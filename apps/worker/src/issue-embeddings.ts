@@ -106,7 +106,7 @@ const defaultDependencies: IssueEmbeddingDependencies = {
 async function createEmbeddings(
   values: string[],
   environment: NodeJS.ProcessEnv,
-  dependencies: IssueEmbeddingDependencies,
+  dependencies: Pick<IssueEmbeddingDependencies, "createOpenAI">,
 ): Promise<{ model: string; vectors: number[][] }> {
   const apiKey = environment.OPENAI_API_KEY;
   if (!apiKey) throw new Error("OPENAI_API_KEY is required");
@@ -122,6 +122,20 @@ async function createEmbeddings(
     throw new Error("OpenAI returned an incomplete issue embedding response");
   }
   return { model, vectors };
+}
+
+// One text's embedding, or null when it cannot be made.
+export async function embedText(
+  value: string,
+  environment: NodeJS.ProcessEnv = process.env,
+  dependencies: Pick<IssueEmbeddingDependencies, "createOpenAI"> = defaultDependencies,
+): Promise<IssueEmbedding | null> {
+  try {
+    const { model, vectors } = await createEmbeddings([value], environment, dependencies);
+    return { model, vector: vectors[0]! };
+  } catch {
+    return null;
+  }
 }
 
 export async function searchCanonicalIssues(

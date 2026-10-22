@@ -1434,6 +1434,77 @@ export const automationTriggerReceipts = pgTable(
   ],
 );
 
+export interface AutomationIssueLink {
+  label?: string;
+  url: string;
+}
+
+export interface AutomationIssueSlackMessage {
+  channelId: string;
+  timestamp: string;
+}
+
+// The issues an automation has reported, so its later runs can tell a repeat
+// from a new problem. Each run files or attaches to at most one issue.
+export const automationIssues = pgTable(
+  "automation_issues",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    automationId: uuid("automation_id")
+      .notNull()
+      .references(() => automations.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    summary: text("summary").notNull(),
+    occurrences: integer("occurrences").notNull().default(1),
+    firstSeenAt: timestamp("first_seen_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    links: jsonb("links").$type<AutomationIssueLink[]>().notNull().default([]),
+    slackMessages: jsonb("slack_messages")
+      .$type<AutomationIssueSlackMessage[]>()
+      .notNull()
+      .default([]),
+    embedding: jsonb("embedding").$type<number[]>(),
+    embeddingModel: text("embedding_model"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("automation_issues_automation_seen_idx").on(
+      table.automationId,
+      table.lastSeenAt,
+    ),
+    check("automation_issues_occurrences_check", sql`${table.occurrences} >= 1`),
+  ],
+);
+
+export const automationIssueRuns = pgTable(
+  "automation_issue_runs",
+  {
+    runId: uuid("run_id")
+      .primaryKey()
+      .references(() => automationRuns.id, { onDelete: "cascade" }),
+    issueId: uuid("issue_id")
+      .notNull()
+      .references(() => automationIssues.id, { onDelete: "cascade" }),
+    relationship: text("relationship").$type<"attached" | "filed">().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [index("automation_issue_runs_issue_idx").on(table.issueId)],
+);
+
 export const automationRunEvents = pgTable(
   "automation_run_events",
   {

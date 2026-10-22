@@ -158,6 +158,10 @@ function dependencies() {
     usageWaiverStart: vi.fn<AutomationRunDependencies["usageWaiverStart"]>()
       .mockResolvedValue(new Date("2026-09-22T18:59:59.000Z")),
     waiveUsage: vi.fn<AutomationRunDependencies["waiveUsage"]>().mockResolvedValue(true),
+    issueCatalog: vi.fn<AutomationRunDependencies["issueCatalog"]>(() => ({
+      recordAction: vi.fn().mockResolvedValue(undefined),
+      tools: [],
+    })),
     workspaceTools: vi.fn<AutomationRunDependencies["workspaceTools"]>(() => []),
   };
 }
@@ -480,6 +484,68 @@ describe("automation run processor", () => {
     const prompt = deps.runCodex.mock.calls[0]![1].prompt;
     expect(prompt).toContain("Call get_workspace before changing anything");
     expect(prompt).toContain("https://app.responder.example/settings");
+  });
+
+  it("gives an alert run that reports to Slack the issue catalog", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    const catalogTool = {
+      description: "Search the catalog.",
+      execute: vi.fn(),
+      name: "find_issues",
+      parameters: z.object({}),
+      readOnly: true,
+    };
+    const recordAction = vi.fn().mockResolvedValue(undefined);
+    deps.issueCatalog.mockReturnValue({ recordAction, tools: [catalogTool] });
+    deps.claimRun.mockResolvedValue({
+      ...claimedRun(),
+      notifications: [{ channelId: "C0123", integrationAccountId: "61616161-6161-4161-8161-616161616161", kind: "slack" }],
+      triggerInput: { body: "{}", externalEventId: "event-1", provider: "sentry", title: "EXAMPLE-1: Error 504" },
+    });
+
+    await processAutomationRun("job-1", {
+      kind: "automation_run",
+      queuedAt: "2026-09-22T19:00:00.000Z",
+      runId,
+    }, process.env, deps);
+
+    expect(deps.issueCatalog).toHaveBeenCalledWith({
+      automationId: claimedRun().automationId,
+      organizationId,
+      runId,
+    });
+    expect(deps.createToolHandler.mock.calls[0]![0].workspaceTools).toEqual([catalogTool]);
+    const server = deps.session.materializeEntry.mock.calls
+      .map(([call]) => call as { entry: { content: string }; path: string })
+      .find((call) => call.path.endsWith("/tools/server.mjs"));
+    expect(server?.entry.content).toContain("\"name\":\"find_issues\"");
+    expect(deps.runCodex.mock.calls[0]![1].prompt).toContain("This automation keeps a catalog of the issues it has reported");
+    expect(recordAction).toHaveBeenCalledWith(pullRequest);
+    // The agent did not post, so the run's own report is recorded on the issue.
+    const notified = deps.notify.mock.calls[0]![0];
+    await notified.onDelivered?.({ channelId: "C0123", integrationAccountId: "61616161-6161-4161-8161-616161616161", kind: "slack" }, "1791787772.000100");
+    expect(recordAction).toHaveBeenCalledWith({ externalReference: "C0123:1791787772.000100", kind: "send_slack_message" });
+  });
+
+  it("leaves out the issue catalog for runs that are not alerts", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    deps.claimRun.mockResolvedValue({
+      ...claimedRun(),
+      notifications: [{ channelId: "C0123", integrationAccountId: "61616161-6161-4161-8161-616161616161", kind: "slack" }],
+    });
+
+    await processAutomationRun("job-1", {
+      kind: "automation_run",
+      queuedAt: "2026-09-22T19:00:00.000Z",
+      runId,
+    }, process.env, deps);
+
+    expect(deps.issueCatalog).not.toHaveBeenCalled();
+    expect(deps.runCodex.mock.calls[0]![1].prompt).not.toContain("find_issues");
   });
 
   it("leaves out the workspace tools without simplified navigation", async () => {

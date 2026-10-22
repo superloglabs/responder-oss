@@ -81,7 +81,7 @@ export interface WorkspaceTool {
   readOnly: boolean;
 }
 
-function workspaceTool<T extends z.ZodObject>(spec: {
+export function workspaceTool<T extends z.ZodObject>(spec: {
   description: string;
   execute(args: z.infer<T>): unknown;
   name: string;

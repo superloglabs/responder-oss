@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   analytics: vi.fn(),
   getShare: vi.fn(),
   getUsageHistory: vi.fn().mockResolvedValue({ days: [], points: [], sources: {} }),
+  listAutomationIssues: vi.fn().mockResolvedValue({ issues: [], total: 0 }),
   share: vi.fn(),
   unshare: vi.fn(),
   credential: vi.fn(),
@@ -92,6 +93,9 @@ vi.mock("../../../../packages/core/src/db/shared-automation-templates.js", () =>
   getAutomationShare: mocks.getShare,
   shareAutomation: mocks.share,
   unshareAutomation: mocks.unshare,
+}));
+vi.mock("../../../../packages/core/src/db/automation-issues.js", () => ({
+  listAutomationIssues: mocks.listAutomationIssues,
 }));
 vi.mock("../../../../packages/core/src/db/usage-history.js", async (original) => ({
   ...(await original<typeof import("../../../../packages/core/src/db/usage-history.js")>()),
@@ -190,6 +194,48 @@ describe("automation control-plane routes", () => {
     expect(mocks.listAutomationRuns).toHaveBeenNthCalledWith(1, organizationId, automationId, { limit: 10, offset: 10 });
     expect(invalid.status).toBe(200);
     expect(mocks.listAutomationRuns).toHaveBeenNthCalledWith(2, organizationId, automationId, { limit: 10, offset: 0 });
+  });
+
+  it("pages an automation's issues within the active organization", async () => {
+    const automationId = "31313131-3131-4131-8131-313131313131";
+    mocks.listAutomationIssues.mockResolvedValueOnce({
+      issues: [{
+        filedRunId: "41414141-4141-4141-8141-414141414141",
+        firstSeenAt: new Date("2026-10-12T06:02:00.000Z"),
+        id: "51515151-5151-4151-8151-515151515151",
+        lastSeenAt: new Date("2026-10-12T06:28:00.000Z"),
+        links: [],
+        occurrences: 207,
+        slackMessages: [],
+        summary: "Validation checks return 504.",
+        title: "US sync checks time out",
+      }],
+      total: 26,
+    });
+
+    const response = await app.request(`/api/automations/${automationId}/issues?page=2`);
+    const malformed = await app.request("/api/automations/not-a-uuid/issues");
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      issues: [{
+        filedRunId: "41414141-4141-4141-8141-414141414141",
+        firstSeenAt: "2026-10-12T06:02:00.000Z",
+        id: "51515151-5151-4151-8151-515151515151",
+        lastSeenAt: "2026-10-12T06:28:00.000Z",
+        links: [],
+        occurrences: 207,
+        slackMessages: [],
+        summary: "Validation checks return 504.",
+        title: "US sync checks time out",
+      }],
+      page: 2,
+      pageSize: 25,
+      total: 26,
+    });
+    expect(mocks.listAutomationIssues).toHaveBeenCalledWith({ automationId, limit: 25, offset: 25, organizationId });
+    expect(malformed.status).toBe(404);
+    expect(mocks.listAutomationIssues).toHaveBeenCalledTimes(1);
   });
 
   it("reads an automation's usage within the active organization", async () => {

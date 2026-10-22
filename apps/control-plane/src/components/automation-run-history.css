@@ -23,3 +23,9 @@
 .automationRuns__footer button { padding: 3px 7px; border: 1px solid #ddd; border-radius: 6px; background: #fff; color: #202020; box-shadow: 0 1px 3px #00000008; font: inherit; font-size: 13px; cursor: pointer; }
 .automationRuns__footer button:disabled { border-color: #e8e8e8; background: #fcfcfc; color: #999; box-shadow: none; cursor: default; }
 .automationRuns :is(a, button):focus-visible { outline: 2px solid #4e58f9; outline-offset: 2px; }
+.automationIssues .agentTableTitle small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.automationIssues__count { font-variant-numeric: tabular-nums; }
+.automationIssues__links { display: flex; flex-wrap: wrap; gap: 4px 10px; min-width: 0; }
+.automationIssues__links a { overflow: hidden; color: #4e58c7; text-decoration: none; text-overflow: ellipsis; white-space: nowrap; }
+.automationIssues__links a:hover { text-decoration: underline; }
+.appShell--workspace .automationIssues .dsDataTable--workspace :is(th, td):nth-child(4) { border-right: .5px solid #e6e8ec; }

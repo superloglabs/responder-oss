@@ -26,6 +26,7 @@ import {
 } from "../../../../packages/core/src/db/automations.js";
 import { listAgentOptions } from "../../../../packages/core/src/db/agents.js";
 import { listWorkspaceSkills } from "../../../../packages/core/src/db/workspace-skills.js";
+import { listAutomationIssues } from "../../../../packages/core/src/db/automation-issues.js";
 import {
   createOrganizationModelCredential,
   deleteOrganizationModelCredential,
@@ -68,6 +69,7 @@ const runMessageSchema = z.object({
 });
 const slackAuthorChannelsSchema = z.array(z.string().min(1).max(255)).max(50);
 const runPageSize = 10;
+const issuePageSize = 25;
 const runPageSchema = z.coerce.number().int().min(1).max(10_000).catch(1);
 const credentialInputSchema = z.object({
   apiKey: z.string().min(1).max(4_096),
@@ -686,6 +688,31 @@ export const automationRoutes = new Hono()
       { limit: runPageSize, offset: (page - 1) * runPageSize },
     );
     return context.json({ ...runs, page, pageSize: runPageSize });
+  })
+  .get("/:automationId/issues", async (context) => {
+    const access = await getAutomationTenant(context.req.raw.headers);
+    if (!access.ok) return context.json({ error: access.error }, access.status);
+    const automationId = context.req.param("automationId");
+    if (!z.uuid().safeParse(automationId).success) {
+      return context.json({ error: "Automation not found" }, 404);
+    }
+    const page = runPageSchema.parse(context.req.query("page"));
+    const { issues, total } = await listAutomationIssues({
+      automationId,
+      limit: issuePageSize,
+      offset: (page - 1) * issuePageSize,
+      organizationId: access.tenant.organizationId,
+    });
+    return context.json({
+      issues: issues.map((issue) => ({
+        ...issue,
+        firstSeenAt: issue.firstSeenAt.toISOString(),
+        lastSeenAt: issue.lastSeenAt.toISOString(),
+      })),
+      page,
+      pageSize: issuePageSize,
+      total,
+    });
   })
   .get("/:automationId/usage", async (context) => {
     const access = await getAutomationTenant(context.req.raw.headers);

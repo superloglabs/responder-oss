@@ -143,11 +143,12 @@ export function App() {
         <Route element={<AutomationsPage />} path="/automations" />
         <Route element={<AutomationCreatePage />} path="/automations/new" />
         <Route element={<AutomationConnectionCompletePage />} path="/automations/connection-complete" />
-        {/* Detail pages show run history at their index, usage at /usage, and
-            the editor at /settings. One parent route keeps the editor mounted
-            across tabs. */}
+        {/* Detail pages show run history at their index, issues at /issues,
+            usage at /usage, and the editor at /settings. One parent route
+            keeps the editor mounted across tabs. */}
         <Route element={<AutomationDetailPage />} path="/automations/:automationId">
           <Route element={null} index />
+          <Route element={null} path="issues" />
           <Route element={null} path="usage" />
           <Route element={null} path="settings" />
         </Route>

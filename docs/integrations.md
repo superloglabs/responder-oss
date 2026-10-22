@@ -169,6 +169,18 @@ a button. A paused run's sandbox is deleted after 24 hours, so a later press
 continues the conversation in a new sandbox, where the agent repeats any
 changes it had not pushed.
 
+Runs started by Sentry, Axiom, SigNoz, or Honeycomb alerts share an issue
+catalog per automation, when the automation reports to Slack. Before it
+investigates, the agent searches the issues the automation already reported
+(`find_issues`, by embedding similarity and text) and lists the automation's
+runs that are going or finished in the last 30 minutes (`list_runs`). A repeat
+of a known issue is counted on it with `attach_issue` and not posted. When
+earlier runs are handling the same problem, the run ends quietly and the
+earliest run reports for all of them. A run that reports calls `file_issue`
+with the number of later runs it saw for the same problem. The Slack posts and
+pull requests a run makes are recorded on the issue it filed or attached to.
+The agent decides what counts as the same problem.
+
 Watched channels accept app-authored CloudWatch alarm notifications from AWS
 and Amazon Q Developer in chat applications. Responder starts investigations
 only for `ALARM` notifications, normalizes the alarm name, region, state, and
