@@ -137,6 +137,15 @@ describe("error issue operations", () => {
     expect(mocks.list).toHaveBeenCalledWith(organizationId, { limit: 25, service: "api", status: "open" });
   });
 
+  it("accepts a limit from a REST query string", async () => {
+    const response = await app.request("/api/v1/error-issues?limit=50&status=all", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(response.status).toBe(200);
+    expect(mocks.list).toHaveBeenCalledWith(organizationId, { limit: 50 });
+  });
+
   it("returns an issue with its sample and 30 days of counts", async () => {
     const { body } = await callTool("get_error_issue", { issueId });
 

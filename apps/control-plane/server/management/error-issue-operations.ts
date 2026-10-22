@@ -85,7 +85,7 @@ export const errorIssueOperations = [
     tag: "Errors",
     effect: "read",
     input: z.object({
-      limit: z.number().int().min(1).max(100).default(25).describe("Most issues to return."),
+      limit: z.coerce.number().int().min(1).max(100).default(25).describe("Most issues to return."),
       search: z.string().trim().min(1).max(200).optional().describe("Case-insensitive text in the title, top frame, or exception type."),
       service: z.string().trim().min(1).max(200).optional().describe("Only issues from this `service.name`."),
       status: z.enum([...errorIssueStatuses, "all"]).default("open").describe("Defaults to `open`."),

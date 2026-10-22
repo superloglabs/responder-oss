@@ -298,7 +298,8 @@ export async function errorIssueDays(issueIds: string[], since: string): Promise
 }
 
 // Resolves, silences, or reopens an issue. Returns null when the workspace
-// has no such issue.
+// has no such issue. Setting the status it already has keeps the time it was
+// set, since the worker compares late occurrences with that time.
 export async function setErrorIssueStatus(
   organizationId: string,
   issueId: string,
@@ -307,7 +308,11 @@ export async function setErrorIssueStatus(
   const now = new Date();
   const updated = await getDatabase()
     .update(errorIssues)
-    .set({ status, statusChangedAt: now, updatedAt: now })
+    .set({
+      status,
+      statusChangedAt: sql`case when ${errorIssues.status} = ${status} then ${errorIssues.statusChangedAt} else ${now.toISOString()}::timestamptz end`,
+      updatedAt: now,
+    })
     .where(and(eq(errorIssues.organizationId, organizationId), eq(errorIssues.id, issueId)))
     .returning({ id: errorIssues.id });
   return updated.length > 0 ? findErrorIssue(organizationId, issueId) : null;
