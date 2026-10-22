@@ -4,6 +4,7 @@ import {
   bigint,
   boolean,
   check,
+  date,
   doublePrecision,
   foreignKey,
   index,
@@ -40,6 +41,7 @@ import type {
   DashboardWidgetLayout,
   DashboardWidgetType,
 } from "../telemetry/dashboards.js";
+import type { ErrorIssueKind, ErrorIssueSample, ErrorIssueStatus } from "../telemetry/error-issues.js";
 import type {
   AutomationHarnessKind,
   AutomationInferenceSource,
@@ -903,6 +905,67 @@ export const telemetryAlertEpisodes = pgTable(
       .where(sql`${table.state} = 'firing'`),
   ],
 );
+
+// Exceptions from the workspace's telemetry, grouped by fingerprint.
+export const errorIssues = pgTable(
+  "error_issues",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    fingerprint: text("fingerprint").notNull(),
+    // Whether the first occurrence was a span event or a log.
+    kind: text("kind").$type<ErrorIssueKind>().notNull(),
+    service: text("service"),
+    exceptionType: text("exception_type").notNull(),
+    title: text("title").notNull(),
+    message: text("message"),
+    topFrame: text("top_frame"),
+    frames: jsonb("frames").$type<string[]>().notNull().default([]),
+    lastSample: jsonb("last_sample").$type<ErrorIssueSample>().notNull(),
+    status: text("status").$type<ErrorIssueStatus>().notNull().default("open"),
+    statusChangedAt: timestamp("status_changed_at", { withTimezone: true }),
+    // When a resolved issue last occurred again.
+    regressedAt: timestamp("regressed_at", { withTimezone: true }),
+    eventCount: bigint("event_count", { mode: "number" }).notNull().default(0),
+    firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).notNull(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("error_issues_fingerprint_idx").on(table.organizationId, table.fingerprint),
+    index("error_issues_status_idx").on(table.organizationId, table.status, table.lastSeenAt),
+  ],
+);
+
+// Occurrences of an error issue per UTC day.
+export const errorIssueDailyCounts = pgTable(
+  "error_issue_daily_counts",
+  {
+    issueId: uuid("issue_id")
+      .notNull()
+      .references(() => errorIssues.id, { onDelete: "cascade" }),
+    day: date("day", { mode: "string" }).notNull(),
+    eventCount: bigint("event_count", { mode: "number" }).notNull().default(0),
+  },
+  (table) => [primaryKey({ columns: [table.issueId, table.day] })],
+);
+
+// How far the worker has read the cell's exception projection, per kind.
+export const errorIssueCursors = pgTable("error_issue_cursors", {
+  kind: text("kind").$type<ErrorIssueKind>().primaryKey(),
+  discoveredAt: timestamp("discovered_at", { precision: 3, withTimezone: true }).notNull(),
+  candidateId: uuid("candidate_id").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
 
 // An HTTP request the worker makes on a schedule, with assertions on the
 // response.

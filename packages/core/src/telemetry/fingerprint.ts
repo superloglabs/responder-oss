@@ -1,0 +1,553 @@
+import { createHash } from "node:crypto";
+
+// Groups error occurrences into issues. Equal fingerprints are the same
+// problem: the exception type, the message with per-occurrence values
+// replaced, and the top frames of the application's own code. Ported from
+// Superlog's fingerprint package; its hashes are not compatible with these.
+//
+// Every fingerprint starts with the algorithm version. A change that alters
+// any hash must bump it, so existing issues are not split without notice.
+export const fingerprintVersion = "v1";
+
+export type Fingerprint = {
+  hash: string;
+  exceptionType: string;
+  topFrame: string | null;
+  normalizedFrames: string[];
+};
+
+export type LogFingerprintInput = {
+  service: string;
+  severity: string;
+  body: string;
+  exceptionType?: string | null;
+  stacktrace?: string | null;
+};
+
+type Frame = { fn: string | null; path: string };
+
+const TOP_N_FRAMES = 5;
+const HASH_LEN = 16;
+
+const IGNORE_PATH = [
+  /node_modules\//,
+  /^node:internal\//,
+  /^node:async_hooks/,
+  /async_hooks\.js/,
+  /^webpack:\/\/\//,
+  /(?:site|dist)-packages\//,
+  /\/lib\/python\d+(?:\.\d+)*\//,
+  /^<frozen /,
+];
+
+const NUL_BYTE = String.fromCharCode(0);
+
+// Postgres `text` and `jsonb` columns reject the NUL byte (0x00) with
+// `22021 invalid byte sequence for encoding "UTF8": 0x00`. Telemetry can carry
+// a raw NUL inside an exception message, body, or stack frame, and these
+// fingerprint outputs flow straight into the issues upsert — so strip NUL
+// before it can poison a parameter. Passes null/undefined through unchanged.
+export function stripNullBytes<T extends string | null | undefined>(value: T): T {
+  return (typeof value === "string" ? value.split(NUL_BYTE).join("") : value) as T;
+}
+
+export function fingerprint(input: {
+  type: string;
+  stacktrace: string | null | undefined;
+  message?: string | null;
+}): Fingerprint {
+  const type = input.type || "Error";
+  const frames = parseFrames(input.stacktrace ?? "");
+  const userFrames = frames.filter(isUserFrame).slice(0, TOP_N_FRAMES);
+
+  const picked = userFrames.length > 0 ? userFrames : frames.slice(0, TOP_N_FRAMES);
+  const normalized = picked.map(formatFrame);
+  const messageBucket = messageBucketFor(input.message);
+  const canonical = `${type}::${messageBucket}::${normalized.join("|")}`;
+  const hash = hashCanonical(canonical);
+
+  // The hash is hex (always safe); the human-readable fields below are persisted
+  // to Postgres, so they must be NUL-free.
+  const safeFrames = normalized.map((frame) => stripNullBytes(frame));
+  return {
+    hash,
+    exceptionType: stripNullBytes(type),
+    topFrame: safeFrames[0] ?? null,
+    normalizedFrames: safeFrames,
+  };
+}
+
+export function fingerprintLog(input: LogFingerprintInput): Fingerprint {
+  if (input.stacktrace && input.stacktrace.trim().length > 0) {
+    return fingerprint({
+      type: input.exceptionType || input.severity || "LogError",
+      stacktrace: input.stacktrace,
+    });
+  }
+
+  // A Python traceback logged as the body groups like a span's exception.
+  // Postgres driver errors keep their own grouping below.
+  const traceback = extractPsycopgHeadline(input.body ?? "") ? null : pythonTracebackException(input.body ?? "");
+  if (traceback) {
+    return fingerprint({ message: traceback.message, stacktrace: input.body, type: traceback.type });
+  }
+
+  const type = input.exceptionType || input.severity || "LogError";
+  const service = input.service || "unknown";
+  const normalized = normalizeMessage(input.body ?? "");
+  const canonical = `log::${service}::${type}::${normalized}`;
+  const hash = hashCanonical(canonical);
+
+  return {
+    hash,
+    exceptionType: stripNullBytes(type),
+    topFrame: null,
+    normalizedFrames: [],
+  };
+}
+
+// The exception a Python traceback ends with: its last line that is not
+// indented, as "Type: message" or a bare type.
+export function pythonTracebackException(body: string): { message: string; type: string } | null {
+  if (!body.includes("Traceback (most recent call last):")) return null;
+  const lines = body.split("\n").map((line) => line.trimEnd());
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const line = lines[index]!;
+    if (!line || /^\s/.test(line)) continue;
+    const match = line.match(/^([A-Za-z_][\w.]*)(?::\s*(.*))?$/);
+    return match ? { message: match[2] ?? "", type: match[1]! } : null;
+  }
+  return null;
+}
+
+function hashCanonical(canonical: string): string {
+  return `${fingerprintVersion}:${createHash("sha256").update(canonical).digest("hex").slice(0, HASH_LEN)}`;
+}
+
+// Bucket key for grouping by error message. Lighter than `normalizeMessage`:
+// preserves alphabetic content (so `model is not supported` doesn't collapse
+// onto `extra inputs are not permitted`) but strips identifiers that vary per
+// occurrence. Anthropic-style envelopes are unwrapped first so the per-request
+// `request_id` doesn't leak into the bucket.
+const MESSAGE_BUCKET_MAX = 160;
+export function messageBucketFor(message: string | null | undefined): string {
+  if (!message) return "";
+  let s = unwrapAnthropicErrorMessage(message);
+  s = s.replace(/https?:\/\/\S+/gi, "<url>");
+  s = collapseRequestPaths(s);
+  s = s.replace(/\b[\w.+-]+@[\w.-]+\.\w+\b/g, "<email>");
+  s = s.replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, "<uuid>");
+  s = s.replace(/\b\d{4}-\d{2}-\d{2}[T ][\d:.]+Z?(?:[+-]\d{2}:?\d{2})?\b/g, "<ts>");
+  s = s.replace(/\b(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?\b/g, "<ip>");
+  s = s.replace(/\b0x[0-9a-f]+\b/gi, "<hex>");
+  s = s.replace(/\b[A-Za-z0-9_]{20,}\b/g, "<id>");
+  s = s.replace(/\b\d+\b/g, "<n>");
+  s = s.replace(/\s+/g, " ").trim().toLowerCase();
+  return s.length > MESSAGE_BUCKET_MAX ? s.slice(0, MESSAGE_BUCKET_MAX) : s;
+}
+
+// Collapse leading-slash request paths to a single `<path>` token. A route
+// scanner hammering a server emits one error per probed URL (`/wp-admin`,
+// `/.env`, `/.git/config`, …) that are otherwise identical — same type, same
+// stacktrace. Without this every probed path becomes its own fingerprint, so a
+// single bot sweep explodes into tens of thousands of distinct issues and
+// floods ingestion. We only collapse a slash at a token boundary (start or
+// after whitespace) so in-word slashes like `and/or` or `client/server` stay
+// intact. The HTTP method (`GET`/`POST`) is left alone, so a sweep groups into
+// at most a handful of issues (one per method) instead of thousands.
+function collapseRequestPaths(s: string): string {
+  return s.replace(/(^|\s)\/\S*/g, "$1<path>");
+}
+
+function unwrapAnthropicErrorMessage(raw: string): string {
+  // SDK errors land as `<status> <json>`; pull `error.message` if present so we
+  // hash the human-readable failure, not the JSON wrapper.
+  const m = raw.match(/"message"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+  return m?.[1] ? m[1].replace(/\\"/g, '"').replace(/\\\\/g, "\\") : raw;
+}
+
+export function normalizeMessage(body: string): string {
+  const vercelRuntimeRequest = normalizeVercelRuntimeRequest(body);
+  if (vercelRuntimeRequest) return vercelRuntimeRequest;
+
+  const psycopgError = normalizePsycopgError(body);
+  if (psycopgError) return psycopgError;
+
+  let s = body;
+  s = s.replace(/https?:\/\/\S+/gi, "<url>");
+  s = collapseRequestPaths(s);
+  s = s.replace(/\b[\w.+-]+@[\w.-]+\.\w+\b/g, "<email>");
+  s = s.replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, "<uuid>");
+  s = s.replace(/\b\d{4}-\d{2}-\d{2}[T ][\d:.]+Z?(?:[+-]\d{2}:?\d{2})?\b/g, "<ts>");
+  s = s.replace(/\b(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?\b/g, "<ip>");
+  s = s.replace(/\b0x[0-9a-f]+\b/gi, "<hex>");
+  s = s.replace(/"(?:[^"\\]|\\.)*"/g, "<str>");
+  s = s.replace(/'(?:[^'\\]|\\.)*'/g, "<str>");
+  s = s.replace(/\b[0-9a-f]{20,}\b/gi, "<hex>");
+  s = s.replace(/\b\d+\b/g, "<n>");
+  s = s.replace(/\s+/g, " ").trim().toLowerCase();
+  return s;
+}
+
+// Psycopg errors often arrive inside SQLAlchemy tracebacks or application log
+// prefixes. Everything after the first driver-error line (DETAIL, rendered
+// SQL, bound parameters) is occurrence metadata, not error identity.
+function normalizePsycopgError(body: string): string | null {
+  const headline = extractPsycopgHeadline(body);
+  if (!headline) return null;
+
+  let s = `postgres.errors.${headline.type}: ${headline.message}`;
+  s = redactPostgresHeadlineValues(s);
+  s = s.replace(/https?:\/\/\S+/gi, "<url>");
+  s = s.replace(/\b[\w.+-]+@[\w.-]+\.\w+\b/g, "<email>");
+  s = s.replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, "<uuid>");
+  s = s.replace(/\b\d{4}-\d{2}-\d{2}[T ][\d:.]+Z?(?:[+-]\d{2}:?\d{2})?\b/g, "<ts>");
+  s = s.replace(/\b(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?\b/g, "<ip>");
+  s = s.replace(/\b0x[0-9a-f]+\b/gi, "<hex>");
+  s = s.replace(/\b[0-9a-f]{20,}\b/gi, "<hex>");
+  s = s.replace(/\b\d+\b/g, "<n>");
+  return s.replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+const PSYCOPG_ERROR_PREFIXES = ["psycopg2.errors.", "psycopg.errors."] as const;
+const POSTGRES_IDENTIFIER_CONTEXTS = new Set([
+  "column",
+  "relation",
+  "constraint",
+  "table",
+  "schema",
+  "database",
+  "index",
+]);
+
+function extractPsycopgHeadline(body: string): { type: string; message: string } | null {
+  let marker = -1;
+  let prefix = "";
+  for (const candidate of PSYCOPG_ERROR_PREFIXES) {
+    const index = body.indexOf(candidate);
+    if (index !== -1 && (marker === -1 || index < marker)) {
+      marker = index;
+      prefix = candidate;
+    }
+  }
+  if (marker === -1) return null;
+
+  const typeStart = marker + prefix.length;
+  let cursor = typeStart;
+  while (cursor < body.length && isIdentifierCharacter(body.charCodeAt(cursor))) cursor += 1;
+  if (cursor === typeStart || (body[cursor] !== ":" && body[cursor] !== ")")) return null;
+
+  const type = body.slice(typeStart, cursor);
+  cursor += 1;
+  while (body[cursor] === " " || body[cursor] === "\t") cursor += 1;
+  const messageEnd = findPostgresDiagnosticBoundary(body, cursor);
+  return { type, message: body.slice(cursor, messageEnd).trimEnd() };
+}
+
+function isIdentifierCharacter(code: number): boolean {
+  return (
+    (code >= 65 && code <= 90) ||
+    (code >= 97 && code <= 122) ||
+    (code >= 48 && code <= 57) ||
+    code === 95
+  );
+}
+
+function findPostgresDiagnosticBoundary(body: string, start: number): number {
+  for (let index = start; index < body.length; index += 1) {
+    const char = body[index];
+    if (char === "\r" || char === "\n") return index;
+    if (char === "\\" && (body[index + 1] === "r" || body[index + 1] === "n")) return index;
+    if (char !== " " && char !== "\t") continue;
+
+    let marker = index;
+    while (body[marker] === " " || body[marker] === "\t") marker += 1;
+    if (isPostgresDiagnosticMarker(body, marker)) return index;
+    index = marker - 1;
+  }
+  return body.length;
+}
+
+function isPostgresDiagnosticMarker(body: string, start: number): boolean {
+  if (body.startsWith("(Background on this error at:", start)) return true;
+
+  if (body[start] === "[") {
+    let cursor = start + 1;
+    const nameStart = cursor;
+    while (isAsciiLetterCode(body.charCodeAt(cursor))) cursor += 1;
+    return cursor > nameStart && body[cursor] === ":";
+  }
+
+  let cursor = start;
+  if (!isUppercaseWordCharacter(body.charCodeAt(cursor))) return false;
+  while (cursor < body.length) {
+    while (isUppercaseWordCharacter(body.charCodeAt(cursor))) cursor += 1;
+    if (body[cursor] === ":") return true;
+    if (body[cursor] !== " ") return false;
+    while (body[cursor] === " ") cursor += 1;
+
+    if (isDigitCode(body.charCodeAt(cursor))) {
+      while (isDigitCode(body.charCodeAt(cursor))) cursor += 1;
+      while (body[cursor] === " ") cursor += 1;
+      return body[cursor] === ":";
+    }
+    if (!isUppercaseWordCharacter(body.charCodeAt(cursor))) return false;
+  }
+  return false;
+}
+
+function isAsciiLetterCode(code: number): boolean {
+  return (code >= 65 && code <= 90) || (code >= 97 && code <= 122);
+}
+
+function isUppercaseWordCharacter(code: number): boolean {
+  return (code >= 65 && code <= 90) || code === 95;
+}
+
+function isDigitCode(code: number): boolean {
+  return code >= 48 && code <= 57;
+}
+
+function redactPostgresHeadlineValues(headline: string): string {
+  let output = "";
+  let cursor = 0;
+  while (cursor < headline.length) {
+    const quote = headline[cursor];
+    if (quote !== '"' && quote !== "'") {
+      output += quote;
+      cursor += 1;
+      continue;
+    }
+
+    const end = findClosingQuote(headline, cursor, quote);
+    if (end === -1) {
+      output += headline.slice(cursor);
+      break;
+    }
+    const preserve = quote === '"' && hasPostgresIdentifierContext(headline, cursor);
+    output += preserve ? headline.slice(cursor, end + 1) : "<str>";
+    cursor = end + 1;
+  }
+  return output;
+}
+
+function findClosingQuote(value: string, start: number, quote: string): number {
+  for (let cursor = start + 1; cursor < value.length; cursor += 1) {
+    if (value[cursor] === "\\") {
+      cursor += 1;
+      continue;
+    }
+    if (value[cursor] !== quote) continue;
+    if (value[cursor + 1] === quote) {
+      cursor += 1;
+      continue;
+    }
+    return cursor;
+  }
+  return -1;
+}
+
+function hasPostgresIdentifierContext(value: string, quoteIndex: number): boolean {
+  let end = quoteIndex;
+  while (end > 0 && (value[end - 1] === " " || value[end - 1] === "\t")) end -= 1;
+  let start = end;
+  while (start > 0 && isAsciiLetterCode(value.charCodeAt(start - 1))) start -= 1;
+  return POSTGRES_IDENTIFIER_CONTEXTS.has(value.slice(start, end).toLowerCase());
+}
+
+// Vercel log drains can emit one four-line runtime envelope per request. Its
+// request ID, path, timings, and memory figures are occurrence metadata, not
+// error identity. Recognize exactly four lines and require the same request ID
+// on START/END/REPORT so application output is never mistaken for the envelope.
+const START_REQUEST_ID = "START RequestId:";
+const END_REQUEST_ID = "END RequestId:";
+const REPORT_REQUEST_ID = "REPORT RequestId:";
+const VERSION_METADATA = "Version:";
+
+function normalizeVercelRuntimeRequest(body: string): string | null {
+  const lines = body
+    .trim()
+    .split("\n")
+    .map((line) => (line.endsWith("\r") ? line.slice(0, -1) : line));
+  if (lines.length !== 4) return null;
+
+  const [startLine, requestLine, endLine, reportLine] = lines;
+  if (!startLine || !requestLine || !endLine || !reportLine) return null;
+
+  const requestId = startRequestId(startLine);
+  if (!requestId || requestIdFromLine(endLine, END_REQUEST_ID) !== requestId) return null;
+  if (reportRequestId(reportLine) !== requestId) return null;
+
+  const request = parseVercelRequestLine(requestLine);
+  return request
+    ? `vercel runtime request method=${request.method.toLowerCase()} status=${request.status}`
+    : null;
+}
+
+function startRequestId(line: string): string | null {
+  if (!line.startsWith(START_REQUEST_ID)) return null;
+  const rest = line.slice(START_REQUEST_ID.length).trim();
+  if (!rest) return null;
+
+  const boundary = firstWhitespaceIndex(rest);
+  if (boundary === -1) return rest;
+
+  const requestId = rest.slice(0, boundary);
+  const metadata = rest.slice(boundary).trimStart();
+  if (!metadata.startsWith(VERSION_METADATA)) return null;
+  const version = metadata.slice(VERSION_METADATA.length).trim();
+  return version && !hasWhitespace(version) ? requestId : null;
+}
+
+function requestIdFromLine(line: string, prefix: string): string | null {
+  if (!line.startsWith(prefix)) return null;
+  const requestId = line.slice(prefix.length).trim();
+  return requestId && !hasWhitespace(requestId) ? requestId : null;
+}
+
+function reportRequestId(line: string): string | null {
+  if (!line.startsWith(REPORT_REQUEST_ID)) return null;
+  const rest = line.slice(REPORT_REQUEST_ID.length).trimStart();
+  if (!rest) return null;
+  const boundary = firstWhitespaceIndex(rest);
+  return boundary === -1 ? rest : rest.slice(0, boundary);
+}
+
+function parseVercelRequestLine(line: string): { method: string; status: string } | null {
+  if (!line.startsWith("[")) return null;
+  const methodEnd = line.indexOf("]");
+  if (methodEnd <= 1) return null;
+
+  const method = line.slice(1, methodEnd);
+  if (!isAsciiLetters(method) || !isWhitespace(line[methodEnd + 1])) return null;
+
+  let pathStart = methodEnd + 1;
+  while (isWhitespace(line[pathStart])) pathStart += 1;
+
+  const statusStart = line.lastIndexOf("status=");
+  if (statusStart <= pathStart || !isWhitespace(line[statusStart - 1])) return null;
+
+  let pathEnd = statusStart;
+  while (pathEnd > pathStart && isWhitespace(line[pathEnd - 1])) pathEnd -= 1;
+  const path = line.slice(pathStart, pathEnd);
+  const status = line.slice(statusStart + "status=".length).trim();
+  if (!path || hasWhitespace(path) || !isThreeDigits(status)) return null;
+
+  return { method, status };
+}
+
+function firstWhitespaceIndex(value: string): number {
+  for (let index = 0; index < value.length; index += 1) {
+    if (isWhitespace(value[index])) return index;
+  }
+  return -1;
+}
+
+function hasWhitespace(value: string): boolean {
+  return firstWhitespaceIndex(value) !== -1;
+}
+
+function isWhitespace(value: string | undefined): boolean {
+  return value !== undefined && value.trim() === "";
+}
+
+function isAsciiLetters(value: string): boolean {
+  if (!value) return false;
+  for (const char of value) {
+    const code = char.charCodeAt(0);
+    const isUppercase = code >= 65 && code <= 90;
+    const isLowercase = code >= 97 && code <= 122;
+    if (!isUppercase && !isLowercase) return false;
+  }
+  return true;
+}
+
+function isThreeDigits(value: string): boolean {
+  if (value.length !== 3) return false;
+  for (const char of value) {
+    const code = char.charCodeAt(0);
+    if (code < 48 || code > 57) return false;
+  }
+  return true;
+}
+
+// Reads JavaScript (V8) and Python stack traces, innermost frame first.
+function parseFrames(stacktrace: string): Frame[] {
+  return /^\s*File "/m.test(stacktrace) ? parsePythonFrames(stacktrace) : parseJavaScriptFrames(stacktrace);
+}
+
+// Python prints the innermost frame last.
+function parsePythonFrames(stacktrace: string): Frame[] {
+  const out: Frame[] = [];
+  for (const raw of stacktrace.split("\n")) {
+    const match = raw.trim().match(/^File "(.+?)", line \d+(?:, in (.+))?$/);
+    if (match) out.push({ fn: match[2]?.trim() || null, path: match[1] ?? "" });
+  }
+  return out.reverse();
+}
+
+function parseJavaScriptFrames(stacktrace: string): Frame[] {
+  const out: Frame[] = [];
+  for (const raw of stacktrace.split("\n")) {
+    const line = raw.trim();
+    if (!line.startsWith("at ")) continue;
+    const body = line.slice(3);
+
+    const withFn = body.match(/^(.+?)\s+\((.+?):\d+:\d+\)$/);
+    if (withFn) {
+      out.push({ fn: withFn[1] ?? null, path: withFn[2] ?? "" });
+      continue;
+    }
+
+    const bare = body.match(/^(.+?):\d+:\d+$/);
+    if (bare) {
+      out.push({ fn: null, path: bare[1] ?? "" });
+    }
+  }
+  return out;
+}
+
+function isUserFrame(f: Frame): boolean {
+  return !IGNORE_PATH.some((re) => re.test(f.path));
+}
+
+function formatFrame(f: Frame): string {
+  const path = normalizePath(f.path);
+  return f.fn ? `${f.fn}@${path}` : path;
+}
+
+function normalizePath(p: string): string {
+  let out = p
+    .replace(/^webpack-internal:\/\/\/?/, "")
+    .replace(/^\([^)]*\)\//, "")
+    .replace(/^\.\//, "")
+    .replace(/^file:\/\//, "")
+    // iOS assigns each installed app a different UUID-named sandbox. Hermes
+    // includes that absolute sandbox path in frames, but it is deployment
+    // metadata rather than part of the failing code's identity.
+    .replace(
+      /\/var\/mobile\/Containers\/Data\/Application\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\//i,
+      "/var/mobile/Containers/Data/Application/<uuid>/",
+    )
+    // Expo gives the generated Hermes bundle a build-specific name. The
+    // function names still identify the failing code across app releases.
+    .replace(/(\/\.expo-internal\/)[^/]+\.(?:js)?bundle$/i, "$1<bundle>");
+
+  // Browser stack URLs can append deployment or cache metadata to any Next.js
+  // chunk, including stable filenames such as `main-app.js`. Strip that suffix
+  // before normalizing generated content hashes below.
+  out = out.replace(
+    /(\/(?:\.next|_next)\/(?:server|static)\/(?:[^/]+\/)*[^/?#]+(?:\._)?\.js)(?:[?#].*)$/gi,
+    "$1",
+  );
+
+  // Next.js/Turbopack puts content hashes in generated chunk filenames. The
+  // same source stack can therefore acquire a different path identity across
+  // chunks (or builds), which must not create a fresh issue fingerprint.
+  out = out.replace(
+    /(\/(?:\.next|_next)\/(?:server|static)\/(?:[^/]+\/)*[^/]*?)[0-9a-f]{8,}((?:\._)?\.js)$/gi,
+    "$1<hash>$2",
+  );
+  out = out.replace(/^.*?\/((?:apps|packages|src|app|lib|pages)\/.*)$/, "$1");
+  return out;
+}

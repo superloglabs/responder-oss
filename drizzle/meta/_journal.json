@@ -645,6 +645,13 @@
       "when": 1792673788827,
       "tag": "0091_automation_issues",
       "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "7",
+      "when": 1792686080380,
+      "tag": "0092_error_issues",
+      "breakpoints": true
     }
   ]
 }
