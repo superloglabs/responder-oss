@@ -28,6 +28,7 @@ export const listRunsToolName = "list_runs";
 const recentRunWindowMs = 30 * 60 * 1_000;
 const maxListedRuns = 100;
 const maxFoundIssues = 10;
+const maxTextOnlyIssues = 5;
 
 // Only a run's first turn reports, so only it decides whether to file.
 export function usesIssueCatalog(input: {
@@ -45,8 +46,8 @@ export function issueCatalogInstructions(): string {
   return [
     `This automation keeps a catalog of the issues it has reported, shared by all its runs, so people are told about each problem once. Use the ${findIssuesToolName}, ${listRunsToolName}, ${attachIssueToolName}, and ${fileIssueToolName} tools from the ${automationToolServerName} tool server, in this order, before you investigate in depth:`,
     `1. Call ${findIssuesToolName} with a short description of this alert. If one of the issues is the same problem, call ${attachIssueToolName} with its id, then call ${skipNotificationToolName} and finish. Do not post, open a ticket, or open a pull request for it.`,
-    `2. Call ${listRunsToolName}. If runs that started before this one are handling the same problem, this run is part of a stream of repeats: call ${skipNotificationToolName} naming the earliest of those runs, and finish without filing, posting, or opening a ticket. The earliest run reports for all of them.`,
-    `3. Otherwise investigate. If the result is worth reporting under the automation's instructions, call ${listRunsToolName} again and count the runs that started after this one for the same problem. Then call ${fileIssueToolName} with that count as laterOccurrences, link any ticket you open, and report as the automation's instructions say. When later runs repeated the alert, say how many times it fired in the post.`,
+    `2. Call ${listRunsToolName}. When it reports runs it did not list, call it again with titleContains set to a phrase from this alert's title. If runs that started before this one are handling the same problem, this run is part of a stream of repeats: call ${skipNotificationToolName} naming the earliest of those runs, and finish without filing, posting, or opening a ticket. The earliest run reports for all of them. Defer only to runs that are pending or running, or that filed an issue: when the earlier runs for the problem failed or were cancelled without filing, handle it yourself.`,
+    `3. Otherwise investigate. If the result is worth reporting under the automation's instructions, call ${listRunsToolName} again, with titleContains when the alerts share a phrase, and count the runs that started after this one for the same problem. Then call ${fileIssueToolName} with that count as laterOccurrences, link any ticket you open, and report as the automation's instructions say. When later runs repeated the alert, say how many times it fired in the post.`,
     "You decide what counts as the same problem: the same failure with the same cause, even when ids, numbers, or wording in the alert differ.",
   ].join("\n");
 }
@@ -166,12 +167,17 @@ export function createIssueCatalog(
             .sort((left, right) => right.similarity - left.similarity)
             .slice(0, maxFoundIssues)
         : [];
-      const seen = new Set(semantic.map((match) => match.issue.id));
+      // Text matches not among the most similar keep their place, so an
+      // issue without an embedding can still be found.
+      const similarIds = new Set(semantic.map((match) => match.issue.id));
+      const textOnly = textMatches
+        .filter((issue) => !similarIds.has(issue.id))
+        .slice(0, maxTextOnlyIssues);
       return {
         issues: [
-          ...semantic.map((match) => serializeIssue(match.issue, match.similarity)),
-          ...textMatches.filter((issue) => !seen.has(issue.id)).map((issue) => serializeIssue(issue)),
-        ].slice(0, maxFoundIssues),
+          ...semantic.slice(0, maxFoundIssues - textOnly.length).map((match) => serializeIssue(match.issue, match.similarity)),
+          ...textOnly.map((issue) => serializeIssue(issue)),
+        ],
       };
     },
     name: findIssuesToolName,
@@ -180,16 +186,20 @@ export function createIssueCatalog(
   });
 
   const listRuns = tool({
-    description: "List this automation's runs that are in progress or finished in the last 30 minutes, oldest first, including this one. Each has its trigger title, status, start time, and the issue it filed or attached to.",
-    async execute() {
-      const { runs, total } = await dependencies.listRuns({
+    description: `List this automation's runs that are in progress or finished in the last 30 minutes, oldest first. Each has its trigger title, status, start time, and the issue it filed or attached to. This run is always included. At most ${maxListedRuns} are listed; total counts all that match, so pass titleContains to narrow a storm of alerts to the ones like this.`,
+    async execute({ titleContains }) {
+      const { current, runs, total } = await dependencies.listRuns({
         ...catalog,
+        currentRunId: input.runId,
         finishedSince: new Date(dependencies.now().getTime() - recentRunWindowMs),
         limit: maxListedRuns,
+        titleContains: titleContains ?? null,
       });
+      const listed = current && !runs.some((run) => run.id === current.id) ? [...runs, current] : runs;
+      const shown = runs.length;
       return {
         currentRunId: input.runId,
-        runs: runs.map((run) => ({
+        runs: listed.map((run) => ({
           createdAt: run.createdAt.toISOString(),
           ...(run.id === input.runId ? { current: true } : {}),
           id: run.id,
@@ -199,11 +209,15 @@ export function createIssueCatalog(
           status: run.status,
           title: run.title?.slice(0, 300) ?? null,
         })),
-        ...(total > runs.length ? { notListed: total - runs.length } : {}),
+        ...(total > shown ? { notListed: total - shown } : {}),
+        total,
       };
     },
     name: listRunsToolName,
-    parameters: z.object({}),
+    parameters: z.object({
+      titleContains: z.string().trim().min(1).max(200).nullable().optional()
+        .describe("Only runs whose trigger title contains this text, ignoring case."),
+    }),
     readOnly: true,
   });
 

@@ -194,13 +194,17 @@ export async function listAutomationIssueCandidates(input: {
     .limit(input.limit ?? 1_000);
 }
 
+function likePattern(value: string): string {
+  return `%${value.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_")}%`;
+}
+
 export async function searchAutomationIssuesByText(input: {
   automationId: string;
   limit: number;
   organizationId: string;
   query: string;
 }): Promise<AutomationIssue[]> {
-  const pattern = `%${input.query.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_")}%`;
+  const pattern = likePattern(input.query);
   return getDatabase()
     .select(issueColumns)
     .from(automationIssues)
@@ -214,13 +218,18 @@ export async function searchAutomationIssuesByText(input: {
 }
 
 // The automation's runs that are still going or finished since the given
-// time, oldest first, with the issue each filed or attached to.
+// time, oldest first, with the issue each filed or attached to. A title filter
+// narrows them during an alert storm; the current run is returned on its own
+// so it is never cut off by the limit.
 export async function listRecentAutomationRuns(input: {
   automationId: string;
+  currentRunId: string;
   finishedSince: Date;
   limit: number;
   organizationId: string;
+  titleContains: string | null;
 }) {
+  const title = sql<string | null>`${automationRuns.triggerInput}->>'title'`;
   const recent = and(
     eq(automationRuns.automationId, input.automationId),
     eq(automationRuns.organizationId, input.organizationId),
@@ -228,27 +237,38 @@ export async function listRecentAutomationRuns(input: {
       inArray(automationRuns.status, ["pending", "running"]),
       gte(automationRuns.completedAt, input.finishedSince),
     ),
+    input.titleContains ? ilike(title, likePattern(input.titleContains)) : undefined,
   );
-  const [runs, [total]] = await Promise.all([
+  const columns = {
+    completedAt: automationRuns.completedAt,
+    createdAt: automationRuns.createdAt,
+    id: automationRuns.id,
+    issueId: automationIssueRuns.issueId,
+    relationship: automationIssueRuns.relationship,
+    startedAt: automationRuns.startedAt,
+    status: automationRuns.status,
+    title,
+  };
+  const [runs, [total], [current]] = await Promise.all([
     getDatabase()
-      .select({
-        completedAt: automationRuns.completedAt,
-        createdAt: automationRuns.createdAt,
-        id: automationRuns.id,
-        issueId: automationIssueRuns.issueId,
-        relationship: automationIssueRuns.relationship,
-        startedAt: automationRuns.startedAt,
-        status: automationRuns.status,
-        title: sql<string | null>`${automationRuns.triggerInput}->>'title'`,
-      })
+      .select(columns)
       .from(automationRuns)
       .leftJoin(automationIssueRuns, eq(automationIssueRuns.runId, automationRuns.id))
       .where(recent)
       .orderBy(asc(automationRuns.createdAt), asc(automationRuns.id))
       .limit(input.limit),
     getDatabase().select({ value: count() }).from(automationRuns).where(recent),
+    getDatabase()
+      .select(columns)
+      .from(automationRuns)
+      .leftJoin(automationIssueRuns, eq(automationIssueRuns.runId, automationRuns.id))
+      .where(and(
+        eq(automationRuns.id, input.currentRunId),
+        eq(automationRuns.automationId, input.automationId),
+        eq(automationRuns.organizationId, input.organizationId),
+      )),
   ]);
-  return { runs, total: total?.value ?? runs.length };
+  return { current: current ?? null, runs, total: total?.value ?? runs.length };
 }
 
 // A page of the automation's issues, most recently seen first, each with the

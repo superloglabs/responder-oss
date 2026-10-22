@@ -74,6 +74,8 @@ describe("issue catalog", () => {
     const instructions = issueCatalogInstructions();
     expect(instructions).toContain("call attach_issue with its id, then call skip_notification");
     expect(instructions).toContain("The earliest run reports for all of them.");
+    expect(instructions).toContain("Defer only to runs that are pending or running, or that filed an issue");
+    expect(instructions).toContain("titleContains");
     expect(instructions).toContain("laterOccurrences");
   });
 
@@ -103,6 +105,22 @@ describe("issue catalog", () => {
       title: "US sync checks time out",
     });
     expect(value.issues[2]).not.toHaveProperty("similarity");
+  });
+
+  it("keeps text matches when similar issues fill the page", async () => {
+    const deps = dependencies();
+    deps.listCandidates.mockResolvedValue(Array.from({ length: 12 }, (_, index) => ({
+      ...issue(`9000000${index.toString(16)}-0000-4000-8000-000000000000`, `Similar ${index}`),
+      embedding: [1, index / 100],
+      embeddingModel: "openai/text-embedding-3-small",
+    })));
+    deps.searchText.mockResolvedValue([issue(issueId, "Not embedded")]);
+    const catalog = createIssueCatalog(scope, deps);
+
+    const { value } = await call(catalog, "find_issues", { query: "Not embedded" });
+
+    expect(value.issues).toHaveLength(10);
+    expect(value.issues.at(-1)).toMatchObject({ id: issueId, title: "Not embedded" });
   });
 
   it("searches by text when the query cannot be embedded", async () => {
@@ -190,6 +208,33 @@ describe("issue catalog", () => {
     expect(linked).toEqual({ isError: true, value: `This run is already linked to issue ${otherIssueId}.` });
   });
 
+  it("filters runs by title and always shows this run", async () => {
+    const deps = dependencies();
+    const current = {
+      completedAt: null,
+      createdAt: new Date("2026-10-12T06:05:00.000Z"),
+      id: runId,
+      issueId: null,
+      relationship: null,
+      startedAt: null,
+      status: "running",
+      title: "SYNCS-SCHEDULERS-5AA: Error 504: for task_id: 1a4f41da",
+    };
+    deps.listRuns.mockResolvedValue({
+      current,
+      runs: [{ ...current, createdAt: new Date("2026-10-12T06:02:00.000Z"), id: "80000000-0000-4000-8000-000000000000" }],
+      total: 207,
+    });
+    const catalog = createIssueCatalog(scope, deps);
+
+    const { value } = await call(catalog, "list_runs", { titleContains: "Error 504" });
+
+    expect(deps.listRuns.mock.calls[0]![0]).toMatchObject({ currentRunId: runId, titleContains: "Error 504" });
+    expect(value.total).toBe(207);
+    expect(value.runs.map((run: { id: string }) => run.id)).toEqual(["80000000-0000-4000-8000-000000000000", runId]);
+    expect(value.runs[1]).toMatchObject({ current: true });
+  });
+
   it("lists the automation's recent runs and marks this one", async () => {
     const deps = dependencies();
     deps.listRuns.mockResolvedValue({
@@ -223,12 +268,15 @@ describe("issue catalog", () => {
 
     expect(deps.listRuns).toHaveBeenCalledWith({
       ...catalogScope,
+      currentRunId: runId,
       finishedSince: new Date("2026-10-12T06:00:00.000Z"),
       limit: 100,
+      titleContains: null,
     });
     expect(value).toEqual({
       currentRunId: runId,
       notListed: 148,
+      total: 150,
       runs: [
         {
           createdAt: "2026-10-12T06:02:00.000Z",
