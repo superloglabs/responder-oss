@@ -21,6 +21,8 @@ export type LogFingerprintInput = {
   severity: string;
   body: string;
   exceptionType?: string | null;
+  // The exception's message, grouped like a span's when the log has a stack.
+  message?: string | null;
   stacktrace?: string | null;
 };
 
@@ -80,6 +82,7 @@ export function fingerprint(input: {
 export function fingerprintLog(input: LogFingerprintInput): Fingerprint {
   if (input.stacktrace && input.stacktrace.trim().length > 0) {
     return fingerprint({
+      message: input.message,
       type: input.exceptionType || input.severity || "LogError",
       stacktrace: input.stacktrace,
     });

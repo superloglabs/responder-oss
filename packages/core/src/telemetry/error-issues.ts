@@ -19,8 +19,9 @@ export type ErrorIssueStatus = (typeof errorIssueStatuses)[number];
 
 // What an occurrence means for its issue:
 // - new: the fingerprint had no issue
-// - regressed: the issue was resolved, and is open again
-// - seen: the issue is open
+// - regressed: the issue was resolved before the occurrence, and is open again
+// - seen: the issue keeps its status: it is open, or the occurrence is from
+//   before it was resolved
 // - silenced: the issue is silenced; only its counts change
 export type ErrorIssueTransition = "new" | "regressed" | "seen" | "silenced";
 
@@ -95,10 +96,17 @@ const maximumMessageLength = 4_000;
 const maximumStacktraceLength = 16_000;
 const maximumTitleLength = 200;
 
-export function occurrenceTransition(previous: ErrorIssueStatus | null): ErrorIssueTransition {
+// The worker reads behind the present, so an occurrence can arrive after the
+// issue was resolved and still be older than the resolution.
+export function occurrenceTransition(
+  previous: { status: ErrorIssueStatus; statusChangedAt: Date | null } | null,
+  lastSeenAt: Date,
+): ErrorIssueTransition {
   if (previous === null) return "new";
-  if (previous === "resolved") return "regressed";
-  if (previous === "silenced") return "silenced";
+  if (previous.status === "resolved") {
+    return previous.statusChangedAt && lastSeenAt <= previous.statusChangedAt ? "seen" : "regressed";
+  }
+  if (previous.status === "silenced") return "silenced";
   return "seen";
 }
 
@@ -223,6 +231,7 @@ export function groupErrorCandidates(candidates: ErrorCandidate[]): ErrorOccurre
       : fingerprintLog({
         body: candidate.body,
         exceptionType: candidate.exception_type || null,
+        message: candidate.exception_message || null,
         service: candidate.service,
         severity: candidate.severity,
         stacktrace: bodyTraceback ? null : stacktrace,

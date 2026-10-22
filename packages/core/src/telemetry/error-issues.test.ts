@@ -125,11 +125,19 @@ describe("errorIssueTitle", () => {
 });
 
 describe("occurrenceTransition", () => {
+  const resolvedAt = new Date("2026-10-22T12:00:00Z");
+  const after = new Date("2026-10-22T12:00:01Z");
+
   it("opens new issues, reopens resolved ones, and leaves silenced ones silent", () => {
-    expect(occurrenceTransition(null)).toBe("new");
-    expect(occurrenceTransition("resolved")).toBe("regressed");
-    expect(occurrenceTransition("silenced")).toBe("silenced");
-    expect(occurrenceTransition("open")).toBe("seen");
+    expect(occurrenceTransition(null, after)).toBe("new");
+    expect(occurrenceTransition({ status: "resolved", statusChangedAt: resolvedAt }, after)).toBe("regressed");
+    expect(occurrenceTransition({ status: "silenced", statusChangedAt: resolvedAt }, after)).toBe("silenced");
+    expect(occurrenceTransition({ status: "open", statusChangedAt: null }, after)).toBe("seen");
+  });
+
+  it("does not reopen a resolved issue for occurrences from before it was resolved", () => {
+    expect(occurrenceTransition({ status: "resolved", statusChangedAt: resolvedAt }, resolvedAt)).toBe("seen");
+    expect(occurrenceTransition({ status: "resolved", statusChangedAt: null }, resolvedAt)).toBe("regressed");
   });
 });
 

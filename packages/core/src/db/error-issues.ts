@@ -2,7 +2,6 @@ import { and, eq, sql } from "drizzle-orm";
 import {
   type ErrorCandidateCursor,
   type ErrorIssueKind,
-  type ErrorIssueStatus,
   type ErrorIssueTransition,
   type ErrorOccurrences,
   occurrenceTransition,
@@ -81,11 +80,11 @@ export async function recordErrorOccurrences(
   occurrences: ErrorOccurrences,
 ): Promise<RecordedErrorOccurrences> {
   const [existing] = await executor
-    .select({ id: errorIssues.id, status: errorIssues.status })
+    .select({ id: errorIssues.id, status: errorIssues.status, statusChangedAt: errorIssues.statusChangedAt })
     .from(errorIssues)
     .where(and(eq(errorIssues.organizationId, occurrences.organizationId), eq(errorIssues.fingerprint, occurrences.fingerprint)))
     .for("update");
-  const transition = occurrenceTransition((existing?.status as ErrorIssueStatus | undefined) ?? null);
+  const transition = occurrenceTransition(existing ?? null, occurrences.lastSeenAt);
   const now = new Date();
   let issueId: string;
   if (!existing) {
@@ -121,9 +120,9 @@ export async function recordErrorOccurrences(
         lastSample: sql`case when ${newer} then ${JSON.stringify(occurrences.sample)}::jsonb else ${errorIssues.lastSample} end`,
         lastSeenAt: sql`greatest(${errorIssues.lastSeenAt}, ${occurrences.lastSeenAt.toISOString()}::timestamptz)`,
         message: sql`case when ${newer} then ${occurrences.message} else ${errorIssues.message} end`,
+        service: sql`case when ${newer} then coalesce(${occurrences.service}, ${errorIssues.service}) else ${errorIssues.service} end`,
         title: sql`case when ${newer} then ${occurrences.title} else ${errorIssues.title} end`,
         updatedAt: now,
-        ...(occurrences.service ? { service: occurrences.service } : {}),
         ...(transition === "regressed" ? { regressedAt: now, status: "open" as const, statusChangedAt: now } : {}),
       })
       .where(eq(errorIssues.id, existing.id));

@@ -514,3 +514,18 @@ test("fingerprintLog groups Python tracebacks logged as the body by their frames
   expect(first.hash).toBe(fingerprintFor(30, "order-2").hash);
   expect(first).toMatchObject({ exceptionType: "KeyError", topFrame: "compute_total@app/billing/totals.py" });
 });
+
+test("fingerprintLog separates errors with a stack that differ by message", () => {
+  const fingerprintFor = (message: string) =>
+    fingerprintLog({
+      service: "api",
+      severity: "ERROR",
+      body: message,
+      exceptionType: "ValidationError",
+      message,
+      stacktrace: "    at validate (/var/task/apps/api/src/validate.ts:10:5)",
+    }).hash;
+
+  expect(fingerprintFor("email is required")).not.toBe(fingerprintFor("plan is not available"));
+  expect(fingerprintFor("order 41 is closed")).toBe(fingerprintFor("order 42 is closed"));
+});

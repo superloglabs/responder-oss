@@ -908,8 +908,8 @@ Every ten seconds the worker reads exceptions from ClickHouse's
 `otel_issue_candidates` table in arrival order, 30 seconds behind the present,
 and adds them to `error_issues` with daily counts. Its cursor is in
 `error_issue_cursors`. An issue is open, resolved or silenced. A new
-fingerprint opens an issue; an occurrence of a resolved issue opens it again;
-a silenced issue only counts. A cell whose ClickHouse lacks the table skips
+fingerprint opens an issue; an occurrence from after an issue was resolved
+opens it again; a silenced issue only counts. A cell whose ClickHouse lacks the table skips
 the pass.
 
 ## Custom MCP servers
