@@ -126,6 +126,11 @@ import {
   honeycombWebhookSecret,
 } from "../../../../packages/core/src/integrations/honeycomb.js";
 import {
+  betterStackAccount,
+  BetterStackCredentialsError,
+} from "./betterstack.js";
+import { betterStackWebhookSecret } from "../../../../packages/core/src/integrations/betterstack.js";
+import {
   createDevRevTicketWebhook,
   deleteDevRevWebhook,
   DevRevApiError,
@@ -197,6 +202,7 @@ import {
   devrevWebhookUrl,
   signozWebhookUrl,
   honeycombWebhookUrl,
+  betterStackWebhookUrl,
   dash0WebhookUrl,
   cellCallbackUrl,
   integrationCallbackUrl,
@@ -373,6 +379,10 @@ const honeycombConnectionSchema = z.object({
   keyId: z.string().trim().min(1).max(512),
   keySecret: z.string().trim().min(1).max(4_096),
   region: z.enum(honeycombRegionIds),
+  returnTo: z.string().max(2_048).optional(),
+});
+const betterStackConnectionSchema = z.object({
+  apiToken: z.string().trim().min(1).max(4_096),
   returnTo: z.string().max(2_048).optional(),
 });
 const dash0ConnectionSchema = z.object({
@@ -877,7 +887,8 @@ export async function startIntegrationConnection(input: {
     parsedProvider.data === "langfuse" ||
     parsedProvider.data === "supabase" ||
     parsedProvider.data === "signoz" ||
-    parsedProvider.data === "honeycomb"
+    parsedProvider.data === "honeycomb" ||
+    parsedProvider.data === "betterstack"
   ) {
     return Response.json({ error: `Use the ${definition.name} connection endpoint` }, { status: 405 });
   }
@@ -1229,7 +1240,8 @@ export const integrationRoutes = new Hono()
                   definition.id === "langfuse" ||
                   definition.id === "supabase" ||
                   definition.id === "signoz" ||
-                  definition.id === "honeycomb"
+                  definition.id === "honeycomb" ||
+                  definition.id === "betterstack"
                 ? `/api/integrations/${definition.id}/connect`
                 : definition.id === "custom_mcp"
                   ? "/api/integrations/custom-mcp/connect"
@@ -1918,6 +1930,68 @@ export const integrationRoutes = new Hono()
       return context.json({ error: "Unable to verify the Honeycomb connection" }, 502);
     }
   })
+  .post("/betterstack/connect", async (context) => {
+    const tenant = await getActiveTenant(context.req.raw.headers);
+    if (tenant.ok === false) {
+      return context.json({ error: tenant.error }, tenant.status);
+    }
+    if (!(await organizationHasCapability(tenant.organizationId, "automations"))) {
+      return context.json({ error: "Unknown integration provider" }, 404);
+    }
+
+    const parsed = betterStackConnectionSchema.safeParse(
+      await context.req.json().catch(() => null),
+    );
+    if (!parsed.success) {
+      return context.json({ error: "Enter a Better Stack API token" }, 400);
+    }
+
+    try {
+      const account = await betterStackAccount({ apiToken: parsed.data.apiToken });
+      const accountId = await upsertIntegrationAccount({
+        organizationId: tenant.organizationId,
+        provider: "betterstack",
+        externalAccountId: account.externalAccountId,
+        displayName: account.displayName,
+        encryptedCredentials: encryptCredentials({
+          apiToken: parsed.data.apiToken,
+          authType: "api_token",
+        }),
+        credentialKeyVersion: 1,
+        metadata: account.metadata,
+      });
+      await captureAnalyticsEvent({
+        distinctId: tenant.user.id,
+        event: "integration connected",
+        organizationId: tenant.organizationId,
+        properties: {
+          integration_account_id: accountId,
+          provider: "betterstack",
+        },
+      });
+      console.info(
+        JSON.stringify({
+          accountId,
+          event: "betterstack_connected",
+          organizationId: tenant.organizationId,
+        }),
+      );
+      return context.json({
+        accountId,
+        redirectUrl: settingsRedirect(
+          parsed.data.returnTo ?? "/settings",
+          "betterstack",
+          "connected",
+        ),
+      });
+    } catch (error) {
+      if (error instanceof BetterStackCredentialsError) {
+        return context.json({ error: error.message }, 401);
+      }
+      logCallbackError("Better Stack", error, { organizationId: tenant.organizationId });
+      return context.json({ error: "Unable to verify the Better Stack connection" }, 502);
+    }
+  })
   .post("/devrev/connect", async (context) => {
     const tenant = await getActiveTenant(context.req.raw.headers);
     if (tenant.ok === false) {
@@ -2324,6 +2398,33 @@ export const integrationRoutes = new Hono()
     return context.json({
       sharedSecret: honeycombWebhookSecret(accountId.data),
       webhookUrl: honeycombWebhookUrl(accountId.data),
+    });
+  })
+  // Where a Better Stack outgoing incident webhook sends incidents so they can
+  // start automations. Better Stack sends the secret as the basic auth
+  // password.
+  .get("/betterstack/:accountId/webhook-config", async (context) => {
+    const tenant = await getActiveTenant(context.req.raw.headers);
+    if (tenant.ok === false) {
+      return context.json({ error: tenant.error }, tenant.status);
+    }
+    const accountId = z.uuid().safeParse(context.req.param("accountId"));
+    if (!accountId.success) {
+      return context.json({ error: "Better Stack connection not found" }, 404);
+    }
+    const account = await getOrganizationIntegrationAccount({
+      integrationAccountId: accountId.data,
+      organizationId: tenant.organizationId,
+      provider: "betterstack",
+    });
+    if (account?.status !== "connected") {
+      return context.json({ error: "Better Stack connection not found" }, 404);
+    }
+    context.header("cache-control", "no-store");
+    return context.json({
+      password: betterStackWebhookSecret(accountId.data),
+      username: "responder",
+      webhookUrl: betterStackWebhookUrl(accountId.data),
     });
   })
   .post("/grafana/connect", async (context) => {

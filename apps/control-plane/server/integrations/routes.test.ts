@@ -4612,3 +4612,124 @@ describe("Honeycomb connections", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
+
+describe("Better Stack connections", () => {
+  const accountId = "50000000-0000-4000-8000-000000000000";
+
+  function connect(body: Record<string, unknown> = {}) {
+    return app.request("/api/integrations/betterstack/connect", {
+      body: JSON.stringify({
+        apiToken: "betterstack-token",
+        returnTo: "/automations/new",
+        ...body,
+      }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+  }
+
+  beforeEach(() => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://hooks.responder.example");
+    vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 5).toString("base64"));
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    vi.mocked(organizationHasCapability).mockResolvedValue(true);
+    vi.mocked(encryptCredentials).mockImplementation((value) => JSON.stringify(value));
+    vi.mocked(upsertIntegrationAccount).mockResolvedValue(accountId);
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it("verifies the token against Better Stack's MCP server and stores it encrypted", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ id: 1, jsonrpc: "2.0", result: {} }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await connect();
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      accountId,
+      redirectUrl: "https://responder.example/automations/new?integration=betterstack&status=connected",
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://mcp.betterstack.com",
+      expect.objectContaining({
+        headers: expect.objectContaining({ authorization: "Bearer betterstack-token" }),
+        method: "POST",
+        redirect: "error",
+      }),
+    );
+    expect(JSON.parse(fetchMock.mock.calls[0]![1].body)).toMatchObject({ method: "initialize" });
+    expect(upsertIntegrationAccount).toHaveBeenCalledWith({
+      credentialKeyVersion: 1,
+      displayName: "Better Stack",
+      encryptedCredentials: JSON.stringify({ apiToken: "betterstack-token", authType: "api_token" }),
+      externalAccountId: "https://mcp.betterstack.com",
+      metadata: { mcpUrl: "https://mcp.betterstack.com" },
+      organizationId: tenant.organizationId,
+      provider: "betterstack",
+    });
+  });
+
+  it("rejects a token Better Stack does not accept", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ error: "invalid_token" }, { status: 401 })));
+
+    const response = await connect();
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({
+      error: expect.stringContaining("Better Stack rejected the API token"),
+    });
+    expect(upsertIntegrationAccount).not.toHaveBeenCalled();
+  });
+
+  it("asks for a token", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await connect({ apiToken: "  " });
+
+    expect(response.status).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("shows the webhook setup for a connected organization", async () => {
+    vi.mocked(getOrganizationIntegrationAccount).mockResolvedValue({ status: "connected" } as never);
+
+    const response = await app.request(`/api/integrations/betterstack/${accountId}/webhook-config`);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({
+      password: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/u),
+      username: "responder",
+      webhookUrl: `https://hooks.responder.example/api/webhooks/betterstack/${accountId}`,
+    });
+    expect(getOrganizationIntegrationAccount).toHaveBeenCalledWith({
+      integrationAccountId: accountId,
+      organizationId: tenant.organizationId,
+      provider: "betterstack",
+    });
+  });
+
+  it("is available only with automations", async () => {
+    vi.mocked(listOrganizationIntegrationAccounts).mockResolvedValue([]);
+    const listed = await (await app.request("/api/integrations")).json();
+    expect(listed.integrations).toContainEqual(expect.objectContaining({
+      connectUrl: "/api/integrations/betterstack/connect",
+      id: "betterstack",
+    }));
+
+    vi.mocked(organizationHasCapability).mockResolvedValue(false);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const hidden = await (await app.request("/api/integrations")).json();
+    expect(hidden.integrations).not.toContainEqual(expect.objectContaining({ id: "betterstack" }));
+    expect((await connect()).status).toBe(404);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});

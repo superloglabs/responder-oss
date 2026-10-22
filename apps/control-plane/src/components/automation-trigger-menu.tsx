@@ -4,7 +4,7 @@ import type { AutomationTrigger } from "../automations-api";
 import { AutomationTriggerIcon } from "./automation-trigger-icon";
 import { searchInputProps } from "./search-input-props";
 
-export type TriggerEvent = "every_message" | "mentions" | "both" | "new_issue" | "regression" | "alert" | "ticket" | "opened" | "merged" | "command" | "hourly" | "daily" | "weekly" | "custom";
+export type TriggerEvent = "every_message" | "mentions" | "both" | "new_issue" | "regression" | "alert" | "incident" | "ticket" | "opened" | "merged" | "command" | "hourly" | "daily" | "weekly" | "custom";
 const providers = [
   { kind: "slack", name: "Slack", events: [
     { value: "every_message", label: "New message in channel" },
@@ -24,6 +24,9 @@ const providers = [
   ] },
   { kind: "honeycomb", name: "Honeycomb", events: [
     { value: "alert", label: "Trigger or SLO alert" },
+  ] },
+  { kind: "betterstack", name: "Better Stack", events: [
+    { value: "incident", label: "Incident started" },
   ] },
   { kind: "devrev", name: "DevRev", events: [
     { value: "ticket", label: "New ticket" },

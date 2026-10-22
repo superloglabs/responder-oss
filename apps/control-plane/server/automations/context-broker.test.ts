@@ -945,6 +945,31 @@ describe("automation context broker", () => {
     expect(body).not.toContain("honeycomb-secret");
   });
 
+  it("sends Better Stack requests to its hosted MCP server with the API token", async () => {
+    vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 4).toString("base64"));
+    const { app, dependencies } = appFor(claim("betterstack", {
+      apiToken: "betterstack-token",
+      authType: "api_token",
+    }));
+    dependencies.providerFetch.mockResolvedValue(new Response(
+      JSON.stringify({ id: 1, jsonrpc: "2.0", result: { tools: [{ name: "list_incidents" }] } }),
+      { headers: { "content-type": "application/json" } },
+    ));
+
+    const response = await app.request(
+      `/api/automation-context-broker/v1/${accountId}`,
+      rpcRequest({ id: 1, jsonrpc: "2.0", method: "tools/list" }),
+    );
+
+    expect(response.status).toBe(200);
+    const [url, request] = dependencies.providerFetch.mock.calls[0]! as [string, RequestInit];
+    expect(url).toBe("https://mcp.betterstack.com");
+    expect(new Headers(request.headers).get("authorization")).toBe("Bearer betterstack-token");
+    const body = await response.text();
+    expect(body).toContain("list_incidents");
+    expect(body).not.toContain("betterstack-token");
+  });
+
   it("refreshes Sentry credentials before proxying", async () => {
     vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 4).toString("base64"));
     const activeClaim = claim("sentry", {

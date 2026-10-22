@@ -488,10 +488,18 @@ export function findAutomationsForHoneycombAlert(
   return findAutomationsForConnectionTrigger("honeycomb", integrationAccountId);
 }
 
+// Enabled automations with a Better Stack trigger on the connection whose
+// webhook received the incident.
+export function findAutomationsForBetterStackIncident(
+  integrationAccountId: string,
+): Promise<Array<{ automationId: string }>> {
+  return findAutomationsForConnectionTrigger("betterstack", integrationAccountId);
+}
+
 // These triggers have no resources to choose: every event that reaches the
 // connection's webhook starts a run.
 async function findAutomationsForConnectionTrigger(
-  kind: "axiom" | "devrev" | "honeycomb" | "signoz",
+  kind: "axiom" | "betterstack" | "devrev" | "honeycomb" | "signoz",
   integrationAccountId: string,
 ): Promise<Array<{ automationId: string }>> {
   const rows = await getDatabase()
@@ -653,11 +661,11 @@ async function validateConfigurationResources(
         "integration_not_found",
       );
     }
-    // Axiom, SigNoz, and Honeycomb alerts and DevRev tickets arrive at the
-    // connection's webhook, so there is no resource to choose.
+    // Axiom, SigNoz, Honeycomb, and Better Stack alerts and DevRev tickets
+    // arrive at the connection's webhook, so there is no resource to choose.
     if (
       trigger.kind === "axiom" || trigger.kind === "devrev" || trigger.kind === "signoz" ||
-      trigger.kind === "honeycomb"
+      trigger.kind === "honeycomb" || trigger.kind === "betterstack"
     ) continue;
     if (trigger.kind === "github") {
       const triggerRepositories = await tx
@@ -1650,7 +1658,7 @@ export interface AutomationTriggerInput {
   attributes?: Record<string, string | number | boolean | null>;
   body: string;
   externalEventId: string;
-  provider: "axiom" | "devrev" | "discord" | "github" | "honeycomb" | "manual" | "schedule" | "sentry" | "signoz" | "slack";
+  provider: "axiom" | "betterstack" | "devrev" | "discord" | "github" | "honeycomb" | "manual" | "schedule" | "sentry" | "signoz" | "slack";
   sourceUrl?: string;
   title: string;
 }

@@ -134,7 +134,7 @@ export const automationConfigurationOutputSchema = z
     model: z.string(),
     modelProvider: automationModelProviderSchema,
     notifications: z.array(automationNotificationSchema)
-      .describe("Slack channels that receive the result of scheduled, Sentry, Axiom, SigNoz, Honeycomb, and GitHub runs."),
+      .describe("Slack channels that receive the result of scheduled, Sentry, Axiom, SigNoz, Honeycomb, Better Stack, and GitHub runs."),
     prompt: z.string().describe("The agent instructions."),
     repositoryIds: z.array(z.uuid()),
     skillIds: z.array(z.uuid())
@@ -149,7 +149,7 @@ const describedConfigurationShape = {
   contextAccountIds: configurationShape.contextAccountIds
     .describe("Integration account IDs the agent can read from, besides GitHub."),
   notifications: configurationShape.notifications
-    .describe("Slack channels that receive the result of each scheduled, Sentry, Axiom, SigNoz, Honeycomb, or GitHub run."),
+    .describe("Slack channels that receive the result of each scheduled, Sentry, Axiom, SigNoz, Honeycomb, Better Stack, or GitHub run."),
   prompt: configurationShape.prompt.describe("The agent instructions."),
   repositoryIds: configurationShape.repositoryIds
     .describe("Repositories checked out in the sandbox."),
@@ -273,7 +273,7 @@ const inferenceUsageSchema = z
   .nullable();
 
 const runTriggerSchema = z.object({
-  provider: z.string().describe("What started the run: `manual`, `schedule`, `slack`, `sentry`, `axiom`, `signoz`, `honeycomb`, `devrev`, `github`, or `discord`."),
+  provider: z.string().describe("What started the run: `manual`, `schedule`, `slack`, `sentry`, `axiom`, `signoz`, `honeycomb`, `betterstack`, `devrev`, `github`, or `discord`."),
   sourceUrl: z.string().nullable().describe("A link to the event that started the run."),
   title: z.string(),
 });

@@ -45,6 +45,7 @@ import { axiomWebhookRoutes } from "./webhooks/axiom.js";
 import { devrevWebhookRoutes } from "./webhooks/devrev.js";
 import { signozWebhookRoutes } from "./webhooks/signoz.js";
 import { honeycombWebhookRoutes } from "./webhooks/honeycomb.js";
+import { betterStackWebhookRoutes } from "./webhooks/betterstack.js";
 import { dash0WebhookRoutes } from "./webhooks/dash0.js";
 import { slackWebhookRoutes } from "./webhooks/slack.js";
 import { discordWebhookRoutes } from "./webhooks/discord.js";
@@ -510,6 +511,7 @@ export const app = instrumentedApp
   .route("/api/webhooks/devrev", devrevWebhookRoutes)
   .route("/api/webhooks/signoz", signozWebhookRoutes)
   .route("/api/webhooks/honeycomb", honeycombWebhookRoutes)
+  .route("/api/webhooks/betterstack", betterStackWebhookRoutes)
   .route("/api/webhooks/slack", slackWebhookRoutes)
   .route("/api/webhooks/discord", discordWebhookRoutes)
   .route("/api/webhooks/linear", linearWebhookRoutes)

@@ -16,6 +16,10 @@ import { withIntegrationAccountCredentialLease } from "../../../../packages/core
 import { freshSentryCredentials } from "../../../../packages/core/src/db/investigations.js";
 import { awsConnectionCredentialsSchema } from "../../../../packages/core/src/integrations/aws.js";
 import { parseAxiomCredentials } from "../../../../packages/core/src/integrations/axiom.js";
+import {
+  betterStackAuthorization,
+  parseBetterStackCredentials,
+} from "../../../../packages/core/src/integrations/betterstack.js";
 import { getDatadogSite } from "../../../../packages/core/src/integrations/datadog.js";
 import {
   honeycombAuthorization,
@@ -189,6 +193,15 @@ async function providerTarget(
     const parsed = parseHoneycombCredentials(credentials);
     return {
       headers: new Headers({ authorization: honeycombAuthorization(parsed) }),
+      url: parsed.mcpUrl,
+    };
+  }
+  // Better Stack's hosted MCP server takes the global API token as a bearer
+  // token.
+  if (claim.account.provider === "betterstack") {
+    const parsed = parseBetterStackCredentials(credentials);
+    return {
+      headers: new Headers({ authorization: betterStackAuthorization(parsed) }),
       url: parsed.mcpUrl,
     };
   }

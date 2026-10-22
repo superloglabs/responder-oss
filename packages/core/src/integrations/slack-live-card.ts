@@ -157,6 +157,7 @@ function humanizeToolName(value: string): string {
     ai: "AI",
     apm: "APM",
     axiom: "Axiom",
+    betterstack: "Better Stack",
     clickstack: "ClickStack",
     cloudflare: "Cloudflare",
     datadog: "Datadog",

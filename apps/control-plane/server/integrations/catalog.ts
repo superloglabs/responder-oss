@@ -21,6 +21,7 @@ export const productIntegrationIds = [
   "devrev",
   "signoz",
   "honeycomb",
+  "betterstack",
 ] as const;
 
 export type ProductIntegrationId = (typeof productIntegrationIds)[number];
@@ -31,6 +32,7 @@ export const automationOnlyIntegrationIds: ReadonlySet<ProductIntegrationId> = n
   "discord",
   "signoz",
   "honeycomb",
+  "betterstack",
 ]);
 
 interface IntegrationDefinition {
@@ -132,6 +134,13 @@ export const integrationCatalog: IntegrationDefinition[] = [
     id: "honeycomb",
     name: "Honeycomb",
     description: "Trigger and SLO alerts with event and trace context for automations.",
+    implemented: true,
+    requiredEnvironment: [],
+  },
+  {
+    id: "betterstack",
+    name: "Better Stack",
+    description: "Incident triggers with monitor, log, and error context for automations.",
     implemented: true,
     requiredEnvironment: [],
   },

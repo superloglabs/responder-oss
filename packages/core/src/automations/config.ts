@@ -85,6 +85,10 @@ export const automationTriggerSchema = z.discriminatedUnion("kind", [
   }).describe("Runs when a Honeycomb trigger or SLO burn alert fires and notifies the connection's webhook recipient."),
   z.object({
     integrationAccountId: integrationAccountIdSchema,
+    kind: z.literal("betterstack"),
+  }).describe("Runs when a Better Stack incident starts and the connection's outgoing incident webhook receives it."),
+  z.object({
+    integrationAccountId: integrationAccountIdSchema,
     kind: z.literal("devrev"),
   }).describe("Runs when a ticket is created in the connected DevRev organization. The run's final reply is posted as an internal comment on the ticket."),
   z.object({
@@ -121,8 +125,8 @@ export const automationTriggerSchema = z.discriminatedUnion("kind", [
   ).describe("Runs on the hour, at a local time each day or week, or on a custom cron expression."),
 ]);
 
-// Where a scheduled, Sentry, Axiom, SigNoz, Honeycomb, or GitHub automation
-// reports each finished run. Slack only for now.
+// Where a scheduled, Sentry, Axiom, SigNoz, Honeycomb, Better Stack, or
+// GitHub automation reports each finished run. Slack only for now.
 export const automationNotificationSchema = z.discriminatedUnion("kind", [
   z.object({
     channelId: externalResourceIdSchema,
@@ -132,12 +136,13 @@ export const automationNotificationSchema = z.discriminatedUnion("kind", [
 ]);
 
 // Slack and Discord runs answer where their event came from. Scheduled,
-// Sentry, Axiom, SigNoz, Honeycomb, and GitHub runs have no reply thread, so
-// they report to notification channels.
+// Sentry, Axiom, SigNoz, Honeycomb, Better Stack, and GitHub runs have no
+// reply thread, so they report to notification channels.
 export function automationTriggersNotify(triggers: Array<{ kind: AutomationTrigger["kind"] }>): boolean {
   return triggers.some((trigger) =>
     trigger.kind === "schedule" || trigger.kind === "sentry" || trigger.kind === "axiom" ||
-    trigger.kind === "signoz" || trigger.kind === "honeycomb" || trigger.kind === "github"
+    trigger.kind === "signoz" || trigger.kind === "honeycomb" || trigger.kind === "betterstack" ||
+    trigger.kind === "github"
   );
 }
 
@@ -189,7 +194,7 @@ export const automationConfigurationSchema = z
     ) {
       context.addIssue({
         code: "custom",
-        message: "Notifications are only available for scheduled, Sentry, Axiom, SigNoz, Honeycomb, and GitHub automations",
+        message: "Notifications are only available for scheduled, Sentry, Axiom, SigNoz, Honeycomb, Better Stack, and GitHub automations",
         path: ["notifications"],
       });
     }

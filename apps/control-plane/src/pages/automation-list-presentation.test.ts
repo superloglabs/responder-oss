@@ -26,6 +26,7 @@ describe("automation list presentation", () => {
     expect(triggerEventLabel({ integrationAccountId: "a", kind: "axiom" })).toBe("Monitor alert");
     expect(triggerEventLabel({ integrationAccountId: "a", kind: "signoz" })).toBe("Alert fired");
     expect(triggerEventLabel({ integrationAccountId: "a", kind: "honeycomb" })).toBe("Trigger or SLO alert");
+    expect(triggerEventLabel({ integrationAccountId: "a", kind: "betterstack" })).toBe("Incident started");
     expect(triggerEventLabel({ integrationAccountId: "a", kind: "devrev" })).toBe("New ticket");
     expect(triggerEventLabel({ eventTypes: ["opened"], integrationAccountId: "a", kind: "github", repositoryIds: [] })).toBe("Pull request opened");
     expect(triggerEventLabel({ eventTypes: ["merged"], integrationAccountId: "a", kind: "github", repositoryIds: [] })).toBe("Pull request merged");
