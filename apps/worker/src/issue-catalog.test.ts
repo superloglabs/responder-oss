@@ -44,7 +44,7 @@ function dependencies(): { [K in keyof IssueCatalogDependencies]: ReturnType<typ
     append: vi.fn().mockResolvedValue(undefined),
     attach: vi.fn().mockResolvedValue({ attached: true, issue: issue() }),
     embed: vi.fn().mockResolvedValue({ model: "openai/text-embedding-3-small", vector: [1, 0] }),
-    file: vi.fn().mockResolvedValue({ created: true, issue: issue() }),
+    file: vi.fn().mockResolvedValue({ issue: issue(), status: "filed" }),
     listCandidates: vi.fn().mockResolvedValue([]),
     listRuns: vi.fn().mockResolvedValue({ runs: [], total: 0 }),
     now: () => new Date("2026-10-12T06:30:00.000Z"),
@@ -174,6 +174,42 @@ describe("issue catalog", () => {
       links: [{ label: "Retry validation checks", url: "https://github.com/example/app/pull/7" }],
       slackMessages: [],
     });
+  });
+
+  it("tells a run that an earlier run already reported its problem", async () => {
+    const deps = dependencies();
+    deps.file.mockResolvedValue({ issue: issue(), status: "attached_by_earlier_run" });
+    const catalog = createIssueCatalog(scope, deps);
+
+    const { isError, value } = await call(catalog, "file_issue", { summary: "A summary.", title: "A title" });
+
+    expect(isError).toBe(false);
+    expect(value).toMatchObject({ alreadyReported: true, issue: { id: issueId } });
+    expect(value.note).toContain("call skip_notification");
+  });
+
+  it("accepts only web links", async () => {
+    const deps = dependencies();
+    const catalog = createIssueCatalog(scope, deps);
+
+    for (const url of ["javascript:alert(1)", "data:text/html,hi", "file:///etc/passwd"]) {
+      const { isError } = await call(catalog, "file_issue", { links: [{ url }], summary: "A summary.", title: "A title" });
+      expect(isError).toBe(true);
+    }
+    expect(deps.file).not.toHaveBeenCalled();
+  });
+
+  it("does not record a pull request link twice", async () => {
+    const deps = dependencies();
+    const url = "https://github.com/example/app/pull/7";
+    deps.file.mockResolvedValue({ issue: { ...issue(), links: [{ url }] }, status: "filed" });
+    const catalog = createIssueCatalog(scope, deps);
+    await catalog.recordAction({ externalReference: url, kind: "open_github_pull_request", title: "Retry checks" });
+
+    await call(catalog, "file_issue", { links: [{ url }], summary: "A summary.", title: "A title" });
+    await catalog.recordAction({ externalReference: url, kind: "open_github_pull_request", title: "Retry checks" });
+
+    expect(deps.append).not.toHaveBeenCalled();
   });
 
   it("files an issue without later runs", async () => {

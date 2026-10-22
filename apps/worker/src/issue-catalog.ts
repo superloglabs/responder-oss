@@ -58,7 +58,8 @@ const findIssuesSchema = z.object({
 
 const linkSchema = z.object({
   label: z.string().trim().min(1).max(200).nullable().optional(),
-  url: z.url().max(2_000),
+  // Links are shown as anchors, so only web pages are kept.
+  url: z.url({ protocol: /^https?$/u }).max(2_000),
 });
 
 const fileIssueSchema = z.object({
@@ -125,11 +126,18 @@ export function createIssueCatalog(
     slackMessages: [],
   };
 
+  // Links already on the issue, so a pull request the agent also linked is
+  // kept once.
+  const knownLinks = new Set<string>();
+
   // A failed write loses the record, not the run.
   async function flush() {
     if (!issueId) return;
-    const records = pending;
+    const links = pending.links.filter((link) => !knownLinks.has(link.url));
+    const records = { links, slackMessages: pending.slackMessages };
     pending = { links: [], slackMessages: [] };
+    for (const link of links) knownLinks.add(link.url);
+    if (records.links.length === 0 && records.slackMessages.length === 0) return;
     try {
       await dependencies.append({ issueId, ...records });
     } catch (error) {
@@ -141,8 +149,9 @@ export function createIssueCatalog(
     }
   }
 
-  async function linked(id: string) {
-    issueId = id;
+  async function linked(issue: AutomationIssue) {
+    issueId = issue.id;
+    for (const link of issue.links) knownLinks.add(link.url);
     await flush();
   }
 
@@ -225,7 +234,7 @@ export function createIssueCatalog(
     description: `File a new issue in this automation's catalog after investigating an alert worth reporting, before you post. Later runs find it and attach to it instead of reporting again. A run files one issue: calling again returns the issue it filed.`,
     async execute(args) {
       const embedding = await dependencies.embed(`${args.title}\n\n${args.summary}`);
-      const { created, issue } = await dependencies.file({
+      const { issue, status } = await dependencies.file({
         ...scope,
         embedding,
         links: args.links.map((link) => ({ ...(link.label ? { label: link.label } : {}), url: link.url })),
@@ -233,8 +242,15 @@ export function createIssueCatalog(
         summary: args.summary,
         title: args.title,
       });
-      await linked(issue.id);
-      return { ...(created ? { filed: true } : { alreadyFiled: true }), issue: serializeIssue(issue) };
+      await linked(issue);
+      if (status === "attached_by_earlier_run") {
+        return {
+          alreadyReported: true,
+          issue: serializeIssue(issue),
+          note: `An earlier run already filed and reported this problem, and counted this run as a repeat. Do not post or open a ticket: call ${skipNotificationToolName} and finish.`,
+        };
+      }
+      return { ...(status === "filed" ? { filed: true } : { alreadyFiled: true }), issue: serializeIssue(issue) };
     },
     name: fileIssueToolName,
     parameters: fileIssueSchema,
@@ -254,7 +270,7 @@ export function createIssueCatalog(
         throw error;
       }
       if (!result) throw new Error("No issue with that id is in this automation's catalog.");
-      await linked(result.issue.id);
+      await linked(result.issue);
       return { ...(result.attached ? { attached: true } : { alreadyAttached: true }), issue: serializeIssue(result.issue) };
     },
     name: attachIssueToolName,

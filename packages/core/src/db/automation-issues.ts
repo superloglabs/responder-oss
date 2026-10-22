@@ -47,7 +47,7 @@ interface RunScope {
 type Transaction = Parameters<Parameters<ReturnType<typeof getDatabase>["transaction"]>[0]>[0];
 
 // Locks the run, so two calls from the same run take turns, and returns the
-// issue it already filed or attached to.
+// issue it already filed or was attached to.
 async function lockRun(tx: Transaction, scope: RunScope) {
   const [run] = await tx
     .select({ id: automationRuns.id })
@@ -60,10 +60,10 @@ async function lockRun(tx: Transaction, scope: RunScope) {
     .for("update");
   if (!run) throw new Error("Automation run not found");
   const [link] = await tx
-    .select({ issueId: automationIssueRuns.issueId })
+    .select({ issueId: automationIssueRuns.issueId, relationship: automationIssueRuns.relationship })
     .from(automationIssueRuns)
     .where(eq(automationIssueRuns.runId, scope.runId));
-  return link?.issueId ?? null;
+  return link ?? null;
 }
 
 async function issueById(tx: Transaction, scope: RunScope, issueId: string) {
@@ -88,13 +88,17 @@ export async function fileAutomationIssue(input: RunScope & {
   links: AutomationIssueLink[];
   summary: string;
   title: string;
-}): Promise<{ created: boolean; issue: AutomationIssue }> {
+}): Promise<{
+  issue: AutomationIssue;
+  // An earlier run may have filed the issue and attached this run to it.
+  status: "already_filed" | "attached_by_earlier_run" | "filed";
+}> {
   return getDatabase().transaction(async (tx) => {
-    const linkedIssueId = await lockRun(tx, input);
-    if (linkedIssueId) {
-      const issue = await issueById(tx, input, linkedIssueId);
+    const link = await lockRun(tx, input);
+    if (link) {
+      const issue = await issueById(tx, input, link.issueId);
       if (!issue) throw new Error("Automation issue not found");
-      return { created: false, issue };
+      return { issue, status: link.relationship === "filed" ? "already_filed" : "attached_by_earlier_run" };
     }
     const [filed] = await tx
       .insert(automationIssues)
@@ -139,7 +143,7 @@ export async function fileAutomationIssue(input: RunScope & {
       .set({ occurrences: 1 + attached.length })
       .where(eq(automationIssues.id, filed!.id))
       .returning(issueColumns);
-    return { created: true, issue: issue! };
+    return { issue: issue!, status: "filed" };
   });
 }
 
@@ -149,12 +153,12 @@ export async function attachAutomationIssue(input: RunScope & {
   issueId: string;
 }): Promise<{ attached: boolean; issue: AutomationIssue } | null> {
   return getDatabase().transaction(async (tx) => {
-    const linkedIssueId = await lockRun(tx, input);
-    if (linkedIssueId && linkedIssueId !== input.issueId) {
-      throw new AutomationIssueRunLinkedError(linkedIssueId);
+    const link = await lockRun(tx, input);
+    if (link && link.issueId !== input.issueId) {
+      throw new AutomationIssueRunLinkedError(link.issueId);
     }
-    if (linkedIssueId) {
-      const issue = await issueById(tx, input, linkedIssueId);
+    if (link) {
+      const issue = await issueById(tx, input, link.issueId);
       return issue ? { attached: false, issue } : null;
     }
     const [issue] = await tx

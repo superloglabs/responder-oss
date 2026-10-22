@@ -27,6 +27,17 @@ function linkLabel(link: AutomationIssue["links"][number]): string {
   }
 }
 
+// Only web pages are shown as links.
+function webLinks(issue: AutomationIssue): AutomationIssue["links"] {
+  return issue.links.filter((link) => {
+    try {
+      return ["http:", "https:"].includes(new URL(link.url).protocol);
+    } catch {
+      return false;
+    }
+  });
+}
+
 function SeenCell({ value }: { value: string }) {
   return <time className="agentTableCell" dateTime={value} title={new Date(value).toLocaleString()}>{seenLabel(value)}</time>;
 }
@@ -95,8 +106,8 @@ export function AutomationIssues({ automationId }: { automationId: string }) {
         {
           header: "Links",
           key: "links",
-          render: (issue) => issue.links.length > 0
-            ? <span className="automationIssues__links">{issue.links.map((link) => <a href={link.url} key={link.url} onClick={(event) => event.stopPropagation()} rel="noreferrer" target="_blank" title={link.url}>{linkLabel(link)}</a>)}</span>
+          render: (issue) => webLinks(issue).length > 0
+            ? <span className="automationIssues__links">{webLinks(issue).map((link) => <a href={link.url} key={link.url} onClick={(event) => event.stopPropagation()} rel="noreferrer" target="_blank" title={link.url}>{linkLabel(link)}</a>)}</span>
             : <span className="agentTableCell">—</span>,
           width: "16%",
         },
