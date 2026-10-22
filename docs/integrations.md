@@ -239,6 +239,10 @@ Create a public Sentry integration with:
 Responder validates `Sentry-Hook-Signature`, synchronizes visible projects,
 and triggers only agents whose installation and project match.
 
+Metric issues, which Sentry opens and reopens each time an alert rule fires,
+do not start agents or automations. The rule counts errors that already arrive
+as their own issues.
+
 An automation's Sentry trigger can leave out environments. The webhook
 payload has no environment, so Responder reads it from the issue's first event
 for a new issue and from its latest event for a regression, after replying to

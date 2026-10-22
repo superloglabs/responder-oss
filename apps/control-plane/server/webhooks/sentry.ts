@@ -79,6 +79,13 @@ export function verifySentrySignature(input: {
 type SentryIssue = z.infer<typeof sentryIssueSchema>;
 type SentryIssueAction = z.infer<typeof sentryIssueWebhookSchema>["action"];
 
+// Sentry opens a metric issue when an alert rule fires and reopens it each
+// time the rule fires again. The rule counts errors that already arrive as
+// their own issues, so these webhooks would only repeat them.
+function isSentryMetricIssue(issue: SentryIssue): boolean {
+  return issue.issueCategory === "metric" || issue.issueType === "metric_issue";
+}
+
 export function sentryIssueBody(
   issue: SentryIssue,
   environment?: string | null,
@@ -299,6 +306,16 @@ export const sentryWebhookRoutes = new Hono().post("/", async (context) => {
       projectId: issue.project.id,
     }),
   );
+  if (isSentryMetricIssue(issue)) {
+    console.info(
+      JSON.stringify({
+        event: "sentry_metric_issue_skipped",
+        installationId,
+        issueId: issue.id,
+      }),
+    );
+    return context.json({ ok: true, ignored: true });
+  }
   const matches = await findAgentsForSentryIssue({
     installationId,
     projectId: issue.project.id,
