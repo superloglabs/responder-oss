@@ -344,6 +344,21 @@ export function isAxiomMonitorResolution(input: {
   return fromAxiom && /^\**resolved:/iu.test(slackMessageTitle(input.body));
 }
 
+// Honeycomb posts a trigger's recovery as ":bee: Resolved: <trigger>" and an
+// SLO burn alert's recovery as "Resolved -- <status>", with links to the
+// Honeycomb UI.
+export function isHoneycombResolution(input: {
+  body: string;
+  isAppMessage: boolean;
+  senderName?: string;
+}): boolean {
+  if (!input.isAppMessage) return false;
+  const fromHoneycomb = /^honeycomb$/iu.test(input.senderName?.trim() ?? "") ||
+    /https:\/\/ui(?:\.eu1)?\.honeycomb\.io\//iu.test(input.body);
+  return fromHoneycomb &&
+    /^(?:(?::bee:|🐝)\s*)?resolved\s*(?::|--)/iu.test(slackMessageTitle(input.body));
+}
+
 export function isSlackErrorRecap(body: string): boolean {
   const title = slackMessageTitle(body)
     .replace(/^\*+|\*+$/gu, "")
@@ -1301,13 +1316,17 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
       username: event.username,
     })
     : null;
-  // Axiom resolutions are skipped whichever provider the message reads as.
-  const axiomResolution = event.type === "message" && isAxiomMonitorResolution({
+  // Axiom and Honeycomb resolutions are skipped whichever provider the message
+  // reads as.
+  const monitorResolutionInput = {
     body,
     isAppMessage: Boolean(event.app_id || event.bot_profile?.app_id || event.bot_id),
     senderName,
-  });
-  const ignoreReason = axiomResolution
+  };
+  const monitorResolution = event.type === "message" &&
+    (isAxiomMonitorResolution(monitorResolutionInput) ||
+      isHoneycombResolution(monitorResolutionInput));
+  const ignoreReason = monitorResolution
     ? "resolved_alert"
     : alertProvider
       ? slackAlertIgnoreReason({
