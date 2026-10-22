@@ -76,7 +76,7 @@ describe("issue catalog", () => {
     expect(instructions).toContain("The earliest run reports for all of them.");
     expect(instructions).toContain("Defer only to runs that are pending or running, or that filed an issue");
     expect(instructions).toContain("titleContains");
-    expect(instructions).toContain("laterOccurrences");
+    expect(instructions).toContain("laterRunIds");
   });
 
   it("finds issues by similarity first, then by text", async () => {
@@ -142,7 +142,7 @@ describe("issue catalog", () => {
     expect(deps.append).not.toHaveBeenCalled();
 
     const { value } = await call(catalog, "file_issue", {
-      laterOccurrences: 206,
+      laterRunIds: ["80000000-0000-4000-8000-000000000000", "80000000-0000-4000-8000-000000000001"],
       links: [{ url: "https://linear.app/example/issue/SYNC-4101" }],
       summary: "Hourly validation checks in usnv return 504.",
       title: "US sync checks time out",
@@ -152,8 +152,8 @@ describe("issue catalog", () => {
     expect(deps.file).toHaveBeenCalledWith({
       ...scope,
       embedding: { model: "openai/text-embedding-3-small", vector: [1, 0] },
+      laterRunIds: ["80000000-0000-4000-8000-000000000000", "80000000-0000-4000-8000-000000000001"],
       links: [{ url: "https://linear.app/example/issue/SYNC-4101" }],
-      occurrences: 207,
       summary: "Hourly validation checks in usnv return 504.",
       title: "US sync checks time out",
     });
@@ -176,13 +176,13 @@ describe("issue catalog", () => {
     });
   });
 
-  it("counts a single alert once when no later runs are given", async () => {
+  it("files an issue without later runs", async () => {
     const deps = dependencies();
     const catalog = createIssueCatalog(scope, deps);
 
     await call(catalog, "file_issue", { summary: "A summary.", title: "A title" });
 
-    expect(deps.file.mock.calls[0]![0]).toMatchObject({ links: [], occurrences: 1 });
+    expect(deps.file.mock.calls[0]![0]).toMatchObject({ laterRunIds: [], links: [] });
   });
 
   it("attaches the run to an existing issue", async () => {

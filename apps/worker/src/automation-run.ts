@@ -746,6 +746,8 @@ export async function processAutomationRun(
   const agentNotified = new Set<string>();
   // The agent found nothing worth reporting on a successful run.
   let notificationSkipped = false;
+  // The issue catalog of an alert run, which records the run's report.
+  let issueCatalog: ReturnType<typeof createIssueCatalog> | null = null;
   const notificationKey = (notification: { channelId: string; integrationAccountId: string }) =>
     `${notification.integrationAccountId}:${notification.channelId}`;
   const runAbort = new AbortController();
@@ -923,7 +925,7 @@ export async function processAutomationRun(
       : [];
     // Alert runs check what the automation already reported before they
     // report again.
-    const issueCatalog = usesIssueCatalog({
+    issueCatalog = usesIssueCatalog({
       firstTurn,
       notificationChannels: notificationTargets.length,
       triggerInput: run.triggerInput,
@@ -1291,11 +1293,19 @@ export async function processAutomationRun(
     ? notificationSkipped ? [] : reportTo.filter((notification) => !agentNotified.has(notificationKey(notification)))
     : reportTo;
   if (outcome && unreported.length > 0) {
+    const catalog = issueCatalog;
     await dependencies.notify({
       automationId: run.automationId,
       automationName: run.automationName,
       environment,
       notifications: unreported,
+      // The run's own report is the post for the issue it filed.
+      ...(catalog
+        ? {
+            onDelivered: (notification: AutomationNotification, timestamp: string) =>
+              catalog.recordAction({ externalReference: `${notification.channelId}:${timestamp}`, kind: "send_slack_message" }),
+          }
+        : {}),
       onError: (notification, error) => recordEvent(dependencies, run.runId, "notification_failed", {
         channelId: notification.channelId,
         kind: notification.kind,

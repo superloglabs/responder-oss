@@ -47,7 +47,7 @@ export function issueCatalogInstructions(): string {
     `This automation keeps a catalog of the issues it has reported, shared by all its runs, so people are told about each problem once. Use the ${findIssuesToolName}, ${listRunsToolName}, ${attachIssueToolName}, and ${fileIssueToolName} tools from the ${automationToolServerName} tool server, in this order, before you investigate in depth:`,
     `1. Call ${findIssuesToolName} with a short description of this alert. If one of the issues is the same problem, call ${attachIssueToolName} with its id, then call ${skipNotificationToolName} and finish. Do not post, open a ticket, or open a pull request for it.`,
     `2. Call ${listRunsToolName}. When it reports runs it did not list, call it again with titleContains set to a phrase from this alert's title. If runs that started before this one are handling the same problem, this run is part of a stream of repeats: call ${skipNotificationToolName} naming the earliest of those runs, and finish without filing, posting, or opening a ticket. The earliest run reports for all of them. Defer only to runs that are pending or running, or that filed an issue: when the earlier runs for the problem failed or were cancelled without filing, handle it yourself.`,
-    `3. Otherwise investigate. If the result is worth reporting under the automation's instructions, call ${listRunsToolName} again, with titleContains when the alerts share a phrase, and count the runs that started after this one for the same problem. Then call ${fileIssueToolName} with that count as laterOccurrences, link any ticket you open, and report as the automation's instructions say. When later runs repeated the alert, say how many times it fired in the post.`,
+    `3. Otherwise investigate. If the result is worth reporting under the automation's instructions, call ${listRunsToolName} again, with titleContains when the alerts share a phrase, and collect the ids of the runs that started after this one for the same problem. Then call ${fileIssueToolName} with those ids as laterRunIds, link any ticket you open, and report as the automation's instructions say. When later runs repeated the alert, say how many times it fired in the post.`,
     "You decide what counts as the same problem: the same failure with the same cause, even when ids, numbers, or wording in the alert differ.",
   ].join("\n");
 }
@@ -62,8 +62,8 @@ const linkSchema = z.object({
 });
 
 const fileIssueSchema = z.object({
-  laterOccurrences: z.number().int().min(0).max(100_000).default(0)
-    .describe("How many runs that started after this one were for the same problem."),
+  laterRunIds: z.array(z.uuid()).max(500).default([])
+    .describe("Ids of the runs that started after this one for the same problem, from list_runs. Each counts as an occurrence."),
   links: z.array(linkSchema).max(10).default([])
     .describe("Tickets or other pages about this issue."),
   summary: z.string().trim().min(1).max(4_000)
@@ -229,7 +229,7 @@ export function createIssueCatalog(
         ...scope,
         embedding,
         links: args.links.map((link) => ({ ...(link.label ? { label: link.label } : {}), url: link.url })),
-        occurrences: 1 + args.laterOccurrences,
+        laterRunIds: args.laterRunIds,
         summary: args.summary,
         title: args.title,
       });

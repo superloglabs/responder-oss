@@ -63,14 +63,17 @@ describe("sending automation notifications", () => {
       ...overrides,
     };
     const onError = vi.fn().mockResolvedValue(undefined);
+    const onDelivered = vi.fn().mockResolvedValue(undefined);
     return {
       dependencies,
+      onDelivered,
       onError,
       sent: sendAutomationRunNotifications({
         automationId,
         automationName: "Weekly digest",
         environment: { RESPONDER_APP_URL: "https://responder.example" },
         notifications: [notification, { ...notification, channelId: "C888" }],
+        onDelivered,
         onError,
         organizationId,
         outcome: { message: "All clear.", status: "succeeded" },
@@ -166,13 +169,15 @@ describe("sending automation notifications", () => {
 
   it("keeps posting to other channels when one fails", async () => {
     const failure = new Error("not_in_channel");
-    const { dependencies, onError, sent } = send({
+    const { dependencies, onDelivered, onError, sent } = send({
       post: vi.fn().mockRejectedValueOnce(failure).mockResolvedValue("1790000000.000100"),
     });
     await sent;
 
     expect(onError).toHaveBeenCalledWith(notification, failure);
     expect(dependencies.post).toHaveBeenCalledTimes(2);
+    expect(onDelivered).toHaveBeenCalledTimes(1);
+    expect(onDelivered).toHaveBeenCalledWith({ ...notification, channelId: "C888" }, "1790000000.000100");
   });
 
   it("reports a disconnected Slack workspace", async () => {

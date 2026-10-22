@@ -79,11 +79,13 @@ async function issueById(tx: Transaction, scope: RunScope, issueId: string) {
 }
 
 // Files a new issue for the run. A run files at most one issue: calling again
-// returns the issue it already filed.
+// returns the issue it already filed. The later runs of the automation that
+// repeated the alert are attached to it, each counted once, so a later run
+// that attaches itself again is not counted twice.
 export async function fileAutomationIssue(input: RunScope & {
   embedding: IssueEmbedding | null;
+  laterRunIds: string[];
   links: AutomationIssueLink[];
-  occurrences: number;
   summary: string;
   title: string;
 }): Promise<{ created: boolean; issue: AutomationIssue }> {
@@ -94,24 +96,49 @@ export async function fileAutomationIssue(input: RunScope & {
       if (!issue) throw new Error("Automation issue not found");
       return { created: false, issue };
     }
-    const [issue] = await tx
+    const [filed] = await tx
       .insert(automationIssues)
       .values({
         automationId: input.automationId,
         embedding: input.embedding?.vector ?? null,
         embeddingModel: input.embedding?.model ?? null,
         links: input.links,
-        occurrences: input.occurrences,
         organizationId: input.organizationId,
         summary: input.summary,
         title: input.title,
       })
-      .returning(issueColumns);
+      .returning({ id: automationIssues.id });
     await tx.insert(automationIssueRuns).values({
-      issueId: issue!.id,
+      issueId: filed!.id,
       relationship: "filed",
       runId: input.runId,
     });
+    const laterRunIds = [...new Set(input.laterRunIds)].filter((id) => id !== input.runId);
+    const attached = laterRunIds.length === 0
+      ? []
+      : await tx
+          .insert(automationIssueRuns)
+          // In the table's column order, which an insert from a select needs.
+          .select(tx
+            .select({
+              runId: automationRuns.id,
+              issueId: sql<string>`${filed!.id}::uuid`.as("issue_id"),
+              relationship: sql<"attached">`'attached'`.as("relationship"),
+              createdAt: sql<Date>`now()`.as("created_at"),
+            })
+            .from(automationRuns)
+            .where(and(
+              inArray(automationRuns.id, laterRunIds),
+              eq(automationRuns.automationId, input.automationId),
+              eq(automationRuns.organizationId, input.organizationId),
+            )))
+          .onConflictDoNothing({ target: automationIssueRuns.runId })
+          .returning({ runId: automationIssueRuns.runId });
+    const [issue] = await tx
+      .update(automationIssues)
+      .set({ occurrences: 1 + attached.length })
+      .where(eq(automationIssues.id, filed!.id))
+      .returning(issueColumns);
     return { created: true, issue: issue! };
   });
 }

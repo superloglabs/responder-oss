@@ -523,6 +523,10 @@ describe("automation run processor", () => {
     expect(server?.entry.content).toContain("\"name\":\"find_issues\"");
     expect(deps.runCodex.mock.calls[0]![1].prompt).toContain("This automation keeps a catalog of the issues it has reported");
     expect(recordAction).toHaveBeenCalledWith(pullRequest);
+    // The agent did not post, so the run's own report is recorded on the issue.
+    const notified = deps.notify.mock.calls[0]![0];
+    await notified.onDelivered?.({ channelId: "C0123", integrationAccountId: "61616161-6161-4161-8161-616161616161", kind: "slack" }, "1791787772.000100");
+    expect(recordAction).toHaveBeenCalledWith({ externalReference: "C0123:1791787772.000100", kind: "send_slack_message" });
   });
 
   it("leaves out the issue catalog for runs that are not alerts", async () => {

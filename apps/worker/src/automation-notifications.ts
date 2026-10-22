@@ -135,6 +135,7 @@ export async function sendAutomationRunNotifications(input: {
   automationName: string;
   environment: NodeJS.ProcessEnv;
   notifications: AutomationNotification[];
+  onDelivered?(notification: AutomationNotification, timestamp: string): Promise<void>;
   onError(notification: AutomationNotification, error: unknown): Promise<void>;
   organizationId: string;
   outcome: AutomationRunOutcome;
@@ -157,5 +158,6 @@ export async function sendAutomationRunNotifications(input: {
   }, dependencies);
   for (const delivery of deliveries) {
     if ("error" in delivery) await input.onError(delivery.notification, delivery.error);
+    else if (delivery.timestamp) await input.onDelivered?.(delivery.notification, delivery.timestamp);
   }
 }
