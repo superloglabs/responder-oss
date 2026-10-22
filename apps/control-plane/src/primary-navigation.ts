@@ -18,17 +18,19 @@ export type NavigationSection =
   | "telemetry-overview"
   | "traces";
 
+export type NavigationGroup = "Automation" | "Detect" | "Explore";
+
 export interface NavigationItem {
   // Pages within the section, listed under it while it is open.
   children?: Array<{ label: string; to: string }>;
+  // The labeled sidebar block the item belongs to.
+  group?: NavigationGroup;
   label: string;
   section: NavigationSection;
   to: string;
 }
 
-// Organizations with simplified navigation see automations and the pages
-// automations depend on. The other product areas stay reachable by URL.
-export function primaryNavigation(options: {
+interface NavigationOptions {
   // Shown only with telemetry.
   alerts?: boolean;
   automations: boolean;
@@ -36,67 +38,103 @@ export function primaryNavigation(options: {
   dashboards?: boolean;
   simplified: boolean;
   telemetry?: boolean;
-}): NavigationItem[] {
+}
+
+// Organizations with simplified navigation see automations and the pages
+// automations depend on. The other product areas stay reachable by URL.
+// With telemetry the sidebar groups automation and telemetry pages under
+// labels, and lists the remaining product areas above them.
+export function primaryNavigation(options: NavigationOptions): NavigationItem[] {
+  const grouped = Boolean(options.telemetry);
+  const inGroup = (group: NavigationGroup, items: NavigationItem[]) =>
+    grouped ? items.map((item) => ({ ...item, group })) : items;
   // Skills extend automations and pull requests come from their runs, so
   // both appear with them.
-  const automations: NavigationItem[] = options.automations
-    ? [
+  const automations = options.automations
+    ? inGroup("Automation", [
         { label: "Automations", section: "automations", to: "/automations" },
-        { label: "PRs", section: "pull-requests", to: "/pull-requests" },
         { label: "Skills", section: "skills", to: "/skills" },
-      ]
+        { label: "PRs", section: "pull-requests", to: "/pull-requests" },
+      ])
     : [];
-  const telemetry: NavigationItem[] = options.telemetry
+  const telemetry = options.telemetry
     ? [
-        { label: "Overview", section: "telemetry-overview", to: "/telemetry" },
-        { label: "Logs", section: "logs", to: "/logs" },
-        {
-          children: [
-            { label: "Overview", to: "/traces" },
-            { label: "Search", to: "/traces/search" },
-          ],
-          label: "Traces",
-          section: "traces",
-          to: "/traces",
-        },
-        { label: "Metrics", section: "metrics", to: "/metrics" },
-        { label: "AI models", section: "ai-models", to: "/ai-models" },
-        ...(options.dashboards ? [{ label: "Dashboards", section: "dashboards" as const, to: "/dashboards" }] : []),
+        ...inGroup("Explore", [
+          { label: "Overview", section: "telemetry-overview", to: "/telemetry" },
+          ...(options.dashboards ? [{ label: "Dashboards", section: "dashboards" as const, to: "/dashboards" }] : []),
+          { label: "Logs", section: "logs", to: "/logs" },
+          { label: "Metrics", section: "metrics", to: "/metrics" },
+          {
+            children: [
+              { label: "Overview", to: "/traces" },
+              { label: "Search", to: "/traces/search" },
+            ],
+            label: "Traces",
+            section: "traces",
+            to: "/traces",
+          },
+        ]),
         ...(options.alerts
-          ? [
-              { label: "Alerts", section: "alerts" as const, to: "/alerts" },
-              { label: "Synthetics", section: "synthetics" as const, to: "/synthetics" },
-            ]
+          ? inGroup("Detect", [
+              { label: "Alerts", section: "alerts", to: "/alerts" },
+              { label: "Synthetics", section: "synthetics", to: "/synthetics" },
+            ])
           : []),
       ]
     : [];
   if (options.simplified) {
+    const sidebarSettings = settingsInSidebar(options);
     return [
       ...automations,
       ...telemetry,
-      { label: "Integrations", section: "integrations", to: "/settings" },
-      { label: "Tag mode", section: "tag-mode", to: "/settings/tag-mode" },
-      { label: "Settings", section: "settings", to: "/settings/workspace" },
+      ...(sidebarSettings
+        ? [
+            { label: "Integrations", section: "integrations" as const, to: "/settings" },
+            { label: "Tag mode", section: "tag-mode" as const, to: "/settings/tag-mode" },
+          ]
+        : []),
+      { label: "Settings", section: "settings", to: sidebarSettings ? "/settings/workspace" : "/settings" },
     ];
   }
-  return [
-    { label: "Agents", section: "agents", to: "/agents" },
-    ...automations,
+  const agents: NavigationItem = { label: "Agents", section: "agents", to: "/agents" };
+  const productAreas: NavigationItem[] = [
     { label: "Issues", section: "issues", to: "/issues" },
     { label: "Scans", section: "scans", to: "/scans" },
     { label: "Suggestions", section: "suggestions", to: "/suggestions" },
-    ...telemetry,
-    { label: "Settings", section: "settings", to: "/settings" },
   ];
+  const settings: NavigationItem = { label: "Settings", section: "settings", to: "/settings" };
+  // Ungrouped pages go above the groups so none reads as part of one.
+  return grouped
+    ? [agents, ...productAreas, ...automations, ...telemetry, settings]
+    : [agents, ...automations, ...productAreas, settings];
 }
 
-// Integrations and tag mode are settings tabs unless simplified navigation
-// gives them their own sidebar entries.
+// Consecutive items of one group form a labeled block. Ungrouped items are
+// blocks of their own.
+export function navigationBlocks(
+  items: NavigationItem[],
+): Array<{ group?: NavigationGroup; items: NavigationItem[] }> {
+  const blocks: Array<{ group?: NavigationGroup; items: NavigationItem[] }> = [];
+  for (const item of items) {
+    const last = blocks.at(-1);
+    if (item.group && last?.group === item.group) last.items.push(item);
+    else blocks.push({ group: item.group, items: [item] });
+  }
+  return blocks;
+}
+
+// Simplified navigation gives integrations and tag mode their own sidebar
+// entries. With telemetry they stay settings tabs.
+export function settingsInSidebar(options: Pick<NavigationOptions, "simplified" | "telemetry">): boolean {
+  return options.simplified && !options.telemetry;
+}
+
+// Integrations and tag mode highlight settings while they are settings tabs.
 export function activeNavigationSection(
   active: NavigationSection,
-  simplified: boolean,
+  sidebarSettings: boolean,
 ): NavigationSection {
-  return !simplified && (active === "integrations" || active === "tag-mode")
+  return !sidebarSettings && (active === "integrations" || active === "tag-mode")
     ? "settings"
     : active;
 }
@@ -106,7 +144,7 @@ export function homePath(capabilities: readonly string[]): string {
   return primaryNavigation(navigationOptions(capabilities))[0].to;
 }
 
-export function navigationOptions(capabilities: readonly string[]) {
+export function navigationOptions(capabilities: readonly string[]): NavigationOptions {
   return {
     alerts: capabilities.includes("alerts"),
     automations: capabilities.includes("automations"),

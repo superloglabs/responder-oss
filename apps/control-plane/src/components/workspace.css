@@ -50,6 +50,9 @@
 .appShell--workspace .primaryNav a:hover { background: var(--issues-row); }
 .appShell--workspace .primaryNav__children { display: flex; flex-direction: column; gap: 4px; margin: 2px 0 4px 15px; padding-left: 8px; border-left: 1px solid #e3e3e3; }
 .appShell--workspace .primaryNav__children a { height: 30px; padding: 6px 8px; }
+.appShell--workspace .primaryNav__group { display: flex; flex-direction: column; gap: 4px; padding-top: 12px; }
+.appShell--workspace .primaryNav__group + a { margin-top: 12px; }
+.appShell--workspace .primaryNav__label { padding: 4px 8px; color: #707070; font-size: 11px; line-height: 16px; letter-spacing: .02em; }
 .appShell--workspace .globalHeader__right { margin-top: auto; flex-direction: column; align-items: stretch; gap: 12px; }
 .appShell--workspace .accountMenuTrigger { width: 100%; max-width: none; height: 48px; border-radius: 8px; padding: 8px; justify-content: flex-start; }
 .appShell--workspace .accountMenuTrigger { color: #202020; border: 0; gap: 8px; font-size: 14px; line-height: 17.5px; }

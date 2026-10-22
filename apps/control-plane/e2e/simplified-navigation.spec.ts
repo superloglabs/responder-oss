@@ -71,6 +71,8 @@ test("lists every product area without simplified navigation", async ({ page }) 
   await expect(primaryLinks(page)).toHaveText([
     "Agents",
     "Automations",
+    "Skills",
+    "PRs",
     "Issues",
     "Scans",
     "Suggestions",
@@ -86,6 +88,8 @@ test("moves integrations and tag mode into the sidebar", async ({ page }) => {
 
   await expect(primaryLinks(page)).toHaveText([
     "Automations",
+    "Skills",
+    "PRs",
     "Integrations",
     "Tag mode",
     "Settings",
@@ -102,6 +106,33 @@ test("moves integrations and tag mode into the sidebar", async ({ page }) => {
   await expect(settingsTabs.getByRole("link", { name: "Tag mode" })).toHaveCount(0);
 });
 
+test("groups the sidebar and keeps integrations and tag mode in settings with telemetry", async ({ page }) => {
+  await mockWorkspace(page, ["alerts", "automations", "dashboards", "simplified_navigation", "telemetry"]);
+  await page.goto("/settings");
+
+  const navigation = page.getByRole("navigation", { name: "Primary navigation" });
+  await expect(navigation.getByRole("group", { name: "Automation" }).getByRole("link")).toHaveText([
+    "Automations",
+    "Skills",
+    "PRs",
+  ]);
+  await expect(navigation.getByRole("group", { name: "Explore" }).getByRole("link")).toHaveText([
+    "Overview",
+    "Dashboards",
+    "Logs",
+    "Metrics",
+    "Traces",
+  ]);
+  await expect(navigation.getByRole("group", { name: "Detect" }).getByRole("link")).toHaveText([
+    "Alerts",
+    "Synthetics",
+  ]);
+  await expect(primaryLinks(page).filter({ hasText: "Settings" })).toHaveAttribute("aria-current", "page");
+  const settingsTabs = page.getByRole("navigation", { name: "Settings sections" });
+  await expect(settingsTabs.getByRole("link", { name: "Integrations" })).toHaveAttribute("aria-current", "page");
+  await expect(settingsTabs.getByRole("link", { name: "Tag mode" })).toBeVisible();
+});
+
 test("waits for capabilities before showing the sidebar", async ({ page }) => {
   await mockWorkspace(page, ["automations", "simplified_navigation"], 500);
   await page.goto("/settings");
@@ -110,6 +141,8 @@ test("waits for capabilities before showing the sidebar", async ({ page }) => {
   await expect(page.getByRole("navigation", { name: "Primary navigation" })).toHaveCount(0);
   await expect(primaryLinks(page)).toHaveText([
     "Automations",
+    "Skills",
+    "PRs",
     "Integrations",
     "Tag mode",
     "Settings",

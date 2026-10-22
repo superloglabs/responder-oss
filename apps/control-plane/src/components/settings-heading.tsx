@@ -1,9 +1,10 @@
 import { GearIcon, PlugsConnectedIcon, TagIcon } from "@phosphor-icons/react";
 import { useOrganizationCapabilities } from "../organization-capabilities";
+import { navigationOptions, settingsInSidebar } from "../primary-navigation";
 import { SettingsTabs, type SettingsSection } from "./settings-tabs";
 import "./settings.css";
 
-// With simplified navigation these sections are sidebar pages, not tabs.
+// Sections that are sidebar pages, not tabs, in simplified navigation.
 const standaloneSections = {
   integrations: {
     description: "Connect the services Superlog can use.",
@@ -19,7 +20,7 @@ const standaloneSections = {
 
 export function SettingsHeading({ active }: { active: SettingsSection }) {
   const capabilities = useOrganizationCapabilities();
-  const standalone = capabilities.includes("simplified_navigation") &&
+  const standalone = settingsInSidebar(navigationOptions(capabilities)) &&
       (active === "integrations" || active === "tag-mode")
     ? standaloneSections[active]
     : null;
