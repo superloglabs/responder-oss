@@ -108,7 +108,9 @@ describe("ingestErrorIssues", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const fake = store({
       record: vi.fn<ErrorIssueStore["record"]>(async (occurrences) => {
-        if (occurrences.message === "bad") throw new Error("invalid input");
+        if (occurrences.message === "bad") {
+          throw new Error("Failed query", { cause: Object.assign(new Error("invalid byte sequence"), { code: "22021" }) });
+        }
         return { issueId: "good", transition: "new" };
       }),
     });
@@ -149,5 +151,19 @@ describe("ingestErrorIssues without the exception projection", () => {
       throw new Error("Timeout");
     });
     await expect(ingestErrorIssues(deps)).rejects.toThrow("Timeout");
+  });
+});
+
+describe("ingestErrorIssues when a write fails for another reason", () => {
+  it("fails the pass without moving the cursor, so the next pass retries", async () => {
+    const fake = store({
+      record: vi.fn<ErrorIssueStore["record"]>(async () => {
+        throw Object.assign(new Error("canceling statement due to lock timeout"), { code: "55P03" });
+      }),
+    });
+    const deps = dependencies(fake, (kind) => (kind === "span" ? [candidate({})] : []));
+
+    await expect(ingestErrorIssues(deps)).rejects.toThrow("lock timeout");
+    expect(fake.saveCursor).not.toHaveBeenCalled();
   });
 });

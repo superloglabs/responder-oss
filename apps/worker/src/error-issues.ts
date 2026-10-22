@@ -38,6 +38,17 @@ function missingProjection(error: unknown): boolean {
 }
 let missingProjectionReported = false;
 
+// A write Postgres rejected for its data (SQLSTATE classes 22 and 23) fails
+// the same way on every pass, so the pass skips it. Any other failure fails
+// the pass, and the next one reads the same rows again.
+function rejectedData(error: unknown): boolean {
+  for (let current = error; typeof current === "object" && current !== null; current = (current as { cause?: unknown }).cause) {
+    const code = (current as { code?: unknown }).code;
+    if (typeof code === "string") return /^2[23]/u.test(code);
+  }
+  return false;
+}
+
 function errorText(error: unknown): string {
   return (error instanceof Error ? error.message : String(error)).slice(0, 500);
 }
@@ -73,8 +84,9 @@ export async function ingestErrorIssues(
             });
           }
         } catch (error) {
-          // The cursor moves past the occurrences anyway, so one bad row
-          // cannot stop the rest.
+          if (!rejectedData(error)) throw error;
+          // The cursor moves past the occurrences, so one bad row cannot stop
+          // the rest.
           console.warn(JSON.stringify({
             error: errorText(error),
             event: "error_issue_record_failed",
