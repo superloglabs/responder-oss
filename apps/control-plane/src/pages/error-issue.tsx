@@ -49,27 +49,29 @@ export function ErrorIssuePage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState<ErrorIssueStatus | null>(null);
-  const latest = useRef(issueId);
+  // A load is kept only if no other load or status change started after it.
+  const generation = useRef(0);
   useDocumentTitle(detail?.issue.title ?? "Error");
 
   const load = useCallback(async () => {
+    const request = ++generation.current;
     setLoadError(null);
     try {
       const loaded = await fetchErrorIssue(issueId);
-      if (latest.current === issueId) setDetail(loaded);
+      if (generation.current === request) setDetail(loaded);
     } catch (cause) {
-      if (latest.current === issueId) setLoadError(cause instanceof Error ? cause.message : "Unable to load the error");
+      if (generation.current === request) setLoadError(cause instanceof Error ? cause.message : "Unable to load the error");
     }
   }, [issueId]);
 
   useEffect(() => {
-    latest.current = issueId;
     void Promise.resolve().then(load);
     const timer = setInterval(() => void load(), 30_000);
     return () => clearInterval(timer);
   }, [issueId, load]);
 
   async function changeStatus(status: ErrorIssueStatus) {
+    generation.current += 1;
     setSaving(status);
     setError(null);
     try {

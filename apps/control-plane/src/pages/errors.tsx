@@ -56,6 +56,9 @@ export function ErrorsPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const latest = useRef(0);
+  // Changes with the filter, so an older page fetched for a previous filter
+  // is dropped.
+  const filterGeneration = useRef(0);
 
   const filter: ErrorIssueFilter = { status, ...(service ? { service } : {}), ...(search ? { search } : {}) };
 
@@ -82,6 +85,7 @@ export function ErrorsPage() {
   }, [search, service, status]);
 
   useEffect(() => {
+    filterGeneration.current += 1;
     void Promise.resolve().then(() => {
       setOlder(null);
       return load();
@@ -107,9 +111,11 @@ export function ErrorsPage() {
     const shown = [...(list?.issues ?? []), ...(older?.issues ?? [])];
     const last = shown.at(-1);
     if (!last) return;
+    const generation = filterGeneration.current;
     setLoadingMore(true);
     try {
       const more = await fetchErrorIssues({ ...filter, before: last });
+      if (generation !== filterGeneration.current) return;
       setOlder({ done: (more?.issues.length ?? 0) < 50, issues: [...(older?.issues ?? []), ...(more?.issues ?? [])] });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to load more errors");
