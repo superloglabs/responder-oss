@@ -73,10 +73,11 @@ export function applyAutomationTemplate(configuration: AutomationConfiguration, 
   return { ...configuration, contextAccountIds, prompt: template.prompt, triggers };
 }
 
-// Axiom, SigNoz, and Honeycomb alerts and DevRev tickets arrive at the
-// connection's webhook, so there is nothing to choose.
+// Axiom, SigNoz, Honeycomb, and Better Stack alerts and DevRev tickets arrive
+// at the connection's webhook, so there is nothing to choose.
 const triggerResources: Record<ConnectedAutomationTrigger["kind"], string | null> = {
   axiom: null,
+  betterstack: null,
   devrev: null,
   discord: "a Discord channel",
   github: "a GitHub repository",

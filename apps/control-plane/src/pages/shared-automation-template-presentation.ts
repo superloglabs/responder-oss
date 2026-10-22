@@ -18,6 +18,7 @@ export function sharedTriggerDescription(trigger: AutomationTrigger): string {
   if (trigger.kind === "axiom") return "When an Axiom monitor sends an alert to its Responder notifier";
   if (trigger.kind === "signoz") return "When a SigNoz alert that uses the Responder channel fires";
   if (trigger.kind === "honeycomb") return "When a Honeycomb trigger or SLO burn alert that notifies the Responder webhook fires";
+  if (trigger.kind === "betterstack") return "When a Better Stack incident starts and its outgoing webhook notifies Responder";
   if (trigger.kind === "devrev") return "When a ticket is created in DevRev";
   if (trigger.kind === "github") {
     const events = trigger.eventTypes.length > 1

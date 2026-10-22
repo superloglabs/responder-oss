@@ -14,6 +14,7 @@ describe("ProviderGlyph", () => {
 
   it.each([
     ["axiom", "Axiom", "AX"],
+    ["betterstack", "Better Stack", "BS"],
     ["clickstack", "ClickStack", "CS"],
     ["cloudflare", "Cloudflare", "CF"],
     ["dash0", "Dash0", "D0"],

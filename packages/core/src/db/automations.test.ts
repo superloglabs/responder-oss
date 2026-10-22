@@ -6,6 +6,7 @@ import {
   findAutomationsForSlackEvent,
   listSlackMessageAuthors,
   findAutomationsForAxiomAlert,
+  findAutomationsForBetterStackIncident,
   findAutomationsForDevRevTicket,
   findAutomationsForGitHubPullRequest,
   findAutomationsForHoneycombAlert,
@@ -342,6 +343,15 @@ describe("trigger matching", () => {
       { automationId: "other-connection", triggers: [{ integrationAccountId: "00000000-0000-4000-8000-000000000099", kind: "honeycomb" }] },
     ]]));
     await expect(findAutomationsForHoneycombAlert(accountId)).resolves.toEqual([{ automationId: "honeycomb" }]);
+  });
+
+  it("matches Better Stack incidents to automations with a Better Stack trigger on that connection", async () => {
+    vi.mocked(getDatabase).mockReturnValue(queuedDatabase([[
+      { automationId: "betterstack", triggers: [slack, { integrationAccountId: accountId, kind: "betterstack" }] },
+      { automationId: "honeycomb", triggers: [{ integrationAccountId: accountId, kind: "honeycomb" }] },
+      { automationId: "other-connection", triggers: [{ integrationAccountId: "00000000-0000-4000-8000-000000000099", kind: "betterstack" }] },
+    ]]));
+    await expect(findAutomationsForBetterStackIncident(accountId)).resolves.toEqual([{ automationId: "betterstack" }]);
   });
 
   it("matches DevRev tickets to automations with a DevRev trigger on that connection", async () => {

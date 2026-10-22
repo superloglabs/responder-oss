@@ -17,6 +17,7 @@ import { LangfuseConnectionDialog } from "../components/langfuse-connection-dial
 import { DevRevConnectionDialog } from "../components/devrev-connection-dialog";
 import { SignozConnectionDialog } from "../components/signoz-connection-dialog";
 import { HoneycombConnectionDialog } from "../components/honeycomb-connection-dialog";
+import { BetterStackConnectionDialog } from "../components/betterstack-connection-dialog";
 import { SupabaseConnectionDialog } from "../components/supabase-connection-dialog";
 import { currentProjectSelectionState } from "../project-selection";
 import {
@@ -60,7 +61,8 @@ interface IntegrationSummary {
     | "discord"
     | "devrev"
     | "signoz"
-    | "honeycomb";
+    | "honeycomb"
+    | "betterstack";
   name: string;
   description: string;
   state: IntegrationState;
@@ -401,6 +403,7 @@ function DefaultIntegrationCard({
   const [connectingDevRev, setConnectingDevRev] = useState(false);
   const [connectingSignoz, setConnectingSignoz] = useState(false);
   const [connectingHoneycomb, setConnectingHoneycomb] = useState(false);
+  const [connectingBetterStack, setConnectingBetterStack] = useState(false);
   const supabaseSelectionState = currentProjectSelectionState("supabase");
   const [connectingSupabase, setConnectingSupabase] = useState(
     integration.id === "supabase" && Boolean(supabaseSelectionState),
@@ -451,6 +454,10 @@ function DefaultIntegrationCard({
     }
     if (integration.id === "honeycomb") {
       setConnectingHoneycomb(true);
+      return;
+    }
+    if (integration.id === "betterstack") {
+      setConnectingBetterStack(true);
       return;
     }
     if (integration.id === "supabase") {
@@ -549,6 +556,11 @@ function DefaultIntegrationCard({
       <HoneycombConnectionDialog
         onCancel={() => setConnectingHoneycomb(false)}
         open={connectingHoneycomb}
+        returnTo="/settings"
+      />
+      <BetterStackConnectionDialog
+        onCancel={() => setConnectingBetterStack(false)}
+        open={connectingBetterStack}
         returnTo="/settings"
       />
       <SupabaseConnectionDialog

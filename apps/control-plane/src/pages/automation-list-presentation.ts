@@ -43,6 +43,7 @@ export function triggerEventLabel(trigger: AutomationListTrigger): string {
   if (trigger.kind === "axiom") return "Monitor alert";
   if (trigger.kind === "signoz") return "Alert fired";
   if (trigger.kind === "honeycomb") return "Trigger or SLO alert";
+  if (trigger.kind === "betterstack") return "Incident started";
   if (trigger.kind === "devrev") return "New ticket";
   if (trigger.kind === "github") {
     if (trigger.eventTypes.length > 1) return "Pull request opened or merged";
@@ -74,6 +75,7 @@ export function triggerTitle(trigger: AutomationListTrigger): string {
   if (trigger.kind === "axiom") return "Axiom monitor alert";
   if (trigger.kind === "signoz") return "SigNoz alert fired";
   if (trigger.kind === "honeycomb") return "Honeycomb trigger or SLO alert";
+  if (trigger.kind === "betterstack") return "Better Stack incident started";
   if (trigger.kind === "devrev") return "DevRev new ticket";
   if (trigger.kind === "github") {
     if (trigger.eventTypes.length > 1) return "GitHub pull request opened or merged";

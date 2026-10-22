@@ -305,6 +305,7 @@ export const automationRoutes = new Hono()
           "sentry",
           "signoz",
           "honeycomb",
+          "betterstack",
           "datadog",
           "gcp",
           "grafana",

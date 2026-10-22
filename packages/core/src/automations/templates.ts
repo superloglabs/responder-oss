@@ -213,6 +213,21 @@ export const builtInAutomationTemplates: BuiltInAutomationTemplate[] = [
   },
   {
     category: "bug_triage",
+    connectors: ["betterstack", "github"],
+    description: "When a Better Stack incident starts, read the monitor, logs, and errors behind it and find the cause in your code.",
+    id: "investigate-betterstack-incidents",
+    name: "Investigate Better Stack incidents",
+    prompt: [
+      "A Better Stack incident started. The trigger payload has the incident name, its cause, the checked URL, and the monitor it belongs to.",
+      "Use the Better Stack tools to read the incident and its monitor, then query the logs, metrics, and errors of the affected service around the time it started.",
+      "Find what changed: a deploy, a dependency, a traffic change, or a code path in the selected repositories.",
+      "Report what is failing, who is affected, the likely cause, and the queries you used.",
+      "If the incident is noise, such as a flaky check or a timeout that is too tight, say so in one line and suggest a better setting.",
+    ].join("\n"),
+    triggers: [{ integrationAccountId: "", kind: "betterstack" }],
+  },
+  {
+    category: "bug_triage",
     connectors: ["github"],
     description: "When a bug is posted in your bugs channel, reproduce it, open a pull request with a regression test, and reply with the link.",
     id: "fix-slack-bug-reports",

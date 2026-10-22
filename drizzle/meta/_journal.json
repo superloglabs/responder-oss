@@ -652,6 +652,13 @@
       "when": 1792686080380,
       "tag": "0092_error_issues",
       "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "7",
+      "when": 1792690455746,
+      "tag": "0093_add_betterstack_integration",
+      "breakpoints": true
     }
   ]
 }

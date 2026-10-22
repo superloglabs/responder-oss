@@ -2,6 +2,7 @@
 // trigger share a catalog of the issues it has reported.
 export const issueCatalogTriggerKinds: ReadonlySet<string> = new Set([
   "axiom",
+  "betterstack",
   "honeycomb",
   "sentry",
   "signoz",

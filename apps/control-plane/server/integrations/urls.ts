@@ -84,6 +84,15 @@ export function honeycombWebhookUrl(integrationAccountId: string): string {
   ).toString();
 }
 
+export function betterStackWebhookUrl(integrationAccountId: string): string {
+  const callbackBaseUrl =
+    process.env.RESPONDER_PUBLIC_URL ?? controlPlaneBaseUrl();
+  return new URL(
+    `/api/webhooks/betterstack/${encodeURIComponent(integrationAccountId)}`,
+    callbackBaseUrl,
+  ).toString();
+}
+
 export function devrevWebhookUrl(integrationAccountId: string): string {
   const callbackBaseUrl =
     process.env.RESPONDER_PUBLIC_URL ?? controlPlaneBaseUrl();

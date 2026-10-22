@@ -56,7 +56,7 @@ describe("webhook routing keys", () => {
 
   it("routes per-account webhooks by the account in the path", () => {
     const id = "0f0c8e9a-1d4b-4f43-9b1d-0d2b3f1a2c3d";
-    for (const provider of ["dash0", "axiom", "devrev", "signoz", "honeycomb"]) {
+    for (const provider of ["dash0", "axiom", "devrev", "signoz", "honeycomb", "betterstack"]) {
       expect(webhookRoutingKey(`/api/webhooks/${provider}/${id}`, "application/json", json({}))).toEqual({
         key: id,
         provider: "integration_account",

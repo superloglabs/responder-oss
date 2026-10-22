@@ -1,6 +1,7 @@
 export const providerGlyphs = {
   aws: { label: "AWS", logo: "aws" },
   axiom: { label: "Axiom", logo: "axiom" },
+  betterstack: { label: "Better Stack", logo: "betterstack" },
   clickstack: { label: "ClickStack", logo: "clickstack" },
   cloudflare: { label: "Cloudflare", logo: "cloudflare" },
   custom_mcp: { label: "Custom MCP", text: "MCP" },
@@ -48,7 +49,7 @@ export const contextCategoryDescriptions: Record<ContextCategory, string> = {
 };
 
 export const contextProviderMetadata: Record<
-  Exclude<ProviderGlyphId, "devrev" | "discord" | "google" | "honeycomb" | "scan" | "signoz">,
+  Exclude<ProviderGlyphId, "betterstack" | "devrev" | "discord" | "google" | "honeycomb" | "scan" | "signoz">,
   { category: ContextCategory; searchTerms: string }
 > = {
   sentry: { category: "Observability", searchTerms: "errors exceptions monitoring" },

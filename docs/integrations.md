@@ -628,6 +628,47 @@ A trigger set to alert on every evaluation, rather than on change, sends a
 new delivery each time it is evaluated, and each one starts a run.
 Honeycomb-triggered automations report to their notification channels.
 
+## Better Stack
+
+Better Stack is an automation trigger and connector, available in workspaces
+with the `automations` capability. Connect it from Settings or the automation
+editor with a global API token from **Better Stack → API tokens → Global API
+tokens**. A read-only token is enough for investigations. Responder verifies
+the token by initializing a session with Better Stack's MCP server and stores
+it in the encrypted tenant credential envelope. A global token covers the
+whole Better Stack organization, so a workspace has one Better Stack
+connection; connecting again replaces its token.
+
+As a connector, the run reaches Better Stack through the run-scoped context
+broker, which forwards tool listings and calls to
+`https://mcp.betterstack.com` with `Authorization: Bearer <token>`. The token
+never enters the sandbox. The tools cover incidents, monitors, on-call,
+logs, metrics, and errors.
+
+As a trigger, a new Better Stack incident starts the automation. Incidents
+come from monitors, heartbeats, and telemetry alerts. Each connection has its
+own webhook:
+
+```text
+<public>/api/webhooks/betterstack/<connection>
+```
+
+The trigger card's **Set up Better Stack webhook** shows the URL, a username,
+and a password. In Better Stack, open **Integrations → Exporting data**, add an
+**Incident webhook** under Outgoing webhooks with that URL, turn on the
+**Incident started** event, set basic authentication to the username and
+password, and keep the default request body. Responder also accepts the
+password as `Authorization: Bearer <password>`. The password is derived per
+connection from `CREDENTIAL_ENCRYPTION_KEY`; reconnecting keeps it, and
+rotating that key changes it.
+
+Responder starts a run for an incident that is neither acknowledged nor
+resolved, and ignores acknowledged, resolved, and comment notifications, and
+monitor or on-call webhooks sent to the same URL. The incident ID and start
+time identify the incident, so a retry or a reopened incident does not start a
+second run. Better Stack-triggered automations report to their notification
+channels.
+
 ## Upstash
 
 Connect Upstash from Settings with the Upstash account email and a developer
