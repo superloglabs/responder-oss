@@ -250,3 +250,32 @@ export async function listRecentAutomationRuns(input: {
   ]);
   return { runs, total: total?.value ?? runs.length };
 }
+
+// A page of the automation's issues, most recently seen first, each with the
+// run that filed it.
+export async function listAutomationIssues(input: {
+  automationId: string;
+  limit: number;
+  offset: number;
+  organizationId: string;
+}) {
+  const scope = and(
+    eq(automationIssues.automationId, input.automationId),
+    eq(automationIssues.organizationId, input.organizationId),
+  );
+  const [issues, [total]] = await Promise.all([
+    getDatabase()
+      .select({ ...issueColumns, filedRunId: automationIssueRuns.runId })
+      .from(automationIssues)
+      .leftJoin(automationIssueRuns, and(
+        eq(automationIssueRuns.issueId, automationIssues.id),
+        eq(automationIssueRuns.relationship, "filed"),
+      ))
+      .where(scope)
+      .orderBy(desc(automationIssues.lastSeenAt), desc(automationIssues.id))
+      .limit(input.limit)
+      .offset(input.offset),
+    getDatabase().select({ value: count() }).from(automationIssues).where(scope),
+  ]);
+  return { issues, total: total?.value ?? issues.length };
+}

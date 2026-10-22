@@ -1,3 +1,4 @@
+import { issueCatalogTriggerKinds } from "@responder/core/automations/issue-catalog";
 import {
   appendAutomationIssueRecords,
   attachAutomationIssue,
@@ -23,10 +24,6 @@ export const fileIssueToolName = "file_issue";
 export const attachIssueToolName = "attach_issue";
 export const listRunsToolName = "list_runs";
 
-// Alerts from these sources often repeat, so their runs share a catalog of
-// the issues the automation has reported.
-const catalogTriggerProviders = new Set(["axiom", "honeycomb", "sentry", "signoz"]);
-
 // list_runs shows runs that finished this recently, beside those still going.
 const recentRunWindowMs = 30 * 60 * 1_000;
 const maxListedRuns = 100;
@@ -41,7 +38,7 @@ export function usesIssueCatalog(input: {
   return input.firstTurn &&
     input.notificationChannels > 0 &&
     typeof input.triggerInput.provider === "string" &&
-    catalogTriggerProviders.has(input.triggerInput.provider);
+    issueCatalogTriggerKinds.has(input.triggerInput.provider);
 }
 
 export function issueCatalogInstructions(): string {

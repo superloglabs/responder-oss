@@ -241,6 +241,31 @@ export async function fetchAutomation(id: string): Promise<AutomationDetail> {
   };
 }
 
+// An issue the automation reported, with how often its alert came back.
+export interface AutomationIssue {
+  filedRunId: string | null;
+  firstSeenAt: string;
+  id: string;
+  lastSeenAt: string;
+  links: Array<{ label?: string; url: string }>;
+  occurrences: number;
+  summary: string;
+  title: string;
+}
+
+export interface AutomationIssuePage {
+  issues: AutomationIssue[];
+  page: number;
+  pageSize: number;
+  total: number;
+}
+
+export function fetchAutomationIssues(id: string, page: number): Promise<AutomationIssuePage> {
+  return automationJson<AutomationIssuePage>(
+    `/api/automations/${encodeURIComponent(id)}/issues?page=${page}`,
+  );
+}
+
 export function fetchAutomationRuns(id: string, page: number): Promise<AutomationRunPage> {
   return automationJson<AutomationRunPage>(
     `/api/automations/${encodeURIComponent(id)}/runs?page=${page}`,

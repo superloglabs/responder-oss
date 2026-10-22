@@ -34,6 +34,8 @@ import { AutomationModelPicker } from "../components/automation-model-picker";
 import { AutomationRepositoryPicker } from "../components/automation-repository-picker";
 import { AutomationRunHistory } from "../components/automation-run-history";
 import { AutomationUsage } from "../components/automation-usage";
+import { AutomationIssues } from "../components/automation-issues";
+import { automationUsesIssueCatalog } from "@responder/core/automations/issue-catalog";
 import { AutomationNotificationEditor } from "../components/automation-notification-editor";
 import { AutomationTriggerEditor } from "../components/automation-trigger-editor";
 import { automationContextAccounts, availableAutomationConfiguration, defaultContextAccountIds, isScheduleComplete, isTriggerComplete, moveItem, slackPhrasesError } from "../automation-configuration";
@@ -100,7 +102,8 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
   // their own URLs.
   const settingsMatch = useMatch("/automations/:automationId/settings");
   const usageMatch = useMatch("/automations/:automationId/usage");
-  const activeTab = !automationId || settingsMatch ? "settings" : usageMatch ? "usage" : "history";
+  const issuesMatch = useMatch("/automations/:automationId/issues");
+  const activeTab = !automationId || settingsMatch ? "settings" : usageMatch ? "usage" : issuesMatch ? "issues" : "history";
   const navigate = useNavigate();
   const [options, setOptions] = useState<AutomationOptions | null>(null);
   // A new automation can start from a template chosen on the automation list,
@@ -114,6 +117,8 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
   const description = initialAutomation?.description ?? template?.description ?? "";
   const [enabled, setEnabled] = useState(initialAutomation?.enabled ?? true);
   const [configuration, setConfiguration] = useState<AutomationConfiguration>(initialAutomation?.configuration ?? { ...defaultConfiguration, prompt: "" });
+  // Alert automations that report to Slack keep an issue catalog, shown first.
+  const showIssues = automationUsesIssueCatalog(configuration);
   const [connectDialog, setConnectDialog] = useState<{ provider: "aws" | "datadog" | "custom_mcp" | "gcp" | "grafana" | "honeycomb" | "signoz"; connectUrl: string } | null>(null);
   // Google Cloud returns here to pick a project and finishes the connection in
   // its dialog. Read before the restored draft cleans the URL.
@@ -442,6 +447,7 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
             {automationId ? <button className="automationCreate__save" disabled={!enabled || saveStatus === "saving"} onClick={() => navigate(`/automations/${automationId}/test`)} title={enabled ? "Chat with the agent to test this automation" : "Turn the automation on to test it"} type="button"><ChatCircleIcon size={14} />Test</button> : null}
           </div>
           {automationId ? <div className="automationCreate__tabs" role="tablist" aria-label="Automation sections">
+            {showIssues ? <button aria-selected={activeTab === "issues"} onClick={() => { if (activeTab !== "issues") navigate(`/automations/${automationId}/issues`); setRenaming(false); }} role="tab" type="button">Issues</button> : null}
             <button aria-selected={activeTab === "history"} onClick={() => { if (activeTab !== "history") navigate(`/automations/${automationId}`); setRenaming(false); }} role="tab" type="button">Run history</button>
             <button aria-selected={activeTab === "usage"} onClick={() => { if (activeTab !== "usage") navigate(`/automations/${automationId}/usage`); setRenaming(false); }} role="tab" type="button">Usage</button>
             <button aria-selected={activeTab === "settings"} onClick={() => { if (activeTab !== "settings") navigate(editorPath); }} role="tab" type="button">Settings</button>
@@ -457,6 +463,7 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
         {unsavedReason && activeTab === "settings" ? <p className="automationCreate__unsaved" role="status">{unsavedReason}</p> : null}
         {automationId && activeTab === "history" ? <AutomationRunHistory automationId={automationId} refreshKey={runsRefreshKey} /> : null}
         {automationId && activeTab === "usage" ? <AutomationUsage automationId={automationId} /> : null}
+        {automationId && activeTab === "issues" ? <AutomationIssues automationId={automationId} /> : null}
         <form className="automationCreate__form" hidden={activeTab !== "settings"} id="automation-settings" onSubmit={(event) => void submit(event)}>
           <section className="automationCreate__section automationCreate__section--trigger" aria-labelledby="automation-triggers" ref={triggerSectionRef}>
             <h2 id="automation-triggers">Triggers</h2>
