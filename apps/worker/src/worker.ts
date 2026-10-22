@@ -102,6 +102,7 @@ import { settleUnbilledUsage } from "@responder/core/billing/usage-billing";
 import { BILLING_NOTICE_RETRY_WINDOW_MS } from "@responder/core/billing/notifications";
 import { defaultAlertAutomationDependencies, startAlertAutomations } from "./telemetry-alert-automations.js";
 import { checkDueTelemetryAlerts, defaultTelemetryAlertDependencies } from "./telemetry-alerts.js";
+import { ingestErrorIssues } from "./error-issues.js";
 import {
   automationSuggestionModel,
   generateDueAutomationSuggestions,
@@ -143,6 +144,7 @@ const pollers: {
   automationSuggestions?: NodeJS.Timeout;
   automationUsageBilling?: NodeJS.Timeout;
   brokerGrantCleanup?: NodeJS.Timeout;
+  errorIssues?: NodeJS.Timeout;
   gcpTelemetry?: NodeJS.Timeout;
   linearTicket?: NodeJS.Timeout;
   remediationRecovery?: NodeJS.Timeout;
@@ -153,6 +155,7 @@ const pollers: {
 } = {};
 
 let telemetryAlertPass: Promise<void> | undefined;
+let errorIssuePass: Promise<void> | undefined;
 // Alerts and failing synthetic checks start the Slack automations watching
 // their channel through this worker's job queue.
 const startChannelAutomations = (input: Parameters<typeof startAlertAutomations>[0]) =>
@@ -200,6 +203,19 @@ function checkTelemetryAlerts(): Promise<void> {
       telemetryAlertPass = undefined;
     });
   return telemetryAlertPass;
+}
+
+// Runs at most one error issue pass at a time.
+function groupErrorIssues(): Promise<void> {
+  errorIssuePass ??= ingestErrorIssues()
+    .then(() => undefined)
+    .catch((error: unknown) => {
+      void reportWorkerException(error, { operation: "error_issues" });
+    })
+    .finally(() => {
+      errorIssuePass = undefined;
+    });
+  return errorIssuePass;
 }
 
 // Runs at most one Google Cloud telemetry pass at a time.
@@ -567,6 +583,7 @@ async function shutdown(signal: string): Promise<void> {
     new Promise((resolve) => setTimeout(resolve, 5_000).unref()),
   ]);
   if (pollers.telemetryAlerts) clearInterval(pollers.telemetryAlerts);
+  if (pollers.errorIssues) clearInterval(pollers.errorIssues);
   if (pollers.automationSuggestions) clearInterval(pollers.automationSuggestions);
   if (pollers.gcpTelemetry) clearInterval(pollers.gcpTelemetry);
   if (pollers.syntheticChecks) clearInterval(pollers.syntheticChecks);
@@ -577,6 +594,7 @@ async function shutdown(signal: string): Promise<void> {
   await linearTicketDrain;
   await remediationRecoveryDrain;
   await telemetryAlertPass;
+  await errorIssuePass;
   // A pass that sent data saves its cursors before the worker exits.
   await gcpTelemetryPass;
   await syntheticChecks.stop();
@@ -1158,6 +1176,8 @@ pollers.remediationRecovery = setInterval(
 pollers.remediationRecovery.unref();
 pollers.telemetryAlerts = setInterval(() => void checkTelemetryAlerts(), 15_000);
 pollers.telemetryAlerts.unref();
+pollers.errorIssues = setInterval(() => void groupErrorIssues(), 10_000);
+pollers.errorIssues.unref();
 pollers.syntheticChecks = setInterval(runSyntheticChecks, 5_000);
 pollers.syntheticChecks.unref();
 pollers.syntheticCheckPurge = setInterval(purgeSyntheticChecks, 10 * 60 * 1_000);

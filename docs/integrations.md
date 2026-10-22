@@ -892,6 +892,26 @@ telemetry Overview page to send logs, traces and metrics. Every option needs a c
 Removing a source revokes its ingest key. Responder also removes Vercel
 drains; an AWS stack stays until the customer deletes it.
 
+## Error issues
+
+The worker groups a telemetry workspace's exceptions into error issues by
+fingerprint. An exception is a span event named `exception` or a log at ERROR
+severity or above. The fingerprint is the exception type, the message with
+URLs, paths, IDs, numbers and timestamps replaced, and the top five frames of
+the application's own code without line numbers. Frames from `node_modules`,
+Node internals and Python packages are skipped. JavaScript and Python stacks
+are read; other languages group by type and message. A log without a stack
+groups by its service, severity and normalized body. Fingerprints start with
+the algorithm version (`v1:`).
+
+Every ten seconds the worker reads exceptions from ClickHouse's
+`otel_issue_candidates` table in arrival order, 30 seconds behind the present,
+and adds them to `error_issues` with daily counts. Its cursor is in
+`error_issue_cursors`. An issue is open, resolved or silenced. A new
+fingerprint opens an issue; an occurrence from after an issue was resolved
+opens it again; a silenced issue only counts. A cell whose ClickHouse lacks the table skips
+the pass.
+
 ## Custom MCP servers
 
 Organizations can connect remote Streamable HTTP MCP servers with either a

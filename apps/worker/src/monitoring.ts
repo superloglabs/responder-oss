@@ -16,6 +16,7 @@ import {
 export interface WorkerErrorContext {
   operation:
     | "automation"
+    | "error_issues"
     | "gcp_telemetry_pull"
     | "investigation"
     | "linear_ticket"
