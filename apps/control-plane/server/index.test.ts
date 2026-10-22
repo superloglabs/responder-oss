@@ -9,6 +9,7 @@ import {
 } from "./app.js";
 import {
   isAxiomMonitorResolution,
+  isHoneycombResolution,
   isResolvedSlackAlert,
   isPostHogInactiveMessage,
   isSentryIssueAlert,
@@ -533,6 +534,24 @@ describe("control-plane API", () => {
     expect(isAxiomMonitorResolution({ body: resolved, isAppMessage: false })).toBe(false);
     expect(isAxiomMonitorResolution({ body: "Resolved: checkout latency", isAppMessage: true, senderName: "Grafana" })).toBe(false);
     expect(isAxiomMonitorResolution({ body: "Resolved: flaky test", isAppMessage: true, senderName: "Nova Axiom" })).toBe(false);
+  });
+
+  it("recognizes Honeycomb resolutions", () => {
+    const triggerResolved = [
+      ":bee: Resolved: capacity-gate-pruned -- test environment:",
+      "Current value no longer greater than threshold value (0) for any hb.provider -- We will send another alert when the trigger threshold is met. -- <https://ui.honeycomb.io/acme/environments/test/datasets/worker/triggers/abc123>",
+    ].join("\n");
+    const triggerFired = triggerResolved
+      .replace("Resolved:", "Triggered:")
+      .replace("Current value no longer greater than", "Currently greater than");
+    const sloResolved = "Resolved -- The error budget for SLO job-time is no longer in danger of being exhausted. -- test -- <https://ui.honeycomb.io/acme/environments/test/datasets/gateway/slo/abc123>";
+    expect(isHoneycombResolution({ body: triggerResolved, isAppMessage: true, senderName: "Honeycomb" })).toBe(true);
+    expect(isHoneycombResolution({ body: triggerResolved, isAppMessage: true })).toBe(true);
+    expect(isHoneycombResolution({ body: sloResolved, isAppMessage: true, senderName: "Honeycomb" })).toBe(true);
+    expect(isHoneycombResolution({ body: triggerFired, isAppMessage: true, senderName: "Honeycomb" })).toBe(false);
+    expect(isHoneycombResolution({ body: triggerResolved, isAppMessage: false })).toBe(false);
+    expect(isHoneycombResolution({ body: "Resolved: checkout latency", isAppMessage: true, senderName: "Grafana" })).toBe(false);
+    expect(isHoneycombResolution({ body: "Resolved the flaky test", isAppMessage: true, senderName: "Honeycomb" })).toBe(false);
   });
 
   it("accepts Sentry thread broadcasts as alert messages", () => {
@@ -1124,6 +1143,51 @@ describe("control-plane API", () => {
         channel: "C123",
         ts: "1700000002.000001",
         text: "Resolved: Checkout errors (&gt; 50/min)\nnotifications resolved icon\n<https://app.axiom.co/acme/monitors/view/mon_123|View Monitor>",
+      },
+    });
+    const signature = `v0=${createHmac("sha256", "slack-signing-secret")
+      .update(`v0:${timestamp}:${body}`)
+      .digest("hex")}`;
+
+    const response = await app.request("/api/webhooks/slack", {
+      method: "POST",
+      body,
+      headers: {
+        "content-type": "application/json",
+        "x-slack-request-timestamp": timestamp,
+        "x-slack-signature": signature,
+      },
+    });
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      ignored: true,
+      reason: "resolved_alert",
+    });
+    expect(slackWebhookMocks.findAutomationsForSlackEvent).not.toHaveBeenCalled();
+    expect(queueAutomationRun).not.toHaveBeenCalled();
+  });
+
+  it("ignores Honeycomb resolutions before automations see them", async () => {
+    vi.stubEnv("SLACK_SIGNING_SECRET", "slack-signing-secret");
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    const timestamp = Math.floor(Date.now() / 1_000).toString();
+    const body = JSON.stringify({
+      type: "event_callback",
+      team_id: "T123",
+      event_id: "EvHoneycombResolved",
+      event: {
+        type: "message",
+        bot_id: "B-HONEYCOMB",
+        app_id: "A-HONEYCOMB",
+        bot_profile: { app_id: "A-HONEYCOMB", name: "Honeycomb" },
+        channel: "C123",
+        ts: "1700000002.000002",
+        text: "",
+        attachments: [{
+          fallback: ":bee: Resolved: capacity-gate-pruned -- test environment:\nCurrent value no longer greater than threshold value (0) for any hb.provider -- <https://ui.honeycomb.io/acme/environments/test/datasets/worker/triggers/abc123>",
+          fields: [{ title: ":bee: Resolved: capacity-gate-pruned", value: "" }],
+        }],
       },
     });
     const signature = `v0=${createHmac("sha256", "slack-signing-secret")
