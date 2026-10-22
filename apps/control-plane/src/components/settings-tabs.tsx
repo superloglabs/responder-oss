@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { billingEnabled as loadBillingEnabled } from "../billing-api";
+import { navigationOptions, settingsInSidebar } from "../primary-navigation";
 import { useIngestAvailable } from "../use-ingest-available";
 
 export type SettingsSection =
@@ -23,8 +24,7 @@ export function SettingsTabs({
   const [billingEnabled, setBillingEnabled] = useState(false);
   const ingestAvailable = useIngestAvailable();
   const automationsEnabled = capabilities.includes("automations");
-  // Simplified navigation lists integrations and tag mode in the sidebar.
-  const sidebarSections = capabilities.includes("simplified_navigation");
+  const sidebarSections = settingsInSidebar(navigationOptions(capabilities));
 
   useEffect(() => {
     let mounted = true;

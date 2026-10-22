@@ -6,8 +6,11 @@ import { resetBrowserAnalytics } from "../browser-analytics";
 import { useOrganizationCapabilities } from "../organization-capabilities";
 import {
   activeNavigationSection,
+  navigationBlocks,
   navigationOptions,
   primaryNavigation,
+  settingsInSidebar,
+  type NavigationItem,
   type NavigationSection,
 } from "../primary-navigation";
 import { BillingBanner } from "./billing-banner";
@@ -102,12 +105,12 @@ export function AppShell({
   const [switchingTo, setSwitchingTo] = useState<string | null>(null);
   const [menuError, setMenuError] = useState<string | null>(null);
   const capabilities = useOrganizationCapabilities(!guest);
-  const simplifiedNavigation = capabilities.includes("simplified_navigation");
+  const options = navigationOptions(capabilities);
   const navigation = primaryNavigation({
-    ...navigationOptions(capabilities),
-    automations: capabilities.includes("automations") || Boolean(guest),
+    ...options,
+    automations: options.automations || Boolean(guest),
   });
-  const activeSection = activeNavigationSection(active, simplifiedNavigation);
+  const activeSection = activeNavigationSection(active, settingsInSidebar(options));
   const menuRef = useRef<HTMLDivElement>(null);
   const sidebarRef = useRef<HTMLElement>(null);
   const sidebarTriggerRef = useRef<HTMLButtonElement>(null);
@@ -243,6 +246,37 @@ export function AppShell({
     window.location.assign("/");
   }
 
+  function renderNavigationItem(item: NavigationItem) {
+    const Icon = navigationIcons[item.section];
+    const isActive = item.section === activeSection;
+    return (
+      <Fragment key={item.section}>
+        <Link
+          aria-current={isActive && !(workspace && item.children) ? "page" : undefined}
+          className={isActive && !(workspace && item.children) ? "isActive" : undefined}
+          to={item.to}
+        >
+          {workspace ? <Icon size={16} aria-hidden="true" /> : null}
+          {item.label}
+        </Link>
+        {workspace && isActive && item.children ? (
+          <div className="primaryNav__children">
+            {item.children.map((child) => (
+              <Link
+                aria-current={child.to === activePage ? "page" : undefined}
+                className={child.to === activePage ? "isActive" : undefined}
+                key={child.to}
+                to={child.to}
+              >
+                {child.label}
+              </Link>
+            ))}
+          </div>
+        ) : null}
+      </Fragment>
+    );
+  }
+
   return (
     <main className={`appShell appShell--${density}${workspace ? " appShell--workspace" : ""}${workspace && isSidebarOpen ? " appShell--sidebarOpen" : ""}`}>
       {workspace && isSidebarOpen ? (
@@ -293,36 +327,25 @@ export function AppShell({
             )}
           </Link>
           <nav aria-label="Primary navigation" className="primaryNav" onClick={() => setIsSidebarOpen(false)}>
-            {navigation.map((item) => {
-              const Icon = navigationIcons[item.section];
-              const isActive = item.section === activeSection;
-              return (
-                <Fragment key={item.section}>
-                  <Link
-                    aria-current={isActive && !(workspace && item.children) ? "page" : undefined}
-                    className={isActive && !(workspace && item.children) ? "isActive" : undefined}
-                    to={item.to}
-                  >
-                    {workspace ? <Icon size={16} aria-hidden="true" /> : null}
-                    {item.label}
-                  </Link>
-                  {workspace && isActive && item.children ? (
-                    <div className="primaryNav__children">
-                      {item.children.map((child) => (
-                        <Link
-                          aria-current={child.to === activePage ? "page" : undefined}
-                          className={child.to === activePage ? "isActive" : undefined}
-                          key={child.to}
-                          to={child.to}
-                        >
-                          {child.label}
-                        </Link>
-                      ))}
+            {workspace
+              ? navigationBlocks(navigation).map((block) =>
+                  block.group ? (
+                    <div
+                      aria-labelledby={`primary-nav-${block.group.toLowerCase()}`}
+                      className="primaryNav__group"
+                      key={block.group}
+                      role="group"
+                    >
+                      <span className="primaryNav__label" id={`primary-nav-${block.group.toLowerCase()}`}>
+                        {block.group}
+                      </span>
+                      {block.items.map(renderNavigationItem)}
                     </div>
-                  ) : null}
-                </Fragment>
-              );
-            })}
+                  ) : (
+                    block.items.map(renderNavigationItem)
+                  ),
+                )
+              : navigation.map(renderNavigationItem)}
           </nav>
         </div>
         <div className="globalHeader__right" ref={menuRef}>
