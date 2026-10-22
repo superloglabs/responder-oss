@@ -23,7 +23,7 @@
     "@daytona/sdk": "0.203.0",
     "@fontsource-variable/inter": "5.2.8",
     "@hono/node-server": "2.0.12",
-    "@modelcontextprotocol/sdk": "1.30.0",
+    "@modelcontextprotocol/sdk": "1.32.0",
     "@opentelemetry/api": "1.9.1",
     "@opentelemetry/core": "2.10.0",
     "@opentelemetry/exporter-trace-otlp-http": "0.221.0",
