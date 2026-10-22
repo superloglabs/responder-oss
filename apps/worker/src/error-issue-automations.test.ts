@@ -105,6 +105,22 @@ describe("startErrorIssueAutomations", () => {
     warn.mockRestore();
   });
 
+  it("counts only queued runs toward the per-pass limit", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const queue = vi.fn();
+    for (let index = 0; index < errorRunsPerAutomationPerPass; index += 1) queue.mockRejectedValueOnce(new Error("queue down"));
+    queue.mockResolvedValue(undefined);
+    const deps = dependencies({ queue });
+    const changes = Array.from({ length: errorRunsPerAutomationPerPass + 2 }, (_, index) => ({
+      issueId: `issue-${index}`,
+      organizationId,
+      transition: "new" as const,
+    }));
+
+    expect(await startErrorIssueAutomations(changes, deps)).toBe(2);
+    warn.mockRestore();
+  });
+
   it(`starts at most ${errorRunsPerAutomationPerPass} runs per automation in a pass`, async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const deps = dependencies();

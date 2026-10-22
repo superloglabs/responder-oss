@@ -135,7 +135,6 @@ export async function startErrorIssueAutomations(
             },
           });
           if (!run.created) continue;
-          startedPerAutomation.set(match.automationId, count + 1);
           try {
             await dependencies.queue({ organizationId: run.organizationId, runId: run.runId });
           } catch (error) {
@@ -143,6 +142,7 @@ export async function startErrorIssueAutomations(
             await dependencies.abandon(run.runId);
             throw error;
           }
+          startedPerAutomation.set(match.automationId, count + 1);
           started += 1;
         } catch (error) {
           console.warn(JSON.stringify({
