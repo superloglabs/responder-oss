@@ -42,6 +42,7 @@ export function TimeseriesChart({
   chart,
   chartType = "bar",
   hiddenSeries,
+  highlights = [],
   label,
   legendPosition = "bottom",
   onZoom,
@@ -57,6 +58,7 @@ export function TimeseriesChart({
   // Series hidden by a legend outside the chart, which replaces the chart's
   // own legend. Without it the chart's own legend hides and shows series.
   hiddenSeries?: ReadonlySet<string>;
+  highlights?: Array<{ start: number; end: number; label: string }>;
   label: string;
   legendPosition?: "bottom" | "side";
   // Dragging across the plot selects a window, in milliseconds.
@@ -253,6 +255,12 @@ export function TimeseriesChart({
             role="img"
             width={size.width}
           >
+            {spanMs > 0 ? highlights.map((region, index) => {
+              const first = chart.buckets[0]!;
+              const from = Math.max(0, Math.min(1, (region.start - first) / spanMs));
+              const to = Math.max(0, Math.min(1, (region.end - first) / spanMs));
+              return to > from ? <rect key={index} x={left + from * width} y={6} width={(to - from) * width} height={height} fill="#4e58f914"><title>{region.label}</title></rect> : null;
+            }) : null}
             {ticks.map((tick) => (
               <g key={tick}>
                 <line className="timeseriesChart__grid" x1={left} x2={left + width} y1={y(tick)} y2={y(tick)} />

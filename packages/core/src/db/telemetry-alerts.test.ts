@@ -1,5 +1,9 @@
 import { readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+import { findTelemetryAlertActivation } from "./telemetry-alerts.js";
+const database = vi.hoisted(() => ({ rows: [] as unknown[] }));
+vi.mock("./client.js", () => ({ getDatabase: () => ({ select: () => ({ from: () => ({ where: () => ({ limit: async () => database.rows }) }) }) }) }));
 
 describe("telemetry alerts", () => {
   const migration = readFileSync(new URL("../../../../drizzle/0078_telemetry_alerts.sql", import.meta.url), "utf8");
@@ -20,5 +24,33 @@ describe("telemetry alerts", () => {
         ),
       );
     }
+  });
+});
+
+
+describe("activation delivery history", () => {
+  const at = new Date("2026-10-22T10:00:00Z");
+  const row = { id: "episode", groupKey: "", state: "resolved", startedAt: at, endedAt: at,
+    openValue: 60, peakValue: 80, lastValue: 10, ruleSnapshot: null,
+    endReason: "recovered", slackChannelId: "C1", slackMessageTs: "1792663200.000001",
+    slackIntegrationAccountId: "account", recoveryNotifiedAt: at };
+
+  it("reports a confirmed recovery delivery", async () => {
+    database.rows = [row];
+    expect(await findTelemetryAlertActivation("alert", "episode")).toMatchObject({ recoveryNotifiedAt: at.toISOString() });
+  });
+
+  it("does not turn a skipped recovery into a delivered notification", async () => {
+    for (const change of [{ endReason: "configuration_changed" }, { endReason: null }, { slackMessageTs: null }, { slackIntegrationAccountId: null }]) {
+      database.rows = [{ ...row, ...change }];
+      expect(await findTelemetryAlertActivation("alert", "episode")).toMatchObject({ recoveryNotifiedAt: null });
+    }
+  });
+
+  it("keeps a legacy snapshot unknown, and handles a missing activation", async () => {
+    database.rows = [row];
+    expect(await findTelemetryAlertActivation("alert", "episode")).toMatchObject({ ruleSnapshot: null });
+    database.rows = [];
+    expect(await findTelemetryAlertActivation("alert", "missing")).toBeNull();
   });
 });

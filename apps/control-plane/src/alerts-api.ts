@@ -2,6 +2,7 @@ import { apiErrorMessage } from "./agents-api";
 import type {
   TelemetryAlert,
   TelemetryAlertEpisode,
+  TelemetryAlertActivation,
   TelemetryAlertSlackChannel,
   TelemetryAlertSummary,
 } from "../../../packages/core/src/db/telemetry-alerts";
@@ -23,6 +24,7 @@ export type {
   AlertUpdate,
   TelemetryAlert,
   TelemetryAlertEpisode,
+  TelemetryAlertActivation,
   TelemetryAlertSlackChannel,
   TelemetryAlertSummary,
 };
@@ -71,8 +73,9 @@ export function deleteAlert(alertId: string): Promise<void> {
 // server reads only the rule's fields.
 export function previewAlert(
   input: AlertUpdate,
+  hours?: number,
 ): Promise<{ chart: ChartData; evaluations: AlertEvaluation[] }> {
-  return request(`${base}/preview`, { body: input, method: "POST" });
+  return request(`${base}/preview${hours ? `?hours=${hours}` : ""}`, { body: input, method: "POST" });
 }
 
 export async function fetchAlertSlackChannels(refresh = false): Promise<TelemetryAlertSlackChannel[]> {
@@ -81,6 +84,18 @@ export async function fetchAlertSlackChannels(refresh = false): Promise<Telemetr
     refresh ? { method: "POST" } : undefined,
   );
   return body.channels;
+}
+
+export function fetchAlertHistory(alertId: string, state: string, days: string, offset = 0): Promise<{ episodes: TelemetryAlertEpisode[]; hasMore: boolean }> {
+  return request(`${base}/${encodeURIComponent(alertId)}/activations?${new URLSearchParams({ state, days, offset: String(offset) })}`);
+}
+
+export function fetchAlertActivation(alertId: string, activationId: string): Promise<{ alert: TelemetryAlert; activation: TelemetryAlertActivation }> {
+  return request(`${base}/${encodeURIComponent(alertId)}/activations/${encodeURIComponent(activationId)}`);
+}
+
+export function fetchAlertActivationChart(alertId: string, activationId: string): Promise<{ chart: ChartData | null; reason: string | null }> {
+  return request(`${base}/${encodeURIComponent(alertId)}/activations/${encodeURIComponent(activationId)}/chart`);
 }
 
 // The alert editor's form. Text fields hold what is typed until saved.

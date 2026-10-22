@@ -33,6 +33,7 @@ import type {
   AlertComparator,
   AlertFilter,
   AlertGroupMode,
+  AlertUpdate,
   AlertSource,
 } from "../telemetry/alerts.js";
 import type {
@@ -886,6 +887,9 @@ export const telemetryAlertEpisodes = pgTable(
     // Furthest past the threshold while firing.
     peakValue: doublePrecision("peak_value").notNull(),
     lastValue: doublePrecision("last_value").notNull(),
+    // New activations retain their original configuration; older ones remain unknown.
+    ruleSnapshot: jsonb("rule_snapshot").$type<AlertUpdate>(),
+    endReason: text("end_reason").$type<"recovered" | "configuration_changed">(),
     // The channel and message that announced the episode; recovery replies
     // in its thread.
     slackIntegrationAccountId: uuid("slack_integration_account_id").references(() => integrationAccounts.id, {

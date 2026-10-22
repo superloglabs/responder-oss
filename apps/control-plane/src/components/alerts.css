@@ -1,24 +1,103 @@
-.alertPage { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
-.alertPage__body { display: grid; grid-template-columns: minmax(320px, 440px) minmax(0, 1fr); gap: 20px; align-items: start; }
-.alertForm { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
-.alertForm__section { display: flex; flex-direction: column; gap: 12px; padding: 16px; border-radius: 12px; background: var(--ds-surface-base); outline: .5px solid var(--ds-border-default); }
-.alertForm__section > h2 { margin: 0; color: var(--ds-text-primary); font-size: 13px; font-weight: 600; }
-.alertForm__section > .dsSegmentedControl { align-self: flex-start; }
-.alertForm__threshold { flex: 0 1 160px !important; }
+.alertPage { --chart-0: #4e58f9; display: flex; flex-direction: column; gap: 22px; min-width: 0; color: #202020; font-size: 13px; line-height: 20px; }
+.alertPage p, .alertPage h1, .alertPage h2, .alertPage h3 { margin: 0; }
+.alertPage h1 { color: #121212; font-size: 15px; font-weight: 600; line-height: 23px; letter-spacing: normal; }
+.alertPage h2 { color: #444; font-size: 15px; font-weight: 500; line-height: 23px; }
+.alertPage h3 { color: #202020; font-size: 13px; font-weight: 500; line-height: 20px; }
+.alertHeader { display: flex; flex-direction: column; gap: 12px; }
+.alertBreadcrumb { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; color: #666; font-size: 12px; line-height: 16px; }
+.alertBreadcrumb a { color: inherit; text-decoration: none; }
+.alertBreadcrumb a:hover { color: #202020; }
+.alertTitleRow { display: flex; align-items: center; gap: 8px; }
+.alertTitleRow h1 { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.alertTitleRow .dsButton { flex-shrink: 0; }
+.alertMuted { color: #666; font-size: 12px; line-height: 20px; }
+.alertHeader > .alertMuted { font-size: 13px; line-height: 16px; }
+.alertOverview { display: flex; align-items: flex-start; gap: 71px; }
+.alertOverview__copy { display: flex; flex-direction: column; flex: 1; min-width: 0; gap: 22px; color: #444; line-height: 23px; }
+.alertOverview__copy section { display: flex; flex-direction: column; gap: 12px; }
+.alertProperties { flex: 0 0 242px; min-width: 0; }
+.alertProperties dl { display: flex; flex-direction: column; gap: 10px; margin: 14px 0 0; }
+.alertProperties dl > div { display: flex; gap: 12px; }
+.alertProperties dt { flex: 0 0 76px; color: #666; }
+.alertProperties dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.alertFilterSummary { display: flex; flex-wrap: wrap; gap: 8px; }
+.alertFilterSummary > span { background: #f9f9f9; border: 1px solid #e8e8e8; border-radius: 6px; padding: 3px 8px; font-size: 12px; line-height: 18px; overflow-wrap: anywhere; }
+.alertSectionHeading { display: flex; align-items: center; gap: 12px; justify-content: space-between; flex-wrap: wrap; }
+.alertToolbar { display: flex; align-items: center; gap: 8px; }
+.alertToolbar select { max-width: 100%; padding: 3px 7px; border: 1px solid #ddd; border-radius: 6px; background: #fff; color: #444; font: inherit; font-size: 13px; line-height: 18px; box-shadow: 0 1px 3px #00000008; }
+.alertToolbar .dsField > .dsField__label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.alertToolbar .dsField { min-width: 120px; }
+.alertChart { display: flex; flex-direction: column; gap: 16px; padding: 16px; min-width: 0; border: 1px solid #e3e3e3; border-radius: 8px; background: #fff; }
+.alertChart__plot { height: 190px; min-width: 0; }
+.alertChart__plot .alertEmpty { display: flex; align-items: center; justify-content: center; height: 100%; }
+.alertPage .timeseriesChart__grid { stroke: #e8e8e8; stroke-dasharray: none; }
+.alertPage .timeseriesChart__line { stroke-width: 2; }
+.alertPage .timeseriesChart__axis { fill: #666; font-size: 12px; }
+.alertPage .timeseriesChart__threshold { stroke: #666; }
+.alertHistory { display: flex; flex-direction: column; gap: 20px; }
+.alertHistory__groups { display: flex; flex-direction: column; gap: 32px; }
+.alertHistory__group { display: flex; flex-direction: column; gap: 8px; }
+.alertHistory__group > h3 { padding-left: 12px; font-size: 12px; line-height: 16px; }
+.alertTableWrap { overflow-x: auto; border-radius: 12px; background: #fafafa; box-shadow: 0 0 0 .5px #00000014, 0 1px 2px #0000000d, 0 2px 4px #00000005; }
+.alertTable { table-layout: fixed; border-collapse: separate; border-spacing: 0; width: 100%; text-align: left; font-size: 13px; line-height: 19.5px; }
+.alertTable col { width: 16%; }
+.alertTable col.alertTable__wide { width: 68%; }
+.alertTable th { font-weight: 500; padding: 7px 12px; color: #444; }
+.alertTable td { padding: 9px 12px; background: #fff; border-top: .5px solid #e6e8ec; color: #444; overflow-wrap: anywhere; }
+.alertTable :is(td, th) + :is(td, th) { border-left: .5px solid #e6e8ec; }
+.alertTable tbody tr:first-child td:first-child { border-top-left-radius: 12px; }
+.alertTable tbody tr:first-child td:last-child { border-top-right-radius: 12px; }
+.alertTable td a { display: block; color: #202020; text-decoration: none; }
+.alertTable tr:has(a):hover td { background: #fafafa; }
+.alertTable td a:hover { color: #4e58f9; }
+.alertFiring { color: #b42318; }
+.alertEmpty { padding: 24px 12px; color: #666; font-size: 13px; text-align: center; }
+.alertPagination { display: flex; justify-content: flex-end; align-items: center; gap: 12px; color: #666; }
+.alertTimeline ol { list-style: none; margin: 12px 0 0; padding: 0; }
+.alertTimeline li { display: flex; align-items: flex-start; gap: 16px; padding: 14px 0; border-top: 1px solid #e8e8e8; }
+.alertTimeline time { flex: 0 0 76px; color: #666; font-variant-numeric: tabular-nums; }
+.alertTimeline__dot { flex: 0 0 7px; height: 7px; border-radius: 50%; background: #4e58f9; margin: 6px 4.5px 0; }
+.alertTimeline__dot--ended { background: #666; }
+.alertTimeline li > div { display: flex; flex-direction: column; gap: 4px; }
+.alertTimeline p { color: #666; }
+.alertPage--editor, .alertForm { gap: 32px; }
+.alertForm { display: flex; flex-direction: column; min-width: 0; }
+.alertForm__section { display: grid; grid-template-columns: 208px minmax(0, 1fr); gap: 40px; padding-top: 28px; border-top: 1px solid #e8e8e8; }
+.alertForm__intro { display: flex; flex-direction: column; gap: 8px; }
+.alertForm__intro h2 { font-size: 14px; font-weight: 600; line-height: 18px; color: #202020; }
+.alertForm__intro p { color: #666; line-height: 20px; }
+.alertForm__fields { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.alertForm__fields .widgetEditor__row { align-items: flex-end; }
+.alertForm__threshold { flex: 1 !important; }
 .alertForm__slack { display: flex; align-items: flex-end; gap: 6px; }
-.alertForm__slack > .dsField { flex: 1; }
-
-.alertPreview { position: sticky; top: 12px; display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 16px; border-radius: 12px; background: var(--ds-surface-base); outline: .5px solid var(--ds-border-default); }
-.alertPreview > h2 { margin: 0; color: var(--ds-text-primary); font-size: 13px; font-weight: 600; }
-.alertPreview__values { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
-.alertPreview__values li { display: flex; align-items: center; gap: 10px; font-size: 12px; }
-.alertPreview__group { flex: 1; min-width: 0; overflow: hidden; color: var(--ds-text-secondary); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
-.alertPreview__values strong { font-variant-numeric: tabular-nums; }
-.alertPreview__chart { height: 220px; }
-
-.alertEpisodes th:first-child { width: 22%; }
-
+.alertForm__slack > .dsField { flex: 1; min-width: 0; }
+.alertForm .alertChart__plot { height: 170px; }
+.alertFilterField { display: flex; flex-direction: column; gap: 8px; }
+.alertFilterField__pills { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 44px; padding: 8px; border: 1px solid #ddd; background: #fff; border-radius: 6px; }
+.alertFilter { display: inline-flex; align-items: center; max-width: 100%; gap: 4px; padding: 3px 5px 3px 8px; border: 1px solid #e8e8e8; border-radius: 6px; background: #f9f9f9; }
+.alertFilter > button:first-child { border: 0; padding: 0; background: none; color: #202020; font: inherit; text-align: left; cursor: pointer; overflow-wrap: anywhere; }
+.alertFilter > button:first-child span { color: #666; }
+.alertFilter strong { font-weight: 500; }
+.alertPage a:focus-visible, .alertPage button:focus-visible, .alertPage select:focus-visible { outline: 2px solid #4e58f9; outline-offset: 3px; }
+.alertAdvanced { display: flex; flex-direction: column; gap: 12px; }
+.alertAdvanced summary { color: #666; cursor: pointer; }
+.alertAdvanced[open] summary { margin-bottom: 12px; }
 @media (max-width: 1100px) {
-  .alertPage__body { grid-template-columns: minmax(0, 1fr); }
-  .alertPreview { position: static; }
+  .alertOverview { gap: 32px; }
+  .alertForm__section { grid-template-columns: 170px minmax(0, 1fr); gap: 24px; }
 }
+@media (max-width: 760px) {
+  .alertOverview { flex-direction: column; gap: 24px; }
+  .alertProperties { flex-basis: auto; width: 100%; }
+  .alertForm__section { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+  .alertTitleRow { flex-wrap: wrap; }
+  .alertTitleRow h1 { flex-basis: 100%; }
+  .alertToolbar { flex-wrap: wrap; }
+  .alertTable { min-width: 550px; }
+  .alertChart { padding: 12px; }
+}
+.alertForm .dsSelect__trigger, .alertForm .dsField__control { min-height: 36px; height: 36px; padding: 7px 12px; font-size: 13px; border-radius: 6px; }
+.alertForm .alertToolbar .dsSelect__trigger { min-height: 26px; height: 26px; padding: 3px 8px; }
+.alertForm .dsField__label { font-size: 13px; line-height: 16px; color: #202020; }
+.alertForm .alertToolbar .dsField__label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.alertFilter .dsButton { min-height: 20px; width: 20px; height: 20px; padding: 2px; }

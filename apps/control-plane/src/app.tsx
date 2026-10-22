@@ -14,6 +14,7 @@ import { OAuthAuthorizePage } from "./pages/oauth-authorize";
 import { ResetPasswordPage } from "./pages/reset-password";
 import { OnboardingPage } from "./pages/onboarding";
 import { AlertPage } from "./pages/alert";
+import { AlertDetailPage, AlertActivationPage } from "./pages/alert-detail";
 import { AlertsPage } from "./pages/alerts";
 import { SyntheticCheckPage } from "./pages/synthetic-check";
 import { SyntheticCheckEditPage } from "./pages/synthetic-check-edit";
@@ -177,7 +178,9 @@ export function App() {
         <Route element={<DashboardPage />} path="/dashboards/:dashboardId" />
         <Route element={<AlertsPage />} path="/alerts" />
         <Route element={<AlertPage />} path="/alerts/new" />
-        <Route element={<AlertPage />} path="/alerts/:alertId" />
+        <Route element={<AlertDetailPage />} path="/alerts/:alertId" />
+        <Route element={<AlertPage />} path="/alerts/:alertId/edit" />
+        <Route element={<AlertActivationPage />} path="/alerts/:alertId/activations/:activationId" />
         <Route element={<SyntheticsPage />} path="/synthetics" />
         <Route element={<SyntheticCheckEditPage />} path="/synthetics/new" />
         <Route element={<SyntheticCheckPage />} path="/synthetics/:checkId" />

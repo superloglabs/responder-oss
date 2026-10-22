@@ -24,6 +24,8 @@ export type TelemetryAlert = AlertRule & {
 export type TelemetryAlertSummary = TelemetryAlert & { firingGroups: number };
 
 export type TelemetryAlertEpisode = {
+  ruleSnapshot?: AlertUpdate | null;
+  endReason?: "recovered" | "configuration_changed" | null;
   endedAt: string | null;
   groupKey: string;
   id: string;
@@ -104,9 +106,11 @@ export async function findTelemetryAlert(organizationId: string, alertId: string
   return rows[0] ? toAlert(rows[0]) : null;
 }
 
-export async function listTelemetryAlertEpisodes(alertId: string, limit = 50): Promise<TelemetryAlertEpisode[]> {
+export async function listTelemetryAlertEpisodes(alertId: string, limit = 50, options: { since?: Date; state?: "firing" | "resolved"; offset?: number } = {}): Promise<TelemetryAlertEpisode[]> {
   const rows = await getDatabase()
     .select({
+      ruleSnapshot: telemetryAlertEpisodes.ruleSnapshot,
+      endReason: telemetryAlertEpisodes.endReason,
       endedAt: telemetryAlertEpisodes.endedAt,
       groupKey: telemetryAlertEpisodes.groupKey,
       id: telemetryAlertEpisodes.id,
@@ -117,7 +121,10 @@ export async function listTelemetryAlertEpisodes(alertId: string, limit = 50): P
       state: telemetryAlertEpisodes.state,
     })
     .from(telemetryAlertEpisodes)
-    .where(eq(telemetryAlertEpisodes.alertId, alertId))
+    .where(and(eq(telemetryAlertEpisodes.alertId, alertId),
+      options.since ? gte(telemetryAlertEpisodes.startedAt, options.since) : undefined,
+      options.state ? eq(telemetryAlertEpisodes.state, options.state) : undefined))
+    .offset(options.offset ?? 0)
     .orderBy(desc(telemetryAlertEpisodes.startedAt), desc(telemetryAlertEpisodes.id))
     .limit(limit);
   return rows.map((row) => ({
@@ -125,6 +132,29 @@ export async function listTelemetryAlertEpisodes(alertId: string, limit = 50): P
     endedAt: row.endedAt?.toISOString() ?? null,
     startedAt: row.startedAt.toISOString(),
   }));
+}
+
+export type TelemetryAlertActivation = TelemetryAlertEpisode & {
+  ruleSnapshot: AlertUpdate | null;
+  endReason: "recovered" | "configuration_changed" | null;
+  slackChannelId: string | null;
+  slackMessageTs: string | null;
+  recoveryNotifiedAt: string | null;
+};
+
+// The caller first verifies the parent alert belongs to the active workspace.
+export async function findTelemetryAlertActivation(alertId: string, activationId: string): Promise<TelemetryAlertActivation | null> {
+  const [row] = await getDatabase().select().from(telemetryAlertEpisodes)
+    .where(and(eq(telemetryAlertEpisodes.alertId, alertId), eq(telemetryAlertEpisodes.id, activationId))).limit(1);
+  if (!row) return null;
+  return {
+    id: row.id, groupKey: row.groupKey, state: row.state,
+    startedAt: row.startedAt.toISOString(), endedAt: row.endedAt?.toISOString() ?? null,
+    openValue: row.openValue, lastValue: row.lastValue, peakValue: row.peakValue,
+    ruleSnapshot: row.ruleSnapshot, endReason: row.endReason,
+    slackChannelId: row.slackChannelId, slackMessageTs: row.slackMessageTs,
+    recoveryNotifiedAt: row.endReason === "recovered" && row.slackMessageTs && row.slackIntegrationAccountId ? row.recoveryNotifiedAt?.toISOString() ?? null : null,
+  };
 }
 
 function ruleValues(input: AlertUpdate) {
@@ -164,7 +194,7 @@ async function endOpenEpisodes(executor: Pick<ReturnType<typeof getDatabase>, "u
   const now = new Date();
   await executor
     .update(telemetryAlertEpisodes)
-    .set({ endedAt: now, recoveryNotifiedAt: now, state: "resolved", updatedAt: now })
+    .set({ endedAt: now, recoveryNotifiedAt: now, endReason: "configuration_changed", state: "resolved", updatedAt: now })
     .where(and(eq(telemetryAlertEpisodes.alertId, alertId), eq(telemetryAlertEpisodes.state, "firing")));
 }
 
@@ -354,16 +384,21 @@ export async function openTelemetryAlertEpisode(input: {
     started_at: Date | string;
   }>(sql`
     insert into ${telemetryAlertEpisodes}
-      (alert_id, group_key, open_value, peak_value, last_value, slack_channel_id, slack_integration_account_id)
+      (alert_id, group_key, open_value, peak_value, last_value, slack_channel_id, slack_integration_account_id, rule_snapshot)
     select ${input.alertId}, ${input.groupKey}, ${input.value}, ${input.value}, ${input.value},
-      ${input.slack?.channelId ?? null}, ${input.slack?.integrationAccountId ?? null}
-    where exists (
-      select 1 from ${telemetryAlerts}
-      where ${telemetryAlerts.id} = ${input.alertId}
-        and ${telemetryAlerts.enabled}
-        -- The version is read back in JavaScript, which keeps milliseconds.
-        and date_trunc('milliseconds', ${telemetryAlerts.updatedAt}) = ${input.ruleUpdatedAt}::timestamptz
-    )
+      ${input.slack?.channelId ?? null}, ${input.slack?.integrationAccountId ?? null},
+      jsonb_build_object(
+        'aggregation', aggregation, 'comparator', comparator, 'field', field, 'filter', filter,
+        'groupBy', group_by, 'groupMode', group_mode, 'metricName', metric_name, 'source', source,
+        'threshold', threshold, 'windowMinutes', window_minutes, 'name', name, 'enabled', enabled,
+        'evaluationIntervalSeconds', evaluation_interval_seconds,
+        'slack', case when slack_channel_id is null then null else jsonb_build_object(
+          'channelId', slack_channel_id, 'integrationAccountId', slack_integration_account_id) end)
+    from ${telemetryAlerts}
+    where ${telemetryAlerts.id} = ${input.alertId}
+      and ${telemetryAlerts.enabled}
+      -- The version is read back in JavaScript, which keeps milliseconds.
+      and date_trunc('milliseconds', ${telemetryAlerts.updatedAt}) = ${input.ruleUpdatedAt}::timestamptz
     on conflict do nothing
     returning id, group_key, peak_value, slack_channel_id, slack_integration_account_id, slack_message_ts, started_at
   `);
@@ -402,7 +437,7 @@ export async function resolveTelemetryAlertEpisode(episodeId: string, value: num
   const now = new Date();
   const rows = await getDatabase()
     .update(telemetryAlertEpisodes)
-    .set({ endedAt: now, lastValue: value, state: "resolved", updatedAt: now })
+    .set({ endedAt: now, lastValue: value, endReason: "recovered", state: "resolved", updatedAt: now })
     .where(and(eq(telemetryAlertEpisodes.id, episodeId), eq(telemetryAlertEpisodes.state, "firing")))
     .returning({ id: telemetryAlertEpisodes.id });
   return rows.length > 0;

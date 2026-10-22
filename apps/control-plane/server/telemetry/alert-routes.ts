@@ -5,6 +5,7 @@ import {
   createTelemetryAlert,
   deleteTelemetryAlert,
   findTelemetryAlert,
+  findTelemetryAlertActivation,
   listTelemetryAlertEpisodes,
   listTelemetryAlerts,
   listTelemetryAlertSlackChannels,
@@ -35,6 +36,7 @@ export type AlertRouteDependencies = {
   deleteAlert: typeof deleteTelemetryAlert;
   episodes: typeof listTelemetryAlertEpisodes;
   findAlert: typeof findTelemetryAlert;
+  findActivation: typeof findTelemetryAlertActivation;
   hasCapability: (organizationId: string, capability: "alerts" | "telemetry") => Promise<boolean>;
   listAlerts: typeof listTelemetryAlerts;
   now: () => Date;
@@ -44,6 +46,7 @@ export type AlertRouteDependencies = {
     organizationId: string,
     rule: AlertRule,
     now: Date,
+    range?: { since: string; until: string },
   ) => Promise<Array<{ bucket: string; group: string; value: number }>>;
   refreshSlackChannels: (organizationId: string) => Promise<void>;
   slackChannels: typeof listTelemetryAlertSlackChannels;
@@ -68,8 +71,8 @@ function windowStep(windowMinutes: number) {
       : { n: windowMinutes, unit: "MINUTE" as const };
 }
 
-async function defaultSeries(client: TelemetryClient, organizationId: string, rule: AlertRule, now: Date) {
-  const range = alertWindow(rule.windowMinutes * chartWindows, now);
+async function defaultSeries(client: TelemetryClient, organizationId: string, rule: AlertRule, now: Date, requestedRange?: { since: string; until: string }) {
+  const range = requestedRange ?? alertWindow(rule.windowMinutes * chartWindows, now);
   const groupBy = rule.groupMode === "per_group" && rule.groupBy ? rule.groupBy : undefined;
   const step = windowStep(rule.windowMinutes);
   if (rule.source === "metric") {
@@ -115,6 +118,7 @@ const defaultDependencies: AlertRouteDependencies = {
   deleteAlert: deleteTelemetryAlert,
   episodes: listTelemetryAlertEpisodes,
   findAlert: findTelemetryAlert,
+  findActivation: findTelemetryAlertActivation,
   hasCapability: organizationHasCapability,
   listAlerts: listTelemetryAlerts,
   now: () => new Date(),
@@ -195,16 +199,18 @@ export function createAlertRoutes(dependencies: AlertRouteDependencies = default
       if (!body.success) return context.json({ error: body.error.issues[0]?.message ?? "Invalid alert" }, 400);
       const rule = body.data;
       const now = dependencies.now();
+      const hours = context.req.query("hours");
+      if (hours && !["1", "6", "24"].includes(hours)) return context.json({ error: "Invalid chart range" }, 400);
+      const range = alertWindow(hours ? Number(hours) * 60 : rule.windowMinutes * chartWindows, now);
       const [values, series] = await Promise.all([
         dependencies.values(granted.client, granted.organizationId, rule, now),
-        dependencies.series(granted.client, granted.organizationId, rule, now),
+        dependencies.series(granted.client, granted.organizationId, rule, now, range),
       ]);
       // Breaching groups first, then furthest past the threshold.
       const severity = rule.comparator === "gt" ? 1 : -1;
       const evaluations = evaluateAlert(rule, values, [])
         .sort((a, b) => Number(b.breaching) - Number(a.breaching) || severity * (b.value - a.value))
         .slice(0, 50);
-      const range = alertWindow(rule.windowMinutes * chartWindows, now);
       // Buckets are one window long.
       const stepMs = rule.windowMinutes * 60_000;
       return context.json({
@@ -226,6 +232,62 @@ export function createAlertRoutes(dependencies: AlertRouteDependencies = default
       const alert = await dependencies.findAlert(granted.organizationId, alertId.data);
       if (!alert) return context.json(notFound, 404);
       return context.json({ alert, episodes: await dependencies.episodes(alert.id) });
+    })
+    .get("/:alertId/activations", async (context) => {
+      const granted = await access(context.req.raw.headers);
+      if (!granted.ok) return context.json({ error: granted.error }, granted.status);
+      const alertId = idSchema.safeParse(context.req.param("alertId"));
+      if (!alertId.success) return context.json(notFound, 404);
+      const query = z.object({
+        days: z.enum(["7", "30", "all"]).default("7"),
+        state: z.enum(["all", "firing", "resolved"]).default("all"),
+        offset: z.coerce.number().int().min(0).max(10000).default(0),
+      }).safeParse(context.req.query());
+      if (!query.success) return context.json({ error: "Invalid history filters" }, 400);
+      const alert = await dependencies.findAlert(granted.organizationId, alertId.data);
+      if (!alert) return context.json(notFound, 404);
+      const { days, state, offset } = query.data;
+      const episodes = await dependencies.episodes(alert.id, 51, {
+        offset, ...(days !== "all" ? { since: new Date(dependencies.now().getTime() - Number(days) * 86_400_000) } : {}),
+        ...(state !== "all" ? { state } : {}),
+      });
+      return context.json({ episodes: episodes.slice(0, 50), hasMore: episodes.length > 50 });
+    })
+    .get("/:alertId/activations/:activationId", async (context) => {
+      const granted = await access(context.req.raw.headers);
+      if (!granted.ok) return context.json({ error: granted.error }, granted.status);
+      const alertId = idSchema.safeParse(context.req.param("alertId"));
+      const activationId = idSchema.safeParse(context.req.param("activationId"));
+      if (!alertId.success || !activationId.success) return context.json(notFound, 404);
+      const alert = await dependencies.findAlert(granted.organizationId, alertId.data);
+      if (!alert) return context.json(notFound, 404);
+      const activation = await dependencies.findActivation(alert.id, activationId.data);
+      if (!activation) return context.json({ error: "Activation not found" }, 404);
+      return context.json({ alert, activation });
+    })
+    .get("/:alertId/activations/:activationId/chart", async (context) => {
+      const granted = await access(context.req.raw.headers);
+      if (!granted.ok) return context.json({ error: granted.error }, granted.status);
+      const alertId = idSchema.safeParse(context.req.param("alertId"));
+      const activationId = idSchema.safeParse(context.req.param("activationId"));
+      if (!alertId.success || !activationId.success) return context.json(notFound, 404);
+      const alert = await dependencies.findAlert(granted.organizationId, alertId.data);
+      if (!alert) return context.json(notFound, 404);
+      const activation = await dependencies.findActivation(alert.id, activationId.data);
+      if (!activation) return context.json({ error: "Activation not found" }, 404);
+      const rule = activation.ruleSnapshot;
+      if (!rule) return context.json({ chart: null, reason: "The original rule was not recorded for this activation." });
+      const now = dependencies.now();
+      const padding = rule.windowMinutes * 60_000 * 3;
+      const start = Date.parse(activation.startedAt);
+      const end = Math.min(Date.parse(activation.endedAt ?? now.toISOString()) + padding, now.getTime(), start + 7 * 86_400_000);
+      const range = { since: new Date(start - padding).toISOString(), until: new Date(end).toISOString() };
+      const series = await dependencies.series(granted.client, granted.organizationId, rule, new Date(end), range);
+      return context.json({ chart: chartSeries(
+        rule.groupMode === "per_group" ? series.filter((row) => row.group === activation.groupKey) : series,
+        { fill: alertCountsEmptyAsZero(rule) ? "zero" : "null", limit: 5,
+          sinceMs: Date.parse(range.since), untilMs: end, stepMs: rule.windowMinutes * 60_000 },
+      ), reason: null });
     })
     .put("/:alertId", async (context) => {
       const granted = await access(context.req.raw.headers);
