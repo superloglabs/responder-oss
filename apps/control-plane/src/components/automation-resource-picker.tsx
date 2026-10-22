@@ -12,7 +12,7 @@ export function AutomationResourcePicker({ defaultOpen = false, empty, hideLabel
   defaultOpen?: boolean;
   empty?: string;
   hideLabel?: boolean;
-  label: "Author" | "Channel" | "Environment" | "Project" | "Repository";
+  label: "Author" | "Channel" | "Environment" | "Project" | "Repository" | "Service";
   resources: Array<{ externalId: string; displayName: string }>;
   selected: string[];
   single?: boolean;
@@ -76,7 +76,7 @@ export function AutomationResourcePicker({ defaultOpen = false, empty, hideLabel
     <span className={hideLabel ? "srOnly" : "automationTrigger__fieldLabel"} id={`${id}-label`}>{title ?? label}</span>
     <button aria-labelledby={`${id}-label`} aria-describedby={`${id}-value`} aria-expanded={open} aria-controls={id} aria-haspopup="dialog" className="automationResourcePicker__trigger" onClick={() => { setQuery(""); setOpen(!open); }} ref={button} type="button"><span id={`${id}-value`}>{summary ?? (names.length ? names.join(", ") : `Select ${label.toLowerCase()}`)}</span><CaretDownIcon size={12} /></button>
     {open ? <div aria-label={`Choose ${noun}`} className="automationResourcePicker__popover" id={id} role="dialog">
-      <label className="automationResourcePicker__search"><MagnifyingGlassIcon size={14} /><input {...searchInputProps} aria-label={`Search ${plural}`} placeholder={label === "Environment" || label === "Author" || label === "Repository" ? `Search ${plural}…` : `Search ${plural} or paste ${label.toLowerCase()} ID…`} onChange={(event) => setQuery(event.target.value)} ref={input} value={query} /></label>
+      <label className="automationResourcePicker__search"><MagnifyingGlassIcon size={14} /><input {...searchInputProps} aria-label={`Search ${plural}`} placeholder={label === "Environment" || label === "Author" || label === "Repository" || label === "Service" ? `Search ${plural}…` : `Search ${plural} or paste ${label.toLowerCase()} ID…`} onChange={(event) => setQuery(event.target.value)} ref={input} value={query} /></label>
       <div className="automationResourcePicker__list"><span className="automationResourcePicker__group">{plural[0]!.toUpperCase()}{plural.slice(1)}</span>
         {filtered.map((resource) => <label className="automationResourcePicker__option" key={resource.externalId}><span>{resource.displayName}</span><input checked={selected.includes(resource.externalId)} name={single ? id : undefined} onChange={() => {
           if (!single) {

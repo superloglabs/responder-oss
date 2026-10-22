@@ -66,6 +66,11 @@ export async function fetchErrorIssues(filter: ErrorIssueFilter): Promise<ErrorI
   return body;
 }
 
+// The services the workspace's error issues came from.
+export async function fetchErrorIssueServices(): Promise<string[]> {
+  return (await request<{ services: string[] }>(`${base}/services`)).services;
+}
+
 export function fetchErrorIssue(issueId: string): Promise<ErrorIssueDetail> {
   return request(`${base}/${encodeURIComponent(issueId)}`);
 }

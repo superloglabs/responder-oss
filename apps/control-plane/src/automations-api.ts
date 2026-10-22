@@ -26,6 +26,11 @@ export type AutomationTrigger =
       projectIds: string[];
     }
   | {
+      eventTypes: Array<"new_issue" | "regression">;
+      kind: "errors";
+      services?: string[];
+    }
+  | {
       integrationAccountId: string;
       kind: "axiom";
     }
@@ -71,15 +76,16 @@ export interface SlackAuthor {
   name: string;
 }
 
-export type ConnectedAutomationTrigger = Exclude<AutomationTrigger, { kind: "schedule" }>;
+export type ConnectedAutomationTrigger = Exclude<AutomationTrigger, { kind: "errors" | "schedule" }>;
 
-// The distinct connections of the triggers. A schedule trigger has none.
+// The distinct connections of the triggers. Schedule and error triggers have
+// none.
 export function triggerAccountIds(triggers: AutomationTrigger[]): string[] {
-  return [...new Set(triggers.flatMap((trigger) => trigger.kind === "schedule" || !trigger.integrationAccountId ? [] : [trigger.integrationAccountId]))];
+  return [...new Set(triggers.flatMap((trigger) => trigger.kind === "schedule" || trigger.kind === "errors" || !trigger.integrationAccountId ? [] : [trigger.integrationAccountId]))];
 }
 
-// Where a scheduled, Sentry, Axiom, SigNoz, Honeycomb, Better Stack, or GitHub
-// automation posts each finished run.
+// Where a scheduled, Sentry, error, Axiom, SigNoz, Honeycomb, Better Stack, or
+// GitHub automation posts each finished run.
 export interface AutomationNotification {
   channelId: string;
   integrationAccountId: string;

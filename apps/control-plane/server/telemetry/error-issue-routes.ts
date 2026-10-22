@@ -103,6 +103,11 @@ export function createErrorIssueRoutes(dependencies: ErrorIssueRouteDependencies
         since,
       });
     })
+    .get("/services", async (context) => {
+      const tenant = await access(context.req.raw.headers);
+      if (!tenant.ok) return context.json({ error: tenant.error }, tenant.status);
+      return context.json({ services: await dependencies.services(tenant.organizationId) });
+    })
     .get("/:issueId", async (context) => {
       const tenant = await access(context.req.raw.headers);
       if (!tenant.ok) return context.json({ error: tenant.error }, tenant.status);

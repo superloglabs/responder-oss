@@ -32,7 +32,7 @@ const filters: Array<{ label: string; value: CategoryFilter }> = [
 
 function AutomationTemplateCard({ onDismiss, reason, template, to }: { onDismiss?: () => void; reason?: string; template: AutomationTemplate; to: string }) {
   const [trigger] = template.triggers;
-  const providers = trigger.kind === "schedule" ? template.connectors : [...new Set([trigger.kind, ...template.connectors])];
+  const providers = trigger.kind === "schedule" || trigger.kind === "errors" ? template.connectors : [...new Set([trigger.kind, ...template.connectors])];
   return (
     <>
       <Link className={onDismiss ? "automationTemplate automationTemplate--dismissible" : "automationTemplate"} to={to}>

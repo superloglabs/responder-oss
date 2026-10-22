@@ -100,6 +100,11 @@ describe("automation configuration", () => {
         repositoryIds: ["42424242-4242-4242-8242-424242424242"],
       }],
     }).notifications).toEqual([notification]);
+    expect(automationConfigurationSchema.parse({
+      ...baseConfiguration,
+      notifications: [notification],
+      triggers: [{ eventTypes: ["new_issue"], kind: "errors" }],
+    }).notifications).toEqual([notification]);
     // DevRev runs report on their ticket instead.
     expect(automationConfigurationSchema.safeParse({
       ...baseConfiguration,
@@ -113,6 +118,21 @@ describe("automation configuration", () => {
       ...baseConfiguration,
       notifications: [notification, notification],
       triggers: [schedule],
+    }).success).toBe(false);
+  });
+
+  it("supports error triggers, optionally limited to services", () => {
+    expect(automationConfigurationSchema.parse({
+      ...baseConfiguration,
+      triggers: [{ eventTypes: ["new_issue", "regression"], kind: "errors", services: ["api", "billing-worker"] }],
+    }).triggers[0]).toEqual({ eventTypes: ["new_issue", "regression"], kind: "errors", services: ["api", "billing-worker"] });
+    expect(automationConfigurationSchema.safeParse({
+      ...baseConfiguration,
+      triggers: [{ eventTypes: [], kind: "errors" }],
+    }).success).toBe(false);
+    expect(automationConfigurationSchema.safeParse({
+      ...baseConfiguration,
+      triggers: [{ eventTypes: ["new_issue"], kind: "errors", services: ["api", "api"] }],
     }).success).toBe(false);
   });
 

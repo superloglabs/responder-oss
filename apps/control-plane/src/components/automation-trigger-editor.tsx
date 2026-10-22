@@ -2,6 +2,8 @@ import { type RefObject, useEffect, useId, useRef, useState } from "react";
 import { PlugsConnectedIcon, PlusIcon, TrashIcon } from "@phosphor-icons/react";
 import type { AutomationOptions, AutomationTrigger, ConnectedAutomationTrigger } from "../automations-api";
 import { scheduleWeekdayName } from "../../../../packages/core/src/automations/schedule";
+import { fetchErrorIssueServices } from "../error-issues-api";
+import { useOrganizationCapabilities } from "../organization-capabilities";
 import { defaultScheduleTrigger, scheduleCronError, slackFiltersInUse, slackTriggerFilters, type SlackTriggerFilter, withScheduleFrequency } from "../automation-configuration";
 import { AutomationTriggerMenu, type TriggerEvent } from "./automation-trigger-menu";
 import { AutomationTriggerConnect } from "./automation-trigger-connect";
@@ -27,6 +29,7 @@ import "./automation-trigger-editor.css";
 type TriggerKind = AutomationTrigger["kind"];
 type ConnectedTriggerKind = ConnectedAutomationTrigger["kind"];
 type ScheduleTrigger = Extract<AutomationTrigger, { kind: "schedule" }>;
+type ErrorsTrigger = Extract<AutomationTrigger, { kind: "errors" }>;
 
 const hours = Array.from({ length: 24 }, (_, hour) => hour);
 const weekdayOrder = [1, 2, 3, 4, 5, 6, 0];
@@ -62,6 +65,36 @@ function ScheduleFields({ trigger, onChange }: { trigger: ScheduleTrigger; onCha
         {hours.map((hour) => <option key={hour} value={hour}>{`${String(hour).padStart(2, "0")}:00`}</option>)}
       </select>
     </label> : null}
+  </>;
+}
+
+const errorEvents: Array<{ label: string; value: ErrorsTrigger["eventTypes"] }> = [
+  { label: "New error", value: ["new_issue"] },
+  { label: "Error regression", value: ["regression"] },
+  { label: "New error or regression", value: ["new_issue", "regression"] },
+];
+
+// Error issues come from the workspace's own telemetry, so the trigger needs
+// no connection. It can be limited to some services.
+function ErrorsFields({ trigger, onChange }: { trigger: ErrorsTrigger; onChange: (trigger: ErrorsTrigger) => void }) {
+  const [services, setServices] = useState<string[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void fetchErrorIssueServices().then((names) => { if (!cancelled) setServices(names); }).catch(() => { if (!cancelled) setServices([]); });
+    return () => { cancelled = true; };
+  }, []);
+  const selected = trigger.services ?? [];
+  const resources = [...new Set([...(services ?? []), ...selected])].map((name) => ({ displayName: name, externalId: name }));
+  const events = errorEvents.find((option) => option.value.join() === [...trigger.eventTypes].sort().join()) ?? errorEvents[0]!;
+  return <>
+    <label className="automationTrigger__scheduleField">
+      <span className="automationTrigger__fieldLabel">Event</span>
+      <select className="automationTrigger__select" onChange={(event) => onChange({ ...trigger, eventTypes: errorEvents[Number(event.target.value)]!.value })} value={errorEvents.indexOf(events)}>
+        {errorEvents.map((option, index) => <option key={option.label} value={index}>{option.label}</option>)}
+      </select>
+    </label>
+    <AutomationResourcePicker empty="No errors yet. Services appear here once their errors are grouped." label="Service" resources={resources} selected={selected} summary={selected.length > 0 ? undefined : "All services"} onChange={(names) => onChange({ ...trigger, services: names.length > 0 ? names : undefined })} />
+    <p className="automationTrigger__hint">{selected.length > 0 ? "Only errors from these services start a run." : "Errors from every service start a run."} A new error is a fingerprint seen for the first time; a regression is a resolved error that occurs again.</p>
   </>;
 }
 
@@ -144,7 +177,8 @@ function TriggerCard({ options, trigger, onChange, onRemove, onConnected, onRefr
   fieldsRef?: RefObject<HTMLDivElement | null>;
 }) {
   const schedule = trigger.kind === "schedule" ? trigger : null;
-  const connected = trigger.kind === "schedule" ? null : trigger;
+  const errors = trigger.kind === "errors" ? trigger : null;
+  const connected = trigger.kind === "schedule" || trigger.kind === "errors" ? null : trigger;
   // A Slack trigger shows only its channels until the member adds a filter
   // from its menu. Filters the trigger sets are always shown.
   const [addedFilters, setAddedFilters] = useState<SlackTriggerFilter[]>([]);
@@ -180,6 +214,17 @@ function TriggerCard({ options, trigger, onChange, onRemove, onConnected, onRefr
     </div>
     <div className="automationTrigger__fields" ref={fieldsRef}>
       <ScheduleFields onChange={onChange} trigger={schedule} />
+    </div>
+  </div>;
+  if (errors) return <div className="automationTrigger__card">
+    <div className="automationTrigger__heading">
+      <AutomationTriggerIcon kind="errors" />
+      <span className="automationTrigger__provider">{title}</span>
+      <span className="automationTrigger__account">Telemetry</span>
+      {removeTrigger}
+    </div>
+    <div className="automationTrigger__fields" ref={fieldsRef}>
+      <ErrorsFields onChange={onChange} trigger={errors} />
     </div>
   </div>;
   if (!connected) return null;
@@ -246,6 +291,8 @@ export function AutomationTriggerEditor({ options, triggers, onChange, open, onO
   const menuId = useId();
   const focusAdded = useRef(false);
   const full = triggers.length >= maxAutomationTriggers;
+  // Error triggers read the workspace's telemetry.
+  const telemetry = useOrganizationCapabilities().includes("telemetry");
   // Each card keeps its own state, so it is keyed by its trigger rather than
   // its position: removing a trigger must not hand its card to the next one.
   const [cardKeys, setCardKeys] = useState(() => triggers.map((_, index) => index));
@@ -280,6 +327,10 @@ export function AutomationTriggerEditor({ options, triggers, onChange, open, onO
     focusAdded.current = true;
     if (kind === "schedule") {
       onChange([...triggers, defaultScheduleTrigger(event === "hourly" || event === "daily" || event === "custom" ? event : "weekly")]);
+      return;
+    }
+    if (kind === "errors") {
+      onChange([...triggers, { eventTypes: event === "both" ? ["new_issue", "regression"] : [event === "regression" ? "regression" : "new_issue"], kind }]);
       return;
     }
     const account = options?.accounts.find((item) => item.provider === kind);
@@ -326,7 +377,7 @@ export function AutomationTriggerEditor({ options, triggers, onChange, open, onO
       {triggers.length > 1 ? <span className="automationTrigger__hint">Any trigger starts a run</span> : null}
       {full ? <span className="automationTrigger__hint">Up to {maxAutomationTriggers} triggers per automation</span> : null}
       {open && !full ? <div aria-label="Choose a trigger" className="automationTrigger__menu" id={menuId} ref={menuRef}>
-        <AutomationTriggerMenu onChoose={choose} />
+        <AutomationTriggerMenu onChoose={choose} telemetry={telemetry} />
       </div> : null}
     </div>
   </div>;
