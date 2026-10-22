@@ -1,5 +1,5 @@
-import { ArrowClockwiseIcon } from "@phosphor-icons/react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { ArrowClockwiseIcon, FloppyDiskIcon, PencilSimpleIcon, TrashIcon } from "@phosphor-icons/react";
+import { type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { relativeTime } from "../agents-api";
 import {
@@ -135,8 +135,8 @@ function AlertPreview({ form }: { form: AlertForm }) {
   // Averages and percentiles do not add up, so they are not stacked.
   const additive = form.aggregation === "count" || form.aggregation === "sum";
   return (
-    <section aria-label="Preview" className="alertPreview">
-      <h2>Preview</h2>
+    <section aria-label="Preview" className="alertEditor__preview">
+      <h3>Preview</h3>
       {!key ? (
         <p className="dashboardWidget__status">{"error" in request ? request.error.replace(/^Name the alert\.$/u, "") : ""}</p>
       ) : !state ? (
@@ -216,6 +216,19 @@ function Episodes({
   );
 }
 
+// A question with a short explanation on the left, and its controls on the right.
+function EditorSection({ children, description, id, title }: { children: ReactNode; description: ReactNode; id: string; title: string }) {
+  return (
+    <section aria-labelledby={id} className="alertEditor__section">
+      <div className="alertEditor__intro">
+        <h2 id={id}>{title}</h2>
+        <p>{description}</p>
+      </div>
+      <div className="alertEditor__card">{children}</div>
+    </section>
+  );
+}
+
 export function AlertPage() {
   const { alertId } = useParams();
   const navigate = useNavigate();
@@ -243,6 +256,8 @@ export function AlertPage() {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  // A new alert opens with its name ready to type.
+  const [renaming, setRenaming] = useState(!alertId);
   const [channels, setChannels] = useState<TelemetryAlertSlackChannel[] | null>(null);
   const [refreshingChannels, setRefreshingChannels] = useState(false);
   const [metrics, setMetrics] = useState<MetricName[]>([]);
@@ -325,6 +340,7 @@ export function AlertPage() {
     const request = alertRequest(form);
     if ("error" in request) {
       setError(request.error);
+      if (!form.name.trim()) setRenaming(true);
       return;
     }
     setSaving(true);
@@ -389,20 +405,46 @@ export function AlertPage() {
 
   return (
     <AppShell active="alerts" redesigned>
-      <div className="alertPage">
+      <div className="alertEditor">
         <header className="automationCreate__header">
           <nav aria-label="Breadcrumb" className="automationCreate__breadcrumb">
             <Link to="/alerts">Alerts</Link>
             <span aria-hidden="true">›</span>
-            <span aria-current="page">{saved ? saved.alert.name : "New alert"}</span>
+            <span aria-current="page">{saved ? saved.alert.name : "Create alert"}</span>
           </nav>
-          <div className="dashboardPage__titleRow">
-            <h1>{saved ? saved.alert.name : "New alert"}</h1>
+          <div className="automationCreate__titleRow">
+            {renaming ? (
+              <input
+                aria-label="Alert name"
+                autoFocus
+                className="automationCreate__name"
+                maxLength={200}
+                onBlur={() => setRenaming(false)}
+                onChange={(event) => update({ name: event.target.value })}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === "Escape") {
+                    event.preventDefault();
+                    event.currentTarget.blur();
+                  }
+                }}
+                placeholder="Name the alert"
+                value={form.name}
+              />
+            ) : (
+              <h1 className={form.name.trim() ? undefined : "alertEditor__untitled"}>{form.name.trim() || "New alert"}</h1>
+            )}
+            <button aria-label="Rename alert" className="automationCreate__iconButton" onClick={() => setRenaming(true)} type="button">
+              <PencilSimpleIcon size={14} />
+            </button>
             <span className="automationCreate__spacer" />
-            {saved ? <Button onClick={() => setDeleting(true)} size="small" variant="ghost">Delete</Button> : null}
-            <Button loading={saving} onClick={() => void save()} size="small" variant="primary">
-              {saved ? "Save changes" : "Create alert"}
-            </Button>
+            {saved ? (
+              <button className="automationCreate__secondary" onClick={() => setDeleting(true)} type="button">
+                <TrashIcon size={14} />Delete
+              </button>
+            ) : null}
+            <button className="automationCreate__save" disabled={saving} form="alert-settings" type="submit">
+              <FloppyDiskIcon size={14} />{saving ? "Saving…" : saved ? "Save" : "Create alert"}
+            </button>
           </div>
           {saved?.alert.lastError ? (
             <p className="formError" role="alert">
@@ -415,108 +457,105 @@ export function AlertPage() {
           ) : null}
         </header>
         {error ? <p className="formError" role="alert">{error}</p> : null}
-        <div className="alertPage__body">
-          <form className="alertForm" onSubmit={(event) => { event.preventDefault(); void save(); }}>
-            <TextField label="Name" maxLength={200} onChange={(event) => update({ name: event.target.value })} placeholder="Checkout errors" value={form.name} />
-
-            <section className="alertForm__section">
-              <h2>What to watch</h2>
-              <SegmentedControl
-                aria-label="Data"
-                onChange={(value) =>
-                  update({ aggregation: value === "metric" ? "avg" : "count", field: "", groupBy: "", perGroup: false, source: value })
-                }
-                options={[
-                  { label: "Logs", value: "logs" },
-                  { label: "Spans", value: "traces" },
-                  { label: "Metric", value: "metric" },
-                ]}
-                value={form.source}
-              />
-              {form.source !== "metric" ? (
-                <div className="widgetEditor__row">
-                  <SelectField
-                    label="Measure"
-                    onChange={(aggregation) =>
-                      // Error-only spans suit a count; other measures start from every span.
-                      update(form.aggregation === "count" && aggregation !== "count" ? { aggregation, spanErrors: false } : { aggregation })
-                    }
-                    options={measures}
-                    value={form.aggregation}
-                  />
-                  {form.aggregation !== "count" ? (
-                    <SelectField
-                      label="Field"
-                      onChange={(field) => update({ field })}
-                      options={[
-                        ...(form.field ? [] : [{ label: "Choose a field", value: "" }]),
-                        ...withCurrent(fieldOptions, form.field, form.field),
-                      ]}
-                      searchable={fieldOptions.length > 8}
-                      value={form.field}
-                    />
-                  ) : null}
-                </div>
-              ) : null}
-              {form.source === "logs" ? (
-                <SelectField label="Severity" onChange={(severity) => update({ severity })} options={severities} value={form.severity} />
-              ) : null}
-              {form.source === "traces" ? (
-                <Switch checked={form.spanErrors} label="Only spans with an error status" onCheckedChange={(spanErrors) => update({ spanErrors })} />
-              ) : null}
-              {form.source === "metric" ? (
-                <div className="widgetEditor__row">
-                  <SelectField
-                    label="Metric"
-                    onChange={(value) => update(value ? alertMetricChoice(value) : { metricKind: "", metricName: "", metricUnit: null })}
-                    options={[
-                      ...(form.metricName ? [] : [{ label: "Choose a metric", value: "" }]),
-                      ...withCurrent(
-                        metricOptions,
-                        metricValue,
-                        pickedMetricLabel({ kind: form.metricKind, name: form.metricName, unit: form.metricUnit }),
-                      ),
-                    ]}
-                    searchable
-                    value={metricValue}
-                  />
-                  <SegmentedControl
-                    aria-label="Aggregation"
-                    onChange={(aggregation) => update({ aggregation })}
-                    options={[{ label: "Average", value: "avg" }, { label: "Sum", value: "sum" }]}
-                    value={form.aggregation === "sum" ? "sum" : "avg"}
-                  />
-                </div>
-              ) : null}
-              <SelectField
-                label="Service"
-                onChange={(service) => update({ service })}
-                options={[{ label: "Any service", value: "" }, ...withCurrent(services.map((name) => ({ label: name, value: name })), form.service, form.service)]}
-                searchable={services.length > 8}
-                value={form.service}
-              />
-              <AttributeFilters filters={form.filters} keys={keys} onChange={(filters) => update({ filters })} />
+        <form className="alertEditor__form" id="alert-settings" onSubmit={(event) => { event.preventDefault(); void save(); }}>
+          <EditorSection
+            description="Pick what to watch, narrow it with filters, then set the threshold. The preview shows recent values against it."
+            id="alert-trigger"
+            title="When should it fire?"
+          >
+            <SegmentedControl
+              aria-label="Data"
+              onChange={(value) =>
+                update({ aggregation: value === "metric" ? "avg" : "count", field: "", groupBy: "", perGroup: false, source: value })
+              }
+              options={[
+                { label: "Logs", value: "logs" },
+                { label: "Spans", value: "traces" },
+                { label: "Metric", value: "metric" },
+              ]}
+              value={form.source}
+            />
+            {form.source !== "metric" ? (
               <div className="widgetEditor__row">
                 <SelectField
-                  label="Group by"
-                  onChange={(groupBy) => update({ groupBy, perGroup: groupBy ? form.perGroup : false })}
-                  options={withCurrent(groupOptions, form.groupBy, form.groupBy)}
-                  searchable={groupOptions.length > 8}
-                  value={form.groupBy}
+                  label="Measure"
+                  onChange={(aggregation) =>
+                    // Error-only spans suit a count; other measures start from every span.
+                    update(form.aggregation === "count" && aggregation !== "count" ? { aggregation, spanErrors: false } : { aggregation })
+                  }
+                  options={measures}
+                  value={form.aggregation}
+                />
+                {form.aggregation !== "count" ? (
+                  <SelectField
+                    label="Field"
+                    onChange={(field) => update({ field })}
+                    options={[
+                      ...(form.field ? [] : [{ label: "Choose a field", value: "" }]),
+                      ...withCurrent(fieldOptions, form.field, form.field),
+                    ]}
+                    searchable={fieldOptions.length > 8}
+                    value={form.field}
+                  />
+                ) : null}
+              </div>
+            ) : null}
+            {form.source === "logs" ? (
+              <SelectField label="Severity" onChange={(severity) => update({ severity })} options={severities} value={form.severity} />
+            ) : null}
+            {form.source === "traces" ? (
+              <Switch checked={form.spanErrors} label="Only spans with an error status" onCheckedChange={(spanErrors) => update({ spanErrors })} />
+            ) : null}
+            {form.source === "metric" ? (
+              <div className="widgetEditor__row">
+                <SelectField
+                  label="Metric"
+                  onChange={(value) => update(value ? alertMetricChoice(value) : { metricKind: "", metricName: "", metricUnit: null })}
+                  options={[
+                    ...(form.metricName ? [] : [{ label: "Choose a metric", value: "" }]),
+                    ...withCurrent(
+                      metricOptions,
+                      metricValue,
+                      pickedMetricLabel({ kind: form.metricKind, name: form.metricName, unit: form.metricUnit }),
+                    ),
+                  ]}
+                  searchable
+                  value={metricValue}
+                />
+                <SegmentedControl
+                  aria-label="Aggregation"
+                  onChange={(aggregation) => update({ aggregation })}
+                  options={[{ label: "Average", value: "avg" }, { label: "Sum", value: "sum" }]}
+                  value={form.aggregation === "sum" ? "sum" : "avg"}
                 />
               </div>
-              {form.groupBy ? (
-                <Switch
-                  checked={form.perGroup}
-                  description="Each group fires and recovers on its own. Otherwise the groups are added up."
-                  label="Alert for each group"
-                  onCheckedChange={(perGroup) => update({ perGroup })}
-                />
-              ) : null}
-            </section>
-
-            <section className="alertForm__section">
-              <h2>When to fire</h2>
+            ) : null}
+            <SelectField
+              label="Service"
+              onChange={(service) => update({ service })}
+              options={[{ label: "Any service", value: "" }, ...withCurrent(services.map((name) => ({ label: name, value: name })), form.service, form.service)]}
+              searchable={services.length > 8}
+              value={form.service}
+            />
+            <AttributeFilters filters={form.filters} keys={keys} onChange={(filters) => update({ filters })} />
+            <div className="widgetEditor__row">
+              <SelectField
+                label="Group by"
+                onChange={(groupBy) => update({ groupBy, perGroup: groupBy ? form.perGroup : false })}
+                options={withCurrent(groupOptions, form.groupBy, form.groupBy)}
+                searchable={groupOptions.length > 8}
+                value={form.groupBy}
+              />
+            </div>
+            {form.groupBy ? (
+              <Switch
+                checked={form.perGroup}
+                description="Each group fires and recovers on its own. Otherwise the groups are added up."
+                label="Alert for each group"
+                onCheckedChange={(perGroup) => update({ perGroup })}
+              />
+            ) : null}
+            <div className="alertEditor__condition">
               <div className="widgetEditor__row">
                 <SegmentedControl
                   aria-label="Comparison"
@@ -541,39 +580,39 @@ export function AlertPage() {
                   Fires when the value is {describeAlertCondition(form.comparator, Number(form.threshold), formUnit(form))}, and recovers when it is not.
                 </p>
               ) : null}
-            </section>
+            </div>
+            <AlertPreview form={form} />
+          </EditorSection>
 
-            <section className="alertForm__section">
-              <h2>Where to post</h2>
-              <div className="alertForm__slack">
-                <SelectField
-                  label="Slack channel"
-                  onChange={(slack) => update({ slack })}
-                  options={withCurrent(slackOptions, form.slack, "A channel that is no longer available")}
-                  searchable={slackOptions.length > 8}
-                  value={form.slack}
-                />
-                <IconButton aria-label="Refresh Slack channels" disabled={refreshingChannels} onClick={() => void refreshChannels()} size="small" variant="ghost">
-                  <ArrowClockwiseIcon size={14} />
-                </IconButton>
-              </div>
-              {channels && channels.length === 0 ? (
-                <p className="dashboardDialog__hint">
-                  Connect Slack in <Link to="/settings">Integrations</Link> to post alerts. Private channels appear once the Superlog app is in them.
-                </p>
-              ) : (
-                <p className="dashboardDialog__hint">Posts when the alert fires, and replies in the thread when it recovers.</p>
-              )}
-              <Switch checked={form.enabled} label="Check this alert" onCheckedChange={(enabled) => update({ enabled })} />
-            </section>
-          </form>
-          <AlertPreview form={form} />
-        </div>
+          <EditorSection
+            description={channels && channels.length === 0
+              ? <>Connect Slack in <Link to="/settings">Integrations</Link> to post alerts.</>
+              : "Posts when the alert fires, and replies in the thread when it recovers."}
+            id="alert-notify"
+            title="Where should it go?"
+          >
+            <div className="alertForm__slack">
+              <SelectField
+                label="Slack channel"
+                onChange={(slack) => update({ slack })}
+                options={withCurrent(slackOptions, form.slack, "A channel that is no longer available")}
+                searchable={slackOptions.length > 8}
+                value={form.slack}
+              />
+              <IconButton aria-label="Refresh Slack channels" disabled={refreshingChannels} onClick={() => void refreshChannels()} size="small" variant="ghost">
+                <ArrowClockwiseIcon size={14} />
+              </IconButton>
+            </div>
+            {channels && channels.length > 0 ? (
+              <p className="dashboardDialog__hint">Private channels appear once the Superlog app is in them.</p>
+            ) : null}
+            <Switch checked={form.enabled} label="Check this alert" onCheckedChange={(enabled) => update({ enabled })} />
+          </EditorSection>
+        </form>
         {saved ? (
-          <section aria-label="Recent episodes" className="alertForm__section alertPage__episodes">
-            <h2>Recent episodes</h2>
+          <EditorSection description="When the alert fired and how long it lasted." id="alert-episodes" title="Recent episodes">
             <Episodes episodes={saved.episodes} perGroup={saved.alert.groupMode === "per_group"} unit={alertValueUnit(saved.alert)} />
-          </section>
+          </EditorSection>
         ) : null}
       </div>
       {deleting && saved ? (

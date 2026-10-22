@@ -22,3 +22,25 @@
   .alertPage__body { grid-template-columns: minmax(0, 1fr); }
   .alertPreview { position: static; }
 }
+
+/* The alert editor: each question on the left, its controls in a card on the right. */
+.alertEditor { display: flex; flex-direction: column; gap: 22px; width: 100%; min-width: 0; color: #121212; font-size: 13px; line-height: 18px; }
+.alertEditor__untitled { color: #999; }
+.alertEditor__form { display: flex; flex-direction: column; gap: 40px; padding-top: 24px; }
+/* Recent episodes sit after the form, as far from it as its sections are from each other. */
+.alertEditor__form + .alertEditor__section { padding-top: 18px; }
+.alertEditor__section { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 40px; align-items: start; }
+.alertEditor__intro { display: flex; flex-direction: column; gap: 6px; }
+.alertEditor__intro h2 { margin: 0; color: #121212; font-size: 13px; font-weight: 600; line-height: 20px; }
+.alertEditor__intro p { margin: 0; color: #666; font-size: 12px; line-height: 18px; }
+.alertEditor__intro a { color: inherit; }
+.alertEditor__card { display: flex; flex-direction: column; gap: 12px; min-width: 0; padding: 16px; border: 1px solid #e3e3e3; border-radius: 8px; background: #fff; }
+.alertEditor__card > .dsSegmentedControl { align-self: flex-start; }
+.alertEditor__condition { display: flex; flex-direction: column; gap: 12px; padding-top: 16px; border-top: 1px solid #f0f0f0; }
+.alertEditor__preview { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding-top: 16px; border-top: 1px solid #f0f0f0; }
+.alertEditor__preview > h3 { margin: 0; color: #666; font-size: 12px; font-weight: 400; line-height: 16px; }
+.alertEditor__preview .alertPreview__chart { height: 200px; }
+
+@media (max-width: 900px) {
+  .alertEditor__section { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+}
