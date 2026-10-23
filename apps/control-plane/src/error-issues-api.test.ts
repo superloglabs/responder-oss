@@ -5,6 +5,7 @@ import {
   errorIssueChart,
   errorIssueParams,
   formatEventCount,
+  hourlyCounts,
   sampleAttributes,
 } from "./error-issues-api";
 
@@ -15,6 +16,14 @@ describe("error issue presentation", () => {
       { day: "2026-10-22", eventCount: 5 },
       { day: "2026-10-30", eventCount: 9 },
     ], "2026-10-20", 4)).toEqual([3, 0, 5, 0]);
+  });
+
+  it("fills hours without occurrences with zero", () => {
+    expect(hourlyCounts([
+      { eventCount: 2, hour: "2026-10-22T10:00:00.000Z" },
+      { eventCount: 7, hour: "2026-10-22T12:00:00.000Z" },
+      { eventCount: 9, hour: "2026-10-22T09:00:00.000Z" },
+    ], "2026-10-22T10:00:00.000Z", 3)).toEqual([2, 0, 7]);
   });
 
   it("counts the days through today", () => {

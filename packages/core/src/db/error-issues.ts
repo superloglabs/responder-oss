@@ -9,11 +9,14 @@ import {
   occurrenceTransition,
 } from "../telemetry/error-issues.js";
 import { getDatabase } from "./client.js";
-import { errorIssueCursors, errorIssueDailyCounts, errorIssues, organizationCapabilities } from "./schema.js";
+import { errorIssueCursors, errorIssueDailyCounts, errorIssueHourlyCounts, errorIssues, organizationCapabilities } from "./schema.js";
 
 type Database = ReturnType<typeof getDatabase>;
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 type Executor = Database | Transaction;
+
+// How long hourly counts are kept. The list shows the last 24 hours.
+export const errorIssueHourlyRetentionMs = 2 * 86_400_000;
 
 export type RecordedErrorOccurrences = {
   issueId: string;
@@ -140,6 +143,20 @@ export async function recordErrorOccurrences(
         target: [errorIssueDailyCounts.issueId, errorIssueDailyCounts.day],
       });
   }
+  const oldest = new Date(now.getTime() - errorIssueHourlyRetentionMs);
+  const hours = Object.entries(occurrences.hourlyCounts).filter(([hour]) => Date.parse(hour) >= oldest.getTime());
+  if (hours.length > 0) {
+    await executor
+      .insert(errorIssueHourlyCounts)
+      .values(hours.map(([hour, eventCount]) => ({ eventCount, hour: new Date(hour), issueId })))
+      .onConflictDoUpdate({
+        set: { eventCount: sql`${errorIssueHourlyCounts.eventCount} + excluded.event_count` },
+        target: [errorIssueHourlyCounts.issueId, errorIssueHourlyCounts.hour],
+      });
+  }
+  await executor
+    .delete(errorIssueHourlyCounts)
+    .where(and(eq(errorIssueHourlyCounts.issueId, issueId), lt(errorIssueHourlyCounts.hour, oldest)));
   return { issueId, transition };
 }
 
@@ -166,6 +183,9 @@ export type ErrorIssue = ErrorIssueSummary & {
 };
 
 export type ErrorIssueDay = { day: string; eventCount: number };
+
+// An hour is the ISO time it starts.
+export type ErrorIssueHour = { eventCount: number; hour: string };
 
 export type ErrorIssueListFilter = {
   // The last issue of the previous page, by last seen time then ID.
@@ -318,6 +338,24 @@ export async function errorIssueDays(issueIds: string[], since: string): Promise
     days.set(row.issueId, list);
   }
   return days;
+}
+
+// Occurrences per UTC hour since an hour, for each issue. Hours without
+// occurrences are left out.
+export async function errorIssueHours(issueIds: string[], since: string): Promise<Map<string, ErrorIssueHour[]>> {
+  const hours = new Map<string, ErrorIssueHour[]>();
+  if (issueIds.length === 0) return hours;
+  const rows = await getDatabase()
+    .select({ eventCount: errorIssueHourlyCounts.eventCount, hour: errorIssueHourlyCounts.hour, issueId: errorIssueHourlyCounts.issueId })
+    .from(errorIssueHourlyCounts)
+    .where(and(inArray(errorIssueHourlyCounts.issueId, issueIds), gte(errorIssueHourlyCounts.hour, new Date(since))))
+    .orderBy(asc(errorIssueHourlyCounts.hour));
+  for (const row of rows) {
+    const list = hours.get(row.issueId) ?? [];
+    list.push({ eventCount: row.eventCount, hour: row.hour.toISOString() });
+    hours.set(row.issueId, list);
+  }
+  return hours;
 }
 
 // Resolves, silences, or reopens an issue. Returns null when the workspace

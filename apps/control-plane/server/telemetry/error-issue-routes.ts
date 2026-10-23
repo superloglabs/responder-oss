@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   errorIssueDays,
   errorIssueEnvironments,
+  errorIssueHours,
   errorIssueServices,
   errorIssueStatusCounts,
   findErrorIssue,
@@ -20,6 +21,7 @@ export type ErrorIssueRouteDependencies = {
   environments: typeof errorIssueEnvironments;
   findIssue: typeof findErrorIssue;
   hasCapability: (organizationId: string, capability: "telemetry") => Promise<boolean>;
+  hours: typeof errorIssueHours;
   listIssues: typeof listErrorIssues;
   now: () => Date;
   services: typeof errorIssueServices;
@@ -38,6 +40,7 @@ const defaultDependencies: ErrorIssueRouteDependencies = {
   environments: errorIssueEnvironments,
   findIssue: findErrorIssue,
   hasCapability: organizationHasCapability,
+  hours: errorIssueHours,
   listIssues: listErrorIssues,
   now: () => new Date(),
   services: errorIssueServices,
@@ -68,6 +71,13 @@ const listQuerySchema = z.object({
   status: z.enum([...errorIssueStatuses, "all"]).default("open"),
 });
 const statusSchema = z.object({ status: z.enum(errorIssueStatuses) });
+
+// The start of the first of 24 UTC hours that end with the current hour.
+export function firstHour(now: Date): string {
+  const hour = new Date(now);
+  hour.setUTCMinutes(0, 0, 0);
+  return new Date(hour.getTime() - 23 * 3_600_000).toISOString();
+}
 
 // The first UTC day of a range of days that ends today.
 export function firstDay(now: Date, days: number): string {
@@ -120,11 +130,26 @@ export function createErrorIssueRoutes(dependencies: ErrorIssueRouteDependencies
         dependencies.services(tenant.organizationId),
         dependencies.environments(tenant.organizationId),
       ]);
+      const issueIds = issues.map((issue) => issue.id);
+      // The last day's trend is hourly; longer ranges are daily.
+      if (query.data.range === "24h") {
+        const since = firstHour(now);
+        const hours = await dependencies.hours(issueIds, since);
+        return context.json({
+          counts,
+          environments,
+          interval: "hour" as const,
+          issues: issues.map((issue) => ({ ...issue, days: [], hours: hours.get(issue.id) ?? [] })),
+          services,
+          since,
+        });
+      }
       const since = firstDay(now, query.data.range && query.data.range !== "all" ? rangeDays + 1 : errorIssueListDays);
-      const days = await dependencies.days(issues.map((issue) => issue.id), since);
+      const days = await dependencies.days(issueIds, since);
       return context.json({
         counts,
         environments,
+        interval: "day" as const,
         issues: issues.map((issue) => ({ ...issue, days: days.get(issue.id) ?? [] })),
         services,
         since,

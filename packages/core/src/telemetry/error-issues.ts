@@ -65,6 +65,8 @@ export type ErrorCandidate = {
 export type ErrorOccurrences = {
   // Occurrences per UTC day, as YYYY-MM-DD.
   dailyCounts: Record<string, number>;
+  // Occurrences per UTC hour, as the ISO time the hour starts.
+  hourlyCounts: Record<string, number>;
   eventCount: number;
   exceptionType: string;
   fingerprint: string;
@@ -209,6 +211,10 @@ function utcDay(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
 
+function utcHour(date: Date): string {
+  return `${date.toISOString().slice(0, 13)}:00:00.000Z`;
+}
+
 // Fingerprints each candidate and collapses those with the same workspace and
 // fingerprint, so an exception storm is one write per issue. The newest
 // occurrence becomes the sample.
@@ -257,6 +263,7 @@ export function groupErrorCandidates(candidates: ErrorCandidate[]): ErrorOccurre
       traceId: candidate.trace_id || null,
     };
     const day = utcDay(seenAt);
+    const hour = utcHour(seenAt);
     const existing = groups.get(key);
     if (!existing) {
       groups.set(key, {
@@ -266,6 +273,7 @@ export function groupErrorCandidates(candidates: ErrorCandidate[]): ErrorOccurre
         fingerprint: fp.hash,
         firstSeenAt: seenAt,
         frames: fp.normalizedFrames,
+        hourlyCounts: { [hour]: 1 },
         kind: candidate.kind,
         lastSeenAt: seenAt,
         message: sample.message,
@@ -279,6 +287,7 @@ export function groupErrorCandidates(candidates: ErrorCandidate[]): ErrorOccurre
     }
     existing.eventCount += 1;
     existing.dailyCounts[day] = (existing.dailyCounts[day] ?? 0) + 1;
+    existing.hourlyCounts[hour] = (existing.hourlyCounts[hour] ?? 0) + 1;
     if (seenAt < existing.firstSeenAt) existing.firstSeenAt = seenAt;
     if (seenAt >= existing.lastSeenAt) {
       existing.lastSeenAt = seenAt;

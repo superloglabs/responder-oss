@@ -82,6 +82,16 @@ describe("groupErrorCandidates", () => {
     expect(issue?.dailyCounts).toEqual({ "2026-10-21": 1, "2026-10-22": 2 });
   });
 
+  it("counts occurrences per UTC hour", () => {
+    const [issue] = groupErrorCandidates([
+      candidate({ seen_ms: String(Date.parse("2026-10-22T07:59:59Z")) }),
+      candidate({ seen_ms: String(Date.parse("2026-10-22T08:00:00Z")) }),
+      candidate({ seen_ms: String(Date.parse("2026-10-22T08:59:00Z")) }),
+    ]);
+
+    expect(issue?.hourlyCounts).toEqual({ "2026-10-22T07:00:00.000Z": 1, "2026-10-22T08:00:00.000Z": 2 });
+  });
+
   it("groups logs without a stack by their normalized body", () => {
     const log = (body: string) =>
       candidate({

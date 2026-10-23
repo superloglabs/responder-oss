@@ -962,6 +962,20 @@ export const errorIssueDailyCounts = pgTable(
   (table) => [primaryKey({ columns: [table.issueId, table.day] })],
 );
 
+// Occurrences of an error issue per UTC hour, for the last day's trend. The
+// worker deletes an issue's hours once they are older than two days.
+export const errorIssueHourlyCounts = pgTable(
+  "error_issue_hourly_counts",
+  {
+    issueId: uuid("issue_id")
+      .notNull()
+      .references(() => errorIssues.id, { onDelete: "cascade" }),
+    hour: timestamp("hour", { withTimezone: true }).notNull(),
+    eventCount: bigint("event_count", { mode: "number" }).notNull().default(0),
+  },
+  (table) => [primaryKey({ columns: [table.issueId, table.hour] })],
+);
+
 // How far the worker has read the cell's exception projection, per kind.
 export const errorIssueCursors = pgTable("error_issue_cursors", {
   kind: text("kind").$type<ErrorIssueKind>().primaryKey(),

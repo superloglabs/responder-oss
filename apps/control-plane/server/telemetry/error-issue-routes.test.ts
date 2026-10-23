@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ErrorIssue, ErrorIssueSummary } from "../../../../packages/core/src/db/error-issues.js";
-import { createErrorIssueRoutes, type ErrorIssueRouteDependencies, firstDay } from "./error-issue-routes.js";
+import { createErrorIssueRoutes, type ErrorIssueRouteDependencies, firstDay, firstHour } from "./error-issue-routes.js";
 
 const organizationId = "00000000-0000-4000-8000-000000000001";
 const issueId = "11111111-1111-4111-8111-111111111111";
@@ -47,6 +47,7 @@ function routes(overrides: Partial<ErrorIssueRouteDependencies> = {}) {
     days: vi.fn(async () => new Map([[issueId, [{ day: "2026-10-22", eventCount: 12 }]]])),
     findIssue: vi.fn(async () => issue),
     hasCapability: vi.fn(async () => true),
+    hours: vi.fn(async () => new Map([[issueId, [{ eventCount: 12, hour: "2026-10-22T11:00:00.000Z" }]]])),
     listIssues: vi.fn(async () => [summary]),
     now: () => now,
     services: vi.fn(async () => ["api"]),
@@ -67,12 +68,25 @@ describe("error issue routes", () => {
     expect(await response.json()).toEqual({
       counts: { open: 1, resolved: 2, silenced: 0 },
       environments: ["production"],
+      interval: "day",
       issues: [{ ...summary, days: [{ day: "2026-10-22", eventCount: 12 }] }],
       services: ["api"],
       since: "2026-10-09",
     });
     expect(dependencies.listIssues).toHaveBeenCalledWith(organizationId, { limit: 50, status: "open" });
     expect(dependencies.days).toHaveBeenCalledWith([issueId], "2026-10-09");
+    expect(dependencies.hours).not.toHaveBeenCalled();
+  });
+
+  it("lists the last 24 hours with counts per hour", async () => {
+    const { app, dependencies } = routes();
+    const body = await (await app.request("/?range=24h")).json() as { interval: string; issues: unknown[]; since: string };
+
+    expect(body.interval).toBe("hour");
+    expect(body.since).toBe("2026-10-21T13:00:00.000Z");
+    expect(body.issues).toEqual([{ ...summary, days: [], hours: [{ eventCount: 12, hour: "2026-10-22T11:00:00.000Z" }] }]);
+    expect(dependencies.hours).toHaveBeenCalledWith([issueId], "2026-10-21T13:00:00.000Z");
+    expect(dependencies.days).not.toHaveBeenCalled();
   });
 
   it("filters by status, service and text, and pages from the last issue", async () => {
@@ -172,6 +186,12 @@ describe("error issue routes", () => {
 
     expect(response.status).toBe(400);
     expect(dependencies.setStatus).not.toHaveBeenCalled();
+  });
+});
+
+describe("firstHour", () => {
+  it("counts the current hour as the last of 24", () => {
+    expect(firstHour(new Date("2026-10-22T12:34:56.789Z"))).toBe("2026-10-21T13:00:00.000Z");
   });
 });
 
