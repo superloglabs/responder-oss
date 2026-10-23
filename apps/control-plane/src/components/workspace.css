@@ -39,20 +39,22 @@
 }
 .appShell--workspace .globalHeader__left { flex-direction: column; align-items: stretch; gap: 24px; }
 .appShell--workspace .brand { height: 16px; width: fit-content; padding-left: 8px; }
-.appShell--workspace .brandPictogram { width: 16px; height: 16px; color: var(--issues-text); opacity: .65; }
+.appShell--workspace .brandPictogram { width: 16px; height: 16px; color: #373636; opacity: .65; }
 .appShell--workspace .primaryNav { flex-direction: column; align-items: stretch; gap: 4px; }
 .appShell--workspace .primaryNav a {
   display: flex; align-items: center; gap: 8px; height: 32px; padding: 8px;
-  border-radius: 4px; color: var(--issues-text); font-weight: 400;
+  border-radius: 4px; color: #5d5d5d; font-weight: 500;
 }
-.appShell--workspace .primaryNav svg { width: 16px; height: 16px; flex-shrink: 0; }
-.appShell--workspace .primaryNav a.isActive { background: var(--issues-panel); box-shadow: 0 0 0 .5px var(--issues-line); }
-.appShell--workspace .primaryNav a:hover { background: var(--issues-row); }
+.appShell--workspace .primaryNav svg { width: 16px; height: 16px; flex-shrink: 0; color: #666; opacity: .6; }
+.appShell--workspace .primaryNav a:hover { background: #ededed; }
+.appShell--workspace .primaryNav a:focus-visible { outline: 2px solid #4e58f9; outline-offset: 2px; }
+.appShell--workspace .primaryNav a.isActive { background: #e3e3e3; color: #121212; font-weight: 600; }
+.appShell--workspace .primaryNav a.isActive svg { color: #444; opacity: 1; }
 .appShell--workspace .primaryNav__children { display: flex; flex-direction: column; gap: 4px; margin: 2px 0 4px 15px; padding-left: 8px; border-left: 1px solid #e3e3e3; }
 .appShell--workspace .primaryNav__children a { height: 30px; padding: 6px 8px; }
 .appShell--workspace .primaryNav__group { display: flex; flex-direction: column; gap: 4px; padding-top: 12px; }
 .appShell--workspace .primaryNav__group + a { margin-top: 12px; }
-.appShell--workspace .primaryNav__label { padding: 4px 8px; color: #707070; font-size: 11px; line-height: 16px; letter-spacing: .02em; }
+.appShell--workspace .primaryNav__label { padding: 4px 8px; color: #a0a0a0; font-size: 11px; font-weight: 500; line-height: 16px; letter-spacing: .02em; }
 .appShell--workspace .globalHeader__right { margin-top: auto; flex-direction: column; align-items: stretch; gap: 12px; }
 .appShell--workspace .accountMenuTrigger { width: 100%; max-width: none; height: 48px; border-radius: 8px; padding: 8px; justify-content: flex-start; }
 .appShell--workspace .accountMenuTrigger { color: #202020; border: 0; gap: 8px; font-size: 14px; line-height: 17.5px; }

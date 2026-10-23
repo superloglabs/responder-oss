@@ -1,3 +1,17 @@
+import {
+  IconAdjustmentsHorizontalFilled,
+  IconBellFilled,
+  IconBoltFilled,
+  IconBookFilled,
+  IconBugFilled,
+  IconChartAreaLineFilled,
+  IconCompassFilled,
+  IconFileDiffFilled,
+  IconFileTextFilled,
+  IconLayoutDashboardFilled,
+  IconSitemapFilled,
+  IconWorldFilled,
+} from "@tabler/icons-react";
 import { Fragment, type ReactNode, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { authErrorCode } from "../auth-error-code";
@@ -15,55 +29,44 @@ import {
 } from "../primary-navigation";
 import { BillingBanner } from "./billing-banner";
 import {
-  BellIcon,
-  BugIcon,
   CaretDownIcon,
-  ChartLineIcon,
-  ChartLineUpIcon,
   CheckIcon,
   CoinsIcon,
   FlagIcon,
   GearIcon,
-  GitPullRequestIcon,
-  GlobeIcon,
   LightningIcon,
   ListIcon,
   ListBulletsIcon,
-  BookOpenTextIcon,
-  MagnifyingGlassIcon,
   PlugsConnectedIcon,
   ScanIcon,
-  RobotIcon,
   SignOutIcon,
-  SquaresFourIcon,
   TagIcon,
-  TreeStructureIcon,
   UserCircleIcon,
   XIcon,
 } from "@phosphor-icons/react";
 import { ColorThemeToggle } from "./color-theme-toggle";
 import "./workspace.css";
 
-const navigationIcons: Record<NavigationSection, typeof GearIcon> = {
+const navigationIcons: Record<NavigationSection, typeof GearIcon | typeof IconBoltFilled> = {
   agents: LightningIcon,
   "ai-models": CoinsIcon,
-  alerts: BellIcon,
-  automations: RobotIcon,
-  dashboards: ChartLineIcon,
-  errors: BugIcon,
+  alerts: IconBellFilled,
+  automations: IconBoltFilled,
+  dashboards: IconLayoutDashboardFilled,
+  errors: IconBugFilled,
   integrations: PlugsConnectedIcon,
   issues: ListBulletsIcon,
-  logs: MagnifyingGlassIcon,
-  metrics: ChartLineUpIcon,
-  "pull-requests": GitPullRequestIcon,
+  logs: IconFileTextFilled,
+  metrics: IconChartAreaLineFilled,
+  "pull-requests": IconFileDiffFilled,
   scans: ScanIcon,
-  settings: GearIcon,
-  skills: BookOpenTextIcon,
+  settings: IconAdjustmentsHorizontalFilled,
+  skills: IconBookFilled,
   suggestions: FlagIcon,
-  synthetics: GlobeIcon,
+  synthetics: IconWorldFilled,
   "tag-mode": TagIcon,
-  "telemetry-overview": SquaresFourIcon,
-  traces: TreeStructureIcon,
+  "telemetry-overview": IconCompassFilled,
+  traces: IconSitemapFilled,
 };
 
 interface AppShellProps {

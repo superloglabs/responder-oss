@@ -40,6 +40,7 @@
     "@sentry/hono": "10.69.0",
     "@sentry/node": "10.69.0",
     "@sentry/react": "10.69.0",
+    "@tabler/icons-react": "3.49.0",
     "@xyflow/react": "^12.11.2",
     "better-auth": "1.6.25",
     "class-variance-authority": "^0.7.1",
