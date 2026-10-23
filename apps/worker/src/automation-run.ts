@@ -309,7 +309,7 @@ const runHeartbeatIntervalMs = 30_000;
 function userMessagePrompt(message: AutomationUserMessageEventData): string {
   if (message.slackButton) {
     const { channelId, label, messageTimestamp } = message.slackButton;
-    return `${message.authorName} (<@${message.authorId}>) pressed the "${label}" button on your Slack message (channel_id ${channelId}, ts ${messageTimestamp}).`;
+    return `${message.authorName} (<@${message.authorId}>) saw your Slack message (channel_id ${channelId}, ts ${messageTimestamp}) and pressed its "${label}" button. Treat this as their instruction.`;
   }
   if (message.source === "github") return `GitHub:\n${message.text}`;
   return message.source === "slack"
