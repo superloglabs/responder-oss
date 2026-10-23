@@ -1,10 +1,10 @@
+import { NavigationIcon } from "../components/navigation-icon";
 import {
   CaretDownIcon,
   CheckCircleIcon,
   CoinsIcon,
   CubeIcon,
   SparkleIcon,
-  SquaresFourIcon,
   WarningIcon,
   XCircleIcon,
 } from "@phosphor-icons/react";
@@ -404,7 +404,7 @@ export function TelemetryOverviewPage() {
       <div className="explorer telemetryOverview">
         <header className="workspaceHeading telemetryOverview__heading">
           <div>
-            <h1><SquaresFourIcon aria-hidden="true" size={16} weight="bold" />Overview</h1>
+            <h1><NavigationIcon section="telemetry-overview" />Overview</h1>
             <p>What Superlog receives from your services, and what to fix.</p>
           </div>
           {telemetry.available ? (

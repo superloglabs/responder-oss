@@ -1,4 +1,4 @@
-import { CoinsIcon } from "@phosphor-icons/react";
+import { NavigationIcon } from "../components/navigation-icon";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
@@ -122,7 +122,7 @@ export function AiModelsPage() {
   return (
     <AppShell active="ai-models" redesigned>
       <header className="workspaceHeading">
-        <h1><CoinsIcon aria-hidden="true" size={16} weight="bold" />AI models</h1>
+        <h1><NavigationIcon section="ai-models" />AI models</h1>
         {models.length > 0 && (canCreateDashboards || canCreateAlerts) ? (
           <div className="workspaceHeading__actions">
             {canCreateAlerts ? (

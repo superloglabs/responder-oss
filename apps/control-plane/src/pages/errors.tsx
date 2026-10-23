@@ -1,4 +1,5 @@
-import { OctagonIcon, PlusIcon, MagnifyingGlassIcon } from "@phosphor-icons/react";
+import { NavigationIcon } from "../components/navigation-icon";
+import { PlusIcon, MagnifyingGlassIcon } from "@phosphor-icons/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { relativeTime } from "../agents-api";
@@ -176,7 +177,7 @@ export function ErrorsPage() {
     <AppShell active="errors" redesigned>
       <div className="errorIssues">
         <header className="errorIssues__heading">
-          <div className="workspaceHeading"><h1><OctagonIcon aria-hidden="true" size={16} />Errors</h1>
+          <div className="workspaceHeading"><h1><NavigationIcon section="errors" />Errors</h1>
           <Link className="dsButton dsButton--primary dsButton--small" to="/alerts/new"><PlusIcon size={14} />Create alert</Link></div>
           <p>Find recurring failures and decide what to investigate next.</p>
         </header>

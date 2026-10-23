@@ -1,4 +1,5 @@
-import { CaretRightIcon, ChartLineIcon, PlusIcon } from "@phosphor-icons/react";
+import { NavigationIcon } from "../components/navigation-icon";
+import { CaretRightIcon, PlusIcon } from "@phosphor-icons/react";
 import { type FormEvent, useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { relativeTime } from "../agents-api";
@@ -93,7 +94,7 @@ export function DashboardsPage() {
   return (
     <AppShell active="dashboards" redesigned>
       <header className="workspaceHeading">
-        <h1><ChartLineIcon aria-hidden="true" size={16} weight="bold" />Dashboards</h1>
+        <h1><NavigationIcon section="dashboards" />Dashboards</h1>
         {dashboards && dashboards.length > 0 ? <div className="workspaceHeading__actions">{newButton}</div> : null}
       </header>
       {telemetryError}

@@ -1,4 +1,5 @@
-import { BookOpenTextIcon, PlusIcon } from "@phosphor-icons/react";
+import { NavigationIcon } from "../components/navigation-icon";
+import { PlusIcon } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { relativeTime } from "../agents-api";
@@ -34,7 +35,7 @@ export function SkillsPage() {
   return (
     <AppShell active="skills" redesigned>
       <header className="workspaceHeading">
-        <h1><BookOpenTextIcon aria-hidden="true" size={16} weight="fill" />Skills</h1>
+        <h1><NavigationIcon section="skills" />Skills</h1>
         <Link className="dsButton dsButton--primary dsButton--small" to="/skills/new">
           <PlusIcon aria-hidden="true" size={14} />Create skill
         </Link>

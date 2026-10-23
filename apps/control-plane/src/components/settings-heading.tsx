@@ -1,4 +1,4 @@
-import { GearIcon, PlugsConnectedIcon, TagIcon } from "@phosphor-icons/react";
+import { NavigationIcon } from "./navigation-icon";
 import { useOrganizationCapabilities } from "../organization-capabilities";
 import { navigationOptions, settingsInSidebar } from "../primary-navigation";
 import { SettingsTabs, type SettingsSection } from "./settings-tabs";
@@ -8,12 +8,12 @@ import "./settings.css";
 const standaloneSections = {
   integrations: {
     description: "Connect the services Superlog can use.",
-    icon: PlugsConnectedIcon,
+    section: "integrations",
     title: "Integrations",
   },
   "tag-mode": {
     description: "Choose what Superlog can use and change when someone mentions it in Slack.",
-    icon: TagIcon,
+    section: "tag-mode",
     title: "Tag mode",
   },
 } as const;
@@ -26,10 +26,9 @@ export function SettingsHeading({ active }: { active: SettingsSection }) {
     : null;
 
   if (standalone) {
-    const Icon = standalone.icon;
     return (
       <div className="settingsPageHeading">
-        <header className="workspaceHeading"><h1><Icon size={16} aria-hidden="true" />{standalone.title}</h1></header>
+        <header className="workspaceHeading"><h1><NavigationIcon section={standalone.section} />{standalone.title}</h1></header>
         <div className="settingsPageHeading__navigation">
           <p>{standalone.description}</p>
         </div>
@@ -39,7 +38,7 @@ export function SettingsHeading({ active }: { active: SettingsSection }) {
 
   return (
     <div className="settingsPageHeading">
-      <header className="workspaceHeading"><h1><GearIcon size={16} aria-hidden="true" />Settings</h1></header>
+      <header className="workspaceHeading"><h1><NavigationIcon section="settings" />Settings</h1></header>
       <div className="settingsPageHeading__navigation">
         <p>Manage your workspace, members, and connected services.</p>
         <SettingsTabs active={active} capabilities={capabilities} />

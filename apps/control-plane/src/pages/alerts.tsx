@@ -1,4 +1,5 @@
-import { BellIcon, CaretRightIcon, PlusIcon } from "@phosphor-icons/react";
+import { NavigationIcon } from "../components/navigation-icon";
+import { CaretRightIcon, PlusIcon } from "@phosphor-icons/react";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { relativeTime } from "../agents-api";
@@ -49,7 +50,7 @@ export function AlertsPage() {
   return (
     <AppShell active="alerts" redesigned>
       <header className="workspaceHeading">
-        <h1><BellIcon aria-hidden="true" size={16} weight="bold" />Alerts</h1>
+        <h1><NavigationIcon section="alerts" />Alerts</h1>
         {alerts && alerts.length > 0 ? <div className="workspaceHeading__actions">{newAlert}</div> : null}
       </header>
       {alerts === undefined ? (

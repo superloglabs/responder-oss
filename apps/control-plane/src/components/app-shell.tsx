@@ -1,17 +1,4 @@
-import {
-  IconAdjustmentsHorizontalFilled,
-  IconBellFilled,
-  IconBoltFilled,
-  IconBookFilled,
-  IconBugFilled,
-  IconChartAreaLineFilled,
-  IconCompassFilled,
-  IconFileDiffFilled,
-  IconFileTextFilled,
-  IconLayoutDashboardFilled,
-  IconSitemapFilled,
-  IconWorldFilled,
-} from "@tabler/icons-react";
+import { NavigationIcon } from "./navigation-icon";
 import { Fragment, type ReactNode, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { authErrorCode } from "../auth-error-code";
@@ -31,43 +18,14 @@ import { BillingBanner } from "./billing-banner";
 import {
   CaretDownIcon,
   CheckIcon,
-  CoinsIcon,
-  FlagIcon,
   GearIcon,
-  LightningIcon,
   ListIcon,
-  ListBulletsIcon,
-  PlugsConnectedIcon,
-  ScanIcon,
   SignOutIcon,
-  TagIcon,
   UserCircleIcon,
   XIcon,
 } from "@phosphor-icons/react";
 import { ColorThemeToggle } from "./color-theme-toggle";
 import "./workspace.css";
-
-const navigationIcons: Record<NavigationSection, typeof GearIcon | typeof IconBoltFilled> = {
-  agents: LightningIcon,
-  "ai-models": CoinsIcon,
-  alerts: IconBellFilled,
-  automations: IconBoltFilled,
-  dashboards: IconLayoutDashboardFilled,
-  errors: IconBugFilled,
-  integrations: PlugsConnectedIcon,
-  issues: ListBulletsIcon,
-  logs: IconFileTextFilled,
-  metrics: IconChartAreaLineFilled,
-  "pull-requests": IconFileDiffFilled,
-  scans: ScanIcon,
-  settings: IconAdjustmentsHorizontalFilled,
-  skills: IconBookFilled,
-  suggestions: FlagIcon,
-  synthetics: IconWorldFilled,
-  "tag-mode": TagIcon,
-  "telemetry-overview": IconCompassFilled,
-  traces: IconSitemapFilled,
-};
 
 interface AppShellProps {
   active: NavigationSection;
@@ -252,7 +210,6 @@ export function AppShell({
   }
 
   function renderNavigationItem(item: NavigationItem) {
-    const Icon = navigationIcons[item.section];
     const isActive = item.section === activeSection;
     return (
       <Fragment key={item.section}>
@@ -261,7 +218,7 @@ export function AppShell({
           className={isActive && !(workspace && item.children) ? "isActive" : undefined}
           to={item.to}
         >
-          {workspace ? <Icon size={16} aria-hidden="true" /> : null}
+          {workspace ? <NavigationIcon section={item.section} /> : null}
           {item.label}
         </Link>
         {workspace && isActive && item.children ? (

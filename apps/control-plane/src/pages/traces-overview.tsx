@@ -1,4 +1,4 @@
-import { TreeStructureIcon } from "@phosphor-icons/react";
+import { NavigationIcon } from "../components/navigation-icon";
 import { useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { AppShell } from "../components/app-shell";
@@ -328,7 +328,7 @@ export function TracesOverviewPage() {
     <AppShell active="traces" activePage="/traces" redesigned wide>
       <div className="explorer">
         <header className="workspaceHeading">
-          <h1><TreeStructureIcon aria-hidden="true" size={16} weight="bold" />Traces overview</h1>
+          <h1><NavigationIcon section="traces" />Traces overview</h1>
           {telemetry.available ? (
             <div className="workspaceHeading__actions">
               <ExplorerTimeControls live={live} onLiveChange={setLive} onRangeChange={(range) => navigate({ ...query, range })} range={query.range} />

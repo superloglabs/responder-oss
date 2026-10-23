@@ -1,4 +1,5 @@
-import { CaretRightIcon, GitPullRequestIcon } from "@phosphor-icons/react";
+import { NavigationIcon } from "../components/navigation-icon";
+import { CaretRightIcon } from "@phosphor-icons/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { relativeTime } from "../agents-api";
@@ -56,7 +57,7 @@ export function PullRequestsPage() {
   return (
     <AppShell active="pull-requests" redesigned>
       <header className="workspaceHeading">
-        <h1><GitPullRequestIcon aria-hidden="true" size={16} weight="fill" />Pull requests</h1>
+        <h1><NavigationIcon section="pull-requests" />Pull requests</h1>
       </header>
       {!result ? (
         error

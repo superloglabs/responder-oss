@@ -1,4 +1,5 @@
-import { DotsThreeIcon, PlayPauseIcon, PlusIcon } from "@phosphor-icons/react";
+import { NavigationIcon } from "../components/navigation-icon";
+import { DotsThreeIcon, PlusIcon } from "@phosphor-icons/react";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
@@ -126,7 +127,7 @@ export function AutomationsPage() {
   return (
     <AppShell active="automations" redesigned>
       <header className="workspaceHeading">
-        <h1><PlayPauseIcon aria-hidden="true" size={16} weight="fill" />Automations</h1>
+        <h1><NavigationIcon section="automations" />Automations</h1>
         <Link className="dsButton dsButton--primary dsButton--small" to="/automations/new">
           <PlusIcon aria-hidden="true" size={14} />Create automation
         </Link>

@@ -1,3 +1,4 @@
+import { NavigationIcon } from "../components/navigation-icon";
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
@@ -13,7 +14,7 @@ import {
   integrationsForAgent,
 } from "../agent-list-presentation";
 import { AppShell } from "../components/app-shell";
-import { DotsThreeIcon as EllipsisIcon, PlusIcon, LightningIcon } from "@phosphor-icons/react";
+import { DotsThreeIcon as EllipsisIcon, PlusIcon } from "@phosphor-icons/react";
 import { AgentListSkeleton } from "../components/screen-skeletons";
 import { Badge, DataTable, IconButton } from "../design-system";
 import { useDocumentTitle } from "../use-document-title";
@@ -116,7 +117,7 @@ export function AgentsPage() {
   return (
     <AppShell redesigned active="agents">
       <header className="workspaceHeading">
-        <h1><LightningIcon size={16} weight="fill" aria-hidden="true" />Agents</h1>
+        <h1><NavigationIcon section="agents" />Agents</h1>
         <div className="workspaceHeading__actions">
           <details className="issuesFilters">
             <summary>Filters{agentFilter !== "all" ? " · Active" : ""}</summary>

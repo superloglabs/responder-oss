@@ -1,3 +1,4 @@
+import { NavigationIcon } from "../components/navigation-icon";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
@@ -768,7 +769,7 @@ export function ScansPage() {
     <AppShell active="scans" density="scans" redesigned>
       <div className="scansSetup">
         <section className="workspaceHeading">
-          <h1><SignalIcon size={16} aria-hidden="true" />Scans</h1>
+          <h1><NavigationIcon section="scans" />Scans</h1>
           <Button disabled={loading || saving} loading={isRunning} onClick={startScan} variant="primary">
             {isRunning ? "Running scan…" : "Run scan now"}
           </Button>
