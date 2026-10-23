@@ -1,4 +1,5 @@
-import { ChartLineUpIcon, MagnifyingGlassIcon } from "@phosphor-icons/react";
+import { NavigationIcon } from "../components/navigation-icon";
+import { MagnifyingGlassIcon } from "@phosphor-icons/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { AppShell } from "../components/app-shell";
@@ -96,7 +97,7 @@ export function MetricsPage() {
   return (
     <AppShell active="metrics" redesigned>
       <header className="workspaceHeading">
-        <h1><ChartLineUpIcon aria-hidden="true" size={16} weight="bold" />Metrics</h1>
+        <h1><NavigationIcon section="metrics" />Metrics</h1>
       </header>
       <TelemetryGate signal="Metrics" state={telemetry}>
         <section aria-label="Metrics" className="telemetryPage">

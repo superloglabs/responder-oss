@@ -1,5 +1,5 @@
+import { NavigationIcon } from "../components/navigation-icon";
 import { IssueSeverity } from "../components/issue-severity";
-import { ListDashesIcon } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { fetchIssues, type IssueListItem, relativeTime } from "../agents-api";
@@ -39,7 +39,7 @@ export function IssuesPage() {
     <AppShell active="issues" density="issues">
       <div className="issuesPage">
         <header className="issuesHeading">
-          <h1><ListDashesIcon aria-hidden="true" size={16} weight="fill" />Issues</h1>
+          <h1><NavigationIcon section="issues" />Issues</h1>
           <details className="issuesFilters">
             <summary>Filters{issueFilter !== "all" || showArchived ? " · Active" : ""}</summary>
             <div className="issuesFilters__popover">

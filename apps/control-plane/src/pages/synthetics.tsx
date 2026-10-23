@@ -1,4 +1,5 @@
-import { CaretRightIcon, GlobeIcon, PlusIcon } from "@phosphor-icons/react";
+import { NavigationIcon } from "../components/navigation-icon";
+import { CaretRightIcon, PlusIcon } from "@phosphor-icons/react";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { relativeTime } from "../agents-api";
@@ -56,7 +57,7 @@ export function SyntheticsPage() {
   return (
     <AppShell active="synthetics" redesigned>
       <header className="workspaceHeading">
-        <h1><GlobeIcon aria-hidden="true" size={16} weight="bold" />Synthetic checks</h1>
+        <h1><NavigationIcon section="synthetics" />Synthetic checks</h1>
         {checks && checks.length > 0 ? <div className="workspaceHeading__actions">{newCheck}</div> : null}
       </header>
       {checks === undefined ? (

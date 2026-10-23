@@ -1,4 +1,5 @@
-import { ArrowClockwiseIcon, CaretDownIcon, CaretUpIcon, ListMagnifyingGlassIcon, TreeStructureIcon } from "@phosphor-icons/react";
+import { NavigationIcon } from "../components/navigation-icon";
+import { ArrowClockwiseIcon, CaretDownIcon, CaretUpIcon, TreeStructureIcon } from "@phosphor-icons/react";
 import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { AppShell } from "../components/app-shell";
@@ -415,7 +416,7 @@ export function LogsPage() {
     <AppShell active="logs" redesigned wide>
       <div className="explorer">
         <header className="workspaceHeading">
-          <h1><ListMagnifyingGlassIcon aria-hidden="true" size={16} weight="bold" />Logs</h1>
+          <h1><NavigationIcon section="logs" />Logs</h1>
           {telemetry.available ? (
             <div className="workspaceHeading__actions">
               <IconButton aria-label="Refresh" onClick={reload} size="small" variant="ghost">

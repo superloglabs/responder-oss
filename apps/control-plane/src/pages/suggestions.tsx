@@ -1,3 +1,4 @@
+import { NavigationIcon } from "../components/navigation-icon";
 import { providerDisplayName as sourceLabel } from "../components/provider-glyphs";
 import { lazy, Suspense, useEffect, useState } from "react";
 import Markdown from "react-markdown";
@@ -14,7 +15,7 @@ import {
   type SuggestionSummary,
 } from "../agents-api";
 import { AppShell } from "../components/app-shell";
-import { CaretRightIcon, FlagIcon, GitPullRequestIcon as PullRequestIcon, CheckIcon, ListBulletsIcon } from "@phosphor-icons/react";
+import { CaretRightIcon, GitPullRequestIcon as PullRequestIcon, CheckIcon, ListBulletsIcon } from "@phosphor-icons/react";
 import { Button, DataTable, Switch, SelectField } from "../design-system";
 import "./scan-suggestions.css";
 import { useDocumentTitle } from "../use-document-title";
@@ -551,7 +552,7 @@ export function SuggestionsPage() {
 
   return (
     <AppShell active="suggestions" density="compact" redesigned>
-      <header className="workspaceHeading"><h1><FlagIcon size={16} aria-hidden="true" />Suggestions</h1></header>
+      <header className="workspaceHeading"><h1><NavigationIcon section="suggestions" />Suggestions</h1></header>
       <div className="suggestionsToolbar">
         <div className="suggestionStatusFilters" role="group" aria-label="Suggestion status">
           {(["open", "applied", "dismissed"] as const).map((value) => (
