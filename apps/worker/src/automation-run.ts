@@ -309,7 +309,12 @@ const runHeartbeatIntervalMs = 30_000;
 function userMessagePrompt(message: AutomationUserMessageEventData): string {
   if (message.slackButton) {
     const { channelId, label, messageTimestamp } = message.slackButton;
-    return `${message.authorName} (<@${message.authorId}>) pressed the "${label}" button on your Slack message (channel_id ${channelId}, ts ${messageTimestamp}).`;
+    return [
+      `${message.authorName} (<@${message.authorId}>) pressed the "${label}" button on your Slack message (channel_id ${channelId}, ts ${messageTimestamp}).`,
+      // Without this, a repository rule such as "reproduce before fixing"
+      // can lead the agent to refuse the action the person asked for.
+      "The press approves the action the button names, so do it now without asking again. This approval overrides repository guidance on whether to act, but follow its guidance on how. If you cannot fully verify the result, still complete the action and state what is unverified, in the pull request description when the action opens one. If the action is impossible, reply in the thread with the reason.",
+    ].join("\n");
   }
   if (message.source === "github") return `GitHub:\n${message.text}`;
   return message.source === "slack"
