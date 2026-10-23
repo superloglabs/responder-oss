@@ -1,6 +1,7 @@
 import { ModelCatalogError } from "../../../../packages/core/src/automations/model-catalog.js";
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { automationWebhookToken } from "../../../../packages/core/src/integrations/webhook-secret.js";
 import { automationRoutes } from "./routes.js";
 
 const organizationId = "15151515-1515-4515-8515-151515151515";
@@ -251,6 +252,28 @@ describe("automation control-plane routes", () => {
     expect(mocks.getUsageHistory).toHaveBeenNthCalledWith(2, { automationId, days: 30, organizationId });
     expect(malformed.status).toBe(404);
     expect(mocks.getUsageHistory).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows the webhook URL and token of an automation in the active organization", async () => {
+    vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 7).toString("base64"));
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://app.responder.example");
+    const automationId = "31313131-3131-4131-8131-313131313131";
+    mocks.getAutomation.mockResolvedValueOnce({ id: automationId }).mockResolvedValueOnce(null);
+
+    const response = await app.request(`/api/automations/${automationId}/webhook`);
+    const missing = await app.request(`/api/automations/${automationId}/webhook`);
+    const malformed = await app.request("/api/automations/not-a-uuid/webhook");
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      token: automationWebhookToken(automationId),
+      url: `https://app.responder.example/api/webhooks/automations/${automationId}`,
+    });
+    expect(mocks.getAutomation).toHaveBeenCalledWith(organizationId, automationId);
+    expect(missing.status).toBe(404);
+    expect(malformed.status).toBe(404);
+    expect(mocks.getAutomation).toHaveBeenCalledTimes(2);
+    vi.unstubAllEnvs();
   });
 
   it("starts a test chat with the member's first message", async () => {

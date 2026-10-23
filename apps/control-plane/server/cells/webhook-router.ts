@@ -16,7 +16,7 @@ export const forwardedHeader = "x-responder-cell-forwarded";
 // Signature, event, and content headers the cells read. CloudFront and load
 // balancer headers, including the origin verification secret, stay behind.
 const forwardedHeaderPattern =
-  /^(?:authorization|content-type|user-agent|linear-.+|sentry-hook-.+|x-devrev-.+|x-github-.+|x-hub-.+|x-signature-.+|x-slack-.+)$/u;
+  /^(?:authorization|content-type|idempotency-key|user-agent|linear-.+|sentry-hook-.+|x-devrev-.+|x-github-.+|x-hub-.+|x-signature-.+|x-slack-.+)$/u;
 
 // The provider uses one cell's response to these, so exactly one cell
 // handles each: the receiving cell when it holds the tenant, otherwise the

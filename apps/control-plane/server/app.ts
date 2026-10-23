@@ -51,6 +51,7 @@ import { dash0WebhookRoutes } from "./webhooks/dash0.js";
 import { slackWebhookRoutes } from "./webhooks/slack.js";
 import { discordWebhookRoutes } from "./webhooks/discord.js";
 import { linearWebhookRoutes } from "./webhooks/linear.js";
+import { automationWebhookRoutes } from "./webhooks/automations.js";
 import { pullRequestRoutes } from "./pull-requests/routes.js";
 import { scanRoutes } from "./scans/routes.js";
 import { suggestionRoutes } from "./suggestions/routes.js";
@@ -517,6 +518,7 @@ export const app = instrumentedApp
   .route("/api/webhooks/slack", slackWebhookRoutes)
   .route("/api/webhooks/discord", discordWebhookRoutes)
   .route("/api/webhooks/linear", linearWebhookRoutes)
+  .route("/api/webhooks/automations", automationWebhookRoutes)
   .post("/api/investigations", async (context) => {
     const authorization = context.req.header("authorization") ?? null;
     if (!authorization || !verifyBearerToken(authorization)) {

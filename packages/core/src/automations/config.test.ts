@@ -105,6 +105,11 @@ describe("automation configuration", () => {
       notifications: [notification],
       triggers: [{ eventTypes: ["new_issue"], kind: "errors" }],
     }).notifications).toEqual([notification]);
+    expect(automationConfigurationSchema.parse({
+      ...baseConfiguration,
+      notifications: [notification],
+      triggers: [{ kind: "webhook" }],
+    }).notifications).toEqual([notification]);
     // DevRev runs report on their ticket instead.
     expect(automationConfigurationSchema.safeParse({
       ...baseConfiguration,
@@ -133,6 +138,17 @@ describe("automation configuration", () => {
     expect(automationConfigurationSchema.safeParse({
       ...baseConfiguration,
       triggers: [{ eventTypes: ["new_issue"], kind: "errors", services: ["api", "api"] }],
+    }).success).toBe(false);
+  });
+
+  it("supports one webhook trigger per automation", () => {
+    expect(automationConfigurationSchema.parse({
+      ...baseConfiguration,
+      triggers: [{ kind: "webhook" }, baseConfiguration.triggers[0]],
+    }).triggers[0]).toEqual({ kind: "webhook" });
+    expect(automationConfigurationSchema.safeParse({
+      ...baseConfiguration,
+      triggers: [{ kind: "webhook" }, { kind: "webhook" }],
     }).success).toBe(false);
   });
 

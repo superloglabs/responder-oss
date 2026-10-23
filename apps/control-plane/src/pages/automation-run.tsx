@@ -103,6 +103,7 @@ function triggerMeta(run: AutomationRunDetail): string[] {
   }
   if (provider === "discord") return ["Discord", typeof attributes.username === "string" ? `@${attributes.username}` : "Command"];
   if (provider === "slack") return ["Slack", "Message"];
+  if (provider === "webhook") return ["Webhook", "Request received"];
   if (provider === "schedule") {
     if (attributes.frequency === "custom") return ["Schedule", typeof attributes.cron === "string" ? `Cron ${attributes.cron}` : "Custom"];
     const frequency = attributes.frequency === "hourly" ? "Hourly" : attributes.frequency === "daily" ? "Daily" : "Weekly";
@@ -116,7 +117,7 @@ function TriggerCard({ run }: { run: AutomationRunDetail }) {
   const project = run.trigger.attributes.projectName ?? run.trigger.attributes.projectSlug;
   return <article className="automationRun__card automationRun__trigger" aria-label="Trigger">
     <div className="automationRun__triggerMeta">
-      {provider === "schedule" || provider === "errors" ? <AutomationTriggerIcon kind={provider} /> : provider in providerGlyphs ? <ProviderGlyph decorative provider={provider as ProviderGlyphId} /> : null}
+      {provider === "schedule" || provider === "errors" || provider === "webhook" ? <AutomationTriggerIcon kind={provider} /> : provider in providerGlyphs ? <ProviderGlyph decorative provider={provider as ProviderGlyphId} /> : null}
       <span>{triggerMeta(run).join(" · ")}</span>
       <span className="automationCreate__spacer" />
       <time dateTime={run.createdAt} title={new Date(run.createdAt).toLocaleString()}>{clockTime(run.createdAt)}</time>

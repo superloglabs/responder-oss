@@ -468,7 +468,7 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
         <form className="automationCreate__form" hidden={activeTab !== "settings"} id="automation-settings" onSubmit={(event) => void submit(event)}>
           <section className="automationCreate__section automationCreate__section--trigger" aria-labelledby="automation-triggers" ref={triggerSectionRef}>
             <h2 id="automation-triggers">Triggers</h2>
-            <AutomationTriggerEditor options={options} triggers={configuration.triggers} open={triggerMenuOpen} onOpenChange={setTriggerMenuOpen} onRefresh={async (kind) => {
+            <AutomationTriggerEditor automationId={automationId} options={options} triggers={configuration.triggers} open={triggerMenuOpen} onOpenChange={setTriggerMenuOpen} onRefresh={async (kind) => {
               const endpoint = kind === "slack" ? "/api/agents/options/refresh/slack" : kind === "github" ? "/api/agents/options/refresh/github" : "/api/integrations/sentry/check";
               const response = await fetch(endpoint, { method: "POST" });
               if (!response.ok) throw new Error("Could not refresh trigger resources");

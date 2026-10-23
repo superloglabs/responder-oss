@@ -496,6 +496,35 @@ export function findAutomationsForBetterStackIncident(
   return findAutomationsForConnectionTrigger("betterstack", integrationAccountId);
 }
 
+// Whether the automation is enabled, in a workspace with automations, and
+// has a webhook trigger in its active version.
+export async function automationAcceptsWebhook(automationId: string): Promise<boolean> {
+  const rows = await getDatabase()
+    .select({ id: automations.id })
+    .from(automations)
+    .innerJoin(
+      organizationCapabilities,
+      and(
+        eq(organizationCapabilities.organizationId, automations.organizationId),
+        eq(organizationCapabilities.capability, "automations"),
+        eq(organizationCapabilities.enabled, true),
+      ),
+    )
+    .innerJoin(
+      automationVersions,
+      eq(automationVersions.id, automations.activeVersionId),
+    )
+    .where(
+      and(
+        eq(automations.id, automationId),
+        eq(automations.enabled, true),
+        sql`${automationVersions.triggers} @> '[{"kind":"webhook"}]'::jsonb`,
+      ),
+    )
+    .limit(1);
+  return rows.length > 0;
+}
+
 // Enabled automations in the workspace with an error trigger for the event,
 // limited to the issue's service when the trigger names services.
 export async function findAutomationsForErrorIssue(input: {
@@ -659,11 +688,13 @@ export async function findDueScheduledAutomations(now: Date): Promise<Array<{
   return due.filter((item) => !receivedKeys.has(`${item.automationId}:${scheduleExternalEventId(item.scheduledFor)}`));
 }
 
-// The distinct connections of the triggers. Schedule and error issue
-// triggers have none.
+// The distinct connections of the triggers. Schedule, error issue, and
+// webhook triggers have none.
 function triggerAccountIds(triggers: AutomationTrigger[]): string[] {
   return [...new Set(triggers.flatMap((trigger) =>
-    trigger.kind === "schedule" || trigger.kind === "errors" ? [] : [trigger.integrationAccountId]
+    trigger.kind === "schedule" || trigger.kind === "errors" || trigger.kind === "webhook"
+      ? []
+      : [trigger.integrationAccountId]
   ))];
 }
 
@@ -695,7 +726,7 @@ async function validateConfigurationResources(
     );
   }
   for (const trigger of configuration.triggers) {
-    if (trigger.kind === "schedule") continue;
+    if (trigger.kind === "schedule" || trigger.kind === "webhook") continue;
     // Error issues come from the workspace's own telemetry.
     if (trigger.kind === "errors") {
       const [telemetry] = await tx
@@ -1722,7 +1753,7 @@ export interface AutomationTriggerInput {
   attributes?: Record<string, string | number | boolean | null>;
   body: string;
   externalEventId: string;
-  provider: "axiom" | "betterstack" | "devrev" | "discord" | "errors" | "github" | "honeycomb" | "manual" | "schedule" | "sentry" | "signoz" | "slack";
+  provider: "axiom" | "betterstack" | "devrev" | "discord" | "errors" | "github" | "honeycomb" | "manual" | "schedule" | "sentry" | "signoz" | "slack" | "webhook";
   sourceUrl?: string;
   title: string;
 }

@@ -35,6 +35,7 @@ export function shareableAutomationTriggers(
     }
     // Service names belong to the sender's workspace.
     if (trigger.kind === "errors") return { eventTypes: trigger.eventTypes, kind: "errors" };
+    if (trigger.kind === "webhook") return { kind: "webhook" };
     return { ...(trigger.frequency === "custom" ? { cron: trigger.cron } : {}), frequency: trigger.frequency, hour: trigger.hour, kind: "schedule", timezone: "UTC", weekday: trigger.weekday };
   });
 }

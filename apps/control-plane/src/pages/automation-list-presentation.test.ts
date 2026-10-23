@@ -27,6 +27,7 @@ describe("automation list presentation", () => {
     expect(triggerEventLabel({ eventTypes: ["regression"], kind: "errors" })).toBe("Error regression");
     expect(triggerEventLabel({ eventTypes: ["new_issue", "regression"], kind: "errors" })).toBe("New error or regression");
     expect(triggerEventLabel({ integrationAccountId: "a", kind: "axiom" })).toBe("Monitor alert");
+    expect(triggerEventLabel({ kind: "webhook" })).toBe("Request received");
     expect(triggerEventLabel({ integrationAccountId: "a", kind: "signoz" })).toBe("Alert fired");
     expect(triggerEventLabel({ integrationAccountId: "a", kind: "honeycomb" })).toBe("Trigger or SLO alert");
     expect(triggerEventLabel({ integrationAccountId: "a", kind: "betterstack" })).toBe("Incident started");

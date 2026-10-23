@@ -8,6 +8,7 @@ export type WebhookRoutingKey = WebhookTenant;
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 const perAccountPath = /^\/api\/webhooks\/(?:dash0|axiom|devrev|signoz|honeycomb|betterstack)\/([^/]+)\/?$/u;
+const automationPath = /^\/api\/webhooks\/automations\/([^/]+)\/?$/u;
 
 type JsonObject = Record<string, unknown>;
 
@@ -32,7 +33,7 @@ function parseJson(body: Uint8Array): JsonObject | null {
 }
 
 function key(
-  provider: Exclude<WebhookTenant["provider"], "integration_account">,
+  provider: Exclude<WebhookTenant["provider"], "automation" | "integration_account">,
   value: unknown,
 ): WebhookRoutingKey | null {
   const routingKey = text(value);
@@ -47,6 +48,10 @@ export function webhookRoutingKey(
   const perAccount = perAccountPath.exec(path)?.[1];
   if (perAccount !== undefined) {
     return uuidPattern.test(perAccount) ? { provider: "integration_account", key: perAccount } : null;
+  }
+  const automation = automationPath.exec(path)?.[1];
+  if (automation !== undefined) {
+    return uuidPattern.test(automation) ? { provider: "automation", key: automation } : null;
   }
 
   const route = path.replace(/\/$/u, "");

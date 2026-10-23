@@ -17,6 +17,7 @@ import { HoneycombConnectionDialog } from "./honeycomb-connection-dialog";
 import { HoneycombWebhookDialog } from "./honeycomb-webhook-dialog";
 import { BetterStackConnectionDialog } from "./betterstack-connection-dialog";
 import { BetterStackWebhookDialog } from "./betterstack-webhook-dialog";
+import { AutomationWebhookDialog } from "./automation-webhook-dialog";
 import { SentryEnvironmentPicker } from "./sentry-environment-picker";
 import { SlackAuthorPickers } from "./slack-author-picker";
 import { SlackFilterMenu } from "./slack-filter-menu";
@@ -142,6 +143,20 @@ function BetterStackTriggerFields({ accountId }: { accountId: string }) {
   </div>;
 }
 
+// A webhook trigger needs no connection. Its URL and token name the saved
+// automation, so a new automation shows them once it is created.
+function WebhookTriggerFields({ automationId }: { automationId?: string }) {
+  const [open, setOpen] = useState(false);
+  if (!automationId) {
+    return <p className="automationTrigger__hint">Runs when a POST request with the automation's token reaches its webhook URL. Create the automation to get its URL and token.</p>;
+  }
+  return <div className="automationTrigger__webhook">
+    <p className="automationTrigger__hint">Runs when a POST request with the automation's token reaches its webhook URL.</p>
+    <button className="button button--secondary button--small" onClick={() => setOpen(true)} type="button">Show URL and token</button>
+    <AutomationWebhookDialog automationId={automationId} open={open} onClose={() => setOpen(false)} />
+  </div>;
+}
+
 // DevRev, SigNoz, Honeycomb, and Better Stack connect with credentials in a
 // dialog instead of a popup.
 function DialogTriggerConnect({ kind, onConnected }: {
@@ -167,7 +182,8 @@ function DialogTriggerConnect({ kind, onConnected }: {
 // Most automations need one or two triggers; the server accepts up to ten.
 export const maxAutomationTriggers = 10;
 
-function TriggerCard({ options, trigger, onChange, onRemove, onConnected, onRefresh, fieldsRef }: {
+function TriggerCard({ automationId, options, trigger, onChange, onRemove, onConnected, onRefresh, fieldsRef }: {
+  automationId?: string;
   options: AutomationOptions | null;
   trigger: AutomationTrigger;
   onChange: (trigger: AutomationTrigger) => void;
@@ -178,7 +194,7 @@ function TriggerCard({ options, trigger, onChange, onRemove, onConnected, onRefr
 }) {
   const schedule = trigger.kind === "schedule" ? trigger : null;
   const errors = trigger.kind === "errors" ? trigger : null;
-  const connected = trigger.kind === "schedule" || trigger.kind === "errors" ? null : trigger;
+  const connected = trigger.kind === "schedule" || trigger.kind === "errors" || trigger.kind === "webhook" ? null : trigger;
   // A Slack trigger shows only its channels until the member adds a filter
   // from its menu. Filters the trigger sets are always shown.
   const [addedFilters, setAddedFilters] = useState<SlackTriggerFilter[]>([]);
@@ -225,6 +241,16 @@ function TriggerCard({ options, trigger, onChange, onRemove, onConnected, onRefr
     </div>
     <div className="automationTrigger__fields" ref={fieldsRef}>
       <ErrorsFields onChange={onChange} trigger={errors} />
+    </div>
+  </div>;
+  if (trigger.kind === "webhook") return <div className="automationTrigger__card">
+    <div className="automationTrigger__heading">
+      <AutomationTriggerIcon kind="webhook" />
+      <span className="automationTrigger__provider">{title}</span>
+      {removeTrigger}
+    </div>
+    <div className="automationTrigger__fields" ref={fieldsRef}>
+      <WebhookTriggerFields automationId={automationId} />
     </div>
   </div>;
   if (!connected) return null;
@@ -275,7 +301,9 @@ function TriggerCard({ options, trigger, onChange, onRemove, onConnected, onRefr
 }
 
 // Edits an automation's triggers. Each trigger starts a run on its own.
-export function AutomationTriggerEditor({ options, triggers, onChange, open, onOpenChange, onConnected, onRefresh }: {
+export function AutomationTriggerEditor({ automationId, options, triggers, onChange, open, onOpenChange, onConnected, onRefresh }: {
+  // The saved automation, if any. Webhook triggers show its URL.
+  automationId?: string;
   options: AutomationOptions | null;
   onRefresh: (kind: ConnectedTriggerKind) => Promise<void>;
   onConnected: (kind: ConnectedTriggerKind, signal: AbortSignal) => Promise<boolean>;
@@ -333,6 +361,10 @@ export function AutomationTriggerEditor({ options, triggers, onChange, open, onO
       onChange([...triggers, { eventTypes: event === "both" ? ["new_issue", "regression"] : [event === "regression" ? "regression" : "new_issue"], kind }]);
       return;
     }
+    if (kind === "webhook") {
+      onChange([...triggers, { kind }]);
+      return;
+    }
     const account = options?.accounts.find((item) => item.provider === kind);
     if (kind === "axiom" || kind === "devrev" || kind === "signoz" || kind === "honeycomb" || kind === "betterstack") {
       onChange([...triggers, { kind, integrationAccountId: account?.id ?? "" }]);
@@ -359,6 +391,7 @@ export function AutomationTriggerEditor({ options, triggers, onChange, open, onO
     }
   }}>
     {triggers.map((trigger, index) => <TriggerCard
+      automationId={automationId}
       fieldsRef={index === triggers.length - 1 ? addedFieldsRef : undefined}
       key={cardKeys[index] ?? `new:${index}`}
       onChange={(next) => onChange(triggers.map((current, position) => position === index ? next : current))}
@@ -377,7 +410,7 @@ export function AutomationTriggerEditor({ options, triggers, onChange, open, onO
       {triggers.length > 1 ? <span className="automationTrigger__hint">Any trigger starts a run</span> : null}
       {full ? <span className="automationTrigger__hint">Up to {maxAutomationTriggers} triggers per automation</span> : null}
       {open && !full ? <div aria-label="Choose a trigger" className="automationTrigger__menu" id={menuId} ref={menuRef}>
-        <AutomationTriggerMenu onChoose={choose} telemetry={telemetry} />
+        <AutomationTriggerMenu onChoose={choose} telemetry={telemetry} webhook={!triggers.some((trigger) => trigger.kind === "webhook")} />
       </div> : null}
     </div>
   </div>;

@@ -974,6 +974,44 @@ ten runs per pass; issues past that are logged and skipped. Error runs report
 to notification channels and keep an issue catalog, like alert runs. The
 **Investigate new errors** template uses the trigger.
 
+## Webhook trigger
+
+Any system that can send an HTTP request can start an automation with the
+**Webhook** trigger. It needs no connection. Each automation has one webhook:
+
+```text
+<public>/api/webhooks/automations/<automation>
+```
+
+A `POST` with `Authorization: Bearer <token>` starts a run while the
+automation is on and has a webhook trigger. The trigger card shows the URL
+and token once the automation is created; the management API and MCP server
+return them from `get_automation_webhook`. The token is derived per
+automation from the credential key, like the Axiom and Better Stack webhook
+secrets, so it does not change and cannot be rotated without creating a new
+automation.
+
+```sh
+curl -X POST '<public>/api/webhooks/automations/<automation>' \
+  -H 'Authorization: Bearer <token>' \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: deploy-4821' \
+  -d '{"title":"Deploy 4821 failed","details":"..."}'
+```
+
+- The body, up to 1 MB, is the run's trigger payload. A JSON body is
+  pretty-printed and its `title` field names the run; any other body is passed
+  on as text. The worker keeps the first 100,000 characters.
+- Requests with the same `Idempotency-Key` header start one run. The second
+  answers `200` with the first run's ID. Without the header, each request
+  starts a run and answers `202`.
+- A wrong token answers `401`. An automation that is off or has no webhook
+  trigger answers `404`. Each automation accepts 30 requests a minute per API
+  task; more answer `429` with `Retry-After`.
+- In a multi-cell deployment, the shared address forwards the request to the
+  cell that holds the automation.
+- Webhook runs report to the automation's notification channels.
+
 ## Custom MCP servers
 
 Organizations can connect remote Streamable HTTP MCP servers with either a

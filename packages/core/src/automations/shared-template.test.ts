@@ -15,12 +15,14 @@ describe("shared automation templates", () => {
       { channelIds: ["998877"], integrationAccountId: accountId, kind: "discord" },
       { integrationAccountId: accountId, kind: "devrev" },
       { eventTypes: ["merged"], integrationAccountId: accountId, kind: "github", repositoryIds: ["42424242-4242-4242-8242-424242424242"] },
+      { kind: "webhook" },
     ])).toEqual([
       { channelIds: [], eventMode: "mentions", integrationAccountId: "", kind: "slack" },
       { eventTypes: ["regression"], integrationAccountId: "", kind: "sentry", projectIds: [] },
       { channelIds: [], integrationAccountId: "", kind: "discord" },
       { integrationAccountId: "", kind: "devrev" },
       { eventTypes: ["merged"], integrationAccountId: "", kind: "github", repositoryIds: [] },
+      { kind: "webhook" },
     ]);
   });
 

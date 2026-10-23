@@ -62,6 +62,8 @@ import {
   getSentryOrganizationSlug,
 } from "../integrations/sentry-credentials.js";
 import { getOrganizationIntegrationAccount } from "../../../../packages/core/src/db/integrations.js";
+import { automationWebhookToken } from "../../../../packages/core/src/integrations/webhook-secret.js";
+import { automationWebhookUrl } from "../integrations/urls.js";
 
 const automationEnabledSchema = z.object({ enabled: z.boolean() });
 const runMessageSchema = z.object({
@@ -678,6 +680,22 @@ export const automationRoutes = new Hono()
     return deleted
       ? context.json({ shared: false })
       : context.json({ error: "Automation is not shared" }, 404);
+  })
+  // Where a webhook trigger's requests go. The URL works while the
+  // automation is on and has a webhook trigger.
+  .get("/:automationId/webhook", async (context) => {
+    const access = await getAutomationTenant(context.req.raw.headers);
+    if (!access.ok) return context.json({ error: access.error }, access.status);
+    const automationId = context.req.param("automationId");
+    if (!z.uuid().safeParse(automationId).success) {
+      return context.json({ error: "Automation not found" }, 404);
+    }
+    const automation = await getAutomation(access.tenant.organizationId, automationId);
+    if (!automation) return context.json({ error: "Automation not found" }, 404);
+    return context.json({
+      token: automationWebhookToken(automation.id),
+      url: automationWebhookUrl(automation.id),
+    });
   })
   .get("/:automationId/runs", async (context) => {
     const access = await getAutomationTenant(context.req.raw.headers);

@@ -33,6 +33,7 @@ export function sharedTriggerDescription(trigger: AutomationTrigger): string {
     return `When a pull request is ${events} in a GitHub repository you choose`;
   }
   if (trigger.kind === "discord") return "When someone runs /automate in a Discord channel you choose";
+  if (trigger.kind === "webhook") return "When a request reaches the automation's webhook URL";
   return `${scheduleLabel(trigger)}, in your time zone`;
 }
 
