@@ -27,6 +27,7 @@ import { useDocumentTitle } from "../use-document-title";
 import { useTelemetryAvailable } from "../use-telemetry-available";
 import { useTelemetryQuery } from "../use-telemetry-query";
 import "../components/automation-run-history.css";
+import { traceOverviewMetricBars } from "./traces-overview-charts";
 
 type RequestSeries = "error" | "ok";
 
@@ -101,20 +102,7 @@ function OverviewBody({
   const metricBars = useMemo(() => {
     const response = overview.data;
     if (!response) return null;
-    const makeBars = (value: (row: TraceOverview["series"][number]) => number) => histogramBars(
-      {
-        buckets: response.overview.series.map((row) => ({ bucket: row.bucket, count: value(row), group: "value" })),
-        since: response.since,
-        stepMs: response.stepMs,
-        until: response.until,
-      },
-      ["value"],
-      () => "value",
-    );
-    return {
-      errorRate: makeBars((row) => row.requests ? (row.errors / row.requests) * 100 : 0),
-      latency: makeBars((row) => row.p95_ms),
-    };
+    return traceOverviewMetricBars(response);
   }, [overview.data]);
   const minutes = rangeMinutes[query.range];
   const environment = environmentFilter(query.filters);

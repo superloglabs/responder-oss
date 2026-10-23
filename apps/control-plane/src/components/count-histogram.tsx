@@ -123,7 +123,7 @@ export function CountHistogram<Series extends string>({
               {series.map((item) => (
                 <div key={item.name}>
                   <dt><span aria-hidden="true" style={{ background: item.colorForValue?.(hovered.counts[item.name]) ?? item.color }} />{item.label}</dt>
-                  <dd>{item.formatValue ? item.formatValue(hovered.counts[item.name]) : hovered.counts[item.name].toLocaleString()}</dd>
+                  <dd>{hovered.hasData === false ? "No data" : item.formatValue ? item.formatValue(hovered.counts[item.name]) : hovered.counts[item.name].toLocaleString()}</dd>
                 </div>
               ))}
               {series.length > 1 ? (

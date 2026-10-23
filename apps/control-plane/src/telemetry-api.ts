@@ -470,6 +470,8 @@ export function fetchTelemetryOverviewDetails(range: TelemetryRange): Promise<{ 
 }
 
 export interface HistogramBar<Series extends string> {
+  // False for derived metrics in buckets without observations.
+  hasData?: boolean;
   counts: Record<Series, number>;
   start: Date;
   total: number;
