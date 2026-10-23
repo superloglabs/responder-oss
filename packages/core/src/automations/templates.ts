@@ -198,6 +198,21 @@ export const builtInAutomationTemplates: BuiltInAutomationTemplate[] = [
   },
   {
     category: "bug_triage",
+    connectors: ["github"],
+    description: "When your telemetry shows a new error, or a resolved one comes back, find the cause in your code and suggest a fix.",
+    id: "investigate-new-errors",
+    name: "Investigate new errors",
+    prompt: [
+      "An error issue in this workspace's telemetry opened for the first time or came back after being resolved. The trigger has the exception, its service, how often it happened, the newest stack trace, and its trace ID.",
+      "Find the code that raised it in the selected repositories, starting from the top application frame. Read the surrounding code and recent commits that touched it.",
+      "Work out why it fails: the input or state that reaches that line, and what changed if it is a regression.",
+      "Report what is failing, how often, the likely cause with file and line, and a fix. Open a pull request when the fix is small and clear.",
+      "If the error is expected, such as a validation failure or a client disconnect, say so in one line and suggest silencing it.",
+    ].join("\n"),
+    triggers: [{ eventTypes: ["new_issue", "regression"], kind: "errors" }],
+  },
+  {
+    category: "bug_triage",
     connectors: ["honeycomb", "github"],
     description: "When a Honeycomb trigger or SLO burn alert fires, query the events behind it and find the cause in your code.",
     id: "investigate-honeycomb-alerts",

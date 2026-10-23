@@ -1,5 +1,6 @@
 import { integrationConnectionOperations } from "./integration-connections.js";
 import { dashboardOperations } from "./dashboard-operations.js";
+import { errorIssueOperations } from "./error-issue-operations.js";
 import { telemetryOperations } from "./telemetry-operations.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -1030,5 +1031,6 @@ export const managementOperations: ManagementOperation[] = [
     },
   }),
   ...telemetryOperations,
+  ...errorIssueOperations,
   ...dashboardOperations,
 ];

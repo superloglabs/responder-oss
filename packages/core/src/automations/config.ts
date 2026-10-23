@@ -72,6 +72,16 @@ export const automationTriggerSchema = z.discriminatedUnion("kind", [
       .describe("Sentry project IDs."),
   }).describe("Runs on new or regressed Sentry issues in the selected projects."),
   z.object({
+    eventTypes: z.array(z.enum(["new_issue", "regression"])).min(1).max(2)
+      .refine(uniqueIds, "Event types must be unique")
+      .describe("Run on new error issues, issues that occur again after being resolved, or both."),
+    kind: z.literal("errors"),
+    // Without services, issues from every service start a run.
+    services: z.array(z.string().trim().min(1).max(200)).max(50)
+      .refine(uniqueIds, "Services must be unique").optional()
+      .describe("Only issues from these `service.name` values start a run."),
+  }).describe("Runs when the workspace's telemetry opens a new error issue or reopens a resolved one. Needs telemetry."),
+  z.object({
     integrationAccountId: integrationAccountIdSchema,
     kind: z.literal("axiom"),
   }).describe("Runs when an Axiom monitor sends an alert to the connection's webhook."),
@@ -125,8 +135,8 @@ export const automationTriggerSchema = z.discriminatedUnion("kind", [
   ).describe("Runs on the hour, at a local time each day or week, or on a custom cron expression."),
 ]);
 
-// Where a scheduled, Sentry, Axiom, SigNoz, Honeycomb, Better Stack, or
-// GitHub automation reports each finished run. Slack only for now.
+// Where a scheduled, Sentry, error issue, Axiom, SigNoz, Honeycomb, Better
+// Stack, or GitHub automation reports each finished run. Slack only for now.
 export const automationNotificationSchema = z.discriminatedUnion("kind", [
   z.object({
     channelId: externalResourceIdSchema,
@@ -136,11 +146,11 @@ export const automationNotificationSchema = z.discriminatedUnion("kind", [
 ]);
 
 // Slack and Discord runs answer where their event came from. Scheduled,
-// Sentry, Axiom, SigNoz, Honeycomb, Better Stack, and GitHub runs have no
-// reply thread, so they report to notification channels.
+// Sentry, error issue, Axiom, SigNoz, Honeycomb, Better Stack, and GitHub runs
+// have no reply thread, so they report to notification channels.
 export function automationTriggersNotify(triggers: Array<{ kind: AutomationTrigger["kind"] }>): boolean {
   return triggers.some((trigger) =>
-    trigger.kind === "schedule" || trigger.kind === "sentry" || trigger.kind === "axiom" ||
+    trigger.kind === "schedule" || trigger.kind === "sentry" || trigger.kind === "errors" || trigger.kind === "axiom" ||
     trigger.kind === "signoz" || trigger.kind === "honeycomb" || trigger.kind === "betterstack" ||
     trigger.kind === "github"
   );
@@ -194,7 +204,7 @@ export const automationConfigurationSchema = z
     ) {
       context.addIssue({
         code: "custom",
-        message: "Notifications are only available for scheduled, Sentry, Axiom, SigNoz, Honeycomb, Better Stack, and GitHub automations",
+        message: "Notifications are only available for scheduled, Sentry, error, Axiom, SigNoz, Honeycomb, Better Stack, and GitHub automations",
         path: ["notifications"],
       });
     }

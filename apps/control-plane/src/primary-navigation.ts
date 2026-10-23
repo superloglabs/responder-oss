@@ -4,6 +4,7 @@ export type NavigationSection =
   | "alerts"
   | "automations"
   | "dashboards"
+  | "errors"
   | "integrations"
   | "issues"
   | "logs"
@@ -74,12 +75,16 @@ export function primaryNavigation(options: NavigationOptions): NavigationItem[] 
             to: "/traces",
           },
         ]),
-        ...(options.alerts
-          ? inGroup("Detect", [
-              { label: "Alerts", section: "alerts", to: "/alerts" },
-              { label: "Synthetics", section: "synthetics", to: "/synthetics" },
-            ])
-          : []),
+        // Errors come with telemetry; alerts and synthetic checks need alerts.
+        ...inGroup("Detect", [
+          { label: "Errors", section: "errors", to: "/errors" },
+          ...(options.alerts
+            ? [
+                { label: "Alerts", section: "alerts" as const, to: "/alerts" },
+                { label: "Synthetics", section: "synthetics" as const, to: "/synthetics" },
+              ]
+            : []),
+        ]),
       ]
     : [];
   if (options.simplified) {

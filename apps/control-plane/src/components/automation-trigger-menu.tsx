@@ -16,6 +16,11 @@ const providers = [
     { value: "regression", label: "Issue regression" },
     { value: "both", label: "New issue or regression" },
   ] },
+  { kind: "errors", name: "Errors", events: [
+    { value: "new_issue", label: "New error" },
+    { value: "regression", label: "Error regression" },
+    { value: "both", label: "New error or regression" },
+  ] },
   { kind: "axiom", name: "Axiom", events: [
     { value: "alert", label: "Monitor alert" },
   ] },
@@ -58,14 +63,16 @@ function moveFocus(event: KeyboardEvent<HTMLElement>, selector: string) {
   items[next]?.focus();
 }
 
-export function AutomationTriggerMenu({ onChoose }: {
+export function AutomationTriggerMenu({ onChoose, telemetry = false }: {
   onChoose: (kind: AutomationTrigger["kind"], event: TriggerEvent) => void;
+  // Errors are offered only to workspaces with telemetry.
+  telemetry?: boolean;
 }) {
   const [query, setQuery] = useState("");
   const [active, setActive] = useState<string | null>(null);
   const root = useRef<HTMLDivElement>(null);
   const search = query.trim().toLowerCase();
-  const filtered = providers.map((provider) => ({
+  const filtered = providers.filter((provider) => telemetry || provider.kind !== "errors").map((provider) => ({
     ...provider,
     events: provider.events.filter((event) => provider.name.toLowerCase().includes(search) || event.label.toLowerCase().includes(search)),
   })).filter((provider) => provider.events.length);

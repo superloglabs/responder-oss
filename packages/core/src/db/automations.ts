@@ -496,6 +496,49 @@ export function findAutomationsForBetterStackIncident(
   return findAutomationsForConnectionTrigger("betterstack", integrationAccountId);
 }
 
+// Enabled automations in the workspace with an error trigger for the event,
+// limited to the issue's service when the trigger names services.
+export async function findAutomationsForErrorIssue(input: {
+  eventType: "new_issue" | "regression";
+  organizationId: string;
+  service: string | null;
+}): Promise<Array<{ automationId: string }>> {
+  const rows = await getDatabase()
+    .select({
+      automationId: automations.id,
+      triggers: automationVersions.triggers,
+    })
+    .from(automations)
+    .innerJoin(
+      organizationCapabilities,
+      and(
+        eq(organizationCapabilities.organizationId, automations.organizationId),
+        eq(organizationCapabilities.capability, "automations"),
+        eq(organizationCapabilities.enabled, true),
+      ),
+    )
+    .innerJoin(
+      automationVersions,
+      eq(automationVersions.id, automations.activeVersionId),
+    )
+    .where(
+      and(
+        eq(automations.organizationId, input.organizationId),
+        eq(automations.enabled, true),
+        sql`${automationVersions.triggers} @> '[{"kind":"errors"}]'::jsonb`,
+      ),
+    );
+  return rows.flatMap((row) =>
+    row.triggers.some((trigger) =>
+      trigger.kind === "errors" &&
+      trigger.eventTypes.includes(input.eventType) &&
+      (!trigger.services?.length || (input.service !== null && trigger.services.includes(input.service)))
+    )
+      ? [{ automationId: row.automationId }]
+      : []
+  );
+}
+
 // These triggers have no resources to choose: every event that reaches the
 // connection's webhook starts a run.
 async function findAutomationsForConnectionTrigger(
@@ -616,10 +659,11 @@ export async function findDueScheduledAutomations(now: Date): Promise<Array<{
   return due.filter((item) => !receivedKeys.has(`${item.automationId}:${scheduleExternalEventId(item.scheduledFor)}`));
 }
 
-// The distinct connections of the triggers. A schedule trigger has none.
+// The distinct connections of the triggers. Schedule and error issue
+// triggers have none.
 function triggerAccountIds(triggers: AutomationTrigger[]): string[] {
   return [...new Set(triggers.flatMap((trigger) =>
-    trigger.kind === "schedule" ? [] : [trigger.integrationAccountId]
+    trigger.kind === "schedule" || trigger.kind === "errors" ? [] : [trigger.integrationAccountId]
   ))];
 }
 
@@ -652,6 +696,26 @@ async function validateConfigurationResources(
   }
   for (const trigger of configuration.triggers) {
     if (trigger.kind === "schedule") continue;
+    // Error issues come from the workspace's own telemetry.
+    if (trigger.kind === "errors") {
+      const [telemetry] = await tx
+        .select({ enabled: organizationCapabilities.enabled })
+        .from(organizationCapabilities)
+        .where(
+          and(
+            eq(organizationCapabilities.organizationId, organizationId),
+            eq(organizationCapabilities.capability, "telemetry"),
+            eq(organizationCapabilities.enabled, true),
+          ),
+        );
+      if (!telemetry) {
+        throw new AutomationConfigurationError(
+          "Error triggers need telemetry in this workspace",
+          "capability_disabled",
+        );
+      }
+      continue;
+    }
     const triggerAccount = accountRows.find(
       (account) => account.id === trigger.integrationAccountId,
     );
@@ -1658,7 +1722,7 @@ export interface AutomationTriggerInput {
   attributes?: Record<string, string | number | boolean | null>;
   body: string;
   externalEventId: string;
-  provider: "axiom" | "betterstack" | "devrev" | "discord" | "github" | "honeycomb" | "manual" | "schedule" | "sentry" | "signoz" | "slack";
+  provider: "axiom" | "betterstack" | "devrev" | "discord" | "errors" | "github" | "honeycomb" | "manual" | "schedule" | "sentry" | "signoz" | "slack";
   sourceUrl?: string;
   title: string;
 }

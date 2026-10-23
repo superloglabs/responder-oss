@@ -33,6 +33,8 @@ export function shareableAutomationTriggers(
     if (trigger.kind === "axiom" || trigger.kind === "devrev" || trigger.kind === "signoz" || trigger.kind === "honeycomb" || trigger.kind === "betterstack") {
       return { integrationAccountId: "", kind: trigger.kind };
     }
+    // Service names belong to the sender's workspace.
+    if (trigger.kind === "errors") return { eventTypes: trigger.eventTypes, kind: "errors" };
     return { ...(trigger.frequency === "custom" ? { cron: trigger.cron } : {}), frequency: trigger.frequency, hour: trigger.hour, kind: "schedule", timezone: "UTC", weekday: trigger.weekday };
   });
 }

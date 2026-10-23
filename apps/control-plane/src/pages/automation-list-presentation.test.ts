@@ -23,6 +23,9 @@ describe("automation list presentation", () => {
     expect(triggerEventLabel({ eventTypes: ["regression"], integrationAccountId: "a", kind: "sentry", projectIds: [] })).toBe("Issue regression");
     expect(triggerEventLabel({ eventTypes: ["new_issue", "regression"], integrationAccountId: "a", kind: "sentry", projectIds: [] })).toBe("New issue or regression");
     expect(triggerEventLabel({ channelIds: [], integrationAccountId: "a", kind: "discord" })).toBe("Command in channel");
+    expect(triggerEventLabel({ eventTypes: ["new_issue"], kind: "errors" })).toBe("New error");
+    expect(triggerEventLabel({ eventTypes: ["regression"], kind: "errors" })).toBe("Error regression");
+    expect(triggerEventLabel({ eventTypes: ["new_issue", "regression"], kind: "errors" })).toBe("New error or regression");
     expect(triggerEventLabel({ integrationAccountId: "a", kind: "axiom" })).toBe("Monitor alert");
     expect(triggerEventLabel({ integrationAccountId: "a", kind: "signoz" })).toBe("Alert fired");
     expect(triggerEventLabel({ integrationAccountId: "a", kind: "honeycomb" })).toBe("Trigger or SLO alert");

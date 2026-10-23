@@ -1,7 +1,9 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, ilike, inArray, isNotNull, lt, or, type SQL, sql } from "drizzle-orm";
 import {
   type ErrorCandidateCursor,
   type ErrorIssueKind,
+  type ErrorIssueSample,
+  type ErrorIssueStatus,
   type ErrorIssueTransition,
   type ErrorOccurrences,
   occurrenceTransition,
@@ -139,4 +141,179 @@ export async function recordErrorOccurrences(
       });
   }
   return { issueId, transition };
+}
+
+export type ErrorIssueSummary = {
+  eventCount: number;
+  exceptionType: string;
+  firstSeenAt: string;
+  id: string;
+  kind: ErrorIssueKind;
+  lastSeenAt: string;
+  regressedAt: string | null;
+  service: string | null;
+  status: ErrorIssueStatus;
+  statusChangedAt: string | null;
+  title: string;
+  topFrame: string | null;
+};
+
+export type ErrorIssue = ErrorIssueSummary & {
+  fingerprint: string;
+  frames: string[];
+  lastSample: ErrorIssueSample;
+  message: string | null;
+};
+
+export type ErrorIssueDay = { day: string; eventCount: number };
+
+export type ErrorIssueListFilter = {
+  // The last issue of the previous page, by last seen time then ID.
+  before?: { id: string; lastSeenAt: string };
+  limit: number;
+  search?: string;
+  service?: string;
+  status?: ErrorIssueStatus;
+};
+
+const summaryColumns = {
+  eventCount: errorIssues.eventCount,
+  exceptionType: errorIssues.exceptionType,
+  firstSeenAt: errorIssues.firstSeenAt,
+  id: errorIssues.id,
+  kind: errorIssues.kind,
+  lastSeenAt: errorIssues.lastSeenAt,
+  regressedAt: errorIssues.regressedAt,
+  service: errorIssues.service,
+  status: errorIssues.status,
+  statusChangedAt: errorIssues.statusChangedAt,
+  title: errorIssues.title,
+  topFrame: errorIssues.topFrame,
+};
+
+type SummaryRow = Omit<ErrorIssueSummary, "firstSeenAt" | "lastSeenAt" | "regressedAt" | "statusChangedAt"> & {
+  firstSeenAt: Date;
+  lastSeenAt: Date;
+  regressedAt: Date | null;
+  statusChangedAt: Date | null;
+};
+
+function toSummary(row: SummaryRow): ErrorIssueSummary {
+  return {
+    ...row,
+    firstSeenAt: row.firstSeenAt.toISOString(),
+    lastSeenAt: row.lastSeenAt.toISOString(),
+    regressedAt: row.regressedAt?.toISOString() ?? null,
+    statusChangedAt: row.statusChangedAt?.toISOString() ?? null,
+  };
+}
+
+// The text a search matches as written, with LIKE's wildcards escaped.
+function likePattern(search: string): string {
+  return `%${search.replace(/[\\%_]/gu, (character) => `\\${character}`)}%`;
+}
+
+// A workspace's issues, most recently seen first.
+export async function listErrorIssues(
+  organizationId: string,
+  filter: ErrorIssueListFilter,
+): Promise<ErrorIssueSummary[]> {
+  const conditions: SQL[] = [eq(errorIssues.organizationId, organizationId)];
+  if (filter.status) conditions.push(eq(errorIssues.status, filter.status));
+  if (filter.service) conditions.push(eq(errorIssues.service, filter.service));
+  if (filter.search) {
+    const pattern = likePattern(filter.search);
+    conditions.push(or(ilike(errorIssues.title, pattern), ilike(errorIssues.topFrame, pattern), ilike(errorIssues.exceptionType, pattern))!);
+  }
+  if (filter.before) {
+    const lastSeenAt = new Date(filter.before.lastSeenAt);
+    conditions.push(or(
+      lt(errorIssues.lastSeenAt, lastSeenAt),
+      and(eq(errorIssues.lastSeenAt, lastSeenAt), lt(errorIssues.id, filter.before.id)),
+    )!);
+  }
+  const rows = await getDatabase()
+    .select(summaryColumns)
+    .from(errorIssues)
+    .where(and(...conditions))
+    .orderBy(desc(errorIssues.lastSeenAt), desc(errorIssues.id))
+    .limit(filter.limit);
+  return rows.map(toSummary);
+}
+
+// How many of a workspace's issues have each status.
+export async function errorIssueStatusCounts(organizationId: string): Promise<Record<ErrorIssueStatus, number>> {
+  const rows = await getDatabase()
+    .select({ count: count(), status: errorIssues.status })
+    .from(errorIssues)
+    .where(eq(errorIssues.organizationId, organizationId))
+    .groupBy(errorIssues.status);
+  const counts: Record<ErrorIssueStatus, number> = { open: 0, resolved: 0, silenced: 0 };
+  for (const row of rows) counts[row.status] = row.count;
+  return counts;
+}
+
+// The services a workspace's issues came from.
+export async function errorIssueServices(organizationId: string): Promise<string[]> {
+  const rows = await getDatabase()
+    .selectDistinct({ service: errorIssues.service })
+    .from(errorIssues)
+    .where(and(eq(errorIssues.organizationId, organizationId), isNotNull(errorIssues.service)))
+    .orderBy(asc(errorIssues.service));
+  return rows.flatMap((row) => (row.service ? [row.service] : []));
+}
+
+export async function findErrorIssue(organizationId: string, issueId: string): Promise<ErrorIssue | null> {
+  const [row] = await getDatabase()
+    .select({
+      ...summaryColumns,
+      fingerprint: errorIssues.fingerprint,
+      frames: errorIssues.frames,
+      lastSample: errorIssues.lastSample,
+      message: errorIssues.message,
+    })
+    .from(errorIssues)
+    .where(and(eq(errorIssues.organizationId, organizationId), eq(errorIssues.id, issueId)));
+  if (!row) return null;
+  const { fingerprint, frames, lastSample, message, ...summary } = row;
+  return { ...toSummary(summary), fingerprint, frames, lastSample, message };
+}
+
+// Occurrences per UTC day since a day, for each issue. Days without
+// occurrences are left out.
+export async function errorIssueDays(issueIds: string[], since: string): Promise<Map<string, ErrorIssueDay[]>> {
+  const days = new Map<string, ErrorIssueDay[]>();
+  if (issueIds.length === 0) return days;
+  const rows = await getDatabase()
+    .select({ day: errorIssueDailyCounts.day, eventCount: errorIssueDailyCounts.eventCount, issueId: errorIssueDailyCounts.issueId })
+    .from(errorIssueDailyCounts)
+    .where(and(inArray(errorIssueDailyCounts.issueId, issueIds), gte(errorIssueDailyCounts.day, since)))
+    .orderBy(asc(errorIssueDailyCounts.day));
+  for (const row of rows) {
+    const list = days.get(row.issueId) ?? [];
+    list.push({ day: row.day, eventCount: row.eventCount });
+    days.set(row.issueId, list);
+  }
+  return days;
+}
+
+// Resolves, silences, or reopens an issue. Returns null when the workspace
+// has no such issue. Setting the status it already has keeps the time it was
+// set, since the worker compares late occurrences with that time.
+export async function setErrorIssueStatus(
+  organizationId: string,
+  issueId: string,
+  status: ErrorIssueStatus,
+): Promise<ErrorIssue | null> {
+  const now = new Date();
+  const updated = await getDatabase()
+    .update(errorIssues)
+    .set({
+      status,
+      statusChangedAt: sql`case when ${errorIssues.status} = ${status} then ${errorIssues.statusChangedAt} else ${now.toISOString()}::timestamptz end`,
+      updatedAt: now,
+    })
+    .where(and(eq(errorIssues.organizationId, organizationId), eq(errorIssues.id, issueId)))
+    .returning({ id: errorIssues.id });
+  return updated.length > 0 ? findErrorIssue(organizationId, issueId) : null;
 }

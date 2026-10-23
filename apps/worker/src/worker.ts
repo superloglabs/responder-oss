@@ -103,6 +103,7 @@ import { BILLING_NOTICE_RETRY_WINDOW_MS } from "@responder/core/billing/notifica
 import { defaultAlertAutomationDependencies, startAlertAutomations } from "./telemetry-alert-automations.js";
 import { checkDueTelemetryAlerts, defaultTelemetryAlertDependencies } from "./telemetry-alerts.js";
 import { ingestErrorIssues } from "./error-issues.js";
+import { defaultErrorIssueAutomationDependencies, startErrorIssueAutomations } from "./error-issue-automations.js";
 import {
   automationSuggestionModel,
   generateDueAutomationSuggestions,
@@ -205,9 +206,23 @@ function checkTelemetryAlerts(): Promise<void> {
   return telemetryAlertPass;
 }
 
-// Runs at most one error issue pass at a time.
+const errorIssueAutomationDependencies = {
+  ...defaultErrorIssueAutomationDependencies,
+  queue: async (run: { organizationId: string; runId: string }) => {
+    const queued = await boss.send(automationRunQueue, {
+      kind: "automation_run",
+      queuedAt: new Date().toISOString(),
+      runId: run.runId,
+    }, automationRunJobOptions(run.organizationId));
+    if (!queued) throw new Error("Automation run job was not created");
+  },
+};
+
+// Runs at most one error issue pass at a time. Issues that opened or opened
+// again start the automations with an error trigger once the pass is saved.
 function groupErrorIssues(): Promise<void> {
   errorIssuePass ??= ingestErrorIssues()
+    .then((changes) => startErrorIssueAutomations(changes, errorIssueAutomationDependencies))
     .then(() => undefined)
     .catch((error: unknown) => {
       void reportWorkerException(error, { operation: "error_issues" });

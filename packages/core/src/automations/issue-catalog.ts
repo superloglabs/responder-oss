@@ -3,6 +3,7 @@
 export const issueCatalogTriggerKinds: ReadonlySet<string> = new Set([
   "axiom",
   "betterstack",
+  "errors",
   "honeycomb",
   "sentry",
   "signoz",

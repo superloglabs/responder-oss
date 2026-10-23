@@ -1,0 +1,24 @@
+/* Errors list and error issue page. */
+.errorIssues { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.errorIssues .explorerFilterBar { max-width: 360px; }
+.errorIssues__title { display: block; overflow: hidden; color: var(--ds-text-primary); text-overflow: ellipsis; white-space: nowrap; }
+.errorIssues__meta { display: block; overflow: hidden; color: var(--ds-text-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.errorIssues__number { font-variant-numeric: tabular-nums; }
+.errorIssues__more { align-self: center; }
+
+/* Occurrences per day as small bars. */
+.errorSparkline { display: flex; align-items: flex-end; gap: 1px; height: 20px; }
+.errorSparkline > span { flex: 1 1 0; min-width: 2px; min-height: 1px; border-radius: 1px; background: var(--ds-border-default); }
+.errorSparkline > span[data-filled="true"] { background: #e5484d; }
+
+.errorIssue { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.errorIssue__titleRow h1 { overflow-wrap: anywhere; }
+.errorIssue__message { margin: 0; color: var(--ds-text-secondary); font-size: 13px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.errorIssue__stack { max-height: 420px; margin: 0; overflow: auto; padding: 12px; border-radius: 8px; background: var(--ds-surface-hover); color: var(--ds-text-primary); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 18px; white-space: pre; }
+.errorIssue__frames { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.errorIssue__frames li { overflow: hidden; color: var(--ds-text-primary); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.errorIssue__attributes { display: grid; grid-template-columns: minmax(120px, max-content) minmax(0, 1fr); gap: 4px 16px; margin: 0; font-size: 12px; }
+.errorIssue__attributes dt { color: var(--ds-text-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.errorIssue__attributes dd { margin: 0; overflow-wrap: anywhere; color: var(--ds-text-primary); }
+.errorIssue__links { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px; }
+.errorIssue__fingerprint { color: var(--ds-text-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
