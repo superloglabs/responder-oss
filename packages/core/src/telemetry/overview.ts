@@ -83,7 +83,9 @@ type Row = Record<string, string | number>;
 // Log levels by severity number, or by text when the number is unset.
 const ERROR_LOG = "(SeverityNumber >= 17 OR upper(SeverityText) IN ('ERROR', 'FATAL', 'CRITICAL', 'ALERT', 'EMERGENCY'))";
 const WARNING_LOG = `(NOT ${ERROR_LOG} AND (SeverityNumber BETWEEN 13 AND 16 OR upper(SeverityText) IN ('WARN', 'WARNING')))`;
-// The rollup keeps upper(SeverityText) only.
+// The rollup keeps upper(SeverityText) only, so a log that sets SeverityNumber
+// without a level name counts toward its service's total but not as an error
+// or warning.
 const ERROR_SEVERITY = "severity IN ('ERROR', 'FATAL', 'CRITICAL', 'ALERT', 'EMERGENCY')";
 const WARNING_SEVERITY = "severity IN ('WARN', 'WARNING')";
 // The ClickHouse exporter writes Error; older exporters wrote STATUS_CODE_ERROR.
