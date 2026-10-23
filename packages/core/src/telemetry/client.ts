@@ -15,6 +15,7 @@ export function telemetryClickHouseConfig(
 ): ClickHouseClientConfigOptions | null {
   const url = environment.TELEMETRY_CLICKHOUSE_URL;
   if (!url) return null;
+  const maxConnections = Number(environment.TELEMETRY_CLICKHOUSE_MAX_CONNECTIONS);
   return {
     url,
     database: environment.TELEMETRY_CLICKHOUSE_DATABASE || "superlog",
@@ -33,6 +34,11 @@ export function telemetryClickHouseConfig(
       // Cancel abandoned reads instead of letting them hold a server slot.
       cancel_http_readonly_queries_on_client_close: 1,
     },
+    // A store that limits the user's concurrent queries rejects the ones over
+    // the limit. With fewer open connections than that, extra queries wait
+    // here for a free connection instead. The request timeout starts once a
+    // query has its connection.
+    ...(Number.isInteger(maxConnections) && maxConnections > 0 ? { max_open_connections: maxConnections } : {}),
   };
 }
 
