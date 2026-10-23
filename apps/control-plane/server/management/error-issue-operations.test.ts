@@ -33,6 +33,7 @@ vi.mock("../../../../packages/core/src/db/organization-capabilities.js", () => (
 vi.mock("../../../../packages/core/src/db/error-issues.js", () => ({
   errorIssueDays: mocks.days,
   errorIssueServices: vi.fn(),
+  errorIssueEnvironments: vi.fn(),
   errorIssueStatusCounts: vi.fn(),
   findErrorIssue: mocks.find,
   listErrorIssues: mocks.list,

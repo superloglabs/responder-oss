@@ -1,0 +1,163 @@
+import { expect, test, type Page } from "@playwright/test";
+
+test.use({ viewport: { width: 1440, height: 1000 } });
+
+const organization = {
+  id: "11111111-1111-4111-8111-111111111111",
+  name: "Acme",
+  slug: "acme-workspace-id",
+  createdAt: new Date().toISOString(),
+  logo: null,
+  metadata: null,
+};
+
+async function mockWorkspace(page: Page, capabilities: string[], contextDelayMs = 0) {
+  await page.route("**/api/auth/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith("/get-session")) {
+      await route.fulfill({
+        json: {
+          session: {
+            id: "session-id",
+            userId: "22222222-2222-4222-8222-222222222222",
+            activeOrganizationId: organization.id,
+            token: "session-token",
+            expiresAt: new Date(Date.now() + 60_000).toISOString(),
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          },
+          user: {
+            id: "22222222-2222-4222-8222-222222222222",
+            name: "Ada Lovelace",
+            email: "ada@example.com",
+            emailVerified: true,
+            image: null,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          },
+        },
+      });
+    } else if (path.endsWith("/organization/list")) {
+      await route.fulfill({ json: [organization] });
+    } else if (path.endsWith("/organization/get-full-organization")) {
+      await route.fulfill({ json: organization });
+    } else {
+      await route.fulfill({ json: null });
+    }
+  });
+  await page.route("**/api/context", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, contextDelayMs));
+    await route.fulfill({ json: { capabilities } });
+  });
+  await page.route("**/api/legacy-account-redirect", (route) => route.fulfill({ json: { redirect: false } }));
+  await page.route("**/api/integrations", (route) => route.fulfill({ json: { integrations: [] } }));
+  await page.route("**/api/automations", (route) => route.fulfill({ json: { automations: [] } }));
+  await page.route("**/api/agents", (route) => route.fulfill({ json: { agents: [] } }));
+  await page.route("**/api/billing", (route) => route.fulfill({ json: { configured: false, enabled: false } }));
+}
+
+const issueId = "33333333-3333-4333-8333-333333333333";
+const now = Date.now();
+const issue = { id: issueId, title: "TypeError: Cannot read payment method", exceptionType: "TypeError", service: "checkout", kind: "span", status: "open", eventCount: 1284, firstSeenAt: new Date(now - 86400000).toISOString(), lastSeenAt: new Date(now - 60000).toISOString(), regressedAt: null, statusChangedAt: null, topFrame: "payment.ts:84", fingerprint: "v1:test", frames: ["payment.ts:84"], message: "Cannot read payment method", lastSample: { seenAt: new Date(now - 60000).toISOString(), kind: "span", message: "Cannot read payment method", stacktrace: "TypeError: Cannot read payment method\n    at processPayment (payment.ts:84:29)", traceId: "abc123", attributes: {}, resourceAttributes: { "deployment.environment.name": "production", "service.version": "2.18.0" } } };
+
+async function setup(page: Page, pageSize = 1) {
+  await mockWorkspace(page, ["telemetry", "alerts", "simplified_navigation"]);
+  await page.route("**/api/c15t/**", (route) => route.abort());
+  await page.route("**/api/cells", (route) => route.fulfill({ json: { cells: [] } }));
+  const queries: URLSearchParams[] = [];
+  let current = { ...issue };
+  await page.route("**/api/error-issues**", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname.endsWith(issueId)) {
+      if (route.request().method() === "PATCH") current = { ...current, ...route.request().postDataJSON() };
+      await route.fulfill({ json: { issue: current, days: [{ day: new Date().toISOString().slice(0, 10), eventCount: 32 }], since: new Date(now - 29 * 86400000).toISOString().slice(0, 10) } });
+    } else {
+      queries.push(url.searchParams);
+      await route.fulfill({ json: { counts: { open: 1, resolved: 0, silenced: 0 }, services: ["checkout", "api"], environments: ["production", "staging"], since: new Date(now - 86400000).toISOString().slice(0, 10), issues: Array.from({ length: url.searchParams.has("before") ? 1 : pageSize }, (_, index) => ({ ...current, id: pageSize === 1 ? current.id : `33333333-3333-4333-8333-${String(index + (url.searchParams.has("before") ? 50 : 0)).padStart(12, "0")}`, days: [{ day: new Date().toISOString().slice(0, 10), eventCount: 32 }] })) } });
+    }
+  });
+  return queries;
+}
+
+test("combines checkbox filters, removes chips, and preserves search in the URL", async ({ page }, testInfo) => {
+  const queries = await setup(page);
+  await page.goto("/errors");
+  await page.getByRole("button", { name: "Reject All", exact: true }).click();
+  await expect(page.getByRole("link", { name: issue.title })).toBeVisible();
+  await page.getByRole("button", { name: "Filter", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Status", exact: true }).hover();
+  await page.getByRole("menuitemcheckbox", { name: "Resolved", exact: true }).click();
+  await expect.poll(() => queries.at(-1)?.getAll("statuses")).toEqual(["open", "resolved"]);
+  await expect(page.getByRole("menuitemcheckbox", { name: "Resolved", exact: true })).toBeChecked();
+  await page.keyboard.press("Escape"); await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Remove status filter" }).click();
+  await expect.poll(() => queries.at(-1)?.get("status")).toBe("all");
+  await expect.poll(() => queries.at(-1)?.getAll("statuses")).toEqual([]);
+  await page.getByRole("button", { name: "Filter", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Activity", exact: true }).hover();
+  await page.getByRole("menuitemcheckbox", { name: "No longer happening", exact: true }).click();
+  await expect.poll(() => queries.at(-1)?.get("activity")).toBe("inactive");
+  await page.keyboard.press("Escape"); await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Filter", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Activity", exact: true }).press("ArrowRight");
+  await page.getByRole("menuitemcheckbox", { name: "Still happening", exact: true }).click();
+  await expect.poll(() => queries.at(-1)?.has("activity")).toBe(false);
+  await expect(page.getByRole("menuitemcheckbox", { name: "Still happening", exact: true })).toBeChecked();
+  await expect(page.getByRole("menuitemcheckbox", { name: "No longer happening", exact: true })).toBeChecked();
+  await page.keyboard.press("Escape"); await page.keyboard.press("Escape");
+  await expect(page.locator(".errorFilterChip")).toContainText("No longer happening or Still happening");
+  await page.getByRole("searchbox", { name: "Search errors" }).fill("payment");
+  await expect.poll(() => queries.at(-1)?.get("search")).toBe("payment");
+  await expect(page).toHaveURL(/q=payment/);
+  await page.screenshot({ path: testInfo.outputPath("errors-catalog.png"), fullPage: true });
+});
+
+test("opens the detail and resolves an error", async ({ page }, testInfo) => {
+  await setup(page); await page.goto("/errors");
+  await page.getByRole("button", { name: "Reject All", exact: true }).click();
+  await page.getByRole("link", { name: issue.title }).click();
+  await expect(page.getByRole("heading", { name: issue.title })).toBeVisible();
+  await expect(page.getByText("Still happening", { exact: true })).toBeVisible();
+  await expect(page.getByText("production", { exact: true }).first()).toBeVisible();
+  await page.getByRole("button", { name: "Resolve", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Reopen", exact: true })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("error-detail.png"), fullPage: true });
+});
+
+test("sorts the complete result set and applies bulk status actions", async ({ page }) => {
+  const queries = await setup(page); await page.goto("/errors");
+  await page.getByRole("button", { name: "Reject All", exact: true }).click();
+  await expect(page.getByRole("link", { name: issue.title })).toBeVisible();
+  await page.getByRole("button", { name: /Sort errors/ }).click();
+  await page.getByRole("option", { name: "Sort: Events", exact: true }).click();
+  await expect.poll(() => queries.at(-1)?.get("sort")).toBe("events");
+  await page.getByRole("checkbox", { name: "Select visible errors", exact: true }).focus();
+  await page.keyboard.press("Space");
+  await expect(page.getByText("1 selected", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Ignore", exact: true }).click();
+  await expect(page.getByText("1 selected", { exact: true })).toHaveCount(0);
+  await page.getByRole("link", { name: issue.title }).click();
+  await expect(page.getByText("Ignored", { exact: true })).toBeVisible();
+});
+
+test("supports a narrow viewport without overflowing the page", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await setup(page); await page.goto("/errors");
+  await page.getByRole("button", { name: "Reject All", exact: true }).click();
+  await expect(page.getByRole("link", { name: issue.title })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
+
+test("paginates with the active filters and resets when filters change", async ({ page }) => {
+  const queries = await setup(page, 50); await page.goto("/errors?service=checkout");
+  await page.getByRole("button", { name: "Reject All", exact: true }).click();
+  await expect(page.getByText("1–50 errors", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Next", exact: true }).click();
+  await expect(page.getByText("51–51 errors", { exact: true })).toBeVisible();
+  expect(queries.at(-1)?.getAll("services")).toEqual(["checkout"]);
+  expect(queries.at(-1)?.get("beforeId")).toBe("33333333-3333-4333-8333-000000000049");
+  await expect(page.getByRole("button", { name: "Next", exact: true })).toBeDisabled();
+  await page.getByRole("button", { name: "Remove service filter" }).click();
+  await expect(page.getByText("1–50 errors", { exact: true })).toBeVisible();
+  expect(queries.at(-1)?.has("before")).toBe(false);
+});
