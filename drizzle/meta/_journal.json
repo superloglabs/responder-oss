@@ -659,6 +659,13 @@
       "when": 1792690455746,
       "tag": "0093_add_betterstack_integration",
       "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "7",
+      "when": 1792691964885,
+      "tag": "0094_alert_activation_details",
+      "breakpoints": true
     }
   ]
 }

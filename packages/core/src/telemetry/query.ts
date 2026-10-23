@@ -2302,6 +2302,7 @@ export type MetricSeriesFilter = {
 };
 
 type MetricSeriesQueryOptions = {
+  groupValue?: string;
   bucketAnchorNs?: string;
   // Read only this kind's table, and only points in this unit: a name can be
   // sent as more than one kind or unit.
@@ -2350,6 +2351,10 @@ export async function metricSeries(
         "MetricName = {metricName:String}",
         ...attr.conds,
       ];
+      if (queryOptions.groupValue !== undefined) {
+        baseConds.push(`${groupExpr} = {selectedGroup:String}`);
+        groupParams.selectedGroup = queryOptions.groupValue;
+      }
       if (filter.service) baseConds.push("ServiceName = {service:String}");
       if (queryOptions.unit !== undefined) baseConds.push("MetricUnit = {metricUnit:String}");
       const conds = [...baseConds, `TimeUnix >= ${sinceExpr}`, `TimeUnix <= ${untilExpr}`];
@@ -2791,13 +2796,17 @@ export async function countSeries(
   filter: SeriesFilter,
   groupBy: string | undefined,
   step: Step,
+  groupValue?: string,
 ): Promise<{ bucket: string; group: string; count: number }[]> {
   const folded = foldServiceAttrFilter(filter);
-  if (folded && rollupEligible(folded, groupBy, step) && (await rollupAvailable(ch))) {
+  if (groupValue === undefined && folded && rollupEligible(folded, groupBy, step) && (await rollupAvailable(ch))) {
     return countSeriesFromRollup(ch, organizationId, source, folded, groupBy, step);
   }
   const { conds, params, table } = countConditions(organizationId, source, filter);
   const group = groupExprForAttribute(groupBy, source);
+  if (groupValue !== undefined) {
+    conds.push(`${group.expr} = {selectedGroup:String}`);
+  }
 
   const query = `
     SELECT
@@ -2813,7 +2822,7 @@ export async function countSeries(
 
   const r = await ch.query({
     query,
-    query_params: { ...params, ...group.params },
+    query_params: { ...params, ...group.params, ...(groupValue !== undefined ? { selectedGroup: groupValue } : {}) },
     format: "JSONEachRow",
   });
   const rows = (await r.json()) as { bucket: string; group_key: string; c: string | number }[];
@@ -3044,14 +3053,18 @@ export async function eventSeries(
   groupBy: string | undefined,
   step: Step,
   aiPrices?: AiPriceParams,
+  groupValue?: string,
 ): Promise<MetricSeriesRow[]> {
   if (measure.aggregation === "count") {
-    const rows = await countSeries(ch, organizationId, source, filter, groupBy, step);
+    const rows = await countSeries(ch, organizationId, source, filter, groupBy, step, groupValue);
     return rows.map((row) => ({ bucket: row.bucket, group: row.group, value: row.count }));
   }
   const measured = measuredConditions(organizationId, source, filter, measure, groupBy, aiPrices);
   if (!measured) return [];
   const { conds, expr, group, params, table } = measured;
+  if (groupValue !== undefined) {
+    conds.push(`${group} = {selectedGroup:String}`);
+  }
   const r = await ch.query({
     query: `
       SELECT
@@ -3064,7 +3077,7 @@ export async function eventSeries(
       ORDER BY bucket ASC
       LIMIT 10000
     `,
-    query_params: params,
+    query_params: { ...params, ...(groupValue !== undefined ? { selectedGroup: groupValue } : {}) },
     format: "JSONEachRow",
   });
   const rows = (await r.json()) as { bucket: string; group_key: string; v: string | number | null }[];

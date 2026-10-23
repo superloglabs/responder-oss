@@ -1,7 +1,6 @@
 import { ArrowClockwiseIcon } from "@phosphor-icons/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
-import { relativeTime } from "../agents-api";
 import {
   alertForm,
   alertMetricChoice,
@@ -13,9 +12,7 @@ import {
   emptyAlertForm,
   fetchAlert,
   fetchAlertSlackChannels,
-  previewAlert,
   updateAlert,
-  type AlertEvaluation,
   type AlertForm,
   type TelemetryAlert,
   type TelemetryAlertEpisode,
@@ -23,26 +20,25 @@ import {
 } from "../alerts-api";
 import { pickedMetricLabel } from "../metric-picker";
 import { AppShell } from "../components/app-shell";
-import { AttributeFilters } from "../components/attribute-filters";
+import { AlertFilters } from "../components/alert-filters";
+import { AlertChart } from "../components/alert-chart";
+import { useAlertPreview } from "../use-alert-preview";
 import { DashboardDialog } from "../components/dashboard-dialog";
-import { TimeseriesChart } from "../components/timeseries-chart";
-import { Badge, Button, IconButton, SegmentedControl, SelectField, Switch, TextField } from "../design-system";
+import { Button, IconButton, SegmentedControl, SelectField, Switch, TextField } from "../design-system";
 import {
   aiGroupFields,
   aiMeasureFields,
   fetchAttributeKeys,
   fetchMetricNames,
   widgetAggregationLabels,
-  type ChartData,
   type MetricName,
 } from "../dashboards-api";
 import {
   alertValueUnit,
   describeAlertCondition,
-  formatAlertValue,
   type AlertValueUnit,
 } from "../../../../packages/core/src/telemetry/alert-text";
-import { fetchServices, formatDuration, formatTelemetryTime } from "../telemetry-api";
+import { fetchServices } from "../telemetry-api";
 import { useDocumentTitle } from "../use-document-title";
 import { useTelemetryAvailable } from "../use-telemetry-available";
 import "../components/alerts.css";
@@ -81,8 +77,6 @@ const measures = (["count", "count_distinct", "sum", "avg", "min", "max", "p50",
   value,
 }));
 
-const chartUnits: Record<AlertValueUnit, "duration_ms" | "none" | "usd"> = { ms: "duration_ms", none: "none", usd: "usd" };
-
 function formUnit(form: Pick<AlertForm, "aggregation" | "field" | "source">): AlertValueUnit {
   return alertValueUnit({ aggregation: form.aggregation, field: form.field || null, source: form.source });
 }
@@ -95,125 +89,6 @@ function withCurrent<T extends { value: string }>(options: T[], value: string, l
 function lastDayWindow(): { since: number; until: number } {
   const now = Date.now();
   return { since: now - 86_400_000, until: now };
-}
-
-function useDebounced<T>(value: T, delay: number): T {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const timer = setTimeout(() => setDebounced(value), delay);
-    return () => clearTimeout(timer);
-  }, [value, delay]);
-  return debounced;
-}
-
-function AlertPreview({ form }: { form: AlertForm }) {
-  // Preview the rule with a stand-in name, so it shows before one is typed.
-  const request = alertRequest({ ...form, name: form.name || "Preview" });
-  const key = "body" in request ? JSON.stringify(request.body) : null;
-  const debouncedKey = useDebounced(key, 600);
-  // The result and the rule it is for, so an older result is not shown
-  // beside a newer rule.
-  const [result, setResult] = useState<{
-    key: string;
-    value: { chart: ChartData; evaluations: AlertEvaluation[] } | { error: string };
-  } | null>(null);
-  const state = result && result.key === key ? result.value : null;
-
-  useEffect(() => {
-    if (!debouncedKey) return;
-    let cancelled = false;
-    previewAlert(JSON.parse(debouncedKey) as Parameters<typeof previewAlert>[0])
-      .then((value) => { if (!cancelled) setResult({ key: debouncedKey, value }); })
-      .catch((cause: unknown) => {
-        if (!cancelled) setResult({ key: debouncedKey, value: { error: cause instanceof Error ? cause.message : "Unable to preview" } });
-      });
-    return () => { cancelled = true; };
-  }, [debouncedKey]);
-
-  const threshold = Number(form.threshold);
-  const unit = formUnit(form);
-  // Averages and percentiles do not add up, so they are not stacked.
-  const additive = form.aggregation === "count" || form.aggregation === "sum";
-  return (
-    <section aria-label="Preview" className="alertPreview">
-      <h2>Preview</h2>
-      {!key ? (
-        <p className="dashboardWidget__status">{"error" in request ? request.error.replace(/^Name the alert\.$/u, "") : ""}</p>
-      ) : !state ? (
-        <p className="dashboardWidget__status">Loading…</p>
-      ) : "error" in state ? (
-        <p className="dashboardWidget__status" role="alert">{state.error}</p>
-      ) : (
-        <>
-          <ul className="alertPreview__values">
-            {state.evaluations.length === 0 ? <li className="dashboardWidget__status">No data in the last window.</li> : null}
-            {state.evaluations.slice(0, 8).map((evaluation) => (
-              <li key={evaluation.groupKey}>
-                <span className="alertPreview__group">{evaluation.groupKey || (form.perGroup ? "(none)" : "Now")}</span>
-                <strong>{formatAlertValue(evaluation.value, unit)}</strong>
-                <Badge tone={evaluation.breaching ? "danger" : "live"}>{evaluation.breaching ? "Would fire" : "OK"}</Badge>
-              </li>
-            ))}
-          </ul>
-          <div className="alertPreview__chart">
-            {state.chart.series.length > 0 ? (
-              <TimeseriesChart
-                chart={state.chart}
-                // Groups are compared with the threshold one by one, so they
-                // are drawn as lines rather than stacked.
-                chartType={form.source === "metric" || form.perGroup || !additive ? "line" : "bar"}
-                label="Recent values"
-                showLegend={state.chart.series.length > 1}
-                {...(Number.isFinite(threshold) && form.threshold.trim() ? { threshold } : {})}
-                unit={chartUnits[unit]}
-              />
-            ) : (
-              <p className="dashboardWidget__status">No data in the last {24} windows.</p>
-            )}
-          </div>
-          <p className="dashboardDialog__hint">Each point is one window. The dashed line is the threshold.</p>
-        </>
-      )}
-    </section>
-  );
-}
-
-function Episodes({
-  episodes,
-  perGroup,
-  unit,
-}: {
-  episodes: TelemetryAlertEpisode[];
-  perGroup: boolean;
-  unit: AlertValueUnit;
-}) {
-  if (episodes.length === 0) return <p className="dashboardWidget__status">The alert has not fired yet.</p>;
-  return (
-    <table className="dashboardWidget__table alertEpisodes">
-      <thead>
-        <tr>
-          <th scope="col">Started</th>
-          {perGroup ? <th scope="col">Group</th> : null}
-          <th scope="col">State</th>
-          <th className="dashboardWidget__number" scope="col">Lasted</th>
-          <th className="dashboardWidget__number" scope="col">Peak</th>
-        </tr>
-      </thead>
-      <tbody>
-        {episodes.map((episode) => (
-          <tr key={episode.id}>
-            <td className="dashboardWidget__muted" title={new Date(episode.startedAt).toLocaleString()}>{formatTelemetryTime(episode.startedAt)}</td>
-            {perGroup ? <td className="dashboardWidget__mono">{episode.groupKey || "(none)"}</td> : null}
-            <td>{episode.state === "firing" ? <Badge tone="danger">Firing</Badge> : <Badge>Recovered</Badge>}</td>
-            <td className="dashboardWidget__number">
-              {episode.endedAt ? formatDuration(Date.parse(episode.endedAt) - Date.parse(episode.startedAt)) : "—"}
-            </td>
-            <td className="dashboardWidget__number">{formatAlertValue(episode.peakValue, unit)}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
 }
 
 export function AlertPage() {
@@ -245,6 +120,8 @@ export function AlertPage() {
   const [deleting, setDeleting] = useState(false);
   const [channels, setChannels] = useState<TelemetryAlertSlackChannel[] | null>(null);
   const [refreshingChannels, setRefreshingChannels] = useState(false);
+  const [hours, setHours] = useState(1);
+  const [revision, setRevision] = useState(0);
   const [metrics, setMetrics] = useState<MetricName[]>([]);
   const [keys, setKeys] = useState<string[]>([]);
   const [services, setServices] = useState<string[]>([]);
@@ -272,6 +149,8 @@ export function AlertPage() {
 
   // A new alert starts from the draft, if any, once telemetry is readable.
   const form = edited ?? (!alertId && telemetry.available ? { ...emptyAlertForm(), ...draft } : null);
+
+  const preview = useAlertPreview(form, hours, revision);
 
   useEffect(() => {
     let cancelled = false;
@@ -322,7 +201,7 @@ export function AlertPage() {
 
   async function save() {
     if (!form) return;
-    const request = alertRequest(form);
+    const request = alertRequest({ ...form, enabled: saved ? form.enabled : true });
     if ("error" in request) {
       setError(request.error);
       return;
@@ -334,6 +213,7 @@ export function AlertPage() {
         const alert = await updateAlert(saved.alert.id, request.body);
         setSaved({ ...saved, alert });
         setForm(alertForm(alert));
+        navigate(`/alerts/${alert.id}`);
       } else {
         const alert = await createAlert(request.body);
         navigate(`/alerts/${alert.id}`, { replace: true });
@@ -389,40 +269,33 @@ export function AlertPage() {
 
   return (
     <AppShell active="alerts" redesigned>
-      <div className="alertPage">
-        <header className="automationCreate__header">
-          <nav aria-label="Breadcrumb" className="automationCreate__breadcrumb">
+      <div className="alertPage alertPage--editor">
+        <header className="alertHeader">
+          <nav aria-label="Breadcrumb" className="alertBreadcrumb">
             <Link to="/alerts">Alerts</Link>
             <span aria-hidden="true">›</span>
-            <span aria-current="page">{saved ? saved.alert.name : "New alert"}</span>
+            <span aria-current="page">{saved ? `Edit ${saved.alert.name}` : "Create alert"}</span>
           </nav>
-          <div className="dashboardPage__titleRow">
-            <h1>{saved ? saved.alert.name : "New alert"}</h1>
+          <div className="alertTitleRow">
+            <h1>{saved ? `Edit ${saved.alert.name}` : "Create alert"}</h1>
             <span className="automationCreate__spacer" />
+            <Button onClick={() => navigate(saved ? `/alerts/${saved.alert.id}` : "/alerts")} size="small" variant="secondary">Cancel</Button>
             {saved ? <Button onClick={() => setDeleting(true)} size="small" variant="ghost">Delete</Button> : null}
             <Button loading={saving} onClick={() => void save()} size="small" variant="primary">
               {saved ? "Save changes" : "Create alert"}
             </Button>
           </div>
-          {saved?.alert.lastError ? (
-            <p className="formError" role="alert">
-              {saved.alert.lastError.startsWith("Posting to Slack failed")
-                ? saved.alert.lastError
-                : `The last check failed: ${saved.alert.lastError}`}
-            </p>
-          ) : saved?.alert.lastEvaluatedAt ? (
-            <p className="dashboardPage__meta">Last checked {relativeTime(saved.alert.lastEvaluatedAt)}</p>
-          ) : null}
+          <p className="alertMuted">Define what matters, when to trigger, and who should know.</p>
         </header>
         {error ? <p className="formError" role="alert">{error}</p> : null}
-        <div className="alertPage__body">
           <form className="alertForm" onSubmit={(event) => { event.preventDefault(); void save(); }}>
-            <TextField label="Name" maxLength={200} onChange={(event) => update({ name: event.target.value })} placeholder="Checkout errors" value={form.name} />
+            <TextField label="Alert name" maxLength={200} onChange={(event) => update({ name: event.target.value })} placeholder="Checkout errors" value={form.name} />
 
             <section className="alertForm__section">
-              <h2>What to watch</h2>
-              <SegmentedControl
-                aria-label="Data"
+              <div className="alertForm__intro"><h2>1. Explore your data</h2><p>Select a source and search criteria, then preview matching events over time.</p></div>
+              <div className="alertForm__fields">
+              <SelectField
+                label="Data source"
                 onChange={(value) =>
                   update({ aggregation: value === "metric" ? "avg" : "count", field: "", groupBy: "", perGroup: false, source: value })
                 }
@@ -433,34 +306,6 @@ export function AlertPage() {
                 ]}
                 value={form.source}
               />
-              {form.source !== "metric" ? (
-                <div className="widgetEditor__row">
-                  <SelectField
-                    label="Measure"
-                    onChange={(aggregation) =>
-                      // Error-only spans suit a count; other measures start from every span.
-                      update(form.aggregation === "count" && aggregation !== "count" ? { aggregation, spanErrors: false } : { aggregation })
-                    }
-                    options={measures}
-                    value={form.aggregation}
-                  />
-                  {form.aggregation !== "count" ? (
-                    <SelectField
-                      label="Field"
-                      onChange={(field) => update({ field })}
-                      options={[
-                        ...(form.field ? [] : [{ label: "Choose a field", value: "" }]),
-                        ...withCurrent(fieldOptions, form.field, form.field),
-                      ]}
-                      searchable={fieldOptions.length > 8}
-                      value={form.field}
-                    />
-                  ) : null}
-                </div>
-              ) : null}
-              {form.source === "logs" ? (
-                <SelectField label="Severity" onChange={(severity) => update({ severity })} options={severities} value={form.severity} />
-              ) : null}
               {form.source === "traces" ? (
                 <Switch checked={form.spanErrors} label="Only spans with an error status" onCheckedChange={(spanErrors) => update({ spanErrors })} />
               ) : null}
@@ -488,6 +333,7 @@ export function AlertPage() {
                   />
                 </div>
               ) : null}
+              <div className="widgetEditor__row">
               <SelectField
                 label="Service"
                 onChange={(service) => update({ service })}
@@ -495,31 +341,25 @@ export function AlertPage() {
                 searchable={services.length > 8}
                 value={form.service}
               />
-              <AttributeFilters filters={form.filters} keys={keys} onChange={(filters) => update({ filters })} />
-              <div className="widgetEditor__row">
-                <SelectField
-                  label="Group by"
-                  onChange={(groupBy) => update({ groupBy, perGroup: groupBy ? form.perGroup : false })}
-                  options={withCurrent(groupOptions, form.groupBy, form.groupBy)}
-                  searchable={groupOptions.length > 8}
-                  value={form.groupBy}
-                />
-              </div>
-              {form.groupBy ? (
-                <Switch
-                  checked={form.perGroup}
-                  description="Each group fires and recovers on its own. Otherwise the groups are added up."
-                  label="Alert for each group"
-                  onCheckedChange={(perGroup) => update({ perGroup })}
-                />
+              {form.source === "logs" ? (
+                <SelectField label="Severity" onChange={(severity) => update({ severity })} options={severities} value={form.severity} />
               ) : null}
+              </div>
+              <AlertFilters filters={form.filters} keys={keys} onChange={(filters) => update({ filters })} />
+              <div className="alertSectionHeading"><span className="alertMuted">Matching data</span><div className="alertToolbar">
+                <SelectField label="Preview time range" value={String(preview.selectedHours)} onChange={(value) => setHours(Number(value))} options={preview.rangeOptions.map((value) => ({ label: `Last ${value} ${value === 1 ? "hour" : "hours"}`, value: String(value) }))} />
+                <Button size="small" variant="primary" onClick={() => setRevision((value) => value + 1)} loading={preview.loading}>Run search</Button>
+              </div></div>
+              <section className="alertChart"><h3>Matching data</h3><AlertChart rule={form} chart={preview.data?.chart} error={preview.error} loading={preview.loading} showThreshold={false} /></section>
+              </div>
             </section>
 
             <section className="alertForm__section">
-              <h2>When to fire</h2>
+              <div className="alertForm__intro"><h2>2. Set the threshold</h2><p>Choose when to trigger and compare the threshold with your data.</p></div>
+              <div className="alertForm__fields">
               <div className="widgetEditor__row">
-                <SegmentedControl
-                  aria-label="Comparison"
+                <SelectField
+                  label="Trigger when value is"
                   onChange={(comparator) => update({ comparator })}
                   options={[{ label: "Above", value: "gt" }, { label: "Below", value: "lt" }]}
                   value={form.comparator}
@@ -541,10 +381,57 @@ export function AlertPage() {
                   Fires when the value is {describeAlertCondition(form.comparator, Number(form.threshold), formUnit(form))}, and recovers when it is not.
                 </p>
               ) : null}
+              <details className="alertAdvanced"><summary>Advanced settings</summary><div className="alertForm__fields">
+              {form.source !== "metric" ? (
+                <div className="widgetEditor__row">
+                  <SelectField
+                    label="Measure"
+                    onChange={(aggregation) =>
+                      // Error-only spans suit a count; other measures start from every span.
+                      update(form.aggregation === "count" && aggregation !== "count" ? { aggregation, spanErrors: false } : { aggregation })
+                    }
+                    options={measures}
+                    value={form.aggregation}
+                  />
+                  {form.aggregation !== "count" ? (
+                    <SelectField
+                      label="Field"
+                      onChange={(field) => update({ field })}
+                      options={[
+                        ...(form.field ? [] : [{ label: "Choose a field", value: "" }]),
+                        ...withCurrent(fieldOptions, form.field, form.field),
+                      ]}
+                      searchable={fieldOptions.length > 8}
+                      value={form.field}
+                    />
+                  ) : null}
+                </div>
+              ) : null}
+              <div className="widgetEditor__row">
+                <SelectField
+                  label="Group by"
+                  onChange={(groupBy) => update({ groupBy, perGroup: groupBy ? form.perGroup : false })}
+                  options={withCurrent(groupOptions, form.groupBy, form.groupBy)}
+                  searchable={groupOptions.length > 8}
+                  value={form.groupBy}
+                />
+              </div>
+              {form.groupBy ? (
+                <Switch
+                  checked={form.perGroup}
+                  description="Each group fires and recovers on its own. Otherwise the groups are added up."
+                  label="Alert for each group"
+                  onCheckedChange={(perGroup) => update({ perGroup })}
+                />
+              ) : null}
+              </div></details>
+              <section className="alertChart"><h3>Threshold preview</h3><AlertChart rule={form} chart={preview.data?.chart} error={preview.error} loading={preview.loading} /><p className="alertMuted">Each point covers {form.windowMinutes} {form.windowMinutes === 1 ? "minute" : "minutes"}. The dashed line is the threshold.</p></section>
+              </div>
             </section>
 
             <section className="alertForm__section">
-              <h2>Where to post</h2>
+              <div className="alertForm__intro"><h2>3. Where to notify</h2><p>Choose where to send activation and recovery notifications.</p></div>
+              <div className="alertForm__fields">
               <div className="alertForm__slack">
                 <SelectField
                   label="Slack channel"
@@ -564,17 +451,9 @@ export function AlertPage() {
               ) : (
                 <p className="dashboardDialog__hint">Posts when the alert fires, and replies in the thread when it recovers.</p>
               )}
-              <Switch checked={form.enabled} label="Check this alert" onCheckedChange={(enabled) => update({ enabled })} />
+              </div>
             </section>
           </form>
-          <AlertPreview form={form} />
-        </div>
-        {saved ? (
-          <section aria-label="Recent episodes" className="alertForm__section alertPage__episodes">
-            <h2>Recent episodes</h2>
-            <Episodes episodes={saved.episodes} perGroup={saved.alert.groupMode === "per_group"} unit={alertValueUnit(saved.alert)} />
-          </section>
-        ) : null}
       </div>
       {deleting && saved ? (
         <DashboardDialog

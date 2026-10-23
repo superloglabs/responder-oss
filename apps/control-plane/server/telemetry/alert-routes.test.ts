@@ -43,7 +43,9 @@ function routes(overrides: Partial<AlertRouteDependencies> = {}) {
     createAlert: vi.fn(async () => alert),
     deleteAlert: vi.fn(async () => true),
     episodes: vi.fn(async () => []),
+    intervals: vi.fn(async () => []),
     findAlert: vi.fn(async () => alert),
+    findActivation: vi.fn(async () => null),
     hasCapability: vi.fn(async () => true),
     listAlerts: vi.fn(async () => [{ ...alert, firingGroups: 0 }]),
     now: () => now,
@@ -72,7 +74,7 @@ describe("alert routes", () => {
     const { app, dependencies } = routes();
 
     expect(await (await app.request("/")).json()).toEqual({ alerts: [{ ...alert, firingGroups: 0 }] });
-    expect(await (await app.request(`/${alertId}`)).json()).toEqual({ alert, episodes: [] });
+    expect(await (await app.request(`/${alertId}`)).json()).toEqual({ alert, episodes: [], hasFiringActivations: false });
     expect(dependencies.episodes).toHaveBeenCalledWith(alertId);
   });
 
@@ -170,5 +172,103 @@ describe("alert routes", () => {
       expect((await send(app, "POST", "/", rule)).status).toBe(404);
       expect(dependencies.createAlert).not.toHaveBeenCalled();
     }
+  });
+});
+
+const activationId = "33333333-3333-4333-8333-333333333333";
+const activation = {
+  id: activationId, groupKey: "api", state: "resolved" as const,
+  startedAt: "2026-10-14T11:35:00.000Z", endedAt: "2026-10-14T11:40:00.000Z",
+  openValue: 12, peakValue: 20, lastValue: 4, ruleSnapshot: { ...alert, groupMode: "per_group" as const, groupBy: "service" },
+  endReason: "recovered" as const, slackChannelId: "C1", slackMessageTs: null, recoveryNotifiedAt: null,
+};
+
+describe("activation details", () => {
+  it("checks workspace ownership before reading history or an activation", async () => {
+    const { app, dependencies } = routes({ findAlert: vi.fn(async () => null), findActivation: vi.fn(async () => activation) });
+    for (const suffix of ["activations", `activations/${activationId}`, `activations/${activationId}/chart`]) {
+      expect((await app.request(`/${alertId}/${suffix}`)).status).toBe(404);
+    }
+    expect(dependencies.findAlert).toHaveBeenCalledWith(organizationId, alertId);
+    expect(dependencies.findActivation).not.toHaveBeenCalled();
+    expect(dependencies.episodes).not.toHaveBeenCalled();
+    expect(dependencies.series).not.toHaveBeenCalled();
+  });
+
+  it("scopes direct links to their parent and returns a missing activation", async () => {
+    const { app, dependencies } = routes();
+    expect((await app.request(`/${alertId}/activations/${activationId}`)).status).toBe(404);
+    expect(dependencies.findActivation).toHaveBeenCalledWith(alertId, activationId);
+  });
+
+  it("reconstructs the activation group with its original rule", async () => {
+    const { app, dependencies } = routes({
+      findActivation: vi.fn(async () => activation),
+      series: vi.fn(async () => [{ bucket: "2026-10-14 11:35:00", group: "api", value: 12 }, { bucket: "2026-10-14 11:35:00", group: "other", value: 99 }]),
+    });
+    expect(await (await app.request(`/${alertId}/activations/${activationId}`)).json()).toEqual({ alert, activation });
+    const response = await app.request(`/${alertId}/activations/${activationId}/chart`);
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.chart.series).toHaveLength(1);
+    expect(body.chart.series[0].name).toBe("api");
+    expect(dependencies.series).toHaveBeenCalledWith(expect.anything(), organizationId, activation.ruleSnapshot, new Date("2026-10-14T11:55:00Z"), { since: "2026-10-14T11:20:00.000Z", until: "2026-10-14T11:55:00.000Z" }, "api");
+  });
+
+  it("does not apply today's rule to legacy activations", async () => {
+    const { app, dependencies } = routes({ findActivation: vi.fn(async () => ({ ...activation, ruleSnapshot: null })) });
+    const body = await (await app.request(`/${alertId}/activations/${activationId}/chart`)).json();
+    expect(body.chart).toBeNull();
+    expect(body.reason).toContain("not recorded");
+    expect(dependencies.series).not.toHaveBeenCalled();
+  });
+
+  it("filters and paginates history in the database", async () => {
+    const { app, dependencies } = routes({ episodes: vi.fn(async () => Array.from({ length: 51 }, () => activation)) });
+    const response = await app.request(`/${alertId}/activations?days=7&state=resolved&offset=50`);
+    const body = await response.json();
+    expect(body.hasMore).toBe(true);
+    expect(body.episodes).toHaveLength(50);
+    expect(dependencies.episodes).toHaveBeenCalledWith(alertId, 51, { offset: 50, since: new Date("2026-10-07T12:00:00.000Z"), state: "resolved" });
+    expect((await app.request(`/${alertId}/activations?offset=-1`)).status).toBe(400);
+    expect((await app.request(`/${alertId}/activations?state=invalid`)).status).toBe(400);
+  });
+
+  it("rejects a preview range shorter than an evaluation window", async () => {
+    const { app, dependencies } = routes();
+    const response = await send(app, "POST", "/preview?hours=1", { ...rule, windowMinutes: 360 });
+    expect(response.status).toBe(400);
+    expect(dependencies.series).not.toHaveBeenCalled();
+  });
+
+  it("loads chart intervals independently of paginated history", async () => {
+    const { app, dependencies } = routes();
+    expect((await app.request(`/${alertId}/highlights?hours=24`)).status).toBe(200);
+    expect(dependencies.intervals).toHaveBeenCalledWith(alertId, new Date("2026-10-13T12:00:00Z"), now);
+    expect(dependencies.episodes).not.toHaveBeenCalled();
+  });
+
+  it("validates preview ranges and queries the chosen range", async () => {
+    const { app, dependencies } = routes();
+    expect((await send(app, "POST", "/preview?hours=100", rule)).status).toBe(400);
+    expect((await send(app, "POST", "/preview?hours=6", rule)).status).toBe(200);
+    expect(dependencies.series).toHaveBeenCalledWith(expect.anything(), organizationId, expect.anything(), now, { since: "2026-10-14T06:00:00.000Z", until: now.toISOString() });
+  });
+});
+
+describe("large activation histories", () => {
+  it("reports an open activation even when it is older than the latest history page", async () => {
+    const { app, dependencies } = routes({ episodes: vi.fn<AlertRouteDependencies["episodes"]>(async (_id, _limit, options) => options?.state === "firing" ? [{ ...activation, state: "firing", endedAt: null }] : Array.from({ length: 50 }, () => activation)) });
+    const body = await (await app.request(`/${alertId}`)).json();
+    expect(body.hasFiringActivations).toBe(true);
+    expect(body.episodes).toHaveLength(50);
+    expect(dependencies.episodes).toHaveBeenCalledWith(alertId, 1, { state: "firing" });
+  });
+
+  it("allows the next history page beyond ten thousand activations", async () => {
+    const { app, dependencies } = routes();
+    const response = await app.request(`/${alertId}/activations?days=all&offset=10050`);
+    expect(response.status).toBe(200);
+    expect(dependencies.episodes).toHaveBeenCalledWith(alertId, 51, { offset: 10050 });
   });
 });
