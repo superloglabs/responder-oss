@@ -231,7 +231,12 @@ export function createAlertRoutes(dependencies: AlertRouteDependencies = default
       if (!alertId.success) return context.json(notFound, 404);
       const alert = await dependencies.findAlert(granted.organizationId, alertId.data);
       if (!alert) return context.json(notFound, 404);
-      return context.json({ alert, episodes: await dependencies.episodes(alert.id) });
+      // Health must include long-running activations outside the recent history page.
+      const [episodes, open] = await Promise.all([
+        dependencies.episodes(alert.id),
+        dependencies.episodes(alert.id, 1, { state: "firing" }),
+      ]);
+      return context.json({ alert, episodes, hasFiringActivations: open.length > 0 });
     })
     .get("/:alertId/activations", async (context) => {
       const granted = await access(context.req.raw.headers);
@@ -241,7 +246,7 @@ export function createAlertRoutes(dependencies: AlertRouteDependencies = default
       const query = z.object({
         days: z.enum(["7", "30", "all"]).default("7"),
         state: z.enum(["all", "firing", "resolved"]).default("all"),
-        offset: z.coerce.number().int().min(0).max(10000).default(0),
+        offset: z.coerce.number().int().min(0).default(0),
       }).safeParse(context.req.query());
       if (!query.success) return context.json({ error: "Invalid history filters" }, 400);
       const alert = await dependencies.findAlert(granted.organizationId, alertId.data);

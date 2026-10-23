@@ -53,7 +53,7 @@ export async function fetchAlerts(): Promise<TelemetryAlertSummary[] | null> {
   return body?.alerts ?? [];
 }
 
-export function fetchAlert(alertId: string): Promise<{ alert: TelemetryAlert; episodes: TelemetryAlertEpisode[] }> {
+export function fetchAlert(alertId: string): Promise<{ alert: TelemetryAlert; episodes: TelemetryAlertEpisode[]; hasFiringActivations: boolean }> {
   return request(`${base}/${encodeURIComponent(alertId)}`);
 }
 

@@ -267,10 +267,12 @@ function History({ alert }: { alert: TelemetryAlert }) {
 function AlertDetail({
   alert,
   episodes,
+  hasFiringActivations,
   reload,
 }: {
   alert: TelemetryAlert;
   episodes: TelemetryAlertEpisode[];
+  hasFiringActivations: boolean;
   reload: () => void;
 }) {
   const navigate = useNavigate();
@@ -304,7 +306,6 @@ function AlertDetail({
     }
   }
   const evaluations = preview.data?.evaluations ?? [];
-  const firing = episodes.filter((episode) => episode.state === "firing").length;
   return (
     <div className="alertPage">
       <Header alert={alert}>
@@ -358,7 +359,7 @@ function AlertDetail({
                 ? "Check failed"
                 : !alert.enabled
                   ? "Paused"
-                  : firing
+                  : hasFiringActivations
                     ? "Firing"
                     : alert.lastEvaluatedAt
                       ? "Healthy"

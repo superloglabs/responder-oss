@@ -153,7 +153,7 @@ async function mockAlerts(page: Page, legacy = false) {
       writes.push(input);
       current = { ...current, ...input };
       json = { alert: current };
-    } else if (path.endsWith(`/alerts/${alertId}`)) json = { alert: current, episodes: [episode] };
+    } else if (path.endsWith(`/alerts/${alertId}`)) json = { alert: current, episodes: [episode], hasFiringActivations: false };
     else json = { alerts: [current] };
     await route.fulfill({ json });
   });
@@ -235,4 +235,14 @@ test("older activations disclose unavailable history and fit a narrow screen", a
   await expect(page.getByRole("cell", { name: "Not confirmed" })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: test.info().outputPath("activation-mobile.png"), fullPage: true });
+});
+
+
+test("health includes an older activation outside the displayed history", async ({ page }) => {
+  await mockAlerts(page);
+  await page.route(`**/api/telemetry/alerts/${alertId}`, (route) => route.fulfill({ json: {
+    alert: rule, episodes: [episode], hasFiringActivations: true,
+  } }));
+  await page.goto(`/alerts/${alertId}`);
+  await expect(page.locator(".alertProperties dl > div").filter({ hasText: "Health" }).locator("dd")).toHaveText("Firing");
 });

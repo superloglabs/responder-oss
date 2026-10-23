@@ -73,7 +73,7 @@ describe("alert routes", () => {
     const { app, dependencies } = routes();
 
     expect(await (await app.request("/")).json()).toEqual({ alerts: [{ ...alert, firingGroups: 0 }] });
-    expect(await (await app.request(`/${alertId}`)).json()).toEqual({ alert, episodes: [] });
+    expect(await (await app.request(`/${alertId}`)).json()).toEqual({ alert, episodes: [], hasFiringActivations: false });
     expect(dependencies.episodes).toHaveBeenCalledWith(alertId);
   });
 
@@ -238,5 +238,22 @@ describe("activation details", () => {
     expect((await send(app, "POST", "/preview?hours=100", rule)).status).toBe(400);
     expect((await send(app, "POST", "/preview?hours=6", rule)).status).toBe(200);
     expect(dependencies.series).toHaveBeenCalledWith(expect.anything(), organizationId, expect.anything(), now, { since: "2026-10-14T06:00:00.000Z", until: now.toISOString() });
+  });
+});
+
+describe("large activation histories", () => {
+  it("reports an open activation even when it is older than the latest history page", async () => {
+    const { app, dependencies } = routes({ episodes: vi.fn<AlertRouteDependencies["episodes"]>(async (_id, _limit, options) => options?.state === "firing" ? [{ ...activation, state: "firing", endedAt: null }] : Array.from({ length: 50 }, () => activation)) });
+    const body = await (await app.request(`/${alertId}`)).json();
+    expect(body.hasFiringActivations).toBe(true);
+    expect(body.episodes).toHaveLength(50);
+    expect(dependencies.episodes).toHaveBeenCalledWith(alertId, 1, { state: "firing" });
+  });
+
+  it("allows the next history page beyond ten thousand activations", async () => {
+    const { app, dependencies } = routes();
+    const response = await app.request(`/${alertId}/activations?days=all&offset=10050`);
+    expect(response.status).toBe(200);
+    expect(dependencies.episodes).toHaveBeenCalledWith(alertId, 51, { offset: 10050 });
   });
 });
