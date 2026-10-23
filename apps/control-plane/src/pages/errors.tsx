@@ -11,6 +11,7 @@ import {
   errorState,
   fetchErrorIssues,
   formatEventCount,
+  hourlyCounts,
   updateErrorIssueStatus,
   type ErrorIssueFilter,
   type ErrorIssueList,
@@ -169,7 +170,8 @@ export function ErrorsPage() {
 
   const allIssues = list ? [...list.issues, ...(older?.issues ?? [])] : [];
   const issues = allIssues.slice(page * 50, (page + 1) * 50);
-  const days = list ? daysThroughToday(list.since) : 14;
+  const hourly = list?.interval === "hour";
+  const days = list && !hourly ? daysThroughToday(list.since) : 14;
   const filtered = Boolean(filterKey);
   const total = list ? list.counts.open + list.counts.resolved + list.counts.silenced : 0;
 
@@ -253,9 +255,14 @@ export function ErrorsPage() {
                     width: "80px",
                   },
                   {
-                    header: "Daily trend",
+                    header: hourly ? "Hourly trend" : "Daily trend",
                     key: "trend",
-                    render: (issue) => (
+                    render: (issue) => hourly ? (
+                      <ErrorSparkline
+                        counts={hourlyCounts(issue.hours ?? [], list.since, 24)}
+                        label="Occurrences per hour over the last 24 hours"
+                      />
+                    ) : (
                       <ErrorSparkline
                         counts={dailyCounts(issue.days, list.since, days)}
                         label={`Occurrences per day over the last ${days} days`}

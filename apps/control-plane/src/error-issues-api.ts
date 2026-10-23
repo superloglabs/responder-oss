@@ -2,21 +2,25 @@ import { apiErrorMessage } from "./agents-api";
 import type {
   ErrorIssue,
   ErrorIssueDay,
+  ErrorIssueHour,
   ErrorIssueSummary,
 } from "../../../packages/core/src/db/error-issues";
 import type { ErrorIssueStatus } from "../../../packages/core/src/telemetry/error-issues";
 import type { ChartData } from "./dashboards-api";
 
-export type { ErrorIssue, ErrorIssueDay, ErrorIssueStatus, ErrorIssueSummary };
+export type { ErrorIssue, ErrorIssueDay, ErrorIssueHour, ErrorIssueStatus, ErrorIssueSummary };
 
-export type ErrorIssueListItem = ErrorIssueSummary & { days: ErrorIssueDay[] };
+// Hours are set when the list's counts are hourly.
+export type ErrorIssueListItem = ErrorIssueSummary & { days: ErrorIssueDay[]; hours?: ErrorIssueHour[] };
 
 export interface ErrorIssueList {
   counts: Record<ErrorIssueStatus, number>;
   environments: string[];
   issues: ErrorIssueListItem[];
+  // Hourly for the last 24 hours, daily otherwise.
+  interval: "day" | "hour";
   services: string[];
-  // The first day the issues' counts cover.
+  // The first day, or for hourly counts the first hour, the counts cover.
   since: string;
 }
 
@@ -104,6 +108,7 @@ export const errorIssueStatusLabels: Record<ErrorIssueStatus, string> = {
   silenced: "Ignored",
 };
 
+const hourMs = 3_600_000;
 const dayMs = 86_400_000;
 
 // One count per UTC day from `since` for `length` days, with zero for days
@@ -114,6 +119,18 @@ export function dailyCounts(days: ErrorIssueDay[], since: string, length: number
   for (const day of days) {
     const index = Math.round((Date.parse(`${day.day}T00:00:00Z`) - start) / dayMs);
     if (index >= 0 && index < length) counts[index] = (counts[index] ?? 0) + day.eventCount;
+  }
+  return counts;
+}
+
+// One count per UTC hour from `since` for `length` hours, with zero for hours
+// without occurrences.
+export function hourlyCounts(hours: ErrorIssueHour[], since: string, length: number): number[] {
+  const start = Date.parse(since);
+  const counts = Array.from({ length }, () => 0);
+  for (const hour of hours) {
+    const index = Math.round((Date.parse(hour.hour) - start) / hourMs);
+    if (index >= 0 && index < length) counts[index] = (counts[index] ?? 0) + hour.eventCount;
   }
   return counts;
 }

@@ -666,6 +666,13 @@
       "when": 1792691964885,
       "tag": "0094_alert_activation_details",
       "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1792756072049,
+      "tag": "0095_error_issue_hourly_counts",
+      "breakpoints": true
     }
   ]
 }
