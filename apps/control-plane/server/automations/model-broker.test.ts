@@ -744,6 +744,61 @@ describe("automation model call spans", () => {
     });
   });
 
+  it("asks for usage in an organization-funded chat completions stream", async () => {
+    const providerFetch = vi.fn().mockResolvedValue(new Response(
+      'data: {"choices":[],"usage":{"prompt_tokens":12,"completion_tokens":3}}\n\ndata: [DONE]\n\n',
+      { headers: { "content-type": "text/event-stream" } },
+    ));
+    const routes = brokerRoutes({
+      claimGrant: vi.fn().mockResolvedValue({ ...claim, model: "grok-5", provider: "xai" }),
+      providerFetch,
+    });
+
+    const response = await request(routes, "/v1/providers/xai/chat/completions", {
+      messages: [{ content: "hello", role: "user" }],
+      model: "grok-5",
+      stream: true,
+      stream_options: { include_obfuscation: false },
+    });
+    await response.text();
+
+    expect(JSON.parse(providerFetch.mock.calls[0]![1].body).stream_options).toEqual({
+      include_obfuscation: false,
+      include_usage: true,
+    });
+    await vi.waitFor(() => expect(exporter.getFinishedSpans()).toHaveLength(1));
+    expect(exporter.getFinishedSpans()[0]!.attributes).toMatchObject({
+      "gen_ai.usage.input_tokens": 12,
+      "gen_ai.usage.output_tokens": 3,
+    });
+  });
+
+  it("sends a direct Mistral stream without stream options", async () => {
+    const providerFetch = vi.fn().mockResolvedValue(new Response(
+      'data: {"choices":[],"usage":{"prompt_tokens":8,"completion_tokens":2}}\n\ndata: [DONE]\n\n',
+      { headers: { "content-type": "text/event-stream" } },
+    ));
+    const routes = brokerRoutes({
+      claimGrant: vi.fn().mockResolvedValue({ ...claim, model: "mistral-large-3", provider: "mistral" }),
+      providerFetch,
+    });
+
+    const response = await request(routes, "/v1/providers/mistral/chat/completions", {
+      messages: [{ content: "hello", role: "user" }],
+      model: "mistral-large-3",
+      stream: true,
+    });
+    await response.text();
+
+    expect(JSON.parse(providerFetch.mock.calls[0]![1].body)).not.toHaveProperty("stream_options");
+    await vi.waitFor(() => expect(exporter.getFinishedSpans()).toHaveLength(1));
+    expect(exporter.getFinishedSpans()[0]!.attributes).toMatchObject({
+      "gen_ai.provider.name": "mistral_ai",
+      "gen_ai.usage.input_tokens": 8,
+      "gen_ai.usage.output_tokens": 2,
+    });
+  });
+
   it("marks a call the provider refused as failed", async () => {
     const routes = brokerRoutes({
       claimGrant: vi.fn().mockResolvedValue(claim),

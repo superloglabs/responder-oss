@@ -498,15 +498,20 @@ async function chatCompletionsProviderRequest(
     delete forwarded.max_tokens;
     forwarded.max_completion_tokens = grant.maxOutputTokens;
   }
+  // Streamed chat completions only report usage when asked to. Mistral
+  // reports it in the final chunk without the option, so a direct Mistral
+  // request is sent unchanged.
+  if (
+    forwarded.stream === true &&
+    (grant.inferenceSource === "responder" || grant.provider !== "mistral")
+  ) {
+    const streamOptions = forwarded.stream_options;
+    forwarded.stream_options = {
+      ...(streamOptions && typeof streamOptions === "object" ? streamOptions : {}),
+      include_usage: true,
+    };
+  }
   if (grant.inferenceSource === "responder") {
-    // Streamed chat completions only report usage when asked to.
-    if (forwarded.stream === true) {
-      const streamOptions = forwarded.stream_options;
-      forwarded.stream_options = {
-        ...(streamOptions && typeof streamOptions === "object" ? streamOptions : {}),
-        include_usage: true,
-      };
-    }
     const gatewayBody = { ...forwarded, model: aiGatewayModelId(grant.provider, grant.model) };
     const { apiKey, reservationId } = await reserveResponderRequest(grant, gatewayBody, dependencies);
     return {
