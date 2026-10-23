@@ -53,6 +53,7 @@ export function triggerEventLabel(trigger: AutomationListTrigger): string {
     if (trigger.eventTypes.length > 1) return "Pull request opened or merged";
     return trigger.eventTypes[0] === "merged" ? "Pull request merged" : "Pull request opened";
   }
+  if (trigger.kind === "webhook") return "Request received";
   return "Command in channel";
 }
 
@@ -89,5 +90,6 @@ export function triggerTitle(trigger: AutomationListTrigger): string {
     if (trigger.eventTypes.length > 1) return "GitHub pull request opened or merged";
     return trigger.eventTypes[0] === "merged" ? "GitHub pull request merged" : "GitHub pull request opened";
   }
+  if (trigger.kind === "webhook") return "Webhook request received";
   return trigger.kind === "discord" ? "Discord automation command" : "Schedule";
 }

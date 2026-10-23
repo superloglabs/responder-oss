@@ -258,6 +258,11 @@ export const automationSchema = z
 
 export const automationResponseSchema = z.object({ automation: automationSchema });
 
+export const automationWebhookSchema = z.object({
+  token: z.string().describe("Send as `Authorization: Bearer <token>`."),
+  url: z.string().describe("POST requests here start a run."),
+});
+
 const runStatusSchema = z
   .enum(["pending", "running", "succeeded", "failed", "cancelled"])
   .describe("`pending` and `running` runs are active.");
@@ -273,7 +278,7 @@ const inferenceUsageSchema = z
   .nullable();
 
 const runTriggerSchema = z.object({
-  provider: z.string().describe("What started the run: `manual`, `schedule`, `slack`, `sentry`, `errors`, `axiom`, `signoz`, `honeycomb`, `betterstack`, `devrev`, `github`, or `discord`."),
+  provider: z.string().describe("What started the run: `manual`, `schedule`, `slack`, `sentry`, `errors`, `axiom`, `signoz`, `honeycomb`, `betterstack`, `devrev`, `github`, `discord`, or `webhook`."),
   sourceUrl: z.string().nullable().describe("A link to the event that started the run."),
   title: z.string(),
 });

@@ -133,10 +133,14 @@ export const automationTriggerSchema = z.discriminatedUnion("kind", [
     (trigger) => trigger.frequency !== "custom" || isValidCron(trigger.cron ?? ""),
     { message: "Enter a valid cron expression", path: ["cron"] },
   ).describe("Runs on the hour, at a local time each day or week, or on a custom cron expression."),
+  z.object({
+    kind: z.literal("webhook"),
+  }).describe("Runs when a POST request with the automation's webhook token reaches its webhook URL. The request body is the run's trigger payload."),
 ]);
 
 // Where a scheduled, Sentry, error issue, Axiom, SigNoz, Honeycomb, Better
-// Stack, or GitHub automation reports each finished run. Slack only for now.
+// Stack, GitHub, or webhook automation reports each finished run. Slack only
+// for now.
 export const automationNotificationSchema = z.discriminatedUnion("kind", [
   z.object({
     channelId: externalResourceIdSchema,
@@ -146,13 +150,13 @@ export const automationNotificationSchema = z.discriminatedUnion("kind", [
 ]);
 
 // Slack and Discord runs answer where their event came from. Scheduled,
-// Sentry, error issue, Axiom, SigNoz, Honeycomb, Better Stack, and GitHub runs
-// have no reply thread, so they report to notification channels.
+// Sentry, error issue, Axiom, SigNoz, Honeycomb, Better Stack, GitHub, and
+// webhook runs have no reply thread, so they report to notification channels.
 export function automationTriggersNotify(triggers: Array<{ kind: AutomationTrigger["kind"] }>): boolean {
   return triggers.some((trigger) =>
     trigger.kind === "schedule" || trigger.kind === "sentry" || trigger.kind === "errors" || trigger.kind === "axiom" ||
     trigger.kind === "signoz" || trigger.kind === "honeycomb" || trigger.kind === "betterstack" ||
-    trigger.kind === "github"
+    trigger.kind === "github" || trigger.kind === "webhook"
   );
 }
 
@@ -204,8 +208,17 @@ export const automationConfigurationSchema = z
     ) {
       context.addIssue({
         code: "custom",
-        message: "Notifications are only available for scheduled, Sentry, error, Axiom, SigNoz, Honeycomb, Better Stack, and GitHub automations",
+        message: "Notifications are only available for scheduled, Sentry, error, Axiom, SigNoz, Honeycomb, Better Stack, GitHub, and webhook automations",
         path: ["notifications"],
+      });
+    }
+    // An automation has one webhook URL, so a second webhook trigger would
+    // start a second run for every request.
+    if (configuration.triggers.filter((trigger) => trigger.kind === "webhook").length > 1) {
+      context.addIssue({
+        code: "custom",
+        message: "An automation can have one webhook trigger",
+        path: ["triggers"],
       });
     }
   });

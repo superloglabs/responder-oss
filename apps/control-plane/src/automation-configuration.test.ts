@@ -109,6 +109,7 @@ describe("isTriggerComplete", () => {
     expect(isTriggerComplete({ eventTypes: ["new_issue"], integrationAccountId: "", kind: "sentry", projectIds: ["web"] })).toBe(false);
     expect(isTriggerComplete({ eventTypes: ["new_issue"], kind: "errors" })).toBe(true);
     expect(isTriggerComplete({ eventTypes: [], kind: "errors" })).toBe(false);
+    expect(isTriggerComplete({ kind: "webhook" })).toBe(true);
     expect(isTriggerComplete({ integrationAccountId: "axiom", kind: "axiom" })).toBe(true);
     expect(isTriggerComplete({ integrationAccountId: "", kind: "axiom" })).toBe(false);
     expect(isTriggerComplete({ integrationAccountId: "signoz", kind: "signoz" })).toBe(true);

@@ -4,7 +4,7 @@ import type { AutomationTrigger } from "../automations-api";
 import { AutomationTriggerIcon } from "./automation-trigger-icon";
 import { searchInputProps } from "./search-input-props";
 
-export type TriggerEvent = "every_message" | "mentions" | "both" | "new_issue" | "regression" | "alert" | "incident" | "ticket" | "opened" | "merged" | "command" | "hourly" | "daily" | "weekly" | "custom";
+export type TriggerEvent = "every_message" | "mentions" | "both" | "new_issue" | "regression" | "alert" | "incident" | "ticket" | "opened" | "merged" | "command" | "hourly" | "daily" | "weekly" | "custom" | "request";
 const providers = [
   { kind: "slack", name: "Slack", events: [
     { value: "every_message", label: "New message in channel" },
@@ -50,6 +50,9 @@ const providers = [
     { value: "weekly", label: "Every week" },
     { value: "custom", label: "Custom cron" },
   ] },
+  { kind: "webhook", name: "Webhook", events: [
+    { value: "request", label: "Request received" },
+  ] },
 ] as const;
 
 function moveFocus(event: KeyboardEvent<HTMLElement>, selector: string) {
@@ -63,16 +66,18 @@ function moveFocus(event: KeyboardEvent<HTMLElement>, selector: string) {
   items[next]?.focus();
 }
 
-export function AutomationTriggerMenu({ onChoose, telemetry = false }: {
+export function AutomationTriggerMenu({ onChoose, telemetry = false, webhook = true }: {
   onChoose: (kind: AutomationTrigger["kind"], event: TriggerEvent) => void;
   // Errors are offered only to workspaces with telemetry.
   telemetry?: boolean;
+  // An automation has one webhook URL, so a second webhook is not offered.
+  webhook?: boolean;
 }) {
   const [query, setQuery] = useState("");
   const [active, setActive] = useState<string | null>(null);
   const root = useRef<HTMLDivElement>(null);
   const search = query.trim().toLowerCase();
-  const filtered = providers.filter((provider) => telemetry || provider.kind !== "errors").map((provider) => ({
+  const filtered = providers.filter((provider) => (telemetry || provider.kind !== "errors") && (webhook || provider.kind !== "webhook")).map((provider) => ({
     ...provider,
     events: provider.events.filter((event) => provider.name.toLowerCase().includes(search) || event.label.toLowerCase().includes(search)),
   })).filter((provider) => provider.events.length);

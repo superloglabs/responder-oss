@@ -65,6 +65,8 @@ import {
 import { queueAutomationRun, queueAutomationRunFollowUp } from "../automations/queue.js";
 import { listSubscriptionModels } from "../automations/subscription-models.js";
 import { listSentryEnvironments } from "../integrations/sentry.js";
+import { automationWebhookUrl } from "../integrations/urls.js";
+import { automationWebhookToken } from "../../../../packages/core/src/integrations/webhook-secret.js";
 import {
   getFreshSentryCredentials,
   getSentryOrganizationSlug,
@@ -82,6 +84,7 @@ import {
   automationConfigurationInputSchema,
   automationListSchema,
   automationResponseSchema,
+  automationWebhookSchema,
   integrationsSchema,
   membersSchema,
   modelCredentialListSchema,
@@ -530,6 +533,27 @@ export const managementOperations: ManagementOperation[] = [
         enabled: input.enabled ?? current.enabled,
         name: input.name ?? current.name,
       });
+    },
+  }),
+  defineOperation({
+    description:
+      "Returns the URL and bearer token for an automation's webhook trigger. A POST request to the URL with `Authorization: Bearer <token>` starts a run while the automation is on and has a `webhook` trigger. The request body is the run's trigger payload; a JSON body's `title` names the run. Requests with the same `Idempotency-Key` header start one run.",
+    // The token starts runs.
+    effect: "write",
+    input: z.object({ automationId }),
+    method: "GET",
+    name: "get_automation_webhook",
+    output: automationWebhookSchema,
+    path: "/automations/{automationId}/webhook",
+    requiresAutomations: true,
+    summary: "Get an automation's webhook",
+    tag: "Automations",
+    async run(context, input) {
+      const automation = await requireAutomation(context, input.automationId);
+      return {
+        token: automationWebhookToken(automation.id),
+        url: automationWebhookUrl(automation.id),
+      };
     },
   }),
   defineOperation({

@@ -68,6 +68,9 @@ export type AutomationTrigger =
       kind: "schedule";
       timezone: string;
       weekday: number;
+    }
+  | {
+      kind: "webhook";
     };
 
 // A Slack person or app, by user ID or app ID.
@@ -76,16 +79,16 @@ export interface SlackAuthor {
   name: string;
 }
 
-export type ConnectedAutomationTrigger = Exclude<AutomationTrigger, { kind: "errors" | "schedule" }>;
+export type ConnectedAutomationTrigger = Exclude<AutomationTrigger, { kind: "errors" | "schedule" | "webhook" }>;
 
-// The distinct connections of the triggers. Schedule and error triggers have
-// none.
+// The distinct connections of the triggers. Schedule, error, and webhook
+// triggers have none.
 export function triggerAccountIds(triggers: AutomationTrigger[]): string[] {
-  return [...new Set(triggers.flatMap((trigger) => trigger.kind === "schedule" || trigger.kind === "errors" || !trigger.integrationAccountId ? [] : [trigger.integrationAccountId]))];
+  return [...new Set(triggers.flatMap((trigger) => trigger.kind === "schedule" || trigger.kind === "errors" || trigger.kind === "webhook" || !trigger.integrationAccountId ? [] : [trigger.integrationAccountId]))];
 }
 
-// Where a scheduled, Sentry, error, Axiom, SigNoz, Honeycomb, Better Stack, or
-// GitHub automation posts each finished run.
+// Where a scheduled, Sentry, error, Axiom, SigNoz, Honeycomb, Better Stack,
+// GitHub, or webhook automation posts each finished run.
 export interface AutomationNotification {
   channelId: string;
   integrationAccountId: string;
@@ -281,6 +284,16 @@ export function fetchAutomationRuns(id: string, page: number): Promise<Automatio
   return automationJson<AutomationRunPage>(
     `/api/automations/${encodeURIComponent(id)}/runs?page=${page}`,
   );
+}
+
+// Where a webhook trigger's requests go, and the bearer token they send.
+export interface AutomationWebhook {
+  token: string;
+  url: string;
+}
+
+export function fetchAutomationWebhook(id: string, signal?: AbortSignal): Promise<AutomationWebhook> {
+  return automationJson<AutomationWebhook>(`/api/automations/${encodeURIComponent(id)}/webhook`, { signal });
 }
 
 export async function fetchSentryEnvironments(accountId: string, signal?: AbortSignal): Promise<string[]> {

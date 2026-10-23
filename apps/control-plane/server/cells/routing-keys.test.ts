@@ -65,6 +65,15 @@ describe("webhook routing keys", () => {
     expect(webhookRoutingKey("/api/webhooks/dash0/not-a-uuid", "application/json", json({}))).toBeNull();
   });
 
+  it("routes automation webhooks by the automation in the path", () => {
+    const id = "0f0c8e9a-1d4b-4f43-9b1d-0d2b3f1a2c3d";
+    expect(webhookRoutingKey(`/api/webhooks/automations/${id}`, "text/plain", new TextEncoder().encode("deploy finished"))).toEqual({
+      key: id,
+      provider: "automation",
+    });
+    expect(webhookRoutingKey("/api/webhooks/automations/not-a-uuid", "application/json", json({}))).toBeNull();
+  });
+
   it("returns no key for unknown paths or unreadable bodies", () => {
     expect(webhookRoutingKey("/api/webhooks/unknown", "application/json", json({ team_id: "T1" }))).toBeNull();
     expect(webhookRoutingKey("/api/webhooks/slack", "application/json", new TextEncoder().encode("{"))).toBeNull();
