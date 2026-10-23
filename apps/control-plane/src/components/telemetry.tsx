@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useIngestAvailable } from "../use-ingest-available";
 import type { TelemetryAvailableState } from "../use-telemetry-available";
+import { TelemetryPageSkeleton } from "./screen-skeletons";
 import "./telemetry.css";
 
 // Shown only where the workspace can send telemetry to this cell.
@@ -52,14 +53,16 @@ export function TelemetryException({
 }
 
 // Renders the page once the workspace can read telemetry, and the loading
-// and unavailable states before that.
+// and unavailable states before that. The skeleton should have the page's shape.
 export function TelemetryGate({
   children,
   signal,
+  skeleton = <TelemetryPageSkeleton />,
   state,
 }: {
   children: ReactNode;
   signal: "AI models" | "Logs" | "Metrics" | "Telemetry" | "Traces";
+  skeleton?: ReactNode;
   state: TelemetryAvailableState;
 }) {
   if (state.available === undefined) {
@@ -68,9 +71,7 @@ export function TelemetryGate({
         <p>{state.error}</p>
         <button onClick={state.retry} type="button">Retry</button>
       </div>
-    ) : (
-      <p className="telemetryPage__status">Loading…</p>
-    );
+    ) : skeleton;
   }
   if (!state.available) {
     return (

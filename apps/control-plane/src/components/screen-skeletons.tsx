@@ -1,11 +1,13 @@
-import { Panel, Skeleton } from "../design-system";
+import type { ReactNode } from "react";
+import { DataTable, Panel, Skeleton } from "../design-system";
+import "./screen-skeletons.css";
 
-function LoadingRegion({
+export function LoadingRegion({
   children,
   className,
   label,
 }: {
-  children: React.ReactNode;
+  children: ReactNode;
   className: string;
   label: string;
 }) {
@@ -21,19 +23,18 @@ function TableSkeleton({
   kind,
   rows = 5,
 }: {
-  kind: "agents" | "automationRuns" | "investigations" | "issues";
+  kind: "agents" | "automationRuns" | "investigations";
   rows?: number;
 }) {
   const cellCounts = {
     agents: 6,
     automationRuns: 5,
     investigations: 4,
-    issues: 5,
   } as const;
 
   return (
     <div className={`screenSkeletonTable screenSkeletonTable--${kind}`}>
-      {kind === "agents" || kind === "issues" ? (
+      {kind === "agents" ? (
         <div className="screenSkeletonTable__filters">
           <Skeleton className="screenSkeletonTable__filter" />
           <Skeleton className="screenSkeletonTable__filter" />
@@ -60,7 +61,7 @@ function TableSkeleton({
                         : `${48 + ((rowIndex + cellIndex) % 3) * 14}%`,
                   }}
                 />
-                {cellIndex === 0 && kind !== "issues" ? (
+                {cellIndex === 0 ? (
                   <Skeleton className="screenSkeletonTable__secondary" style={{ width: "88%" }} />
                 ) : null}
               </div>
@@ -238,10 +239,28 @@ export function AutomationRunSkeleton({ label, transcript = true }: { label: str
   );
 }
 
+// One date group of the issues table.
 export function IssueListSkeleton() {
   return (
-    <LoadingRegion className="screenSkeleton screenSkeleton--list" label="Loading issues…">
-      <TableSkeleton kind="issues" />
+    <LoadingRegion className="screenSkeleton" label="Loading issues…">
+      <section className="issuesGroup">
+        <Skeleton className="automationSkeleton__small pageSkeleton__groupLabel" style={{ width: "48px" }} />
+        <div className="issuesTableSurface">
+          <table className="issuesTable">
+            <colgroup><col className="issuesTable__titleColumn" /><col /><col /></colgroup>
+            <thead><tr><th>Issue</th><th>Severity</th><th>Created</th></tr></thead>
+            <tbody>
+              {Array.from({ length: 6 }, (_, index) => (
+                <tr key={index}>
+                  <td><span className="tableSkeleton__lines pageSkeleton__issueTitle"><Skeleton style={{ width: lineWidth(index) }} /></span></td>
+                  <td><Skeleton className="tableSkeleton__badge" /></td>
+                  <td><span className="tableSkeleton__lines"><Skeleton style={{ width: "56px" }} /></span></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </LoadingRegion>
   );
 }
@@ -471,5 +490,687 @@ export function MemberListSkeleton() {
         ))}
       </div>
     </LoadingRegion>
+  );
+}
+
+// Varied widths, so placeholder rows do not read as one solid block.
+const lineWidths = ["72%", "56%", "64%", "48%", "60%", "68%"];
+
+function lineWidth(index: number) {
+  return lineWidths[index % lineWidths.length]!;
+}
+
+export interface SkeletonColumn {
+  align?: "left" | "right";
+  // What a loaded cell holds: a text line, a line over a muted second line,
+  // an avatar beside two lines, a status pill, a checkbox, or nothing.
+  cell?: "avatar" | "badge" | "checkbox" | "empty" | "text" | "twoLines";
+  header: ReactNode;
+  key: string;
+  width?: string;
+}
+
+function SkeletonCell({ align, cell = "text", index }: Pick<SkeletonColumn, "align" | "cell"> & { index: number }) {
+  if (cell === "empty") return null;
+  if (cell === "checkbox") return <Skeleton className="tableSkeleton__checkbox" />;
+  if (cell === "badge") return <Skeleton className="tableSkeleton__badge" />;
+  const lines = (
+    <span className={`tableSkeleton__lines${align === "right" ? " tableSkeleton__lines--right" : ""}`}>
+      <Skeleton style={{ width: lineWidth(index) }} />
+      {cell === "twoLines" || cell === "avatar" ? (
+        <Skeleton className="tableSkeleton__secondary" style={{ width: lineWidth(index + 3) }} />
+      ) : null}
+    </span>
+  );
+  if (cell !== "avatar") return lines;
+  return (
+    <span className="tableSkeleton__avatar">
+      <Skeleton variant="circle" />
+      {lines}
+    </span>
+  );
+}
+
+// A table with the loaded table's columns and placeholder rows, so the page
+// keeps its layout when the rows arrive.
+export function DataTableSkeleton({
+  className = "automationRuns agentListTable",
+  columns,
+  label,
+  rows = 5,
+  variant = "workspace",
+}: {
+  className?: string;
+  columns: SkeletonColumn[];
+  label: string;
+  rows?: number;
+  variant?: "workspace" | null;
+}) {
+  return (
+    <LoadingRegion className={className ? `screenSkeleton ${className}` : "screenSkeleton"} label={label}>
+      <DataTable<number>
+        aria-label={label}
+        columns={columns.map((column, columnIndex) => ({
+          align: column.align,
+          header: column.header,
+          key: column.key,
+          render: (row) => <SkeletonCell align={column.align} cell={column.cell} index={row + columnIndex} />,
+          width: column.width,
+        }))}
+        getRowKey={(row) => row}
+        rows={Array.from({ length: rows }, (_, index) => index)}
+        variant={variant ?? undefined}
+      />
+    </LoadingRegion>
+  );
+}
+
+export function SkeletonLines({ className, widths }: { className?: string; widths: string[] }) {
+  return (
+    <div className={className ? `screenSkeleton__lines ${className}` : "screenSkeleton__lines"}>
+      {widths.map((width, index) => <Skeleton key={index} style={{ width }} />)}
+    </div>
+  );
+}
+
+// A chart, a dashboard widget or a usage graph that is still loading. A
+// percentage height fills the container, which needs a height of its own.
+export function ChartSkeleton({ className, height, label }: { className?: string; height?: number | string; label: string }) {
+  return (
+    <LoadingRegion className={className ? `screenSkeleton screenSkeleton--chart ${className}` : "screenSkeleton screenSkeleton--chart"} label={label}>
+      <Skeleton className="screenSkeleton__chart" style={height === undefined ? undefined : { height }} />
+    </LoadingRegion>
+  );
+}
+
+interface PageHeaderSkeletonProps {
+  // Widths of the buttons at the end of the title row.
+  actions?: string[];
+  crumbs?: string[];
+  meta?: string[];
+  title?: string;
+}
+
+// The breadcrumb, title row and meta lines most detail pages open with.
+export function PageHeaderSkeleton({
+  actions = [],
+  crumbs = ["72px", "120px"],
+  meta = [],
+  title = "260px",
+}: PageHeaderSkeletonProps) {
+  return (
+    <header className="automationCreate__header">
+      <div className="automationCreate__breadcrumb">
+        {crumbs.map((width, index) => <Skeleton className="automationSkeleton__small" key={index} style={{ width }} />)}
+      </div>
+      <div className="dashboardPage__titleRow">
+        <Skeleton className="automationSkeleton__title" style={{ width: title }} />
+        <span className="automationCreate__spacer" />
+        {actions.map((width, index) => <Skeleton className="pageSkeleton__button" key={index} style={{ width }} />)}
+      </div>
+      {meta.map((width, index) => <Skeleton className="automationSkeleton__small" key={index} style={{ width }} />)}
+    </header>
+  );
+}
+
+// A white card with an optional heading and text lines.
+export function PanelSkeleton({ children, title }: { children?: ReactNode; title?: string }) {
+  return (
+    <div className="pageSkeleton__panel">
+      {title ? <Skeleton className="pageSkeleton__heading" style={{ width: title }} /> : null}
+      {children}
+    </div>
+  );
+}
+
+// A labelled form field.
+function FieldSkeleton({ label = "96px" }: { label?: string }) {
+  return (
+    <div className="pageSkeleton__field">
+      <Skeleton className="automationSkeleton__small" style={{ width: label }} />
+      <Skeleton className="pageSkeleton__input" />
+    </div>
+  );
+}
+
+// The page shape behind the telemetry gate, before the workspace is known to
+// read telemetry: the toolbar, then a table.
+export function TelemetryPageSkeleton({ label = "Loading telemetry…" }: { label?: string }) {
+  return (
+    <LoadingRegion className="screenSkeleton" label={label}>
+      <div className="telemetryPage">
+        <div className="telemetryPage__toolbar">
+          {["148px", "120px", "220px"].map((width) => <Skeleton className="pageSkeleton__control" key={width} style={{ width }} />)}
+        </div>
+        <TableRowsSkeleton />
+      </div>
+    </LoadingRegion>
+  );
+}
+
+// Workspace table rows without a region of their own, for skeletons that
+// already announce their loading state.
+function TableRowsSkeleton({ rows = 6 }: { rows?: number }) {
+  return (
+    <div className="pageSkeleton__table">
+      {Array.from({ length: rows }, (_, index) => (
+        <div className="pageSkeleton__tableRow" key={index}>
+          <Skeleton style={{ width: lineWidth(index) }} />
+          <Skeleton style={{ width: "64px" }} />
+          <Skeleton style={{ width: "48px" }} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// The log and trace explorers: the search bar, the volume chart, then the
+// filters beside the results.
+export function ExplorerSkeleton({ label }: { label: string }) {
+  return (
+    <LoadingRegion className="screenSkeleton" label={label}>
+      <div className="pageSkeleton__stack">
+        <div className="explorerToolbar">
+          <Skeleton className="pageSkeleton__control" style={{ flex: "1 1 auto" }} />
+        </div>
+        <section className="explorerVolume">
+          <Skeleton className="automationSkeleton__small" style={{ width: "160px" }} />
+          <Skeleton className="screenSkeleton__chart" style={{ height: "64px" }} />
+        </section>
+        <div className="explorerBody">
+          <div className="explorerFacets">
+            {["40px", "52px"].map((title) => (
+              <div className="pageSkeleton__stack" key={title}>
+                <Skeleton className="automationSkeleton__small" style={{ width: title }} />
+                <ListSkeleton rows={3} />
+              </div>
+            ))}
+          </div>
+          <TableRowsSkeleton rows={8} />
+        </div>
+      </div>
+    </LoadingRegion>
+  );
+}
+
+export function TelemetryOverviewSkeleton() {
+  return (
+    <LoadingRegion className="screenSkeleton" label="Loading overview…">
+      <div className="pageSkeleton__stack pageSkeleton__stack--overview">
+        <div className="telOverviewSection">
+          <Skeleton className="pageSkeleton__heading" style={{ width: "72px" }} />
+          <Skeleton className="automationSkeleton__small" style={{ width: "132px" }} />
+        </div>
+        {["128px", "96px"].map((name) => (
+          <section className="telOverviewTray" key={name}>
+            <header className="telOverviewTray__label">
+              <Skeleton className="automationSkeleton__small" style={{ width: name }} />
+              <Skeleton className="automationSkeleton__small" style={{ width: "72px" }} />
+            </header>
+            <div className="telOverviewTray__card">
+              <div className="telOverviewSignals">
+                {[0, 1].map((signal) => (
+                  <section className="telOverviewSignal" key={signal}>
+                    <Skeleton className="automationSkeleton__small" style={{ width: "44px" }} />
+                    <div className="telOverviewSignal__stats">
+                      {[0, 1, 2].map((stat) => (
+                        <div className="telOverviewStat" key={stat}>
+                          <Skeleton className="automationSkeleton__small" style={{ width: "44px" }} />
+                          <Skeleton className="pageSkeleton__statValue" style={{ width: "52px" }} />
+                        </div>
+                      ))}
+                    </div>
+                    <Skeleton className="pageSkeleton__pills" />
+                  </section>
+                ))}
+              </div>
+              <ul className="telOverviewRows">
+                <li className="telOverviewRow">
+                  <span className="telOverviewRow__icon"><Skeleton className="automationSkeleton__icon" variant="circle" /></span>
+                  <Skeleton style={{ width: "36%" }} />
+                </li>
+              </ul>
+            </div>
+          </section>
+        ))}
+      </div>
+    </LoadingRegion>
+  );
+}
+
+// Spans indented under their parents, each bar starting after the last.
+const waterfallRows = [
+  { depth: 0, left: 0, name: "46%", width: 100 },
+  { depth: 1, left: 2, name: "52%", width: 34 },
+  { depth: 2, left: 4, name: "40%", width: 18 },
+  { depth: 1, left: 38, name: "58%", width: 46 },
+  { depth: 2, left: 40, name: "44%", width: 22 },
+  { depth: 2, left: 64, name: "50%", width: 16 },
+  { depth: 1, left: 86, name: "38%", width: 12 },
+];
+
+export function TraceWaterfallSkeleton() {
+  return (
+    <div className="traceWaterfall">
+      <div className="traceWaterfall__axis">
+        <span className="traceWaterfall__name"><Skeleton style={{ width: "40px" }} /></span>
+        <span className="traceWaterfall__track" />
+        <span />
+      </div>
+      <ul className="traceWaterfall__rows">
+        {waterfallRows.map((row, index) => (
+          <li key={index}>
+            <div className="traceWaterfall__row pageSkeleton__waterfallRow">
+              <span className="traceWaterfall__name" style={{ paddingLeft: `${row.depth * 14}px` }}>
+                <Skeleton style={{ width: row.name }} />
+              </span>
+              <span className="traceWaterfall__track">
+                <Skeleton className="pageSkeleton__span" style={{ left: `${row.left}%`, width: `${row.width}%` }} />
+              </span>
+              <span className="traceWaterfall__duration"><Skeleton style={{ width: "40px", marginLeft: "auto" }} /></span>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+export function TraceDetailSkeleton() {
+  return (
+    <LoadingRegion className="screenSkeleton" label="Loading trace…">
+      <div className="pageSkeleton__stack">
+        <PageHeaderSkeleton crumbs={["44px", "64px"]} meta={["min(520px, 80%)"]} title="240px" />
+        <TraceWaterfallSkeleton />
+      </div>
+    </LoadingRegion>
+  );
+}
+
+// The trace drawer's meta line and waterfall.
+export function TraceDrawerSkeleton() {
+  return (
+    <LoadingRegion className="screenSkeleton" label="Loading trace…">
+      <div className="pageSkeleton__stack">
+        <Skeleton className="automationSkeleton__small" style={{ width: "min(460px, 80%)" }} />
+        <TraceWaterfallSkeleton />
+      </div>
+    </LoadingRegion>
+  );
+}
+
+export function DashboardSkeleton() {
+  return (
+    <LoadingRegion className="screenSkeleton screenSkeleton--fill" label="Loading dashboard…">
+      <div className="dashboardPage">
+        <header className="dashboardPage__controls">
+          <div className="dashboardPage__column automationCreate__header">
+            <div className="automationCreate__breadcrumb">
+              <Skeleton className="automationSkeleton__small" style={{ width: "72px" }} />
+              <Skeleton className="automationSkeleton__small" style={{ width: "112px" }} />
+            </div>
+            <div className="dashboardPage__titleRow">
+              <Skeleton className="automationSkeleton__title" style={{ width: "200px" }} />
+              <span className="automationCreate__spacer" />
+              <Skeleton className="pageSkeleton__button" style={{ width: "220px" }} />
+              <Skeleton className="pageSkeleton__button" style={{ width: "28px" }} />
+            </div>
+          </div>
+        </header>
+        <div className="dashboardPage__canvas">
+          <div className="dashboardPage__column">
+            <div className="dashboardPage__toolbar">
+              <span className="automationCreate__spacer" />
+              <Skeleton className="pageSkeleton__button" style={{ width: "104px" }} />
+            </div>
+            <div className="pageSkeleton__widgets">
+              {["136px", "104px", "120px", "88px"].map((title) => (
+                <article className="dashboardWidget" key={title}>
+                  <header className="dashboardWidget__header">
+                    <Skeleton className="automationSkeleton__small" style={{ width: title }} />
+                  </header>
+                  <div className="dashboardWidget__body">
+                    <Skeleton className="screenSkeleton__chart pageSkeleton__chartFill" />
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </LoadingRegion>
+  );
+}
+
+// The alert and activation pages: header, summary beside the properties,
+// then the chart.
+export function AlertDetailSkeleton() {
+  return (
+    <LoadingRegion className="screenSkeleton" label="Loading alert…">
+      <div className="alertPage">
+        <PageHeaderSkeleton actions={["96px", "84px"]} crumbs={["44px", "120px"]} title="220px" />
+        <div className="alertOverview">
+          <div className="alertOverview__copy">
+            <SkeletonLines widths={["92%", "64%"]} />
+            <SkeletonLines widths={["132px", "78%"]} />
+          </div>
+          <aside className="alertProperties">
+            <SkeletonLines widths={["84px", "72%", "64%", "56%"]} />
+          </aside>
+        </div>
+        <section className="alertChart">
+          <Skeleton className="pageSkeleton__heading" style={{ width: "104px" }} />
+          <Skeleton className="screenSkeleton__chart" />
+        </section>
+      </div>
+    </LoadingRegion>
+  );
+}
+
+// An agent's settings tab: the input, context and output sections.
+export function AgentSettingsSkeleton() {
+  return (
+    <LoadingRegion className="screenSkeleton" label="Loading agent settings…">
+      <div className="createAgentForm agentEditor">
+        {["48px", "64px", "56px"].map((title) => (
+          <section className="createSection" key={title}>
+            <header>
+              <Skeleton className="pageSkeleton__heading" style={{ width: title }} />
+              <Skeleton className="tableSkeleton__secondary" style={{ width: "min(320px, 80%)" }} />
+            </header>
+            <div className="createSection__body">
+              <PanelSkeleton>
+                <SkeletonLines widths={["40%", "72%"]} />
+              </PanelSkeleton>
+            </div>
+          </section>
+        ))}
+      </div>
+    </LoadingRegion>
+  );
+}
+
+// A form page: header, then labelled fields in sections.
+export function FormPageSkeleton({ className, label }: { className: string; label: string }) {
+  return (
+    <LoadingRegion className="screenSkeleton" label={label}>
+      <div className={className}>
+        <PageHeaderSkeleton actions={["64px", "104px"]} crumbs={["72px", "96px"]} title="200px" />
+        <div className="pageSkeleton__form">
+          <FieldSkeleton label="72px" />
+          {["128px", "112px"].map((title) => (
+            <section className="pageSkeleton__formSection" key={title}>
+              <Skeleton className="pageSkeleton__heading" style={{ width: title }} />
+              <FieldSkeleton />
+              <FieldSkeleton label="120px" />
+              <FieldSkeleton label="80px" />
+            </section>
+          ))}
+        </div>
+      </div>
+    </LoadingRegion>
+  );
+}
+
+export function ErrorIssueSkeleton() {
+  return (
+    <LoadingRegion className="screenSkeleton" label="Loading error…">
+      <div className="errorIssue syntheticCheck">
+        <PageHeaderSkeleton actions={["72px", "80px"]} crumbs={["44px", "96px"]} title="min(420px, 60%)" />
+        <section className="errorIssue__overview">
+          <SkeletonLines widths={["94%", "70%", "180px"]} />
+          <SkeletonLines widths={["72%", "88%", "64%", "80%"]} />
+        </section>
+        <PanelSkeleton title="96px">
+          <Skeleton className="screenSkeleton__chart" style={{ height: "140px" }} />
+        </PanelSkeleton>
+        <PanelSkeleton title="112px">
+          <SkeletonLines widths={["88%", "74%", "92%", "60%"]} />
+        </PanelSkeleton>
+      </div>
+    </LoadingRegion>
+  );
+}
+
+export function SyntheticCheckSkeleton() {
+  return (
+    <LoadingRegion className="screenSkeleton" label="Loading check…">
+      <div className="syntheticCheck">
+        <PageHeaderSkeleton
+          actions={["168px", "60px", "64px"]}
+          crumbs={["108px", "120px"]}
+          meta={["min(360px, 70%)", "220px"]}
+          title="200px"
+        />
+        <div className="syntheticCheck__stats">
+          {[0, 1, 2, 3].map((index) => (
+            <PanelSkeleton key={index}>
+              <Skeleton className="automationSkeleton__small" style={{ width: "64px" }} />
+              <Skeleton className="pageSkeleton__statValue" style={{ width: "72px" }} />
+            </PanelSkeleton>
+          ))}
+        </div>
+        <PanelSkeleton title="88px">
+          <Skeleton className="screenSkeleton__chart" style={{ height: "160px" }} />
+        </PanelSkeleton>
+        <PanelSkeleton title="64px">
+          <TableRowsSkeleton rows={4} />
+        </PanelSkeleton>
+      </div>
+    </LoadingRegion>
+  );
+}
+
+export function TelemetrySetupSkeleton({ rows = 4 }: { rows?: number }) {
+  return (
+    <LoadingRegion className="screenSkeleton" label="Loading telemetry sources…">
+      <div className="telemetrySetup">
+        <Skeleton className="automationSkeleton__small" style={{ width: "80px" }} />
+        <SkeletonLines widths={["min(560px, 90%)"]} />
+        <ul className="telemetrySources">
+          {Array.from({ length: rows }, (_, index) => (
+            <li key={index}>
+              <div className="telemetrySources__row">
+                <Skeleton className="pageSkeleton__icon" />
+                <span className="telemetrySources__body">
+                  <Skeleton style={{ width: `${96 + (index % 3) * 24}px` }} />
+                  <Skeleton className="tableSkeleton__secondary" style={{ width: lineWidth(index) }} />
+                </span>
+                <span />
+                <span />
+              </div>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </LoadingRegion>
+  );
+}
+
+// A telemetry source's setup steps.
+export function TelemetrySourceSkeleton() {
+  return (
+    <LoadingRegion className="screenSkeleton" label="Loading setup…">
+      <div className="pageSkeleton__stack">
+        <SkeletonLines widths={["min(600px, 92%)", "min(380px, 60%)"]} />
+        <PanelSkeleton title="132px">
+          <SkeletonLines widths={["86%", "62%"]} />
+          <Skeleton className="pageSkeleton__button" style={{ width: "136px" }} />
+        </PanelSkeleton>
+      </div>
+    </LoadingRegion>
+  );
+}
+
+export function ScanDetailSkeleton() {
+  return (
+    <LoadingRegion className="screenSkeleton" label="Loading scan…">
+      <div className="pageSkeleton__stack">
+        <div className="screenSkeleton__headingCopy">
+          <Skeleton className="pageSkeleton__heading" style={{ width: "220px" }} />
+          <Skeleton style={{ width: "min(360px, 70%)" }} />
+        </div>
+        <div className="pageSkeleton__stats">
+          {[0, 1, 2, 3, 4].map((index) => (
+            <div key={index}>
+              <Skeleton className="automationSkeleton__small" style={{ width: "88px" }} />
+              <Skeleton className="pageSkeleton__statValue" style={{ width: "40px" }} />
+            </div>
+          ))}
+        </div>
+        <Skeleton className="pageSkeleton__heading" style={{ width: "88px" }} />
+        <TableRowsSkeleton rows={4} />
+      </div>
+    </LoadingRegion>
+  );
+}
+
+export function SuggestionDetailSkeleton() {
+  return (
+    <LoadingRegion className="screenSkeleton" label="Loading suggestion…">
+      <div className="pageSkeleton__stack">
+        <div className="automationCreate__breadcrumb">
+          <Skeleton className="automationSkeleton__small" style={{ width: "80px" }} />
+          <Skeleton className="automationSkeleton__small" style={{ width: "160px" }} />
+        </div>
+        <div className="dashboardPage__titleRow">
+          <Skeleton className="automationSkeleton__title" style={{ width: "min(420px, 60%)" }} />
+          <span className="automationCreate__spacer" />
+          <Skeleton className="pageSkeleton__button" style={{ width: "80px" }} />
+        </div>
+        <SkeletonLines widths={["86%", "92%", "70%", "48%"]} />
+        <PanelSkeleton title="128px">
+          <DiffLinesSkeleton />
+        </PanelSkeleton>
+      </div>
+    </LoadingRegion>
+  );
+}
+
+const diffWidths = ["38%", "62%", "54%", "70%", "44%", "58%", "32%"];
+
+function DiffLinesSkeleton() {
+  return (
+    <div className="pageSkeleton__diff">
+      {diffWidths.map((width, index) => (
+        <Skeleton key={index} style={{ marginLeft: `${(index % 3) * 16}px`, width }} />
+      ))}
+    </div>
+  );
+}
+
+// A proposed diff or a pull request's files while the diff viewer loads.
+export function DiffSkeleton({ className, label }: { className?: string; label: string }) {
+  return (
+    <LoadingRegion className={className ? `screenSkeleton ${className}` : "screenSkeleton"} label={label}>
+      <DiffLinesSkeleton />
+    </LoadingRegion>
+  );
+}
+
+// An automation's usage cards: the metric, its total and a daily chart.
+export function UsageCardsSkeleton() {
+  return (
+    <LoadingRegion className="screenSkeleton" label="Loading usage…">
+      <div className="usageHistory__cards">
+        {["96px", "72px"].map((title) => (
+          <section className="usageCard" key={title}>
+            <header className="usageCard__header">
+              <Skeleton className="automationSkeleton__small" style={{ width: title }} />
+              <Skeleton className="pageSkeleton__statValue" style={{ width: "88px" }} />
+              <Skeleton className="tableSkeleton__secondary" style={{ width: "80%" }} />
+            </header>
+            <Skeleton className="screenSkeleton__chart" style={{ height: "120px" }} />
+          </section>
+        ))}
+      </div>
+    </LoadingRegion>
+  );
+}
+
+// The rows of a sidebar list, such as explorer filters or a metric list.
+export function ListSkeleton({ label, rows = 5 }: { label?: string; rows?: number }) {
+  const lines = (
+    <div className="pageSkeleton__list">
+      {Array.from({ length: rows }, (_, index) => <Skeleton key={index} style={{ width: lineWidth(index) }} />)}
+    </div>
+  );
+  return label ? <LoadingRegion className="screenSkeleton" label={label}>{lines}</LoadingRegion> : lines;
+}
+
+// Integration rows with a toggle, as on the tag mode settings.
+export function IntegrationRowsSkeleton({ label }: { label: string }) {
+  return (
+    <LoadingRegion className="screenSkeleton" label={label}>
+      {[0, 1, 2].map((index) => (
+        <div className="pageSkeleton__integrationRow" key={index}>
+          <Skeleton className="pageSkeleton__icon" />
+          <span className="tableSkeleton__lines">
+            <Skeleton style={{ width: `${120 + index * 28}px` }} />
+            <Skeleton className="tableSkeleton__secondary" style={{ width: lineWidth(index + 2) }} />
+          </span>
+          <Skeleton className="pageSkeleton__toggle" />
+        </div>
+      ))}
+    </LoadingRegion>
+  );
+}
+
+// The workspace choices on the sign-in and MCP connection cards.
+export function WorkspaceListSkeleton() {
+  return (
+    <LoadingRegion className="screenSkeleton" label="Loading workspaces…">
+      <div className="workspaceList">
+        {["136px", "104px"].map((width) => (
+          <div className="workspaceChoice pageSkeleton__choice" key={width}>
+            <Skeleton style={{ width }} />
+          </div>
+        ))}
+      </div>
+    </LoadingRegion>
+  );
+}
+
+// The setup card's content while a step's data loads.
+export function CardContentSkeleton({ label }: { label: string }) {
+  return (
+    <LoadingRegion className="screenSkeleton" label={label}>
+      <div className="pageSkeleton__stack">
+        <SkeletonLines widths={["64%", "88%", "52%"]} />
+        <Skeleton className="pageSkeleton__input" />
+      </div>
+    </LoadingRegion>
+  );
+}
+
+// The workspace frame while the session and the workspace load: the sidebar,
+// then a page heading over a table. The shell lays out its own children, so
+// they are hidden one by one instead of inside one wrapper.
+export function AppFrameSkeleton() {
+  return (
+    <main aria-busy="true" className="appShell appShell--default appShell--workspace" role="status">
+      <span className="srOnly">Loading Superlog…</span>
+      <div aria-hidden="true" className="globalHeader pageSkeleton__sidebar">
+        <Skeleton className="automationSkeleton__icon" />
+        <div className="pageSkeleton__nav">
+          {[72, 64, 88, 56, 0, 80, 68, 60].map((width, index) =>
+            width ? (
+              <span className="pageSkeleton__navItem" key={index}>
+                <Skeleton className="automationSkeleton__icon" />
+                <Skeleton style={{ width: `${width}px` }} />
+              </span>
+            ) : (
+              <Skeleton className="pageSkeleton__navLabel" key={index} />
+            ),
+          )}
+        </div>
+      </div>
+      <div aria-hidden="true" className="workspaceSurface">
+        <div className="workspaceContent">
+          <Skeleton className="pageSkeleton__heading" style={{ width: "120px" }} />
+          <TableRowsSkeleton />
+        </div>
+      </div>
+    </main>
   );
 }

@@ -3,6 +3,7 @@ import { type FormEvent, type ReactNode, useCallback, useEffect, useState } from
 import { Link, Navigate, useParams } from "react-router-dom";
 import { relativeTime } from "../agents-api";
 import { AppShell } from "../components/app-shell";
+import { TelemetrySourceSkeleton } from "../components/screen-skeletons";
 import { ProviderGlyph } from "../components/icons";
 import { ScrambleText } from "../components/scramble-text";
 import { useIntegrationConnect } from "../components/use-integration-connect";
@@ -110,7 +111,7 @@ function OpenTelemetrySetup() {
   }
 
   if (available === undefined) {
-    return error ? <RetryMessage message={error} onRetry={() => { setError(null); void load(); }} /> : <p className="telemetryPage__status">Loading…</p>;
+    return error ? <RetryMessage message={error} onRetry={() => { setError(null); void load(); }} /> : <TelemetrySourceSkeleton />;
   }
   if (!available) return <Unavailable />;
   return (
@@ -181,7 +182,7 @@ function CloudSourceSetup({ provider }: { provider: "aws" | "gcp" | "vercel" }) 
   }, [load]);
 
   if (overview === undefined) {
-    return error ? <RetryMessage message={error} onRetry={() => { setError(null); void load(); }} /> : <p className="telemetryPage__status">Loading…</p>;
+    return error ? <RetryMessage message={error} onRetry={() => { setError(null); void load(); }} /> : <TelemetrySourceSkeleton />;
   }
   if (overview === null) return <Unavailable />;
   const sources = overview.sources.filter((source) => source.provider === provider);

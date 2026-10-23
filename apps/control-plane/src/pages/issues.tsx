@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { fetchIssues, type IssueListItem, relativeTime } from "../agents-api";
 import { AppShell } from "../components/app-shell";
+import { IssueListSkeleton } from "../components/screen-skeletons";
 import { dateGroupLabel } from "../date-presentation";
 import { useDocumentTitle } from "../use-document-title";
 
@@ -54,7 +55,7 @@ export function IssuesPage() {
           </details>
         </header>
         {error ? <p className="formError" role="alert">{error}</p> : loading ? (
-          <div className="issuesLoading" role="status" aria-busy="true"><span className="srOnly">Loading issues…</span>{Array.from({ length: 6 }, (_, index) => <div key={index} />)}</div>
+          <IssueListSkeleton />
         ) : groups.size === 0 ? (
           <section className="issuesEmpty"><h2>{issues.length ? "No matching issues" : "No issues identified"}</h2><p>{issues.length ? "Choose another severity to see more issues." : "Issues will appear after an investigation submits a finding."}</p></section>
         ) : Array.from(groups, ([label, rows]) => (

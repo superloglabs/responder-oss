@@ -8,6 +8,7 @@ import {
   syntheticMethods,
 } from "../../../../packages/core/src/synthetics/types";
 import { AppShell } from "../components/app-shell";
+import { FormPageSkeleton } from "../components/screen-skeletons";
 import { SyntheticRunDetails } from "../components/synthetics";
 import { Button, IconButton, SelectField, Switch, TextAreaField, TextField } from "../design-system";
 import {
@@ -372,7 +373,7 @@ export function SyntheticCheckEditPage() {
             <p>{loadError}</p>
           </div>
         ) : (
-          <p className="telemetryPage__status">Loading…</p>
+          <FormPageSkeleton className="alertPage syntheticEditor" label="Loading check…" />
         )}
       </AppShell>
     );

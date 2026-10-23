@@ -21,6 +21,7 @@ import {
   formatAlertValue,
 } from "../../../../packages/core/src/telemetry/alert-text";
 import { AppShell } from "../components/app-shell";
+import { AlertDetailSkeleton } from "../components/screen-skeletons";
 import { AlertChart } from "../components/alert-chart";
 import { useAlertPreview } from "../use-alert-preview";
 import { Button } from "../design-system";
@@ -119,18 +120,13 @@ function Header({
   );
 }
 function LoadState({ error, retry }: { error?: string; retry: () => void }) {
+  if (!error) return <AlertDetailSkeleton />;
   return (
-    <div className="alertEmpty" role={error ? "alert" : "status"}>
-      {error ? (
-        <>
-          <p>{error}</p>
-          <Button onClick={retry} size="small">
-            Retry
-          </Button>
-        </>
-      ) : (
-        "Loading…"
-      )}
+    <div className="alertEmpty" role="alert">
+      <p>{error}</p>
+      <Button onClick={retry} size="small">
+        Retry
+      </Button>
     </div>
   );
 }

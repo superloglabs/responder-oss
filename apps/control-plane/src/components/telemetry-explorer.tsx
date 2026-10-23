@@ -2,6 +2,7 @@ import { CheckIcon, MagnifyingGlassIcon, XIcon } from "@phosphor-icons/react";
 import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { IconButton, SegmentedControl, SelectField } from "../design-system";
 import { telemetryRanges, type TelemetryRange } from "../telemetry-api";
+import { ListSkeleton } from "./screen-skeletons";
 import "./telemetry-explorer.css";
 
 export function ExplorerTimeControls({
@@ -129,7 +130,7 @@ export function ExplorerFacet({
         ) : null}
       </legend>
       {listed.length === 0 ? (
-        <p className="explorerFacet__empty">{loading ? "Loading…" : "None in this window"}</p>
+        loading ? <ListSkeleton rows={3} /> : <p className="explorerFacet__empty">None in this window</p>
       ) : (
         listed.map((option) => {
           const checked = selected.includes(option.value);

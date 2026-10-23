@@ -3,6 +3,7 @@ import { Navigate } from "react-router-dom";
 import { authErrorCode } from "../auth-error-code";
 import { authClient } from "../auth-client";
 import { AppShell } from "../components/app-shell";
+import { DataTableSkeleton } from "../components/screen-skeletons";
 import { Avatar, Badge, Button, DataTable } from "../design-system";
 import { useDocumentTitle } from "../use-document-title";
 import {
@@ -135,61 +136,74 @@ export function SuperuserUsersPage() {
         </p>
       ) : null}
 
-      <section className="superuserUsers" aria-busy={isLoading}>
-        <DataTable
-          aria-label="Responder users"
-          columns={[
-            {
-              header: "User",
-              key: "user",
-              render: (user) => (
-                <div className="superuserUser">
-                  <Avatar
-                    image={user.image ?? undefined}
-                    name={user.name || user.email}
-                    size="small"
-                  />
-                  <span>
-                    <strong>{user.name || "Unnamed user"}</strong>
-                    <small>{user.email}</small>
-                  </span>
-                </div>
-              ),
-            },
-            {
-              header: "Joined",
-              key: "joined",
-              render: (user) => new Date(user.createdAt).toLocaleDateString(),
-              width: "160px",
-            },
-            {
-              align: "right",
-              header: "",
-              key: "action",
-              render: (user) =>
-                isSuperuserRole(user.role) ? (
-                  <Badge>Superuser</Badge>
-                ) : user.banned ? (
-                  <Badge tone="danger">Suspended</Badge>
-                ) : !canImpersonateUser(user) ? (
-                  <Badge>Protected</Badge>
-                ) : (
-                  <Button
-                    disabled={impersonatingId !== null}
-                    loading={impersonatingId === user.id}
-                    onClick={() => void impersonate(user)}
-                    size="small"
-                  >
-                    View as user
-                  </Button>
+      <section className="superuserUsers">
+        {isLoading ? (
+          <DataTableSkeleton
+            className=""
+            columns={[
+              { cell: "avatar", header: "User", key: "user" },
+              { header: "Joined", key: "joined", width: "160px" },
+              { cell: "empty", header: "", key: "action", width: "180px" },
+            ]}
+            label="Loading users…"
+            variant={null}
+          />
+        ) : (
+          <DataTable
+            aria-label="Responder users"
+            columns={[
+              {
+                header: "User",
+                key: "user",
+                render: (user) => (
+                  <div className="superuserUser">
+                    <Avatar
+                      image={user.image ?? undefined}
+                      name={user.name || user.email}
+                      size="small"
+                    />
+                    <span>
+                      <strong>{user.name || "Unnamed user"}</strong>
+                      <small>{user.email}</small>
+                    </span>
+                  </div>
                 ),
-              width: "180px",
-            },
-          ]}
-          emptyMessage={isLoading ? "Loading users…" : "No users found"}
-          getRowKey={(user) => user.id}
-          rows={isLoading ? [] : users}
-        />
+              },
+              {
+                header: "Joined",
+                key: "joined",
+                render: (user) => new Date(user.createdAt).toLocaleDateString(),
+                width: "160px",
+              },
+              {
+                align: "right",
+                header: "",
+                key: "action",
+                render: (user) =>
+                  isSuperuserRole(user.role) ? (
+                    <Badge>Superuser</Badge>
+                  ) : user.banned ? (
+                    <Badge tone="danger">Suspended</Badge>
+                  ) : !canImpersonateUser(user) ? (
+                    <Badge>Protected</Badge>
+                  ) : (
+                    <Button
+                      disabled={impersonatingId !== null}
+                      loading={impersonatingId === user.id}
+                      onClick={() => void impersonate(user)}
+                      size="small"
+                    >
+                      View as user
+                    </Button>
+                  ),
+                width: "180px",
+              },
+            ]}
+            emptyMessage="No users found"
+            getRowKey={(user) => user.id}
+            rows={users}
+          />
+        )}
       </section>
     </AppShell>
   );

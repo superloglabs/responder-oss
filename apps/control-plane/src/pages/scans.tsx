@@ -19,6 +19,7 @@ import {
   AgentContextRow,
 } from "../components/agent-context-controls";
 import { AppShell } from "../components/app-shell";
+import { DataTableSkeleton } from "../components/screen-skeletons";
 import { BookBookmarkIcon as RepositoryIcon, MagnifyingGlassIcon as SearchIcon, ScanIcon as SignalIcon, PlusIcon, TrashIcon, XIcon } from "@phosphor-icons/react";
 import type { ProviderGlyphId } from "../components/provider-glyphs";
 import {
@@ -1138,61 +1139,78 @@ export function ScansPage() {
           </div>
         </div>
         <div className="scanHistoryTable">
-          <DataTable<ScanRun>
-            variant="workspace"
-            aria-label="Recent scans"
-            columns={[
-              {
-                header: "Scan",
-                key: "scan",
-                render: (scan) => (
-                  <Link
-                    className="scanTableTitle"
-                    to={scanDetailPath(scan.id)}
-                  >
-                    <time dateTime={scan.startedAt}>{scan.startedLabel}</time>
-                  </Link>
-                ),
-                width: "27%",
-              },
-              {
-                header: "Status", key: "status", width: "17%",
-                render: (scan) => <span className={`scanRunStatus scanRunStatus--${scan.status}`}><span aria-hidden="true" />{scan.status === "completed" ? "Completed" : scan.status === "running" ? "Running" : "Failed"}</span>,
-              },
-              {
-                header: "Findings",
-                key: "findings",
-                render: (scan) => (
-                  <span className="scanTableFindings">
-                    {scan.status === "running"
-                      ? "Checking…"
-                      : scan.status === "failed"
-                        ? "Scan failed"
-                      : `${scan.filedIssues} new · ${Math.max(0, scan.activeIssues - scan.filedIssues)} existing`}
-                  </span>
-                ),
-                width: "25%",
-              },
-              {
-                header: "Sources",
-                key: "sources",
-                render: (scan) => `${scan.sources} ${scan.sources === 1 ? "source" : "sources"}`,
-                width: "17%",
-              },
-              {
-                align: "right",
-                header: "Duration",
-                key: "duration",
-                render: (scan) => scan.duration,
-                width: "15%",
-              },
+          {loading ? (
+            <DataTableSkeleton
+              className=""
+              columns={[
+                { header: "Scan", key: "scan", width: "27%" },
+                { header: "Status", key: "status", width: "17%" },
+                { header: "Findings", key: "findings", width: "25%" },
+                { header: "Sources", key: "sources", width: "17%" },
+                { align: "right", header: "Duration", key: "duration", width: "15%" },
+              ]}
+              label="Loading scans…"
+              rows={4}
+            />
+          ) : (
+            <>
+              <DataTable<ScanRun>
+                variant="workspace"
+                aria-label="Recent scans"
+                columns={[
+                  {
+                    header: "Scan",
+                    key: "scan",
+                    render: (scan) => (
+                      <Link
+                        className="scanTableTitle"
+                        to={scanDetailPath(scan.id)}
+                      >
+                        <time dateTime={scan.startedAt}>{scan.startedLabel}</time>
+                      </Link>
+                    ),
+                    width: "27%",
+                  },
+                  {
+                    header: "Status", key: "status", width: "17%",
+                    render: (scan) => <span className={`scanRunStatus scanRunStatus--${scan.status}`}><span aria-hidden="true" />{scan.status === "completed" ? "Completed" : scan.status === "running" ? "Running" : "Failed"}</span>,
+                  },
+                  {
+                    header: "Findings",
+                    key: "findings",
+                    render: (scan) => (
+                      <span className="scanTableFindings">
+                        {scan.status === "running"
+                          ? "Checking…"
+                          : scan.status === "failed"
+                            ? "Scan failed"
+                          : `${scan.filedIssues} new · ${Math.max(0, scan.activeIssues - scan.filedIssues)} existing`}
+                      </span>
+                    ),
+                    width: "25%",
+                  },
+                  {
+                    header: "Sources",
+                    key: "sources",
+                    render: (scan) => `${scan.sources} ${scan.sources === 1 ? "source" : "sources"}`,
+                    width: "17%",
+                  },
+                  {
+                    align: "right",
+                    header: "Duration",
+                    key: "duration",
+                    render: (scan) => scan.duration,
+                    width: "15%",
+                  },
 
-            ]}
-            getRowKey={(scan) => scan.id}
-            onRowClick={(scan) => navigate(scanDetailPath(scan.id))}
-            rows={loading ? [] : runs}
-          />
-          {loading ? <p className="contextIntegrationsEmpty">Loading scans…</p> : runs.length === 0 ? <p className="contextIntegrationsEmpty">No scans yet. Configure your sources and run your first scan.</p> : null}
+                ]}
+                getRowKey={(scan) => scan.id}
+                onRowClick={(scan) => navigate(scanDetailPath(scan.id))}
+                rows={runs}
+              />
+              {runs.length === 0 ? <p className="contextIntegrationsEmpty">No scans yet. Configure your sources and run your first scan.</p> : null}
+            </>
+          )}
         </div>
       </section>
     </AppShell>

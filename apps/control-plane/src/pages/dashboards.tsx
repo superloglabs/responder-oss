@@ -4,6 +4,7 @@ import { type FormEvent, useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { relativeTime } from "../agents-api";
 import { AppShell } from "../components/app-shell";
+import { DataTableSkeleton } from "../components/screen-skeletons";
 import { DashboardDialog } from "../components/dashboard-dialog";
 import { Button, DataTable, TextField } from "../design-system";
 import { createDashboard, fetchDashboards, type TelemetryDashboardSummary } from "../dashboards-api";
@@ -105,7 +106,15 @@ export function DashboardsPage() {
             <button onClick={() => void load()} type="button">Retry</button>
           </div>
         ) : (
-          <p className="telemetryPage__status">Loading…</p>
+          <DataTableSkeleton
+            columns={[
+              { header: "Dashboard", key: "name" },
+              { align: "right", header: "Widgets", key: "widgets", width: "96px" },
+              { header: "Updated", key: "updated", width: "140px" },
+              { cell: "empty", header: "", key: "open", width: "44px" },
+            ]}
+            label="Loading dashboards…"
+          />
         )
       ) : dashboards === null ? (
         <section className="emptyState emptyState--list">

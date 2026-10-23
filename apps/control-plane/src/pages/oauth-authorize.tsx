@@ -1,6 +1,7 @@
 import { type FormEvent, useEffect, useState } from "react";
 import { authClient } from "../auth-client";
 import { AuthFrame, SignIn } from "../components/auth-gate";
+import { CardContentSkeleton, WorkspaceListSkeleton } from "../components/screen-skeletons";
 import { workspaceSlug } from "../components/workspace";
 import {
   oauthAuthorizationRequest,
@@ -136,7 +137,7 @@ function Consent({
         </p>
       </div>
       {organizations.isPending ? (
-        <p className="authMuted">Loading workspaces…</p>
+        <WorkspaceListSkeleton />
       ) : workspaces.length > 0 ? (
         <fieldset className="workspaceList oauthWorkspaceList">
           <legend className="srOnly">Workspace</legend>
@@ -228,7 +229,7 @@ export function OAuthAuthorizePage() {
       </div>
     );
   } else if (session.isPending) {
-    content = <p className="authMuted">Loading Superlog…</p>;
+    content = <CardContentSkeleton label="Loading Superlog…" />;
   } else if (!session.data) {
     content = <SignIn allowLegacyHandoff={false} allowRegionChoice={false} />;
   } else {

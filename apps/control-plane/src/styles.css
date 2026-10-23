@@ -4726,10 +4726,6 @@ button:disabled {
   grid-template-columns: 34fr 18fr 19fr 14fr 10fr 5fr;
 }
 
-.screenSkeletonTable--issues .screenSkeletonTable__row {
-  grid-template-columns: minmax(0, 1fr) 150px 90px 100px 36px;
-}
-
 .screenSkeletonTable--automationRuns .screenSkeletonTable__row {
   grid-template-columns: 52fr 16fr 9.5fr 18fr 44px;
 }
@@ -8875,18 +8871,6 @@ body:has(.appShell--create) {
   font-size: 12px;
 }
 
-.remediationDiff__loading {
-  min-height: 92px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid #303136;
-  border-radius: 6px;
-  background: #101011;
-  color: var(--issueMuted);
-  font-size: 12px;
-}
-
 .remediationDiff__fallback,
 .remediationPrompt pre {
   max-height: 360px;
@@ -10198,7 +10182,6 @@ a.issueLine:focus-visible {
 :root[data-color-theme="light"] .remediationReviewTrace__timeline .traceTool__data pre,
 :root[data-color-theme="light"] .remediationReviewTrace__timeline .traceMessage--assistant,
 :root[data-color-theme="light"] .remediationDiff__file,
-:root[data-color-theme="light"] .remediationDiff__loading,
 :root[data-color-theme="light"] .remediationDiff__fallback,
 :root[data-color-theme="light"] .remediationPrompt pre {
   border-color: var(--ds-border-default);

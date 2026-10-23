@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import { fetchAutomationUsage } from "../automations-api";
 import type { UsageHistoryDays } from "../usage-history-presentation";
 import { useUsageHistory } from "../use-usage-history";
+import { UsageCardsSkeleton } from "./screen-skeletons";
 import { UsageMetricCard, UsageRangeControl } from "./usage-history-view";
 import "./usage-history.css";
 
@@ -29,7 +30,7 @@ export function AutomationUsage({ automationId }: { automationId: string }) {
             note="Superlog model usage. Runs with your own API key or ChatGPT subscription are not charged here."
           />
         </div>
-      ) : !error ? <p className="usageHistory__loading" role="status">Loading usage…</p> : null}
+      ) : !error ? <UsageCardsSkeleton /> : null}
     </div>
   );
 }

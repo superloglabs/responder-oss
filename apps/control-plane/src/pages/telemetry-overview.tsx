@@ -12,6 +12,7 @@ import { useState, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { fetchSuggestion, fetchSuggestions } from "../agents-api";
 import { AppShell } from "../components/app-shell";
+import { TelemetryOverviewSkeleton } from "../components/screen-skeletons";
 import { CopyPromptButton } from "../components/copy-prompt-button";
 import { HairlineComputer } from "../components/hairline-computer";
 import { SendTelemetryLink, TelemetryGate } from "../components/telemetry";
@@ -419,7 +420,7 @@ export function TelemetryOverviewPage() {
             </div>
           ) : null}
         </header>
-        <TelemetryGate signal="Telemetry" state={telemetry}>
+        <TelemetryGate signal="Telemetry" skeleton={<TelemetryOverviewSkeleton />} state={telemetry}>
           {overview.error ? (
             <div className="automationRuns__message" role="alert">
               <p>{overview.error}</p>
@@ -431,7 +432,7 @@ export function TelemetryOverviewPage() {
               range={range}
             />
           ) : (
-            <p className="explorerStatus">Loading…</p>
+            <TelemetryOverviewSkeleton />
           )}
         </TelemetryGate>
       </div>

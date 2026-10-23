@@ -11,6 +11,7 @@ import {
 import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { AppShell } from "../components/app-shell";
+import { ChartSkeleton, ListSkeleton } from "../components/screen-skeletons";
 import { MetricKindIcon } from "../components/metric-kind-icon";
 import { TelemetryGate } from "../components/telemetry";
 import { seriesColors, TimeseriesChart } from "../components/timeseries-chart";
@@ -119,7 +120,7 @@ function MetricList({
         />
       </label>
       {error ? <p className="formError" role="alert">{error}</p> : null}
-      {catalog === null && !error ? <p className="telemetryPage__status">Loading metrics…</p> : null}
+      {catalog === null && !error ? <ListSkeleton label="Loading metrics…" rows={8} /> : null}
       {catalog !== null && groups.length === 0 ? <p className="telemetryPage__status">No metrics match.</p> : null}
       {groups.map((group) => {
         // A search shows every match.
@@ -323,7 +324,7 @@ function DimensionsRail({
         {dimensions ? <span>{dimensions.length}</span> : null}
       </header>
       <p className="metricDimensionsRail__hint">Attributes on this metric's points in the time range.</p>
-      {loading ? <p className="telemetryPage__status">Loading…</p> : null}
+      {loading ? <ListSkeleton label="Loading dimensions…" rows={4} /> : null}
       {error ? <p className="formError" role="alert">{error}</p> : null}
       {!loading && dimensions?.length === 0 ? <p className="telemetryPage__status">This metric has no attributes.</p> : null}
       {sections.map((section) => (
@@ -594,7 +595,7 @@ export function MetricExplorerPage() {
               {chart.error ? (
                 <div className="automationRuns__message" role="alert"><p>{chart.error}</p></div>
               ) : chart.value === null ? (
-                <p className="telemetryPage__status metricChart__plot">Loading…</p>
+                <ChartSkeleton className="metricChart__plot" height="100%" label="Loading graph…" />
               ) : seriesCount === 0 ? (
                 <p className="telemetryPage__status metricChart__plot">No data points match in this time range.</p>
               ) : (

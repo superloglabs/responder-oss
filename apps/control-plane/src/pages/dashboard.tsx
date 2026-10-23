@@ -3,6 +3,7 @@ import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useRef
 import ReactGridLayout, { useContainerWidth, type Layout } from "react-grid-layout";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { AppShell } from "../components/app-shell";
+import { DashboardSkeleton } from "../components/screen-skeletons";
 import { DashboardDialog } from "../components/dashboard-dialog";
 import { DashboardTimePicker } from "../components/dashboard-time-picker";
 import { DashboardVariableBar, DashboardVariablesEditor } from "../components/dashboard-variables";
@@ -313,14 +314,14 @@ export function DashboardPage() {
 
   if (!dashboard) {
     return (
-      <AppShell active="dashboards" redesigned>
+      <AppShell active="dashboards" density={loadError ? "default" : "dashboard"} redesigned>
         {loadError ? (
           <div className="automationRuns__message" role="alert">
             <p>{loadError}</p>
             <button onClick={() => void load()} type="button">Retry</button>
           </div>
         ) : (
-          <p className="telemetryPage__status">Loading…</p>
+          <DashboardSkeleton />
         )}
       </AppShell>
     );

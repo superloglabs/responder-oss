@@ -20,6 +20,7 @@ import {
   type TraceListState,
 } from "../telemetry-api";
 import { useTelemetryQuery } from "../use-telemetry-query";
+import { TraceDrawerSkeleton } from "./screen-skeletons";
 import { AttributeTable, ExplorerDrawer } from "./telemetry-explorer";
 import { TraceWaterfall } from "./trace-waterfall";
 
@@ -177,7 +178,7 @@ export function TraceDrawer({
           <button onClick={trace.retry} type="button">Retry</button>
         </div>
       ) : !trace.data || !root ? (
-        <p className="explorerStatus">Loading trace…</p>
+        <TraceDrawerSkeleton />
       ) : (
         <>
           <p className="traceDrawer__meta">

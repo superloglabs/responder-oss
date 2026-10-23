@@ -13,6 +13,7 @@ import {
   type WidgetData,
 } from "../dashboards-api";
 import { formatDuration, formatTelemetryTime, severityTone, traceHref } from "../telemetry-api";
+import { ChartSkeleton } from "./screen-skeletons";
 import { TimeseriesChart } from "./timeseries-chart";
 import { BarListValues, NumberValue, ValueTable } from "./widget-values";
 
@@ -71,7 +72,7 @@ function WidgetData({
 }: WidgetBodyProps & { type: DataWidgetType }) {
   const { data, error, loading } = useWidgetData({ config, range, refresh, type, variables });
   if (error) return <p className="dashboardWidget__status" role="alert">{error}</p>;
-  if (!data) return <p className="dashboardWidget__status">{loading ? "Loading…" : ""}</p>;
+  if (!data) return loading ? <ChartSkeleton height="100%" label={`Loading ${title}…`} /> : <p className="dashboardWidget__status" />;
   if (data.kind === "chart") {
     if (data.chart.series.length === 0) return <p className="dashboardWidget__status">No data in this time range.</p>;
     return (

@@ -2,6 +2,7 @@ import { NavigationIcon } from "../components/navigation-icon";
 import { useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { AppShell } from "../components/app-shell";
+import { DataTableSkeleton } from "../components/screen-skeletons";
 import { CountHistogram, type HistogramSeries } from "../components/count-histogram";
 import { TelemetryGate } from "../components/telemetry";
 import { ExplorerTimeControls } from "../components/telemetry-explorer";
@@ -233,7 +234,18 @@ function OverviewBody({
                   rows={data.operations}
                   variant="workspace"
                 />
-              ) : overview.error ? null : <p className="explorerStatus">Loading…</p>}
+              ) : overview.error ? null : (
+                <DataTableSkeleton
+                  className=""
+                  columns={[
+                    { header: "Operation", key: "name" },
+                    { align: "right", header: "Req/min", key: "rate", width: "96px" },
+                    { align: "right", header: "Errors", key: "errors", width: "88px" },
+                    { align: "right", header: "p95", key: "p95", width: "96px" },
+                  ]}
+                  label="Loading operations…"
+                />
+              )}
             </div>
           </section>
           <section className="overviewSection">
@@ -266,7 +278,18 @@ function OverviewBody({
                   rows={data.dependencies}
                   variant="workspace"
                 />
-              ) : overview.error ? null : <p className="explorerStatus">Loading…</p>}
+              ) : overview.error ? null : (
+                <DataTableSkeleton
+                  className=""
+                  columns={[
+                    { header: "Dependency", key: "name", width: "34%" },
+                    { header: "", key: "bar" },
+                    { align: "right", header: "p95", key: "p95", width: "96px" },
+                  ]}
+                  label="Loading dependencies…"
+                  rows={3}
+                />
+              )}
             </div>
           </section>
         </div>
@@ -304,7 +327,17 @@ function OverviewBody({
                 rows={data.errors}
                 variant="workspace"
               />
-            ) : overview.error ? null : <p className="explorerStatus">Loading…</p>}
+            ) : overview.error ? null : (
+              <DataTableSkeleton
+                className=""
+                columns={[
+                  { cell: "twoLines", header: "Error", key: "message" },
+                  { align: "right", header: "Traces", key: "traces", width: "88px" },
+                  { header: "First seen", key: "first", width: "136px" },
+                ]}
+                label="Loading errors…"
+              />
+            )}
           </div>
         </section>
       </div>

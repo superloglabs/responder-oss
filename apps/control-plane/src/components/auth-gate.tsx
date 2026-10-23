@@ -22,6 +22,7 @@ import { newWorkspacePath } from "../primary-navigation";
 import { ProviderGlyph } from "./icons";
 import { ColorThemeToggle } from "./color-theme-toggle";
 import { OnboardingFrame, OnboardingLoading } from "./onboarding-frame";
+import { AppFrameSkeleton, WorkspaceListSkeleton } from "./screen-skeletons";
 import { onboardingStepAtPath, onboardingStepStages, onboardingSteps } from "../pages/onboarding-presentation";
 import { cellSwitchUrl, rememberCell, useCellDirectory } from "../cells";
 import { SegmentedControl } from "../design-system";
@@ -631,7 +632,7 @@ function WorkspaceSetup({ onCreating, onReady }: WorkspaceSetupProps) {
         <p>Your agents and integrations are isolated inside a workspace.</p>
       </div>
       {organizations.isPending ? (
-        <p className="authMuted">Loading workspaces…</p>
+        <WorkspaceListSkeleton />
       ) : hasOrganizations ? (
         <div className="workspaceList">
           {organizations.data?.map((organization) => (
@@ -916,9 +917,7 @@ export function AuthGate({ children }: AuthGateProps) {
   const loading = onboardingStep ? (
     <OnboardingLoading step={onboardingStep} />
   ) : (
-    <AuthFrame>
-      <p className="authMuted">Loading Superlog…</p>
-    </AuthFrame>
+    <AppFrameSkeleton />
   );
 
   if (session.isPending) return loading;

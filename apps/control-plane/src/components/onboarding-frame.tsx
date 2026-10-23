@@ -10,6 +10,7 @@ import {
 } from "../pages/onboarding-presentation";
 import { ProviderGlyph } from "./icons";
 import { providerDisplayName } from "./provider-glyphs";
+import { CardContentSkeleton } from "./screen-skeletons";
 import "./onboarding.css";
 
 // The setup card: progress across the steps, the step's content and actions,
@@ -67,7 +68,7 @@ export function OnboardingFrame({
 export function OnboardingLoading({ step }: { step: OnboardingStep }) {
   return (
     <OnboardingFrame activeStages={onboardingStepStages[step]} footer={null} step={step} steps={onboardingSteps}>
-      <p className="onboarding__loading">Loading…</p>
+      <CardContentSkeleton label="Loading setup…" />
     </OnboardingFrame>
   );
 }

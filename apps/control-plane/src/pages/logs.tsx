@@ -3,6 +3,7 @@ import { ArrowClockwiseIcon, CaretDownIcon, CaretUpIcon, TreeStructureIcon } fro
 import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { AppShell } from "../components/app-shell";
+import { DataTableSkeleton, ExplorerSkeleton } from "../components/screen-skeletons";
 import { CountHistogram, HistogramLegend, type HistogramSeries } from "../components/count-histogram";
 import { DashboardTimePicker } from "../components/dashboard-time-picker";
 import { TelemetryGate } from "../components/telemetry";
@@ -323,7 +324,19 @@ function LogExplorer({ query, refresh, setQuery, timeZone }: {
         </div>
         <div className="agentListTable explorerTableWrap">
           {logs.data === null ? (
-            logs.error ? null : <p className="explorerStatus">Loading logs…</p>
+            logs.error ? null : (
+              <DataTableSkeleton
+                className=""
+                columns={[
+                  { header: "Time", key: "time", width: withDate ? "176px" : "124px" },
+                  { cell: "badge", header: "Level", key: "severity", width: "76px" },
+                  { header: "Service", key: "service", width: "128px" },
+                  { header: "Message", key: "message" },
+                ]}
+                label="Loading logs…"
+                rows={12}
+              />
+            )
           ) : (
             <DataTable<LogRecord & { key: string }>
               aria-label="Log records"
@@ -435,7 +448,7 @@ export function LogsPage() {
             </div>
           ) : null}
         </header>
-        <TelemetryGate signal="Logs" state={telemetry}>
+        <TelemetryGate signal="Logs" skeleton={<ExplorerSkeleton label="Loading logs…" />} state={telemetry}>
           <LogExplorer query={query} refresh={refresh} setQuery={setQuery} timeZone={timeZone} />
         </TelemetryGate>
       </div>

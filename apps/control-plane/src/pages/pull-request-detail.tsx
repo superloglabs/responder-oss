@@ -4,7 +4,7 @@ import Markdown, { type Components } from "react-markdown";
 import { Link, Navigate, useMatch, useNavigate, useParams } from "react-router-dom";
 import { relativeTime } from "../agents-api";
 import { AppShell } from "../components/app-shell";
-import { PullRequestDetailSkeleton } from "../components/screen-skeletons";
+import { DiffSkeleton, PullRequestDetailSkeleton } from "../components/screen-skeletons";
 import { SegmentedControl } from "../design-system";
 import { filesChangedLabel } from "../pull-request-diff";
 import { remarkHtmlAsText } from "../pull-request-markdown";
@@ -243,11 +243,11 @@ function PullRequestDetailContent({ pullRequestId }: { pullRequestId: string }) 
                 <span>{filesChangedLabel(files.files)}{files.files.length < github.changedFiles ? ` · GitHub lists the first ${files.files.length.toLocaleString()}` : ""}</span>
                 <SegmentedControl aria-label="Diff layout" onChange={setDiffStyle} options={[{ label: "Unified", value: "unified" }, { label: "Split", value: "split" }]} value={diffStyle} />
               </div>
-              <Suspense fallback={<p className="pullRequestDetail__empty" role="status">Loading diffs…</p>}>
+              <Suspense fallback={<DiffSkeleton label="Loading diffs…" />}>
                 <PullRequestFiles diffStyle={diffStyle} files={files.files} url={github.url} />
               </Suspense>
             </>
-          : <p className="pullRequestDetail__empty" role="status">Loading changed files…</p>}
+          : <DiffSkeleton label="Loading changed files…" />}
       </div> : null}
       {github ? <div aria-labelledby="pull-request-tab-overview" className="pullRequestDetail__panel" hidden={activeTab !== "overview"} id="pull-request-panel-overview" role="tabpanel">
         <section aria-labelledby="pull-request-description" className="pullRequestDetail__section">

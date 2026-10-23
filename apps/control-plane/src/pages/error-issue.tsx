@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { relativeTime } from "../agents-api";
 import { AppShell } from "../components/app-shell";
+import { ErrorIssueSkeleton } from "../components/screen-skeletons";
 import { TimeseriesChart } from "../components/timeseries-chart";
 import { Badge, Button } from "../design-system";
 import {
@@ -93,7 +94,7 @@ export function ErrorIssuePage() {
             <button onClick={() => void load()} type="button">Retry</button>
           </div>
         ) : (
-          <p className="telemetryPage__status">Loading…</p>
+          <ErrorIssueSkeleton />
         )}
       </AppShell>
     );

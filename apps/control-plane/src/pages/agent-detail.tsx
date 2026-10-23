@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, Navigate, useParams } from "react-router-dom";
 import { fetchAgent, type AgentDetail } from "../agents-api";
 import { AppShell } from "../components/app-shell";
+import { AgentSetupSkeleton } from "../components/screen-skeletons";
 import { Button } from "../design-system";
 import { AgentCreatePage } from "./agent-create";
 
@@ -27,9 +28,10 @@ function AgentDetailContent({ agentId }: { agentId?: string }) {
   // The editor starts with the original configuration and history. Optional
   // settings requests cannot block history or enable lossy legacy editing.
   if (agent && agent.id === agentId) return <AgentCreatePage key={agent.id} initialAgent={agent} />;
+  if (!error) return <AppShell redesigned active="agents" density="create"><AgentSetupSkeleton /></AppShell>;
   return <AppShell redesigned active="agents" density="create"><section className="emptyState">
-    <h1>{error ? "Unable to load agent" : "Loading agent…"}</h1>
-    {error ? <><p>{error}</p><Button onClick={() => window.location.reload()} variant="secondary">Retry</Button><Link to="/agents">Back to agents</Link></> : null}
+    <h1>Unable to load agent</h1>
+    <p>{error}</p><Button onClick={() => window.location.reload()} variant="secondary">Retry</Button><Link to="/agents">Back to agents</Link>
   </section></AppShell>;
 }
 

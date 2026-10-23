@@ -20,6 +20,7 @@ import {
 } from "../alerts-api";
 import { pickedMetricLabel } from "../metric-picker";
 import { AppShell } from "../components/app-shell";
+import { FormPageSkeleton } from "../components/screen-skeletons";
 import { AlertFilters } from "../components/alert-filters";
 import { AlertChart } from "../components/alert-chart";
 import { useAlertPreview } from "../use-alert-preview";
@@ -251,7 +252,7 @@ export function AlertPage() {
             <p>This workspace cannot read telemetry yet.</p>
           </section>
         ) : (
-          <p className="telemetryPage__status">Loading…</p>
+          <FormPageSkeleton className="alertPage alertPage--editor" label="Loading alert…" />
         )}
       </AppShell>
     );

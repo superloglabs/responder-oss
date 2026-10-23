@@ -5,6 +5,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { relativeTime } from "../agents-api";
 import { fetchAlerts, type TelemetryAlertSummary } from "../alerts-api";
 import { AppShell } from "../components/app-shell";
+import { DataTableSkeleton } from "../components/screen-skeletons";
 import { Badge, DataTable } from "../design-system";
 import { alertFieldLabel, alertValueUnit, describeAlertCondition, describeAlertRule } from "../../../../packages/core/src/telemetry/alert-text";
 import { useDocumentTitle } from "../use-document-title";
@@ -60,7 +61,15 @@ export function AlertsPage() {
             <button onClick={() => void load()} type="button">Retry</button>
           </div>
         ) : (
-          <p className="telemetryPage__status">Loading…</p>
+          <DataTableSkeleton
+            columns={[
+              { cell: "twoLines", header: "Alert", key: "name" },
+              { cell: "badge", header: "Status", key: "status", width: "140px" },
+              { header: "Last checked", key: "checked", width: "140px" },
+              { cell: "empty", header: "", key: "open", width: "44px" },
+            ]}
+            label="Loading alerts…"
+          />
         )
       ) : alerts === null ? (
         <section className="emptyState emptyState--list">

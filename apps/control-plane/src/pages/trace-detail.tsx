@@ -2,6 +2,7 @@ import { XIcon } from "@phosphor-icons/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 import { AppShell } from "../components/app-shell";
+import { TraceDetailSkeleton } from "../components/screen-skeletons";
 import { TelemetryAttributes, TelemetryException, TelemetryGate } from "../components/telemetry";
 import { TraceWaterfall } from "../components/trace-waterfall";
 import { Badge, DataTable, IconButton } from "../design-system";
@@ -108,7 +109,7 @@ function TraceView({ traceId }: { traceId: string }) {
       </div>
     );
   }
-  if (!trace || !root) return <p className="telemetryPage__status">Loading trace…</p>;
+  if (!trace || !root) return <TraceDetailSkeleton />;
 
   const services = new Set(trace.spans.map((span) => span.service).filter(Boolean));
   const errors = trace.spans.filter((span) => span.status_code === "STATUS_CODE_ERROR").length;
@@ -200,7 +201,7 @@ export function TraceDetailPage() {
   return (
     <AppShell active="traces" activePage="/traces/search" redesigned>
       <div className="automationCreate traceDetail">
-        <TelemetryGate signal="Traces" state={telemetry}>
+        <TelemetryGate signal="Traces" skeleton={<TraceDetailSkeleton />} state={telemetry}>
           <TraceView traceId={traceId} />
         </TelemetryGate>
       </div>

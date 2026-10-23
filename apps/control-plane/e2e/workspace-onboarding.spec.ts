@@ -130,7 +130,7 @@ test("keeps guided setup on screen while the workspace list loads", async ({ pag
   await page.goto("/app");
 
   await expect(page.getByRole("list", { name: "Setup progress" })).toBeVisible();
-  await expect(page.getByText("Loading…")).toBeVisible();
+  await expect(page.getByText("Loading setup…")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Choose a workspace" })).toHaveCount(0);
 
   releaseList();
