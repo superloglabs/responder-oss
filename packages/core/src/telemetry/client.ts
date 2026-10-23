@@ -24,6 +24,11 @@ export function telemetryClickHouseConfig(
     // removed both by timer and immediately before reuse so an event-loop
     // delay cannot race ClickHouse's keep-alive timeout.
     request_timeout: 20_000,
+    // Pages fan one request out into several reads (a service list reads
+    // seven tables). Hosted ClickHouse caps the reader at a few running
+    // queries for all of a cell's processes together, and rejects the rest,
+    // so each process runs at most this many and queues the others.
+    max_open_connections: maxOpenConnections(environment.TELEMETRY_CLICKHOUSE_MAX_CONNECTIONS),
     keep_alive: {
       enabled: true,
       idle_socket_ttl: 2_500,
@@ -34,6 +39,13 @@ export function telemetryClickHouseConfig(
       cancel_http_readonly_queries_on_client_close: 1,
     },
   };
+}
+
+const defaultMaxOpenConnections = 2;
+
+function maxOpenConnections(value: string | undefined): number {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : defaultMaxOpenConnections;
 }
 
 export function getTelemetryClient(): ClickHouseClient | null {
