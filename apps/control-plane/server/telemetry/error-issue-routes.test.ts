@@ -43,6 +43,7 @@ const issue: ErrorIssue = {
 
 function routes(overrides: Partial<ErrorIssueRouteDependencies> = {}) {
   const dependencies: ErrorIssueRouteDependencies = {
+    environments: vi.fn(async () => ["production"]),
     days: vi.fn(async () => new Map([[issueId, [{ day: "2026-10-22", eventCount: 12 }]]])),
     findIssue: vi.fn(async () => issue),
     hasCapability: vi.fn(async () => true),
@@ -65,6 +66,7 @@ describe("error issue routes", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
       counts: { open: 1, resolved: 2, silenced: 0 },
+      environments: ["production"],
       issues: [{ ...summary, days: [{ day: "2026-10-22", eventCount: 12 }] }],
       services: ["api"],
       since: "2026-10-09",
@@ -90,6 +92,30 @@ describe("error issue routes", () => {
       search: "invoice",
       service: "api",
     });
+  });
+
+  it("combines multiple values with independent activity, environment and time filters", async () => {
+    const { app, dependencies } = routes();
+    const response = await app.request("/?statuses=open&statuses=resolved&services=api&services=worker&environments=production&activity=inactive&range=24h&search=11111111");
+    expect(response.status).toBe(200);
+    expect(dependencies.listIssues).toHaveBeenCalledWith(organizationId, {
+      limit: 50, statuses: ["open", "resolved"], services: ["api", "worker"], environments: ["production"],
+      activity: "inactive", activeSince: "2026-10-22T11:45:00.000Z", since: "2026-10-21T12:00:00.000Z", search: "11111111",
+    });
+  });
+
+  it("rejects malformed filters and incomplete sort cursors", async () => {
+    const { app, dependencies } = routes();
+    for (const query of ["statuses=unknown", "activity=unknown", "range=forever", "sort=unknown", `before=${summary.lastSeenAt}`, `before=${summary.lastSeenAt}&beforeId=${issueId}&sort=events`]) {
+      expect((await app.request(`/?${query}`)).status).toBe(400);
+    }
+    expect(dependencies.listIssues).not.toHaveBeenCalled();
+  });
+
+  it("pages event sorting with its count and ID to break ties", async () => {
+    const { app, dependencies } = routes();
+    expect((await app.request(`/?sort=events&before=${summary.lastSeenAt}&beforeId=${issueId}&beforeEvents=12`)).status).toBe(200);
+    expect(dependencies.listIssues).toHaveBeenCalledWith(organizationId, { limit: 50, status: "open", sort: "events", before: { id: issueId, lastSeenAt: summary.lastSeenAt, eventCount: 12 } });
   });
 
   it("lists the services issues came from", async () => {

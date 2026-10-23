@@ -849,7 +849,7 @@ export function EmptyState({
 
 export interface DataTableColumn<Row> {
   align?: "left" | "right";
-  header: string;
+  header: ReactNode;
   key: string;
   render: (row: Row) => ReactNode;
   width?: string;

@@ -22,3 +22,64 @@
 .errorIssue__attributes dd { margin: 0; overflow-wrap: anywhere; color: var(--ds-text-primary); }
 .errorIssue__links { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px; }
 .errorIssue__fingerprint { color: var(--ds-text-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+
+/* Catalog and detail share the compact workspace controls and table tokens. */
+.errorIssues, .errorIssue { width: 100%; max-width: 944px; margin-inline: auto; }
+.errorIssues__heading { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+.errorIssues__heading .workspaceHeading { display: flex; align-items: center; justify-content: space-between; margin: 0; }
+.errorIssues__heading h1 { display: flex; align-items: center; gap: 8px; padding-left: 8px; }
+.errorIssues__heading p { margin: 0; padding-left: 8px; color: var(--ds-text-muted); font-size: 13px; line-height: 20px; }
+.errorIssues__filters { display: flex; flex-direction: column; gap: 8px; }
+.errorIssues .explorerToolbar { display: flex; gap: 8px; margin: 0; }
+.errorIssues .explorerFilterBar { flex: 1; min-width: 160px; max-width: none; height: 26px; }
+.errorIssues__filterRow { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--ds-text-secondary); font-size: 13px; }
+.errorIssues__chips { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.errorFilterChip { display: inline-flex; align-items: center; gap: 7px; min-height: 26px; padding: 3px 7px; border: 1px solid var(--ds-border-default); border-radius: 6px; background: var(--ds-surface-base); color: var(--ds-text-primary); font-size: 12px; }
+.errorFilterChip > span { color: var(--ds-text-muted); }
+.errorFilterChip button { display: flex; padding: 0; border: 0; background: none; color: var(--ds-text-muted); cursor: pointer; }
+.errorFilterMenu { min-width: 248px; max-width: min(320px, 90vw); max-height: 360px; overflow-y: auto; padding: 6px; border-radius: 8px; font-family: var(--ds-font-sans); font-size: 13px; }
+.errorFilterMenu [role^="menuitem"] { min-height: 32px; font-size: 13px; }
+.errorIssues .dsDataTable td { height: 60px; padding: 9px 12px; }
+.errorIssues .dsDataTable th { height: 34px; padding: 7px 12px; }
+.errorIssues__meta { font-family: var(--ds-font-sans); font-size: 12px; line-height: 18px; }
+.errorSparkline > span[data-filled="true"] { background: var(--workspace-accent, #4e58f9); }
+.errorIssue { gap: 24px; }
+.errorIssue__titleRow { align-items: flex-start; }
+.errorIssue__titleRow h1 { font-size: 15px; line-height: 23px; }
+.errorIssue__overview { display: grid; grid-template-columns: minmax(0, 1fr) 242px; gap: 71px; }
+.errorIssue__summary { display: flex; flex-direction: column; gap: 16px; }
+.errorIssue__summary p { margin: 0; }
+.errorIssue__states { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; color: var(--ds-text-muted); font-size: 13px; }
+.errorIssue__states [data-active="true"] { color: var(--workspace-accent, #4e58f9); }
+.errorIssue__properties { display: flex; flex-direction: column; gap: 10px; margin: 0; font-size: 13px; line-height: 20px; }
+.errorIssue__properties > div { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 8px; }
+.errorIssue__properties dt { color: var(--ds-text-muted); }
+.errorIssue__properties dd { margin: 0; overflow-wrap: anywhere; }
+.errorIssue__stackPanel { border: 1px solid var(--ds-border-default); border-radius: 8px; overflow: hidden; }
+.errorIssue__stackHeading { padding: 12px; border-bottom: 1px solid var(--ds-border-default); font-size: 12px; font-family: ui-monospace, monospace; overflow-wrap: anywhere; }
+.errorIssue__stack { background: var(--ds-surface-base); border-radius: 0; line-height: 22px; }
+@media (max-width: 760px) {
+  .errorIssue__overview { grid-template-columns: 1fr; gap: 24px; }
+  .errorIssues .explorerToolbar { flex-wrap: wrap; }
+  .errorIssues__filterRow { align-items: flex-start; flex-direction: column; }
+  .errorIssue__titleRow { flex-wrap: wrap; }
+}
+.errorIssues__checkbox .dsChoice__copy { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.errorIssues__bulk { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 13px; }
+.appShell--workspace .errorIssues .dsDataTable.dsDataTable--workspace td { height: 60px; padding: 9px 12px; }
+.appShell--workspace .errorIssues .dsDataTable--workspace :is(th, td):nth-child(5) { border-right: .5px solid #e6e8ec; }
+.appShell--workspace .errorIssues .dsDataTable--workspace :is(th, td):first-child { border-right: 0; }
+.errorIssues__heading .workspaceHeading { padding: 0; }
+.errorIssues__filterRow .dsField { width: auto; }
+.errorIssues__filterRow .dsField__label { display: none; }
+.errorIssues__filterRow .dsSelect { min-height: 26px; padding: 0; border: 0; background: transparent; box-shadow: none; font-size: 13px; }
+.errorIssue.syntheticCheck .syntheticCheck__section { padding: 0; border: 0; outline: 0; border-radius: 0; background: transparent; }
+.errorIssue .syntheticCheck__section > header { justify-content: flex-start; gap: 12px; }
+.errorIssue .syntheticCheck__section > header time, .errorIssue .syntheticCheck__section > header .dashboardPage__meta { margin-left: auto; }
+.errorIssues__pagination, .errorIssues__pagination > div { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ds-text-muted); }
+.errorIssues__pagination { justify-content: space-between; }
+.errorSparkline > span { max-width: 4px; }
+.errorIssues .explorerFilterBar { min-height: 26px; padding: 3px 7px; }
+.appShell--workspace .errorIssues .dsSelect__trigger { min-height: 26px; height: 26px; padding: 3px 7px; font-size: 13px; }
+.errorIssues__filterRow .dsSelect__trigger { border: 0; background: transparent; box-shadow: none; }
+.appShell--workspace .errorIssues .dsDataTable--workspace :is(th, td):nth-child(4) { border-right: .5px solid #e6e8ec; }

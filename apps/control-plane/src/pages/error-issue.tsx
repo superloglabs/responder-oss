@@ -5,6 +5,8 @@ import { AppShell } from "../components/app-shell";
 import { TimeseriesChart } from "../components/timeseries-chart";
 import { Badge, Button } from "../design-system";
 import {
+  errorActivity,
+  errorState,
   errorIssueChart,
   errorIssueStatusLabels,
   fetchErrorIssue,
@@ -104,7 +106,7 @@ export function ErrorIssuePage() {
   const chart = errorIssueChart(detail.days, detail.since);
   const recent = detail.days.reduce((sum, day) => sum + day.eventCount, 0);
   const actions: Array<{ label: string; status: ErrorIssueStatus }> = issue.status === "open"
-    ? [{ label: "Silence", status: "silenced" }, { label: "Resolve", status: "resolved" }]
+    ? [{ label: "Ignore", status: "silenced" }, { label: "Resolve", status: "resolved" }]
     : [{ label: "Reopen", status: "open" }];
 
   return (
@@ -118,7 +120,6 @@ export function ErrorIssuePage() {
           </nav>
           <div className="dashboardPage__titleRow errorIssue__titleRow">
             <h1>{issue.title}</h1>
-            <ErrorIssueStatusBadge status={issue.status} />
             <span className="automationCreate__spacer" />
             {actions.map((action, index) => (
               <Button
@@ -127,46 +128,35 @@ export function ErrorIssuePage() {
                 loading={saving === action.status}
                 onClick={() => void changeStatus(action.status)}
                 size="small"
-                variant={index === actions.length - 1 ? "secondary" : "ghost"}
+                variant={index === actions.length - 1 ? "primary" : "secondary"}
               >
                 {action.label}
               </Button>
             ))}
           </div>
-          <p className="dashboardPage__meta">
-            {[
-              issue.service,
-              issue.kind === "span" ? "Span exception" : "Error log",
-              `First seen ${relativeTime(issue.firstSeenAt)}`,
-              issue.regressedAt ? `Reopened ${relativeTime(issue.regressedAt)}` : null,
-            ].filter(Boolean).join(" · ")}
-          </p>
         </header>
-        {error ? <p className="formError" role="alert">{error}</p> : null}
-
-        <dl className="syntheticCheck__stats">
-          <div className="syntheticCheck__stat">
-            <dt>Events</dt>
-            <dd title={issue.eventCount.toLocaleString()}>{formatEventCount(issue.eventCount)}</dd>
+        {error || loadError ? <p className="formError" role="alert">{error ?? loadError}</p> : null}
+        <section className="errorIssue__overview" aria-label="Error overview">
+          <div className="errorIssue__summary">
+            <div className="errorIssue__states"><ErrorIssueStatusBadge status={issue.status} /><span>{errorState(issue)}</span><span data-active={errorActivity(issue.lastSeenAt) === "active"}>{errorActivity(issue.lastSeenAt) === "active" ? "Still happening" : "No longer happening"}</span></div>
+            <p className="errorIssue__message">{issue.message ?? issue.title}</p>
+            <p className="dashboardPage__meta">{formatEventCount(issue.eventCount)} total events · {issue.kind === "span" ? "Span exception" : "Error log"}{issue.regressedAt ? ` · Reopened ${relativeTime(issue.regressedAt)}` : ""}</p>
           </div>
-          <div className="syntheticCheck__stat">
-            <dt>Last 30 days</dt>
-            <dd>{formatEventCount(recent)}</dd>
-          </div>
-          <div className="syntheticCheck__stat">
-            <dt>Last seen</dt>
-            <dd title={new Date(issue.lastSeenAt).toLocaleString()}>{relativeTime(issue.lastSeenAt)}</dd>
-          </div>
-          <div className="syntheticCheck__stat">
-            <dt>First seen</dt>
-            <dd title={new Date(issue.firstSeenAt).toLocaleString()}>{relativeTime(issue.firstSeenAt)}</dd>
-          </div>
-        </dl>
+          <dl className="errorIssue__properties">
+            {[
+              ["Service", issue.service ?? "—"],
+              ["Environment", sample.resourceAttributes["deployment.environment.name"] ?? sample.resourceAttributes["deployment.environment"] ?? sample.attributes["deployment.environment.name"] ?? sample.attributes["deployment.environment"] ?? "—"],
+              ["Release", sample.resourceAttributes["service.version"] ?? "—"],
+              ["First seen", new Date(issue.firstSeenAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })],
+              ["Last seen", relativeTime(issue.lastSeenAt)],
+            ].map(([name, value]) => <div key={name}><dt>{name}</dt><dd>{value}</dd></div>)}
+          </dl>
+        </section>
 
         <section aria-label="Occurrences" className="syntheticCheck__section">
           <header>
             <h2>Occurrences</h2>
-            <span className="dashboardPage__meta">Per day, last 30 days</span>
+            <span className="dashboardPage__meta">{formatEventCount(recent)} events · Daily, last 30 days</span>
           </header>
           <div className="syntheticCheck__chart">
             <TimeseriesChart chart={chart} chartType="bar" label="Occurrences per day" showLegend={false} />
@@ -175,23 +165,18 @@ export function ErrorIssuePage() {
 
         <section aria-label="Latest occurrence" className="syntheticCheck__section">
           <header>
-            <h2>Latest occurrence</h2>
+            <h2>Latest event</h2>
+            {sample.traceId ? <Link className="dsButton dsButton--secondary dsButton--small" to={`/traces/${sample.traceId}`}>View trace</Link> : null}
             <time className="dashboardPage__meta" dateTime={sample.seenAt} title={new Date(sample.seenAt).toLocaleString()}>
               {relativeTime(sample.seenAt)}
             </time>
           </header>
           {sample.message ? <p className="errorIssue__message">{sample.message}</p> : null}
           {sample.stacktrace ? (
-            <pre className="errorIssue__stack">{sample.stacktrace}</pre>
+            <div className="errorIssue__stackPanel"><div className="errorIssue__stackHeading">{issue.topFrame ?? issue.exceptionType}</div><pre className="errorIssue__stack">{sample.stacktrace}</pre></div>
           ) : (
             <p className="dashboardWidget__status">The occurrence has no stack trace.</p>
           )}
-          {sample.traceId ? (
-            <div className="errorIssue__links">
-              <Link to={`/traces/${sample.traceId}`}>View trace</Link>
-              {sample.spanName ? <span className="dashboardPage__meta">{sample.spanName}</span> : null}
-            </div>
-          ) : null}
         </section>
 
         {issue.frames.length > 0 ? (

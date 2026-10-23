@@ -169,8 +169,15 @@ export type ErrorIssueDay = { day: string; eventCount: number };
 
 export type ErrorIssueListFilter = {
   // The last issue of the previous page, by last seen time then ID.
-  before?: { id: string; lastSeenAt: string };
+  before?: { id: string; lastSeenAt: string; firstSeenAt?: string; eventCount?: number };
+  sort?: "lastSeen" | "firstSeen" | "events";
   limit: number;
+  statuses?: ErrorIssueStatus[];
+  services?: string[];
+  environments?: string[];
+  activeSince?: string;
+  activity?: "active" | "inactive";
+  since?: string;
   search?: string;
   service?: string;
   status?: ErrorIssueStatus;
@@ -213,6 +220,15 @@ function likePattern(search: string): string {
   return `%${search.replace(/[\\%_]/gu, (character) => `\\${character}`)}%`;
 }
 
+// Environment follows the latest occurrence, matching the issue's service and sample.
+const errorEnvironment = sql<string>`coalesce(nullif(${errorIssues.lastSample}->'resourceAttributes'->>'deployment.environment.name', ''), nullif(${errorIssues.lastSample}->'resourceAttributes'->>'deployment.environment', ''), nullif(${errorIssues.lastSample}->'attributes'->>'deployment.environment.name', ''), nullif(${errorIssues.lastSample}->'attributes'->>'deployment.environment', ''))`;
+
+export async function errorIssueEnvironments(organizationId: string): Promise<string[]> {
+  const rows = await getDatabase().selectDistinct({ environment: errorEnvironment }).from(errorIssues)
+    .where(eq(errorIssues.organizationId, organizationId)).orderBy(asc(errorEnvironment));
+  return rows.flatMap(({ environment }) => environment ? [environment] : []);
+}
+
 // A workspace's issues, most recently seen first.
 export async function listErrorIssues(
   organizationId: string,
@@ -221,22 +237,29 @@ export async function listErrorIssues(
   const conditions: SQL[] = [eq(errorIssues.organizationId, organizationId)];
   if (filter.status) conditions.push(eq(errorIssues.status, filter.status));
   if (filter.service) conditions.push(eq(errorIssues.service, filter.service));
+  if (filter.statuses?.length) conditions.push(inArray(errorIssues.status, filter.statuses));
+  if (filter.services?.length) conditions.push(inArray(errorIssues.service, filter.services));
+  if (filter.environments?.length) conditions.push(inArray(errorEnvironment, filter.environments));
+  if (filter.since) conditions.push(gte(errorIssues.lastSeenAt, new Date(filter.since)));
+  if (filter.activeSince && filter.activity) {
+    conditions.push(filter.activity === "active"
+      ? gte(errorIssues.lastSeenAt, new Date(filter.activeSince))
+      : lt(errorIssues.lastSeenAt, new Date(filter.activeSince)));
+  }
   if (filter.search) {
     const pattern = likePattern(filter.search);
-    conditions.push(or(ilike(errorIssues.title, pattern), ilike(errorIssues.topFrame, pattern), ilike(errorIssues.exceptionType, pattern))!);
+    conditions.push(or(ilike(errorIssues.title, pattern), ilike(errorIssues.topFrame, pattern), ilike(errorIssues.exceptionType, pattern), ilike(errorIssues.message, pattern), ilike(errorIssues.service, pattern), ilike(sql`${errorIssues.id}::text`, pattern))!);
   }
+  const order = filter.sort === "events" ? errorIssues.eventCount : filter.sort === "firstSeen" ? errorIssues.firstSeenAt : errorIssues.lastSeenAt;
   if (filter.before) {
-    const lastSeenAt = new Date(filter.before.lastSeenAt);
-    conditions.push(or(
-      lt(errorIssues.lastSeenAt, lastSeenAt),
-      and(eq(errorIssues.lastSeenAt, lastSeenAt), lt(errorIssues.id, filter.before.id)),
-    )!);
+    const value = filter.sort === "events" ? filter.before.eventCount! : new Date(filter.sort === "firstSeen" ? filter.before.firstSeenAt! : filter.before.lastSeenAt);
+    conditions.push(or(lt(order, value), and(eq(order, value), lt(errorIssues.id, filter.before.id)))!);
   }
   const rows = await getDatabase()
     .select(summaryColumns)
     .from(errorIssues)
     .where(and(...conditions))
-    .orderBy(desc(errorIssues.lastSeenAt), desc(errorIssues.id))
+    .orderBy(desc(order), desc(errorIssues.id))
     .limit(filter.limit);
   return rows.map(toSummary);
 }

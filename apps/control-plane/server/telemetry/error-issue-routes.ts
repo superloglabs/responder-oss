@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import {
   errorIssueDays,
+  errorIssueEnvironments,
   errorIssueServices,
   errorIssueStatusCounts,
   findErrorIssue,
@@ -16,6 +17,7 @@ import { getActiveTenant } from "../tenant.js";
 // They come with telemetry.
 export type ErrorIssueRouteDependencies = {
   days: typeof errorIssueDays;
+  environments: typeof errorIssueEnvironments;
   findIssue: typeof findErrorIssue;
   hasCapability: (organizationId: string, capability: "telemetry") => Promise<boolean>;
   listIssues: typeof listErrorIssues;
@@ -33,6 +35,7 @@ export type ErrorIssueRouteDependencies = {
 
 const defaultDependencies: ErrorIssueRouteDependencies = {
   days: errorIssueDays,
+  environments: errorIssueEnvironments,
   findIssue: findErrorIssue,
   hasCapability: organizationHasCapability,
   listIssues: listErrorIssues,
@@ -50,8 +53,16 @@ export const errorIssueDetailDays = 30;
 
 const idSchema = z.uuid();
 const listQuerySchema = z.object({
+  statuses: z.array(z.enum(errorIssueStatuses)).max(3).optional(),
+  services: z.array(z.string().trim().min(1).max(200)).max(100).optional(),
+  environments: z.array(z.string().trim().min(1).max(200)).max(100).optional(),
+  activity: z.enum(["active", "inactive"]).optional(),
+  range: z.enum(["24h", "7d", "14d", "30d", "all"]).optional(),
   before: z.iso.datetime().optional(),
   beforeId: z.uuid().optional(),
+  beforeFirstSeen: z.iso.datetime().optional(),
+  beforeEvents: z.coerce.number().int().nonnegative().optional(),
+  sort: z.enum(["lastSeen", "firstSeen", "events"]).optional(),
   search: z.string().trim().max(200).optional(),
   service: z.string().trim().min(1).max(200).optional(),
   status: z.enum([...errorIssueStatuses, "all"]).default("open"),
@@ -80,24 +91,40 @@ export function createErrorIssueRoutes(dependencies: ErrorIssueRouteDependencies
     .get("/", async (context) => {
       const tenant = await access(context.req.raw.headers);
       if (!tenant.ok) return context.json({ error: tenant.error }, tenant.status);
-      const query = listQuerySchema.safeParse(context.req.query());
+      const query = listQuerySchema.safeParse({
+        ...context.req.query(),
+        ...Object.fromEntries(["statuses", "services", "environments"].flatMap((key) => {
+          const values = context.req.queries(key);
+          return values?.length ? [[key, values]] : [];
+        })),
+      });
       if (!query.success) return context.json({ error: "Invalid filter" }, 400);
-      const { before, beforeId, search, service, status } = query.data;
-      const [issues, counts, services] = await Promise.all([
+      const { before, beforeId, search, service, status, sort, beforeFirstSeen, beforeEvents } = query.data;
+      if (Boolean(before) !== Boolean(beforeId) || (before && ((sort === "events" && beforeEvents === undefined) || (sort === "firstSeen" && !beforeFirstSeen)))) return context.json({ error: "Invalid cursor" }, 400);
+      const now = dependencies.now();
+      const rangeDays = { "24h": 1, "7d": 7, "14d": 14, "30d": 30, all: 14 }[query.data.range ?? "all"];
+      const [issues, counts, services, environments] = await Promise.all([
         dependencies.listIssues(tenant.organizationId, {
           limit: errorIssuesPerPage,
-          ...(before && beforeId ? { before: { id: beforeId, lastSeenAt: before } } : {}),
+          ...(sort ? { sort } : {}),
+          ...(before && beforeId ? { before: { id: beforeId, lastSeenAt: before, ...(beforeFirstSeen ? { firstSeenAt: beforeFirstSeen } : {}), ...(beforeEvents !== undefined ? { eventCount: beforeEvents } : {}) } } : {}),
           ...(search ? { search } : {}),
           ...(service ? { service } : {}),
-          ...(status === "all" ? {} : { status }),
+          ...(query.data.statuses ? { statuses: query.data.statuses } : status === "all" ? {} : { status }),
+          ...(query.data.services ? { services: query.data.services } : {}),
+          ...(query.data.environments ? { environments: query.data.environments } : {}),
+          ...(query.data.activity ? { activity: query.data.activity, activeSince: new Date(now.getTime() - 15 * 60_000).toISOString() } : {}),
+          ...(query.data.range && query.data.range !== "all" ? { since: new Date(now.getTime() - rangeDays * 86_400_000).toISOString() } : {}),
         }),
         dependencies.statusCounts(tenant.organizationId),
         dependencies.services(tenant.organizationId),
+        dependencies.environments(tenant.organizationId),
       ]);
-      const since = firstDay(dependencies.now(), errorIssueListDays);
+      const since = firstDay(now, query.data.range && query.data.range !== "all" ? rangeDays + 1 : errorIssueListDays);
       const days = await dependencies.days(issues.map((issue) => issue.id), since);
       return context.json({
         counts,
+        environments,
         issues: issues.map((issue) => ({ ...issue, days: days.get(issue.id) ?? [] })),
         services,
         since,

@@ -13,6 +13,7 @@ export type ErrorIssueListItem = ErrorIssueSummary & { days: ErrorIssueDay[] };
 
 export interface ErrorIssueList {
   counts: Record<ErrorIssueStatus, number>;
+  environments: string[];
   issues: ErrorIssueListItem[];
   services: string[];
   // The first day the issues' counts cover.
@@ -26,7 +27,13 @@ export interface ErrorIssueDetail {
 }
 
 export type ErrorIssueFilter = {
-  before?: Pick<ErrorIssueSummary, "id" | "lastSeenAt">;
+  before?: Pick<ErrorIssueSummary, "id" | "lastSeenAt"> & Partial<Pick<ErrorIssueSummary, "firstSeenAt" | "eventCount">>;
+  sort?: "lastSeen" | "firstSeen" | "events";
+  statuses?: ErrorIssueStatus[];
+  services?: string[];
+  environments?: string[];
+  activity?: "active" | "inactive";
+  range?: "24h" | "7d" | "14d" | "30d" | "all";
   search?: string;
   service?: string;
   status: ErrorIssueStatus | "all";
@@ -48,11 +55,19 @@ async function request<T>(url: string, init?: { body?: unknown; method?: string 
 
 export function errorIssueParams(filter: ErrorIssueFilter): URLSearchParams {
   const params = new URLSearchParams({ status: filter.status });
+  for (const key of ["statuses", "services", "environments"] as const) {
+    for (const value of filter[key] ?? []) params.append(key, value);
+  }
+  if (filter.sort) params.set("sort", filter.sort);
+  if (filter.activity) params.set("activity", filter.activity);
+  if (filter.range) params.set("range", filter.range);
   if (filter.service) params.set("service", filter.service);
   if (filter.search?.trim()) params.set("search", filter.search.trim());
   if (filter.before) {
     params.set("before", filter.before.lastSeenAt);
     params.set("beforeId", filter.before.id);
+    if (filter.sort === "firstSeen" && filter.before.firstSeenAt) params.set("beforeFirstSeen", filter.before.firstSeenAt);
+    if (filter.sort === "events" && filter.before.eventCount !== undefined) params.set("beforeEvents", String(filter.before.eventCount));
   }
   return params;
 }
@@ -84,9 +99,9 @@ export async function updateErrorIssueStatus(issueId: string, status: ErrorIssue
 }
 
 export const errorIssueStatusLabels: Record<ErrorIssueStatus, string> = {
-  open: "Open",
+  open: "Unresolved",
   resolved: "Resolved",
-  silenced: "Silenced",
+  silenced: "Ignored",
 };
 
 const dayMs = 86_400_000;
@@ -128,4 +143,13 @@ export function formatEventCount(count: number): string {
 // The attributes of the newest occurrence, sorted for display.
 export function sampleAttributes(attributes: Record<string, string>): Array<[string, string]> {
   return Object.entries(attributes).sort(([left], [right]) => left.localeCompare(right));
+}
+
+export function errorActivity(lastSeenAt: string, now = Date.now()): "active" | "inactive" {
+  return Date.parse(lastSeenAt) >= now - 15 * 60_000 ? "active" : "inactive";
+}
+
+export function errorState(issue: ErrorIssueSummary, now = Date.now()): string {
+  if (issue.regressedAt) return "Regressed";
+  return Date.parse(issue.firstSeenAt) >= now - 86_400_000 ? "New" : "Recurring";
 }
