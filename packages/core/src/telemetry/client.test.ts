@@ -27,4 +27,18 @@ describe("telemetry ClickHouse config", () => {
       telemetryClickHouseConfig({ TELEMETRY_CLICKHOUSE_URL: "http://localhost:8123" }),
     ).toMatchObject({ database: "superlog", username: "default", password: "" });
   });
+
+  it("caps the process's open connections when the store limits concurrent queries", () => {
+    const store = { TELEMETRY_CLICKHOUSE_URL: "http://localhost:8123" };
+
+    expect(telemetryClickHouseConfig({ ...store, TELEMETRY_CLICKHOUSE_MAX_CONNECTIONS: "3" })).toMatchObject({
+      max_open_connections: 3,
+    });
+    expect(telemetryClickHouseConfig(store)).not.toHaveProperty("max_open_connections");
+    for (const value of ["0", "-1", "2.5", "many"]) {
+      expect(telemetryClickHouseConfig({ ...store, TELEMETRY_CLICKHOUSE_MAX_CONNECTIONS: value })).not.toHaveProperty(
+        "max_open_connections",
+      );
+    }
+  });
 });
