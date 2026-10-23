@@ -1,8 +1,11 @@
 import type {
   OverviewAi,
+  OverviewDetails,
   OverviewLogBucket,
   OverviewService,
   OverviewTraceBucket,
+  OverviewTraces,
+  TelemetryOverview,
   TelemetryRange,
 } from "../telemetry-api";
 
@@ -47,8 +50,41 @@ export function formatCount(value: number): string {
   return new Intl.NumberFormat("en-US", { maximumFractionDigits: 1, notation: "compact" }).format(value).toLowerCase().replace("m", "M");
 }
 
+// The overview with the details that arrived after its volumes.
+export function withOverviewDetails(overview: TelemetryOverview, details: OverviewDetails): TelemetryOverview {
+  const requests = new Map<string, NonNullable<OverviewDetails["requests"]>>();
+  for (const row of details.requests ?? []) requests.set(row.service, [...(requests.get(row.service) ?? []), row]);
+  return {
+    ...overview,
+    ai: details.ai,
+    services: overview.services.map((service) => ({
+      ...service,
+      logs: service.logs && {
+        ...service.logs,
+        errorsWithoutException: details.errorsWithoutException && (details.errorsWithoutException[service.name] ?? 0),
+        withTrace: details.withTrace && (details.withTrace[service.name] ?? 0),
+      },
+      traces: service.traces && (details.requests ? withRequests(service.traces, requests.get(service.name) ?? []) : service.traces),
+    })),
+  };
+}
+
+function withRequests(traces: OverviewTraces, rows: NonNullable<OverviewDetails["requests"]>): OverviewTraces {
+  const buckets = traces.buckets.map((bucket) => ({ ...bucket }));
+  let slow = 0;
+  for (const row of rows) {
+    const cell = buckets[Math.min(buckets.length - 1, Math.max(0, row.bucket))];
+    if (!cell) continue;
+    cell.requests += row.requests;
+    cell.slow += row.slow;
+    slow += row.slow;
+  }
+  return { ...traces, buckets, slow };
+}
+
 // A bucket is red when errors are at least 5% of it, and amber when warnings
-// or slow requests are at least 10%. An empty bucket received nothing.
+// are at least 10% of it or slow requests 10% of its requests. An empty bucket
+// received nothing.
 function share(part: number, total: number, ratio: number): boolean {
   return part > 0 && part >= Math.max(1, total * ratio);
 }
@@ -66,7 +102,7 @@ export function tracePills(buckets: OverviewTraceBucket[]): PillLevel[] {
   return buckets.map((bucket) => {
     if (bucket.total === 0) return "empty";
     if (share(bucket.errors, bucket.total, 0.05)) return "error";
-    if (share(bucket.slow, bucket.total, 0.1)) return "warning";
+    if (share(bucket.slow, bucket.requests, 0.1)) return "warning";
     return "ok";
   });
 }
@@ -156,14 +192,14 @@ export function serviceProblems(service: OverviewService, range: TelemetryRange)
   }
   if (traces && !logs) {
     problems.push({
-      detail: `It sent ${formatCount(traces.total)} traces but no log records in ${window}.`,
+      detail: `It sent ${formatCount(traces.total)} spans but no log records in ${window}.`,
       id: "no-logs",
       prompt: noLogsPrompt(service.name),
       severity: "warning",
       title: `No logs from ${service.name}`,
     });
   }
-  if (logs && logs.errors >= 10 && logs.errorsWithoutException / logs.errors >= 0.5) {
+  if (logs && logs.errorsWithoutException !== null && logs.errors >= 10 && logs.errorsWithoutException / logs.errors >= 0.5) {
     problems.push({
       detail: `${formatCount(logs.errorsWithoutException)} of ${formatCount(logs.errors)} error logs have no exception type, message or stack trace, so they can't be grouped into issues.`,
       id: "no-exception-details",
@@ -172,7 +208,7 @@ export function serviceProblems(service: OverviewService, range: TelemetryRange)
       title: "Error logs have no exception details",
     });
   }
-  if (logs && traces && logs.total >= 50 && logs.withTrace / logs.total < 0.5) {
+  if (logs && traces && logs.withTrace !== null && logs.total >= 50 && logs.withTrace / logs.total < 0.5) {
     const unlinked = Math.round(((logs.total - logs.withTrace) / logs.total) * 100);
     problems.push({
       detail: `${unlinked}% of log records carry no trace ID, so they can't be found from their traces.`,
@@ -197,8 +233,8 @@ function list(names: string[]): string {
 }
 
 // Shown when model calls arrive without token usage, so their cost is unknown.
-export function aiCostCallout(ai: OverviewAi, range: TelemetryRange): AiCostCallout | null {
-  if (ai.callsWithoutUsage === 0) return null;
+export function aiCostCallout(ai: OverviewAi | null, range: TelemetryRange): AiCostCallout | null {
+  if (!ai || ai.callsWithoutUsage === 0) return null;
   const services = ai.services.filter((service) => service.callsWithoutUsage > 0).map((service) => service.service || "unknown_service");
   const callsWithoutUsage = ai.callsWithoutUsage === ai.calls ? "none report" : `${formatCount(ai.callsWithoutUsage)} don't report`;
   return {

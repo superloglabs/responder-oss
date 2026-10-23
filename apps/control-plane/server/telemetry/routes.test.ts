@@ -67,10 +67,12 @@ function routes(overrides: Partial<TelemetryRouteDependencies> = {}) {
     metricSeries: vi.fn(async () => [{ bucket: "2026-10-13 11:00:00", group: "", value: 12.5 }]),
     metricWindowAggregate: vi.fn(async () => [{ group: "", value: 12.5 }]),
     now: () => now,
-    overview: vi.fn(async () => ({
+    overview: vi.fn(async () => ({ ai: null, bucketSeconds: 1_800, services: [] })),
+    overviewDetails: vi.fn(async () => ({
       ai: { calls: 0, callsWithInput: 0, callsWithModel: 0, callsWithOutput: 0, callsWithoutUsage: 0, models: [], services: [] },
-      bucketSeconds: 1_800,
-      services: [],
+      errorsWithoutException: null,
+      requests: [],
+      withTrace: { checkout: 4 },
     })),
     queryLogs: vi.fn(async () => [{ body: "hello", service: "checkout" }]),
     queryTrace: vi.fn(async () => ({ logs: [], spans: [{ span_id: "a1" }] })),
@@ -339,6 +341,23 @@ describe("telemetry routes", () => {
     expect((await app.request("/overview?range=3d")).status).toBe(400);
     const unavailable = routes({ hasTelemetry: vi.fn(async () => false) });
     expect((await unavailable.app.request("/overview")).status).toBe(404);
+  });
+
+  it("returns the overview's details separately", async () => {
+    const { app, dependencies } = routes();
+
+    const response = await app.request("/overview/details?range=7d");
+
+    await expect(response.json()).resolves.toMatchObject({
+      details: { errorsWithoutException: null, requests: [], withTrace: { checkout: 4 } },
+    });
+    expect(dependencies.overviewDetails).toHaveBeenCalledWith(expect.anything(), organizationId, {
+      since: "2026-10-06T12:00:00.000Z",
+      until: "2026-10-13T12:00:00.000Z",
+    });
+    expect((await app.request("/overview/details?range=3d")).status).toBe(400);
+    const unavailable = routes({ hasTelemetry: vi.fn(async () => false) });
+    expect((await unavailable.app.request("/overview/details")).status).toBe(404);
   });
 
   it("returns a trace's spans and logs, and 404 for a trace with no spans", async () => {

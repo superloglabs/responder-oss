@@ -7,6 +7,7 @@ import {
   serviceProblems,
   suggestionPrompt,
   tracePills,
+  withOverviewDetails,
 } from "./telemetry-overview-presentation";
 
 const logs = (overrides: Partial<NonNullable<OverviewService["logs"]>> = {}): NonNullable<OverviewService["logs"]> => ({
@@ -63,11 +64,52 @@ describe("pills", () => {
     ).toEqual(["empty", "ok", "error", "warning"]);
     expect(
       tracePills([
-        { errors: 0, slow: 0, total: 0 },
-        { errors: 0, slow: 15, total: 100 },
-        { errors: 1, slow: 0, total: 10 },
+        { errors: 0, requests: 0, slow: 0, total: 0 },
+        { errors: 0, requests: 20, slow: 3, total: 400 },
+        { errors: 1, requests: 2, slow: 0, total: 10 },
+        { errors: 0, requests: 0, slow: 0, total: 400 },
       ]),
-    ).toEqual(["empty", "warning", "error"]);
+    ).toEqual(["empty", "warning", "error", "ok"]);
+  });
+});
+
+describe("withOverviewDetails", () => {
+  const emptyBuckets = () => Array.from({ length: 48 }, () => ({ errors: 0, requests: 0, slow: 0, total: 10 }));
+  const overview = {
+    ai: null,
+    bucketSeconds: 1_800,
+    services: [
+      service({ logs: logs({ errorsWithoutException: null, withTrace: null }), name: "checkout", traces: traces({ buckets: emptyBuckets(), slow: null }) }),
+      service({ logs: logs({ errorsWithoutException: null, withTrace: null }), name: "billing", traces: traces({ buckets: emptyBuckets(), slow: null }) }),
+    ],
+  };
+
+  it("fills in the counts that arrived, with zero for services they did not mention", () => {
+    const merged = withOverviewDetails(overview, {
+      ai: ai({ calls: 3 }),
+      errorsWithoutException: { checkout: 7 },
+      requests: [
+        { bucket: 2, requests: 20, service: "checkout", slow: 3 },
+        { bucket: 4, requests: 5, service: "checkout", slow: 1 },
+      ],
+      withTrace: { billing: 900 },
+    });
+
+    expect(merged.ai).toMatchObject({ calls: 3 });
+    const [checkout, billing] = merged.services;
+    expect(checkout!.logs).toMatchObject({ errorsWithoutException: 7, withTrace: 0 });
+    expect(checkout!.traces!.slow).toBe(4);
+    expect(checkout!.traces!.buckets[2]).toEqual({ errors: 0, requests: 20, slow: 3, total: 10 });
+    expect(billing!.logs).toMatchObject({ errorsWithoutException: 0, withTrace: 900 });
+    expect(billing!.traces!.slow).toBe(0);
+    expect(overview.services[0]!.traces!.buckets[2]!.requests).toBe(0);
+  });
+
+  it("keeps a count that ran out of time unknown", () => {
+    const merged = withOverviewDetails(overview, { ai: null, errorsWithoutException: null, requests: null, withTrace: null });
+
+    expect(merged.services[0]!.logs).toMatchObject({ errorsWithoutException: null, withTrace: null });
+    expect(merged.services[0]!.traces!.slow).toBeNull();
   });
 });
 
@@ -100,11 +142,16 @@ describe("serviceProblems", () => {
     expect(problem).toMatchObject({ detail: "80% of log records carry no trace ID, so they can't be found from their traces.", id: "logs-without-trace" });
     expect(serviceProblems(service({ logs: logs({ total: 1_000, withTrace: 200 }), traces: null }), "24h").map((p) => p.id)).toEqual(["no-traces"]);
   });
+
+  it("skips the checks whose counts ran out of time", () => {
+    expect(serviceProblems(service({ logs: logs({ errors: 1_890, errorsWithoutException: null, withTrace: null }) }), "24h")).toEqual([]);
+  });
 });
 
 describe("aiCostCallout", () => {
-  it("stays hidden when every model call reports usage", () => {
+  it("stays hidden when every model call reports usage, or the calls were not counted", () => {
     expect(aiCostCallout(ai({ calls: 10, callsWithInput: 10, callsWithModel: 10, callsWithOutput: 10 }), "24h")).toBeNull();
+    expect(aiCostCallout(null, "24h")).toBeNull();
   });
 
   it("lists the missing attributes, detected models and services", () => {

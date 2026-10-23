@@ -18,6 +18,7 @@ import { SendTelemetryLink, TelemetryGate } from "../components/telemetry";
 import { SegmentedControl } from "../design-system";
 import {
   fetchTelemetryOverview,
+  fetchTelemetryOverviewDetails,
   type OverviewService,
   type TelemetryOverview,
   type TelemetryRange,
@@ -34,6 +35,7 @@ import {
   serviceProblems,
   suggestionPrompt,
   tracePills,
+  withOverviewDetails,
   type AiCostCallout,
   type OverviewProblem,
   type PillLevel,
@@ -102,9 +104,14 @@ function SignalPanels({ range, service }: { range: TelemetryRange; service: Over
         {service.traces ? (
           <>
             <div className="telOverviewSignal__stats">
-              <Stat label="All" value={formatCount(service.traces.total)} />
+              <Stat label="Spans" value={formatCount(service.traces.total)} />
               <Stat dot="error" label="Errors" value={formatCount(service.traces.errors)} />
-              <Stat dot="warning" label="Slow" unit="over 1s" value={formatCount(service.traces.slow)} />
+              <Stat
+                dot="warning"
+                label="Slow"
+                unit="over 1s"
+                value={service.traces.slow === null ? "–" : formatCount(service.traces.slow)}
+              />
             </div>
             <Pills label={`Traces over ${window}, with error and slow spikes`} levels={tracePills(service.traces.buckets)} tone="traces" />
           </>
@@ -388,6 +395,9 @@ export function TelemetryOverviewPage() {
   const requested = params.get("range");
   const range: TelemetryRange = isRange(requested) ? requested : "24h";
   const overview = useTelemetryQuery(telemetry.available ? range : null, () => fetchTelemetryOverview(range));
+  // Slow requests, exception details, trace links and model calls take longer
+  // to count, so they fill in after the volumes.
+  const details = useTelemetryQuery(telemetry.available ? range : null, () => fetchTelemetryOverviewDetails(range));
 
   return (
     <AppShell active="telemetry-overview" redesigned wide>
@@ -416,7 +426,10 @@ export function TelemetryOverviewPage() {
               <button onClick={overview.retry} type="button">Retry</button>
             </div>
           ) : overview.data ? (
-            <OverviewBody overview={overview.data.overview} range={range} />
+            <OverviewBody
+              overview={details.data ? withOverviewDetails(overview.data.overview, details.data.details) : overview.data.overview}
+              range={range}
+            />
           ) : (
             <p className="explorerStatus">Loading…</p>
           )}
