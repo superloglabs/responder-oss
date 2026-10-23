@@ -124,6 +124,7 @@ test("groups the sidebar and keeps integrations and tag mode in settings with te
     "Traces",
   ]);
   await expect(navigation.getByRole("group", { name: "Detect" }).getByRole("link")).toHaveText([
+    "Errors",
     "Alerts",
     "Synthetics",
   ]);
