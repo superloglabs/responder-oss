@@ -14,7 +14,8 @@ export function LoadingRegion({
   return (
     <div aria-busy="true" className={className} role="status">
       <span className="srOnly">{label}</span>
-      <div aria-hidden="true">{children}</div>
+      {/* Inert, so focusable parts such as a table's scroll region stay out of the tab order. */}
+      <div aria-hidden="true" inert>{children}</div>
     </div>
   );
 }
@@ -1150,7 +1151,7 @@ export function AppFrameSkeleton() {
   return (
     <main aria-busy="true" className="appShell appShell--default appShell--workspace" role="status">
       <span className="srOnly">Loading Superlog…</span>
-      <div aria-hidden="true" className="globalHeader pageSkeleton__sidebar">
+      <div aria-hidden="true" inert className="globalHeader pageSkeleton__sidebar">
         <Skeleton className="automationSkeleton__icon" />
         <div className="pageSkeleton__nav">
           {[72, 64, 88, 56, 0, 80, 68, 60].map((width, index) =>
@@ -1165,7 +1166,7 @@ export function AppFrameSkeleton() {
           )}
         </div>
       </div>
-      <div aria-hidden="true" className="workspaceSurface">
+      <div aria-hidden="true" inert className="workspaceSurface">
         <div className="workspaceContent">
           <Skeleton className="pageSkeleton__heading" style={{ width: "120px" }} />
           <TableRowsSkeleton />

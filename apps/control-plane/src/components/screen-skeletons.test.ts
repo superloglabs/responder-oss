@@ -88,6 +88,7 @@ describe("screen skeletons", () => {
     expect(markup).toContain('role="status"');
     expect(markup).toContain(label);
     expect(markup).toContain('aria-hidden="true"');
+    expect(markup).toContain('inert=""');
     expect(markup).toContain("dsSkeleton");
   });
 });
