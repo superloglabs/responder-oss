@@ -60,7 +60,12 @@ import {
   type TimeRange,
   type TraceOverview,
 } from "../../../../packages/core/src/telemetry/query.js";
-import { telemetryOverview, type TelemetryOverview } from "../../../../packages/core/src/telemetry/overview.js";
+import {
+  telemetryOverview,
+  telemetryOverviewDetails,
+  type OverviewDetails,
+  type TelemetryOverview,
+} from "../../../../packages/core/src/telemetry/overview.js";
 import { getActiveTenant } from "../tenant.js";
 
 // Read-only access to a workspace's OpenTelemetry data. A workspace sees
@@ -186,8 +191,10 @@ export type TelemetryRouteDependencies = {
     signal: TelemetrySignal | undefined,
   ) => Promise<unknown>;
   now: () => Date;
-  // What each service sent over the window, and how model calls report usage.
+  // What each service sent over the window.
   overview: (client: ClickHouseClient, organizationId: string, range: Required<TimeRange>) => Promise<TelemetryOverview>;
+  // The overview counts that need raw rows, loaded after the volumes.
+  overviewDetails: (client: ClickHouseClient, organizationId: string, range: Required<TimeRange>) => Promise<OverviewDetails>;
   queryLogs: (
     client: ClickHouseClient,
     organizationId: string,
@@ -275,6 +282,7 @@ const defaultDependencies: TelemetryRouteDependencies = {
     ),
   now: () => new Date(),
   overview: telemetryOverview,
+  overviewDetails: telemetryOverviewDetails,
   queryLogs,
   queryTrace: async (client, organizationId, traceId) => {
     const trace = await getTraceDetail(client, organizationId, traceId);
@@ -795,6 +803,15 @@ export function createTelemetryRoutes(
       if (!range) return context.json({ error: "Invalid overview query" }, 400);
       const overview = await dependencies.overview(granted.client, granted.organizationId, range);
       return context.json({ overview, since: range.since, until: range.until });
+    })
+    .get("/overview/details", async (context) => {
+      const granted = await access(context.req.raw.headers);
+      if (!granted.ok) return context.json({ error: granted.error }, granted.status);
+      const query = windowSchema.safeParse(context.req.query());
+      const range = query.success ? windowFor(query.data, dependencies.now()) : null;
+      if (!range) return context.json({ error: "Invalid overview query" }, 400);
+      const details = await dependencies.overviewDetails(granted.client, granted.organizationId, range);
+      return context.json({ details });
     })
     .get("/attribute-keys", async (context) => {
       const granted = await access(context.req.raw.headers);

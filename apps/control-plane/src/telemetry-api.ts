@@ -1,14 +1,16 @@
 import { apiErrorMessage } from "./agents-api";
 import { resolveTimeRange, timeRangeFromParams, timeRangeParams, type DashboardTimeRange } from "./dashboard-time-range";
 import type { TelemetryRange, TelemetrySignal } from "../server/telemetry/routes";
-import type { TelemetryOverview } from "../../../packages/core/src/telemetry/overview";
+import type { OverviewDetails, TelemetryOverview } from "../../../packages/core/src/telemetry/overview";
 
 export type { TelemetryRange, TelemetrySignal };
 export type {
   OverviewAi,
+  OverviewDetails,
   OverviewLogBucket,
   OverviewService,
   OverviewTraceBucket,
+  OverviewTraces,
   TelemetryOverview,
 } from "../../../packages/core/src/telemetry/overview";
 
@@ -461,6 +463,10 @@ export function fetchTelemetryOverview(
   range: TelemetryRange,
 ): Promise<{ overview: TelemetryOverview; since: string; until: string }> {
   return telemetryJson(`/api/telemetry/overview?${new URLSearchParams({ range })}`);
+}
+
+export function fetchTelemetryOverviewDetails(range: TelemetryRange): Promise<{ details: OverviewDetails }> {
+  return telemetryJson(`/api/telemetry/overview/details?${new URLSearchParams({ range })}`);
 }
 
 export interface HistogramBar<Series extends string> {

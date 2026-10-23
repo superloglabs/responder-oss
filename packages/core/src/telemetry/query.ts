@@ -2676,7 +2676,7 @@ function tableExists(ch: ClickHouseClient, table: string): Promise<boolean> {
   return probe;
 }
 
-function rollupAvailable(ch: ClickHouseClient): Promise<boolean> {
+export function rollupAvailable(ch: ClickHouseClient): Promise<boolean> {
   return tableExists(ch, "events_per_minute");
 }
 
