@@ -7,6 +7,7 @@ import {
   findTelemetryAlert,
   findTelemetryAlertActivation,
   listTelemetryAlertEpisodes,
+  listTelemetryAlertIntervals,
   listTelemetryAlerts,
   listTelemetryAlertSlackChannels,
   updateTelemetryAlert,
@@ -35,6 +36,7 @@ export type AlertRouteDependencies = {
   createAlert: typeof createTelemetryAlert;
   deleteAlert: typeof deleteTelemetryAlert;
   episodes: typeof listTelemetryAlertEpisodes;
+  intervals: typeof listTelemetryAlertIntervals;
   findAlert: typeof findTelemetryAlert;
   findActivation: typeof findTelemetryAlertActivation;
   hasCapability: (organizationId: string, capability: "alerts" | "telemetry") => Promise<boolean>;
@@ -120,6 +122,7 @@ const defaultDependencies: AlertRouteDependencies = {
   createAlert: createTelemetryAlert,
   deleteAlert: deleteTelemetryAlert,
   episodes: listTelemetryAlertEpisodes,
+  intervals: listTelemetryAlertIntervals,
   findAlert: findTelemetryAlert,
   findActivation: findTelemetryAlertActivation,
   hasCapability: organizationHasCapability,
@@ -241,6 +244,19 @@ export function createAlertRoutes(dependencies: AlertRouteDependencies = default
         dependencies.episodes(alert.id, 1, { state: "firing" }),
       ]);
       return context.json({ alert, episodes, hasFiringActivations: open.length > 0 });
+    })
+    .get("/:alertId/highlights", async (context) => {
+      const granted = await access(context.req.raw.headers);
+      if (!granted.ok) return context.json({ error: granted.error }, granted.status);
+      const alertId = idSchema.safeParse(context.req.param("alertId"));
+      if (!alertId.success) return context.json(notFound, 404);
+      const hours = z.enum(["1", "6", "24"]).safeParse(context.req.query("hours"));
+      if (!hours.success) return context.json({ error: "Invalid chart range" }, 400);
+      const alert = await dependencies.findAlert(granted.organizationId, alertId.data);
+      if (!alert) return context.json(notFound, 404);
+      const until = dependencies.now();
+      const since = new Date(until.getTime() - Number(hours.data) * 3_600_000);
+      return context.json({ highlights: await dependencies.intervals(alert.id, since, until) });
     })
     .get("/:alertId/activations", async (context) => {
       const granted = await access(context.req.raw.headers);

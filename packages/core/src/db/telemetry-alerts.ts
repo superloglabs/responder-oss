@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, gte, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import type { AlertCreate, AlertRule, AlertSlackTarget, AlertUpdate } from "../telemetry/alerts.js";
 import { getDatabase } from "./client.js";
 import {
@@ -122,7 +122,7 @@ export async function listTelemetryAlertEpisodes(alertId: string, limit = 50, op
     })
     .from(telemetryAlertEpisodes)
     .where(and(eq(telemetryAlertEpisodes.alertId, alertId),
-      options.since ? gte(telemetryAlertEpisodes.startedAt, options.since) : undefined,
+      options.since ? or(isNull(telemetryAlertEpisodes.endedAt), gte(telemetryAlertEpisodes.endedAt, options.since)) : undefined,
       options.state ? eq(telemetryAlertEpisodes.state, options.state) : undefined))
     .offset(options.offset ?? 0)
     .orderBy(desc(telemetryAlertEpisodes.startedAt), desc(telemetryAlertEpisodes.id))
@@ -132,6 +132,26 @@ export async function listTelemetryAlertEpisodes(alertId: string, limit = 50, op
     endedAt: row.endedAt?.toISOString() ?? null,
     startedAt: row.startedAt.toISOString(),
   }));
+}
+
+// Chart intervals are independent of the paginated history, with only the
+// two timestamps needed for shading and no per-page truncation.
+export async function listTelemetryAlertIntervals(alertId: string, since: Date, until: Date) {
+  const rows = await getDatabase().select({ startedAt: telemetryAlertEpisodes.startedAt, endedAt: telemetryAlertEpisodes.endedAt })
+    .from(telemetryAlertEpisodes)
+    .where(and(eq(telemetryAlertEpisodes.alertId, alertId), lte(telemetryAlertEpisodes.startedAt, until),
+      or(isNull(telemetryAlertEpisodes.endedAt), gte(telemetryAlertEpisodes.endedAt, since))))
+    .orderBy(asc(telemetryAlertEpisodes.startedAt));
+  // Merge overlapping groups: the chart marks when any activation was open.
+  const intervals: { start: number; end: number; label: string }[] = [];
+  for (const row of rows) {
+    const start = Math.max(row.startedAt.getTime(), since.getTime());
+    const end = Math.min(row.endedAt?.getTime() ?? until.getTime(), until.getTime());
+    const previous = intervals.at(-1);
+    if (previous && start <= previous.end) previous.end = Math.max(previous.end, end);
+    else intervals.push({ start, end, label: "Active alert" });
+  }
+  return intervals;
 }
 
 export type TelemetryAlertActivation = TelemetryAlertEpisode & {

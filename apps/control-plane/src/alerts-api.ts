@@ -242,3 +242,7 @@ export function alertRequest(form: AlertForm): { error: string } | { body: Alert
     },
   };
 }
+
+export function fetchAlertHighlights(alertId: string, hours: number): Promise<{ highlights: { start: number; end: number; label: string }[] }> {
+  return request(`${base}/${encodeURIComponent(alertId)}/highlights?hours=${hours}`);
+}

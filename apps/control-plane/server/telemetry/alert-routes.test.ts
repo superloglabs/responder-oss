@@ -43,6 +43,7 @@ function routes(overrides: Partial<AlertRouteDependencies> = {}) {
     createAlert: vi.fn(async () => alert),
     deleteAlert: vi.fn(async () => true),
     episodes: vi.fn(async () => []),
+    intervals: vi.fn(async () => []),
     findAlert: vi.fn(async () => alert),
     findActivation: vi.fn(async () => null),
     hasCapability: vi.fn(async () => true),
@@ -238,6 +239,13 @@ describe("activation details", () => {
     const response = await send(app, "POST", "/preview?hours=1", { ...rule, windowMinutes: 360 });
     expect(response.status).toBe(400);
     expect(dependencies.series).not.toHaveBeenCalled();
+  });
+
+  it("loads chart intervals independently of paginated history", async () => {
+    const { app, dependencies } = routes();
+    expect((await app.request(`/${alertId}/highlights?hours=24`)).status).toBe(200);
+    expect(dependencies.intervals).toHaveBeenCalledWith(alertId, new Date("2026-10-13T12:00:00Z"), now);
+    expect(dependencies.episodes).not.toHaveBeenCalled();
   });
 
   it("validates preview ranges and queries the chosen range", async () => {

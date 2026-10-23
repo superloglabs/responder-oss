@@ -7,6 +7,7 @@ import {
   fetchAlertActivation,
   fetchAlertActivationChart,
   fetchAlertHistory,
+  fetchAlertHighlights,
   fetchAlertSlackChannels,
   updateAlert,
   type TelemetryAlert,
@@ -266,7 +267,6 @@ function History({ alert }: { alert: TelemetryAlert }) {
 }
 function AlertDetail({
   alert,
-  episodes,
   hasFiringActivations,
   reload,
 }: {
@@ -281,6 +281,11 @@ function AlertDetail({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const preview = useAlertPreview(alertForm(alert), hours, revision);
+  const chartHours = preview.selectedHours;
+  const highlights = useResource(
+    `${alert.id}:${chartHours}:${revision}:${alert.updatedAt}`,
+    useCallback(() => fetchAlertHighlights(alert.id, chartHours), [alert.id, chartHours]),
+  );
   const channels = useResource(
     "slack",
     useCallback(() => fetchAlertSlackChannels(), []),
@@ -390,15 +395,11 @@ function AlertDetail({
           chart={preview.data?.chart}
           error={preview.error}
           loading={preview.loading}
-          highlights={episodes.map((episode) => ({
-            start: Date.parse(episode.startedAt),
-            end: Date.parse(episode.endedAt ?? new Date().toISOString()),
-            label: `Activation #${episode.id.slice(0, 8)}`,
-          }))}
+          highlights={highlights.data?.highlights ?? []}
         />
         <p className="alertMuted">
           {alert.windowMinutes}-minute windows reconstructed from telemetry using the current rule. Shading marks
-          activations. {Intl.DateTimeFormat().resolvedOptions().timeZone}.
+          activations. {highlights.error ? "Activation shading could not be loaded." : !highlights.data ? "Loading activation shading…" : ""} {Intl.DateTimeFormat().resolvedOptions().timeZone}.
         </p>
       </section>
       <History alert={alert} />

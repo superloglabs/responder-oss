@@ -145,6 +145,8 @@ async function mockAlerts(page: Page, legacy = false) {
           ...(legacy ? { ruleSnapshot: null, endReason: null, recoveryNotifiedAt: null } : {}),
         },
       };
+    else if (path.endsWith("/highlights"))
+      json = { highlights: [{ start: Date.parse(episode.startedAt), end: Date.parse(episode.endedAt), label: "Active alert" }] };
     else if (path.endsWith("/activations")) {
       historyQueries.push(url.search);
       json = { episodes: url.searchParams.get("state") === "firing" ? [] : [episode], hasMore: false };
@@ -197,6 +199,7 @@ test("filters activation history, opens a detail, and keeps original configurati
   await page.goto(`/alerts/${alertId}`);
   await expect(page.getByRole("heading", { name: "Current evaluation" })).toBeVisible();
   await expect(page.getByRole("img", { name: "Values and alert threshold" })).toBeVisible();
+  await expect(page.getByText(/Loading activation shading/)).toHaveCount(0);
   await page.screenshot({ path: test.info().outputPath("alert-detail.png"), fullPage: true });
   await page.getByLabel("Activation state").selectOption("firing");
   await expect(page.getByText("No activations in this time range.")).toBeVisible();
