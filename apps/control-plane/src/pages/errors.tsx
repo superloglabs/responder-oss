@@ -67,6 +67,8 @@ export function ErrorsPage() {
   const filter: ErrorIssueFilter = {
     status: "all", sort, statuses: filters.status as ErrorIssueStatus[], services: filters.service,
     environments: filters.environment, range,
+    // Values within a property are ORed. Both exhaustive activity states
+    // match every issue, so only a single selected state needs a predicate.
     ...(filters.activity.length === 1 ? { activity: filters.activity[0] as "active" | "inactive" } : {}),
     ...(search ? { search } : {}),
   };

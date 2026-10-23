@@ -48,7 +48,7 @@ export function ErrorFilterMenu({ filters, services, environments, onChange, com
 
 export function ErrorFilterChips({ filters, onChange }: { filters: ErrorFilters; onChange: (property: FilterProperty, values: string[]) => void }) {
   return <>{filterProperties.filter((property) => filters[property].length > 0).map((property) => <span className="errorFilterChip" key={property}>
-    {names[property]} <span>is</span> {filters[property].map((value) => label(property, value)).join(", ")}
+    {names[property]} <span>is</span> {filters[property].map((value) => label(property, value)).join(" or ")}
     <button aria-label={`Remove ${names[property].toLowerCase()} filter`} onClick={() => onChange(property, [])} type="button"><XIcon size={12} /></button>
   </span>)}</>;
 }

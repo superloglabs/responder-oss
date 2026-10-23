@@ -98,6 +98,14 @@ test("combines checkbox filters, removes chips, and preserves search in the URL"
   await page.getByRole("menuitemcheckbox", { name: "No longer happening", exact: true }).click();
   await expect.poll(() => queries.at(-1)?.get("activity")).toBe("inactive");
   await page.keyboard.press("Escape"); await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Filter", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Activity", exact: true }).press("ArrowRight");
+  await page.getByRole("menuitemcheckbox", { name: "Still happening", exact: true }).click();
+  await expect.poll(() => queries.at(-1)?.has("activity")).toBe(false);
+  await expect(page.getByRole("menuitemcheckbox", { name: "Still happening", exact: true })).toBeChecked();
+  await expect(page.getByRole("menuitemcheckbox", { name: "No longer happening", exact: true })).toBeChecked();
+  await page.keyboard.press("Escape"); await page.keyboard.press("Escape");
+  await expect(page.locator(".errorFilterChip")).toContainText("No longer happening or Still happening");
   await page.getByRole("searchbox", { name: "Search errors" }).fill("payment");
   await expect.poll(() => queries.at(-1)?.get("search")).toBe("payment");
   await expect(page).toHaveURL(/q=payment/);
