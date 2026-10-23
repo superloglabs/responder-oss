@@ -15,6 +15,7 @@ import {
   type SuggestionSummary,
 } from "../agents-api";
 import { AppShell } from "../components/app-shell";
+import { DataTableSkeleton, DiffSkeleton, SuggestionDetailSkeleton } from "../components/screen-skeletons";
 import { CaretRightIcon, GitPullRequestIcon as PullRequestIcon, CheckIcon, ListBulletsIcon } from "@phosphor-icons/react";
 import { Button, DataTable, Switch, SelectField } from "../design-system";
 import "./scan-suggestions.css";
@@ -455,7 +456,7 @@ export function SuggestionsPage() {
     ) {
       return (
         <AppShell active="suggestions" density="compact" redesigned>
-          <p className="suggestionDetail__loading">Loading suggestion…</p>
+          <SuggestionDetailSkeleton />
         </AppShell>
       );
     }
@@ -528,7 +529,7 @@ export function SuggestionsPage() {
             ) : null}
                 </div>
                 <p className="remediationCard__description">{selected.codeChange.description}</p>
-                <Suspense fallback={<div className="remediationDiff__loading">Loading proposed diff…</div>}>
+                <Suspense fallback={<DiffSkeleton label="Loading proposed diff…" />}>
                   <RemediationDiff remediation={selected.codeChange} />
                 </Suspense>
               </div>
@@ -566,7 +567,15 @@ export function SuggestionsPage() {
 
       {error ? <p className="formError">{error}</p> : null}
       {loading ? (
-        <p className="suggestionsLoading">Loading suggestions…</p>
+        <DataTableSkeleton
+          className="suggestionsDataTable"
+          columns={[
+            { header: "Suggestion", key: "suggestion", width: "67%" },
+            { header: "Source", key: "source", width: "16%" },
+            { header: "Identified", key: "created", width: "17%" },
+          ]}
+          label="Loading suggestions…"
+        />
       ) : visibleSuggestions.length === 0 ? (
         <section className="emptyState emptyState--list">
           <h2>No {status} suggestions</h2>

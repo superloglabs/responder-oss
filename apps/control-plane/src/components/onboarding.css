@@ -77,7 +77,6 @@
 .onboarding__card--wide .onboarding__intro p { max-width: 560px; }
 .onboarding__intro a, .onboarding__note a { color: #202020; text-decoration: underline; text-decoration-color: #cecece; text-underline-offset: 3px; }
 
-.onboarding__loading { color: var(--onboarding-muted); font-size: 14px; }
 
 .onboarding__form { display: flex; flex-direction: column; gap: 8px; }
 .onboarding__field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; line-height: 20px; }

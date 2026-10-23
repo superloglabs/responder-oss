@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { AppShell } from "../components/app-shell";
 import { BILLING_PLANS_ID, BillingPlans } from "../components/billing-plans";
-import { BillingSkeleton } from "../components/screen-skeletons";
+import { BillingSkeleton, ChartSkeleton } from "../components/screen-skeletons";
 import { SettingsHeading } from "../components/settings-heading";
 import { UsageChart } from "../components/usage-chart";
 import { UsageChoiceGroup, UsageRangeControl } from "../components/usage-history-view";
@@ -420,7 +420,7 @@ function UsageBySource() {
             />
             {chart.total === 0 ? <p>No usage in this period.</p> : null}
           </>
-        ) : !error ? <p role="status">Loading usage…</p> : null}
+        ) : !error ? <ChartSkeleton height={220} label="Loading usage…" /> : null}
       </article>
     </>
   );

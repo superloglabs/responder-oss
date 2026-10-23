@@ -114,9 +114,6 @@
 .issuesEmpty { padding: 48px 12px; color: var(--issues-muted); }
 .issuesEmpty h2 { font-size: 15px; font-weight: 500; }
 .issuesEmpty p { margin-top: 8px; font-size: 13px; }
-.issuesLoading { border: .5px solid var(--issues-line); border-radius: 12px; overflow: hidden; }
-.issuesLoading > div { height: 39px; border-bottom: .5px solid var(--issues-line); background: var(--issues-row); }
-.issuesLoading > div::after { content: ""; display: block; margin: 13px 12px; width: 45%; height: 12px; border-radius: 3px; background: var(--issues-line); }
 @media (max-width: 900px) {
   .appShell.appShell--workspace { padding-left: 200px; }
   .appShell--workspace .globalHeader { width: 200px; }
@@ -289,7 +286,7 @@
 .appShell--workspace .remediationPullRequest:hover { border-color: #d4d7dc; background: var(--issues-header); }
 .appShell--workspace .remediationPullRequest__icon, .appShell--workspace .remediationPullRequest__state { background: var(--ds-positive-surface); color: var(--ds-positive); }
 .appShell--workspace .remediationPullRequest__icon--merged, .appShell--workspace .remediationPullRequest__state--merged { background: #eeeafb; color: #6652ad; }
-.appShell--workspace .remediationDiff, .appShell--workspace .remediationDiff__file, .appShell--workspace .remediationDiff__loading, .appShell--workspace .remediationPrompt, .appShell--workspace .remediationDiff__fallback { background: #fff; border-color: #e8e8e8; color: #444; border-radius: 6px; }
+.appShell--workspace .remediationDiff, .appShell--workspace .remediationDiff__file, .appShell--workspace .remediationPrompt, .appShell--workspace .remediationDiff__fallback { background: #fff; border-color: #e8e8e8; color: #444; border-radius: 6px; }
 .appShell--workspace .remediationDiff__repository h4 { color: #666; font-weight: 400; }
 .appShell--workspace .issueLine { min-height: 24px; padding: 0 12px; border-color: #e8e8e8; }
 .appShell--workspace .issueLine__title { color: #121212; font-size: 13px; font-weight: 500; }

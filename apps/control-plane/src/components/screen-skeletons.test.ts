@@ -4,15 +4,39 @@ import { describe, expect, it } from "vitest";
 import {
   AgentDetailSkeleton,
   AgentListSkeleton,
+  AgentSettingsSkeleton,
   AgentSetupSkeleton,
+  AlertDetailSkeleton,
+  AppFrameSkeleton,
   BillingSkeleton,
+  CardContentSkeleton,
+  ChartSkeleton,
+  DashboardSkeleton,
+  DataTableSkeleton,
+  DiffSkeleton,
+  ErrorIssueSkeleton,
+  ExplorerSkeleton,
+  FormPageSkeleton,
+  IntegrationRowsSkeleton,
   IntegrationSettingsSkeleton,
   InvestigationDetailSkeleton,
-  MemberListSkeleton,
   IssueDetailSkeleton,
   IssueListSkeleton,
+  ListSkeleton,
+  MemberListSkeleton,
   PullRequestDetailSkeleton,
   PullRequestListSkeleton,
+  ScanDetailSkeleton,
+  SuggestionDetailSkeleton,
+  SyntheticCheckSkeleton,
+  TelemetryOverviewSkeleton,
+  TelemetryPageSkeleton,
+  TelemetrySetupSkeleton,
+  TelemetrySourceSkeleton,
+  TraceDetailSkeleton,
+  TraceDrawerSkeleton,
+  UsageCardsSkeleton,
+  WorkspaceListSkeleton,
 } from "./screen-skeletons";
 
 const screens: Array<[ComponentType, string]> = [
@@ -27,6 +51,33 @@ const screens: Array<[ComponentType, string]> = [
   [MemberListSkeleton, "Loading members…"],
   [PullRequestListSkeleton, "Loading pull requests…"],
   [PullRequestDetailSkeleton, "Loading pull request…"],
+  [AgentSettingsSkeleton, "Loading agent settings…"],
+  [AlertDetailSkeleton, "Loading alert…"],
+  [AppFrameSkeleton, "Loading Superlog…"],
+  [DashboardSkeleton, "Loading dashboard…"],
+  [ErrorIssueSkeleton, "Loading error…"],
+  [ScanDetailSkeleton, "Loading scan…"],
+  [SuggestionDetailSkeleton, "Loading suggestion…"],
+  [SyntheticCheckSkeleton, "Loading check…"],
+  [TelemetryOverviewSkeleton, "Loading overview…"],
+  [TelemetryPageSkeleton, "Loading telemetry…"],
+  [TelemetrySetupSkeleton, "Loading telemetry sources…"],
+  [TelemetrySourceSkeleton, "Loading setup…"],
+  [TraceDetailSkeleton, "Loading trace…"],
+  [TraceDrawerSkeleton, "Loading trace…"],
+  [UsageCardsSkeleton, "Loading usage…"],
+  [WorkspaceListSkeleton, "Loading workspaces…"],
+  [() => createElement(ChartSkeleton, { label: "Loading chart…" }), "Loading chart…"],
+  [
+    () => createElement(DataTableSkeleton, { columns: [{ header: "Name", key: "name" }], label: "Loading rows…" }),
+    "Loading rows…",
+  ],
+  [() => createElement(DiffSkeleton, { label: "Loading diff…" }), "Loading diff…"],
+  [() => createElement(ExplorerSkeleton, { label: "Loading logs…" }), "Loading logs…"],
+  [() => createElement(FormPageSkeleton, { className: "alertPage", label: "Loading form…" }), "Loading form…"],
+  [() => createElement(IntegrationRowsSkeleton, { label: "Loading integrations…" }), "Loading integrations…"],
+  [() => createElement(CardContentSkeleton, { label: "Loading setup…" }), "Loading setup…"],
+  [() => createElement(ListSkeleton, { label: "Loading list…" }), "Loading list…"],
 ];
 
 describe("screen skeletons", () => {
@@ -37,6 +88,7 @@ describe("screen skeletons", () => {
     expect(markup).toContain('role="status"');
     expect(markup).toContain(label);
     expect(markup).toContain('aria-hidden="true"');
+    expect(markup).toContain('inert=""');
     expect(markup).toContain("dsSkeleton");
   });
 });

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, Navigate, useLocation, useParams } from "react-router-dom";
 import { fetchScan } from "../scans-api";
 import { AppShell } from "../components/app-shell";
+import { ScanDetailSkeleton } from "../components/screen-skeletons";
 import { ArrowRightIcon as ArrowIcon } from "@phosphor-icons/react";
 import "./scan-suggestions.css";
 import { DataTable } from "../design-system";
@@ -77,7 +78,7 @@ export function ScanDetailPage() {
           Scans
         </Link>
 
-        {loading ? <p>Loading scan…</p> : null}
+        {loading ? <ScanDetailSkeleton /> : null}
         {error ? <p className="formError">{error}</p> : null}
         {scan ? (
           <>

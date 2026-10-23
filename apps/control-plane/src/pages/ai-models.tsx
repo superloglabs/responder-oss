@@ -14,6 +14,7 @@ import {
   type AiPriceOverride,
 } from "../ai-models-api";
 import { AppShell } from "../components/app-shell";
+import { DataTableSkeleton } from "../components/screen-skeletons";
 import { useOrganizationCapabilities } from "../organization-capabilities";
 import { DashboardDialog } from "../components/dashboard-dialog";
 import { TelemetryGate } from "../components/telemetry";
@@ -154,7 +155,19 @@ export function AiModelsPage() {
               <button onClick={() => void load()} type="button">Retry</button>
             </div>
           ) : data === null ? (
-            <p className="telemetryPage__status">Loading models…</p>
+            <DataTableSkeleton
+              className="agentListTable telemetryPage__table"
+              columns={[
+                { cell: "twoLines", header: "Model", key: "model" },
+                { align: "right", header: "Calls", key: "calls", width: "80px" },
+                { align: "right", header: "Input", key: "input", width: "80px" },
+                { align: "right", header: "Output", key: "output", width: "80px" },
+                { align: "right", header: "Per 1M: in · cached · out", key: "price", width: "216px" },
+                { header: "Price from", key: "source", width: "176px" },
+                { cell: "empty", header: "", key: "actions", width: "104px" },
+              ]}
+              label="Loading models…"
+            />
           ) : models.length === 0 ? (
             <section className="emptyState emptyState--list">
               <h2>No model calls in this time range</h2>

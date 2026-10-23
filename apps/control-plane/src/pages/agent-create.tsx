@@ -48,7 +48,7 @@ import {
   AgentContextProviderMark as ProviderMark,
   AgentContextRow as ContextRow,
 } from "../components/agent-context-controls";
-import { AgentSetupSkeleton } from "../components/screen-skeletons";
+import { AgentSettingsSkeleton, AgentSetupSkeleton } from "../components/screen-skeletons";
 import {
   DatadogConnectionDialog,
 } from "../components/datadog-site-dialog";
@@ -1736,7 +1736,7 @@ export function AgentCreatePage({ initialAgent }: { initialAgent?: AgentDetail }
       ) : null}
 
       {activeTab === "history" && agentDetail ? <AgentRunHistory agent={agentDetail} /> : null}
-      {activeTab === "settings" && settingsLoading ? <p role="status">Loading agent settings…</p> : null}
+      {activeTab === "settings" && settingsLoading ? <AgentSettingsSkeleton /> : null}
       {activeTab === "settings" && !settingsLoading && (settingsError || unsupportedReason) ? <section className="agentSettingsUnavailable" role="status"><p>{settingsError ?? unsupportedReason}</p>{settingsError ? <Button onClick={() => window.location.reload()} variant="secondary">Retry settings</Button> : <><h2>Agent instructions</h2><p>{existingConfiguration?.instructions}</p></>}</section> : null}
       <form hidden={activeTab !== "settings" || settingsLoading || Boolean(settingsError || unsupportedReason)} className="createAgentForm agentEditor" onSubmit={submit}>
         <CreateSection title="Input" description="Choose what starts an investigation.">

@@ -21,7 +21,7 @@ import { EvidenceList } from "../components/evidence-list";
 import {
   ProviderGlyph,
 } from "../components/icons";
-import { IssueDetailSkeleton } from "../components/screen-skeletons";
+import { DiffSkeleton, IssueDetailSkeleton } from "../components/screen-skeletons";
 import { copyToClipboard } from "../copy-to-clipboard";
 import { Button } from "../design-system";
 import { useDocumentTitle } from "../use-document-title";
@@ -676,11 +676,7 @@ export function IssueDetailPage() {
                         ))}
                         {codeChangeRemediationId === remediation.id ? (
                           <Suspense
-                            fallback={
-                              <div className="remediationDiff__loading">
-                                Loading proposed diff…
-                              </div>
-                            }
+                            fallback={<DiffSkeleton label="Loading proposed diff…" />}
                           >
                             <RemediationDiff remediation={remediation} theme="light" />
                           </Suspense>
@@ -688,11 +684,7 @@ export function IssueDetailPage() {
                       </>
                     ) : remediation.type === "code_change" ? (
                       <Suspense
-                        fallback={
-                          <div className="remediationDiff__loading">
-                            Loading proposed diff…
-                          </div>
-                        }
+                        fallback={<DiffSkeleton label="Loading proposed diff…" />}
                       >
                         <RemediationDiff remediation={remediation} theme="light" />
                       </Suspense>

@@ -13,8 +13,7 @@
   gap: 16px;
 }
 
-.usageHistory__toolbar p,
-.usageHistory__loading {
+.usageHistory__toolbar p {
   margin: 0;
   color: #666;
 }

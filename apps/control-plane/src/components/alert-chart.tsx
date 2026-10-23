@@ -1,5 +1,6 @@
 import type { AlertForm } from "../alerts-api";
 import type { ChartData } from "../dashboards-api";
+import { ChartSkeleton } from "./screen-skeletons";
 import { TimeseriesChart } from "./timeseries-chart";
 import { alertValueUnit } from "../../../../packages/core/src/telemetry/alert-text";
 
@@ -27,9 +28,7 @@ export function AlertChart({
           {error}
         </p>
       ) : loading ? (
-        <p className="alertEmpty" role="status">
-          Loading chart…
-        </p>
+        <ChartSkeleton height="100%" label="Loading chart…" />
       ) : chart && chart.series.length > 0 ? (
         <TimeseriesChart
           chart={chart}

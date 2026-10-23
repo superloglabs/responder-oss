@@ -1,0 +1,85 @@
+/* Loading placeholders for workspace pages. Each mirrors its loaded page, so
+   the content replaces the placeholders without moving the layout. */
+
+.screenSkeleton--fill,
+.screenSkeleton--fill > div[aria-hidden="true"] { display: flex; flex: 1; flex-direction: column; }
+
+/* Table cells: a bar in a 20px text line, and a thinner muted bar in an 18px line. */
+.tableSkeleton__lines { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.tableSkeleton__lines--right { align-items: flex-end; }
+.tableSkeleton__lines > .dsSkeleton { height: 10px; margin: 5px 0; }
+.tableSkeleton__secondary.dsSkeleton { height: 8px; }
+.tableSkeleton__avatar { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.tableSkeleton__avatar > .tableSkeleton__lines { flex: 1; }
+.tableSkeleton__avatar > .dsSkeleton--circle { width: 28px; height: 28px; }
+.tableSkeleton__badge.dsSkeleton { width: min(64px, 100%); height: 20px; }
+.tableSkeleton__checkbox.dsSkeleton { width: 14px; height: 14px; border-radius: 3px; }
+
+.screenSkeleton--chart, .screenSkeleton--chart > div[aria-hidden="true"] { height: 100%; }
+
+.screenSkeleton__lines { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.screenSkeleton__lines > .dsSkeleton { height: 10px; }
+.screenSkeleton__chart.dsSkeleton { width: 100%; height: 200px; border-radius: 8px; }
+.pageSkeleton__chartFill.dsSkeleton { height: 100%; min-height: 120px; }
+
+.pageSkeleton__stack { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.pageSkeleton__stack--overview { gap: 20px; }
+.pageSkeleton__heading.dsSkeleton { flex: 0 0 auto; height: 14px; }
+.pageSkeleton__button.dsSkeleton { flex: 0 0 auto; height: 28px; border-radius: 6px; }
+.pageSkeleton__control.dsSkeleton { flex: 0 0 auto; height: 32px; border-radius: 8px; }
+.pageSkeleton__input.dsSkeleton { height: 36px; border-radius: 8px; }
+.pageSkeleton__icon.dsSkeleton { flex: 0 0 auto; width: 20px; height: 20px; border-radius: 5px; }
+.pageSkeleton__toggle.dsSkeleton { flex: 0 0 auto; width: 32px; height: 18px; }
+.pageSkeleton__statValue.dsSkeleton { height: 20px; margin: 3px 0; }
+.pageSkeleton__pills.dsSkeleton { height: 20px; }
+
+.pageSkeleton__panel { display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 16px; border-radius: 12px; background: var(--ds-surface-base); outline: .5px solid var(--ds-border-default); }
+.pageSkeleton__form { display: flex; flex-direction: column; gap: 32px; }
+.pageSkeleton__formSection { display: flex; flex-direction: column; gap: 20px; padding-top: 28px; border-top: 1px solid var(--ds-border-subtle); }
+.pageSkeleton__field { display: flex; flex-direction: column; gap: 8px; max-width: 580px; }
+
+.pageSkeleton__table { overflow: hidden; border-radius: 12px; background: #fff; box-shadow: 0 0 0 .5px #00000014, 0 1px 2px #0000000d; }
+.pageSkeleton__tableRow { display: grid; grid-template-columns: minmax(0, 1fr) 96px 72px; align-items: center; gap: 24px; min-height: 41px; padding: 0 12px; border-top: .5px solid #e6e8ec; }
+.pageSkeleton__tableRow:first-child { border-top: 0; }
+.pageSkeleton__tableRow > .dsSkeleton { height: 10px; }
+
+.pageSkeleton__waterfallRow { cursor: default; }
+.pageSkeleton__waterfallRow .traceWaterfall__name { align-items: center; }
+.pageSkeleton__waterfallRow .dsSkeleton, .traceWaterfall__axis .dsSkeleton { height: 10px; }
+.pageSkeleton__span.dsSkeleton { position: absolute; top: 50%; height: 8px; border-radius: 2px; transform: translateY(-50%); }
+
+.pageSkeleton__widgets { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.pageSkeleton__widgets > .dashboardWidget { height: 280px; }
+.pageSkeleton__widgets .dashboardWidget__header { cursor: default; }
+@media (max-width: 700px) { .pageSkeleton__widgets { grid-template-columns: minmax(0, 1fr); } }
+
+.pageSkeleton__stats { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 16px; }
+.pageSkeleton__stats > div { display: flex; flex-direction: column; gap: 8px; }
+@media (max-width: 700px) { .pageSkeleton__stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+.pageSkeleton__diff { display: flex; flex-direction: column; gap: 9px; padding: 14px 16px; border: 1px solid var(--ds-border-default); border-radius: 6px; background: var(--ds-surface-base); }
+.pageSkeleton__diff > .dsSkeleton { height: 9px; border-radius: 3px; }
+.pageSkeleton__panel .pageSkeleton__diff { padding: 0; border: 0; }
+
+.pageSkeleton__list { display: flex; flex-direction: column; gap: 12px; padding: 6px 0; }
+.pageSkeleton__list > .dsSkeleton { height: 10px; }
+
+.pageSkeleton__integrationRow { display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 0 12px; border-top: 1px solid var(--ds-border-subtle); }
+.pageSkeleton__integrationRow:first-child { border-top: 0; }
+.pageSkeleton__integrationRow > .tableSkeleton__lines { flex: 1; }
+
+.pageSkeleton__groupLabel.dsSkeleton { margin: 4px 0 4px 12px; }
+.pageSkeleton__issueTitle { padding: 9px 12px; }
+
+.pageSkeleton__choice { cursor: default; }
+.pageSkeleton__choice > .dsSkeleton { height: 10px; }
+
+/* The workspace sidebar, in the shell's own layout. */
+.globalHeader.pageSkeleton__sidebar { justify-content: flex-start; gap: 24px; }
+/* The sidebar sits on the darker canvas, so its bars need more contrast. */
+.pageSkeleton__sidebar .dsSkeleton { background-color: #e6e6e6; }
+.pageSkeleton__sidebar > .dsSkeleton { margin-left: 8px; }
+.pageSkeleton__nav { display: flex; flex-direction: column; gap: 4px; }
+.pageSkeleton__navItem { display: flex; align-items: center; gap: 8px; height: 32px; padding: 8px; }
+.pageSkeleton__navItem > .dsSkeleton:not(.automationSkeleton__icon) { height: 10px; }
+.pageSkeleton__navLabel.dsSkeleton { width: 56px; height: 8px; margin: 16px 8px 4px; }

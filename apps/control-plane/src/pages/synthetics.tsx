@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { relativeTime } from "../agents-api";
 import { AppShell } from "../components/app-shell";
+import { DataTableSkeleton } from "../components/screen-skeletons";
 import { SyntheticStatusBadge, UptimeStrip } from "../components/synthetics";
 import { Badge, DataTable } from "../design-system";
 import { fetchSyntheticChecks, formatUptime, spanLabel, type SyntheticCheckSummary } from "../synthetics-api";
@@ -67,7 +68,18 @@ export function SyntheticsPage() {
             <button onClick={() => void load()} type="button">Retry</button>
           </div>
         ) : (
-          <p className="telemetryPage__status">Loading…</p>
+          <DataTableSkeleton
+            columns={[
+              { cell: "twoLines", header: "Check", key: "name" },
+              { cell: "badge", header: "Status", key: "status", width: "120px" },
+              { header: "Latest runs", key: "recent", width: "176px" },
+              { header: "Uptime (24h)", key: "uptime", width: "110px" },
+              { header: "Avg. duration", key: "duration", width: "110px" },
+              { header: "Last run", key: "lastRun", width: "100px" },
+              { cell: "empty", header: "", key: "open", width: "44px" },
+            ]}
+            label="Loading synthetic checks…"
+          />
         )
       ) : checks === null ? (
         <section className="emptyState emptyState--list">

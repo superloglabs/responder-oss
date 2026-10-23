@@ -3,6 +3,7 @@ import { MagnifyingGlassIcon } from "@phosphor-icons/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { AppShell } from "../components/app-shell";
+import { DataTableSkeleton } from "../components/screen-skeletons";
 import { MetricKindIcon } from "../components/metric-kind-icon";
 import { SendTelemetryLink, TelemetryGate } from "../components/telemetry";
 import { DataTable, SegmentedControl, SelectField } from "../design-system";
@@ -144,7 +145,18 @@ export function MetricsPage() {
               <button onClick={() => void load()} type="button">Retry</button>
             </div>
           ) : catalog === null ? (
-            <p className="telemetryPage__status">Loading metrics…</p>
+            <DataTableSkeleton
+              className="agentListTable telemetryPage__table"
+              columns={[
+                { cell: "twoLines", header: "Metric", key: "metric" },
+                { header: "Type", key: "kind", width: "120px" },
+                { header: "Unit", key: "unit", width: "104px" },
+                { header: "Dimensions", key: "dimensions", width: "34%" },
+                { align: "right", header: "Series", key: "series", width: "88px" },
+              ]}
+              label="Loading metrics…"
+              rows={8}
+            />
           ) : catalog.length === 0 ? (
             <section className="emptyState emptyState--list">
               <h2>No metrics in this time range</h2>

@@ -2,6 +2,7 @@ import { NavigationIcon } from "../components/navigation-icon";
 import { useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { AppShell } from "../components/app-shell";
+import { DataTableSkeleton, ExplorerSkeleton } from "../components/screen-skeletons";
 import { CountHistogram, HistogramLegend, type HistogramSeries } from "../components/count-histogram";
 import { TelemetryGate } from "../components/telemetry";
 import {
@@ -244,7 +245,20 @@ function TraceExplorer({
         </div>
         <div className="agentListTable explorerTableWrap">
           {traces.data === null ? (
-            traces.error ? null : <p className="explorerStatus">Loading traces…</p>
+            traces.error ? null : (
+              <DataTableSkeleton
+                className=""
+                columns={[
+                  { header: "Started", key: "time", width: withDate ? "176px" : "124px" },
+                  { header: "Root span", key: "root" },
+                  { header: "Duration", key: "duration", width: "26%" },
+                  { align: "right", header: "Spans", key: "spans", width: "72px" },
+                  { cell: "badge", header: "Status", key: "status", width: "104px" },
+                ]}
+                label="Loading traces…"
+                rows={12}
+              />
+            )
           ) : (
             <DataTable<TraceSummary>
               aria-label="Traces"
@@ -363,7 +377,7 @@ export function TracesPage() {
             </div>
           ) : null}
         </header>
-        <TelemetryGate signal="Traces" state={telemetry}>
+        <TelemetryGate signal="Traces" skeleton={<ExplorerSkeleton label="Loading traces…" />} state={telemetry}>
           <TraceExplorer
             live={live}
             onOpenTrace={(trace) => navigate(query, trace)}

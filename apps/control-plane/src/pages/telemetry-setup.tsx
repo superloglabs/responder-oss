@@ -2,6 +2,7 @@ import { CaretRightIcon, CodeIcon, PlusCircleIcon } from "@phosphor-icons/react"
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { AppShell } from "../components/app-shell";
+import { TelemetrySetupSkeleton } from "../components/screen-skeletons";
 import { ProviderGlyph } from "../components/icons";
 import { Badge } from "../design-system";
 import { fetchTelemetrySources, type TelemetrySourceOverview } from "../telemetry-sources-api";
@@ -41,7 +42,7 @@ export function TelemetrySetupPage() {
             <button onClick={() => { setError(null); void load(); }} type="button">Retry</button>
           </div>
         ) : (
-          <p className="telemetryPage__status">Loading…</p>
+          <TelemetrySetupSkeleton rows={telemetrySourceOptions.length} />
         )
       ) : overview === null ? (
         <section className="emptyState emptyState--list">

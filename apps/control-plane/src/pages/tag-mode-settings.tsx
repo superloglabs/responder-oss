@@ -28,6 +28,7 @@ import {
   AgentContextRow,
 } from "../components/agent-context-controls";
 import { AppShell } from "../components/app-shell";
+import { IntegrationRowsSkeleton } from "../components/screen-skeletons";
 import { LangfuseConnectionDialog } from "../components/langfuse-connection-dialog";
 import { SupabaseConnectionDialog } from "../components/supabase-connection-dialog";
 import { useOrganizationCapabilities } from "../organization-capabilities";
@@ -554,9 +555,7 @@ export function TagModeSettingsPage() {
           </div>
 
           <div className="contextList">
-            {!options ? (
-              <div className="contextIntegrationsEmpty">Loading integrations…</div>
-            ) : null}
+            {!options ? <IntegrationRowsSkeleton label="Loading integrations…" /> : null}
             {options &&
             contextAccounts.length === 0 &&
             !githubConnected &&
@@ -709,6 +708,8 @@ export function TagModeSettingsPage() {
                   );
                 })}
               </div>
+            ) : !options ? (
+              <IntegrationRowsSkeleton label="Loading available integrations…" />
             ) : (
               <div className="contextIntegrationsEmpty">
                 No integrations match “{integrationQuery}”.

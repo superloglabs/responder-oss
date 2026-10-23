@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { relativeTime } from "../agents-api";
 import { AppShell } from "../components/app-shell";
+import { ListSkeleton, SyntheticCheckSkeleton } from "../components/screen-skeletons";
 import { DashboardDialog } from "../components/dashboard-dialog";
 import { SyntheticRunDetails, SyntheticStatusBadge, UptimeStrip } from "../components/synthetics";
 import { TimeseriesChart } from "../components/timeseries-chart";
@@ -72,7 +73,7 @@ function RunDialog({ checkId, onClose, run }: { checkId: string; onClose: () => 
         {run.attempts > 1 ? `, after ${run.attempts} attempts` : ""}.
       </p>
       {!detail ? (
-        <p className="dashboardWidget__status">Loading…</p>
+        <ListSkeleton label="Loading run…" rows={6} />
       ) : "loadError" in detail ? (
         <p className="formError" role="alert">{detail.loadError}</p>
       ) : (
@@ -138,7 +139,7 @@ export function SyntheticCheckPage() {
             <button onClick={() => void load()} type="button">Retry</button>
           </div>
         ) : (
-          <p className="telemetryPage__status">Loading…</p>
+          <SyntheticCheckSkeleton />
         )}
       </AppShell>
     );

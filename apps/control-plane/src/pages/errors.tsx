@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { relativeTime } from "../agents-api";
 import { AppShell } from "../components/app-shell";
+import { DataTableSkeleton } from "../components/screen-skeletons";
 import { Button, Checkbox, DataTable, SelectField } from "../design-system";
 import {
   dailyCounts,
@@ -200,7 +201,18 @@ export function ErrorsPage() {
               <button onClick={() => void load()} type="button">Retry</button>
             </div>
           ) : (
-            <p className="telemetryPage__status">Loading…</p>
+            <DataTableSkeleton
+              columns={[
+                { cell: "checkbox", header: "", key: "select", width: "40px" },
+                { cell: "twoLines", header: "Error", key: "title" },
+                { header: "State", key: "state", width: "108px" },
+                { align: "right", header: "Events", key: "events", width: "80px" },
+                { header: range === "24h" ? "Hourly trend" : "Daily trend", key: "trend", width: "120px" },
+                { header: "Last seen", key: "lastSeen", width: "120px" },
+              ]}
+              label="Loading errors…"
+              rows={8}
+            />
           )
         ) : list === null ? (
           <section className="emptyState emptyState--list">
