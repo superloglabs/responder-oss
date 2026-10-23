@@ -14,7 +14,6 @@ import {
   formatDuration,
   formatTelemetryTime,
   histogramBars,
-  logTimestamp,
   traceExplorerParams,
   traceExplorerQuery,
   traceSearchHref,
@@ -35,6 +34,19 @@ const requestChart: Array<HistogramSeries<RequestSeries>> = [
   { color: "#e07b73", label: "Errors", name: "error" },
   { color: "#c9c9c9", label: "Requests", name: "ok" },
 ];
+const errorRateChart: Array<HistogramSeries<"value">> = [
+  { color: "#e07b73", formatValue: (value) => `${value.toFixed(1)}%`, label: "Error rate", name: "value" },
+];
+const latencyChart: Array<HistogramSeries<"value">> = [
+  {
+    color: "#d4b54f",
+    // Fixed millisecond thresholds keep colors consistent across time windows.
+    colorForValue: (milliseconds) => milliseconds >= 1_000 ? "#e07b73" : milliseconds >= 500 ? "#d99a48" : "#d4b54f",
+    formatValue: formatDuration,
+    label: "p95 latency",
+    name: "value",
+  },
+];
 const requestSeriesNames = requestChart.map((series) => series.name);
 
 const rangeMinutes: Record<TelemetryRange, number> = { "15m": 15, "1h": 60, "6h": 360, "24h": 1_440, "7d": 10_080 };
@@ -43,43 +55,6 @@ function percent(part: number, whole: number): string {
   if (whole <= 0) return "0%";
   const value = (part / whole) * 100;
   return `${value < 10 ? value.toFixed(1) : Math.round(value)}%`;
-}
-
-// A line over the window, from each bucket's value.
-function Sparkline({
-  color,
-  label,
-  points,
-  since,
-  until,
-}: {
-  color: string;
-  label: string;
-  points: Array<{ at: number; value: number }>;
-  since: number;
-  until: number;
-}) {
-  const width = 300;
-  const height = 40;
-  const max = Math.max(...points.map((point) => point.value), 0) || 1;
-  const span = until - since || 1;
-  const coordinates = points.map((point) => [
-    ((point.at - since) / span) * width,
-    height - 2 - (point.value / max) * (height - 4),
-  ] as const);
-  const line = coordinates.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
-  const first = coordinates[0];
-  const last = coordinates.at(-1);
-  return (
-    <svg aria-label={label} className="overviewTile__chart" preserveAspectRatio="none" role="img" viewBox={`0 0 ${width} ${height}`}>
-      {first && last ? (
-        <>
-          <polygon fill={color} fillOpacity={0.08} points={`${first[0]},${height} ${line} ${last[0]},${height}`} />
-          <polyline fill="none" points={line} stroke={color} strokeLinejoin="round" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
-        </>
-      ) : null}
-    </svg>
-  );
 }
 
 function OverviewBody({
@@ -107,8 +82,6 @@ function OverviewBody({
     fetchAttributeValues(telemetryRangeWindow(query.range), "traces", "resource.deployment.environment"),
   );
   const data: TraceOverview | null = overview.data?.overview ?? null;
-  const since = overview.data ? Date.parse(overview.data.since) : 0;
-  const until = overview.data ? Date.parse(overview.data.until) : 0;
   const bars = useMemo(() => {
     if (!overview.data) return null;
     return histogramBars(
@@ -125,10 +98,24 @@ function OverviewBody({
       (group) => (group === "error" ? "error" : "ok"),
     );
   }, [overview.data]);
-  const points = (data?.series ?? []).flatMap((row) => {
-    const at = logTimestamp(row.bucket)?.getTime();
-    return at === undefined ? [] : [{ at, row }];
-  });
+  const metricBars = useMemo(() => {
+    const response = overview.data;
+    if (!response) return null;
+    const makeBars = (value: (row: TraceOverview["series"][number]) => number) => histogramBars(
+      {
+        buckets: response.overview.series.map((row) => ({ bucket: row.bucket, count: value(row), group: "value" })),
+        since: response.since,
+        stepMs: response.stepMs,
+        until: response.until,
+      },
+      ["value"],
+      () => "value",
+    );
+    return {
+      errorRate: makeBars((row) => row.requests ? (row.errors / row.requests) * 100 : 0),
+      latency: makeBars((row) => row.p95_ms),
+    };
+  }, [overview.data]);
   const minutes = rangeMinutes[query.range];
   const environment = environmentFilter(query.filters);
   const scope = (update: Partial<TraceExplorerQuery>) => {
@@ -184,12 +171,11 @@ function OverviewBody({
             {data ? percent(data.totals.errors, data.totals.requests) : "…"}
             <span>of {data ? data.totals.requests.toLocaleString() : "…"} requests</span>
           </p>
-          <Sparkline
-            color="#b33d43"
+          <CountHistogram
+            bars={metricBars?.errorRate ?? null}
+            compact
             label="Error rate over time"
-            points={points.map(({ at, row }) => ({ at, value: row.requests ? row.errors / row.requests : 0 }))}
-            since={since}
-            until={until}
+            series={errorRateChart}
           />
         </section>
         <section className="overviewTile">
@@ -197,12 +183,11 @@ function OverviewBody({
           <p className="overviewTile__value">
             {data ? formatDuration(data.totals.p95_ms) : "…"}
           </p>
-          <Sparkline
-            color="#8a6d2b"
+          <CountHistogram
+            bars={metricBars?.latency ?? null}
+            compact
             label="p95 latency over time"
-            points={points.map(({ at, row }) => ({ at, value: row.p95_ms }))}
-            since={since}
-            until={until}
+            series={latencyChart}
           />
         </section>
       </div>

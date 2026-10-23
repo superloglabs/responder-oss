@@ -5,6 +5,8 @@ import "./count-histogram.css";
 export interface HistogramSeries<Series extends string> {
   // Swatch and bar color, as a CSS color.
   color: string;
+  colorForValue?: (value: number) => string;
+  formatValue?: (value: number) => string;
   label: string;
   name: Series;
 }
@@ -105,7 +107,7 @@ export function CountHistogram<Series extends string>({
                     className="countHistogram__segment"
                     key={item.name}
                     style={{
-                      background: item.color,
+                      background: item.colorForValue?.(bar.counts[item.name]) ?? item.color,
                       height: `max(2px, ${(bar.counts[item.name] / max) * 100}%)`,
                     }}
                   />
@@ -120,8 +122,8 @@ export function CountHistogram<Series extends string>({
             <dl>
               {series.map((item) => (
                 <div key={item.name}>
-                  <dt><span aria-hidden="true" style={{ background: item.color }} />{item.label}</dt>
-                  <dd>{hovered.counts[item.name].toLocaleString()}</dd>
+                  <dt><span aria-hidden="true" style={{ background: item.colorForValue?.(hovered.counts[item.name]) ?? item.color }} />{item.label}</dt>
+                  <dd>{item.formatValue ? item.formatValue(hovered.counts[item.name]) : hovered.counts[item.name].toLocaleString()}</dd>
                 </div>
               ))}
               {series.length > 1 ? (
