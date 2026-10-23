@@ -177,7 +177,6 @@
 .overviewTile__value { display: flex; align-items: baseline; gap: 6px; margin: 0; color: #1a1a1a; font-size: 22px; font-variant-numeric: tabular-nums; line-height: 28px; }
 .overviewTile__value span { color: #666; font-size: 12px; }
 .overviewTile__value--danger { color: #b33d43; }
-.overviewTile__chart { width: 100%; height: 36px; }
 .overviewNote { margin: -4px 0 0; padding: 0 8px; color: #999; font-size: 12px; }
 .overviewColumns { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: 24px; align-items: start; }
 .overviewColumn { display: flex; flex-direction: column; gap: 24px; min-width: 0; }
