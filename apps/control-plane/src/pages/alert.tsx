@@ -347,7 +347,7 @@ export function AlertPage() {
               </div>
               <AlertFilters filters={form.filters} keys={keys} onChange={(filters) => update({ filters })} />
               <div className="alertSectionHeading"><span className="alertMuted">Matching data</span><div className="alertToolbar">
-                <SelectField label="Preview time range" value={String(hours)} onChange={(value) => setHours(Number(value))} options={[{ label: "Last 1 hour", value: "1" }, { label: "Last 6 hours", value: "6" }, { label: "Last 24 hours", value: "24" }]} />
+                <SelectField label="Preview time range" value={String(preview.selectedHours)} onChange={(value) => setHours(Number(value))} options={preview.rangeOptions.map((value) => ({ label: `Last ${value} ${value === 1 ? "hour" : "hours"}`, value: String(value) }))} />
                 <Button size="small" variant="primary" onClick={() => setRevision((value) => value + 1)} loading={preview.loading}>Run search</Button>
               </div></div>
               <section className="alertChart"><h3>Matching data</h3><AlertChart rule={form} chart={preview.data?.chart} error={preview.error} loading={preview.loading} showThreshold={false} /></section>

@@ -3,6 +3,8 @@ import { alertRequest, previewAlert, type AlertForm } from "./alerts-api";
 
 // Name, delivery and enabled state do not change the data being previewed.
 export function useAlertPreview(form: AlertForm | null, hours: number, revision = 0) {
+  const rangeOptions = [1, 6, 24].filter((value) => value * 60 >= (form?.windowMinutes ?? 1));
+  const selectedHours = rangeOptions.find((value) => value >= hours) ?? 24;
   const request = form
     ? alertRequest({
         ...form,
@@ -12,7 +14,7 @@ export function useAlertPreview(form: AlertForm | null, hours: number, revision 
         threshold: form.threshold.trim() && Number.isFinite(Number(form.threshold)) ? form.threshold : "0",
       })
     : null;
-  const key = request && "body" in request ? JSON.stringify({ body: request.body, hours, revision }) : null;
+  const key = request && "body" in request ? JSON.stringify({ body: request.body, hours: selectedHours, revision }) : null;
   const [result, setResult] = useState<{
     key: string;
     data?: Awaited<ReturnType<typeof previewAlert>>;
@@ -39,6 +41,8 @@ export function useAlertPreview(form: AlertForm | null, hours: number, revision 
   }, [key]);
   const current = result?.key === key ? result : null;
   return {
+    rangeOptions,
+    selectedHours,
     data: current?.data,
     error: request && "error" in request ? request.error : current?.error,
     loading: !!key && !current,

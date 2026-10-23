@@ -375,12 +375,10 @@ function AlertDetail({
           <div className="alertToolbar">
             <select
               aria-label="Evaluation time range"
-              value={hours}
+              value={preview.selectedHours}
               onChange={(event) => setHours(Number(event.target.value))}
             >
-              <option value={1}>Last 1 hour</option>
-              <option value={6}>Last 6 hours</option>
-              <option value={24}>Last 24 hours</option>
+              {preview.rangeOptions.map((value) => <option key={value} value={value}>Last {value} {value === 1 ? "hour" : "hours"}</option>)}
             </select>
             <Button size="small" onClick={() => setRevision((value) => value + 1)}>
               Refresh

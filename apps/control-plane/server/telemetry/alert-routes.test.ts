@@ -211,7 +211,7 @@ describe("activation details", () => {
     const body = await response.json();
     expect(body.chart.series).toHaveLength(1);
     expect(body.chart.series[0].name).toBe("api");
-    expect(dependencies.series).toHaveBeenCalledWith(expect.anything(), organizationId, activation.ruleSnapshot, new Date("2026-10-14T11:55:00Z"), { since: "2026-10-14T11:20:00.000Z", until: "2026-10-14T11:55:00.000Z" });
+    expect(dependencies.series).toHaveBeenCalledWith(expect.anything(), organizationId, activation.ruleSnapshot, new Date("2026-10-14T11:55:00Z"), { since: "2026-10-14T11:20:00.000Z", until: "2026-10-14T11:55:00.000Z" }, "api");
   });
 
   it("does not apply today's rule to legacy activations", async () => {
@@ -231,6 +231,13 @@ describe("activation details", () => {
     expect(dependencies.episodes).toHaveBeenCalledWith(alertId, 51, { offset: 50, since: new Date("2026-10-07T12:00:00.000Z"), state: "resolved" });
     expect((await app.request(`/${alertId}/activations?offset=-1`)).status).toBe(400);
     expect((await app.request(`/${alertId}/activations?state=invalid`)).status).toBe(400);
+  });
+
+  it("rejects a preview range shorter than an evaluation window", async () => {
+    const { app, dependencies } = routes();
+    const response = await send(app, "POST", "/preview?hours=1", { ...rule, windowMinutes: 360 });
+    expect(response.status).toBe(400);
+    expect(dependencies.series).not.toHaveBeenCalled();
   });
 
   it("validates preview ranges and queries the chosen range", async () => {

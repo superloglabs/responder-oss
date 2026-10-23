@@ -246,3 +246,15 @@ test("health includes an older activation outside the displayed history", async 
   await page.goto(`/alerts/${alertId}`);
   await expect(page.locator(".alertProperties dl > div").filter({ hasText: "Health" }).locator("dd")).toHaveText("Firing");
 });
+
+test("keeps preview ranges at least as long as the evaluation window", async ({ page }) => {
+  await mockAlerts(page);
+  await page.goto(`/alerts/${alertId}/edit`);
+  await page.getByRole("button", { name: /Over the last 5 minutes/ }).click();
+  const request = page.waitForRequest((request) => request.url().includes("/preview?hours=6") && request.postDataJSON().windowMinutes === 360);
+  await page.getByRole("option", { name: "6 hours", exact: true }).click();
+  await request;
+  await expect(page.getByRole("button", { name: "Preview time range Last 6 hours" })).toBeVisible();
+  await page.getByRole("button", { name: "Preview time range Last 6 hours" }).click();
+  await expect(page.getByRole("option", { name: "Last 1 hour", exact: true })).toHaveCount(0);
+});

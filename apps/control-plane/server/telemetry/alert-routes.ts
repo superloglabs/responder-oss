@@ -47,6 +47,7 @@ export type AlertRouteDependencies = {
     rule: AlertRule,
     now: Date,
     range?: { since: string; until: string },
+    groupValue?: string,
   ) => Promise<Array<{ bucket: string; group: string; value: number }>>;
   refreshSlackChannels: (organizationId: string) => Promise<void>;
   slackChannels: typeof listTelemetryAlertSlackChannels;
@@ -71,7 +72,7 @@ function windowStep(windowMinutes: number) {
       : { n: windowMinutes, unit: "MINUTE" as const };
 }
 
-async function defaultSeries(client: TelemetryClient, organizationId: string, rule: AlertRule, now: Date, requestedRange?: { since: string; until: string }) {
+async function defaultSeries(client: TelemetryClient, organizationId: string, rule: AlertRule, now: Date, requestedRange?: { since: string; until: string }, groupValue?: string) {
   const range = requestedRange ?? alertWindow(rule.windowMinutes * chartWindows, now);
   const groupBy = rule.groupMode === "per_group" && rule.groupBy ? rule.groupBy : undefined;
   const step = windowStep(rule.windowMinutes);
@@ -84,7 +85,7 @@ async function defaultSeries(client: TelemetryClient, organizationId: string, ru
       groupBy,
       step,
       rule.aggregation === "avg" ? "avg" : "sum",
-      alertMetricIdentity(rule.filter),
+      { ...alertMetricIdentity(rule.filter), groupValue },
     );
   }
   if (rule.aggregation !== "count" && rule.field) {
@@ -99,6 +100,7 @@ async function defaultSeries(client: TelemetryClient, organizationId: string, ru
       groupBy,
       step,
       aiPrices,
+      groupValue,
     );
   }
   const rows = await countSeries(
@@ -108,6 +110,7 @@ async function defaultSeries(client: TelemetryClient, organizationId: string, ru
     { ...rule.filter, range, resourceAttrs: rule.filter.resourceAttrs ?? [] },
     groupBy,
     step,
+    groupValue,
   );
   return rows.map((row) => ({ bucket: row.bucket, group: row.group, value: row.count }));
 }
@@ -201,6 +204,7 @@ export function createAlertRoutes(dependencies: AlertRouteDependencies = default
       const now = dependencies.now();
       const hours = context.req.query("hours");
       if (hours && !["1", "6", "24"].includes(hours)) return context.json({ error: "Invalid chart range" }, 400);
+      if (hours && Number(hours) * 60 < rule.windowMinutes) return context.json({ error: "Chart range must cover at least one evaluation window" }, 400);
       const range = alertWindow(hours ? Number(hours) * 60 : rule.windowMinutes * chartWindows, now);
       const [values, series] = await Promise.all([
         dependencies.values(granted.client, granted.organizationId, rule, now),
@@ -287,7 +291,7 @@ export function createAlertRoutes(dependencies: AlertRouteDependencies = default
       const start = Date.parse(activation.startedAt);
       const end = Math.min(Date.parse(activation.endedAt ?? now.toISOString()) + padding, now.getTime(), start + 7 * 86_400_000);
       const range = { since: new Date(start - padding).toISOString(), until: new Date(end).toISOString() };
-      const series = await dependencies.series(granted.client, granted.organizationId, rule, new Date(end), range);
+      const series = await dependencies.series(granted.client, granted.organizationId, rule, new Date(end), range, rule.groupMode === "per_group" ? activation.groupKey : undefined);
       return context.json({ chart: chartSeries(
         rule.groupMode === "per_group" ? series.filter((row) => row.group === activation.groupKey) : series,
         { fill: alertCountsEmptyAsZero(rule) ? "zero" : "null", limit: 5,
