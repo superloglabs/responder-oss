@@ -40,6 +40,14 @@ import {
   withCloudflareGrantScope,
 } from "../../../../packages/core/src/integrations/cloudflare.js";
 import {
+  assertRailwayGrant,
+  parseRailwayCredentials,
+  RAILWAY_API_ORIGIN,
+  railwayAccessTokenIsFresh,
+  withRailwayGrantScope,
+  type RailwayCredentials,
+} from "../../../../packages/core/src/integrations/railway.js";
+import {
   linearAccessTokenNeedsRefresh,
   parseLinearOAuthCredentials,
   refreshLinearOAuthCredentials,
@@ -80,6 +88,13 @@ import {
   type SlackToolDependencies,
 } from "./slack-tools.js";
 import {
+  callRailwayContextTool,
+  defaultRailwayToolDependencies,
+  railwayClaimWorkspaces,
+  railwayToolDefinitions,
+  type RailwayToolDependencies,
+} from "./railway-context.js";
+import {
   callVercelTool,
   defaultVercelToolDependencies,
   vercelContextConnection,
@@ -105,6 +120,7 @@ interface ContextBrokerDependencies {
   grafana: SelfHostedGrafanaDependencies;
   linear: LinearToolDependencies;
   providerFetch: typeof safeCustomMcpFetch;
+  railway: RailwayToolDependencies & { now: () => number };
   refreshCustomMcp: typeof refreshCustomMcpOAuth;
   refreshLinear: typeof refreshLinearOAuthCredentials;
   resolveGrant: ResolveGrant;
@@ -121,6 +137,7 @@ const defaultDependencies: ContextBrokerDependencies = {
   grafana: defaultSelfHostedGrafanaDependencies,
   linear: defaultLinearToolDependencies,
   providerFetch: safeCustomMcpFetch,
+  railway: { ...defaultRailwayToolDependencies, now: Date.now },
   refreshCustomMcp: refreshCustomMcpOAuth,
   refreshLinear: refreshLinearOAuthCredentials,
   resolveGrant: resolveAutomationContextBrokerGrant,
@@ -390,6 +407,105 @@ async function cloudflareAccessToken(
   // The API tool can reach any endpoint the grant allows.
   assertCloudflareReadOnlyGrant(credentials?.oauth.tokens);
   return accessToken;
+}
+
+// Railway access tokens last an hour, so the broker refreshes one only when
+// it is about to expire. Refresh tokens rotate, and the lease stores the new
+// one before another call can use the old one.
+async function railwayCredentials(
+  claim: AutomationContextBrokerClaim,
+  dependencies: ContextBrokerDependencies,
+): Promise<RailwayCredentials> {
+  const credentials = await dependencies.withCredentialLease({
+    allowedStatuses: ["connected"],
+    integrationAccountId: claim.account.id,
+    operation: async (encryptedCredentials) => {
+      const current = parseRailwayCredentials(
+        decryptCredentials<Record<string, unknown>>(encryptedCredentials),
+      );
+      const now = dependencies.railway.now();
+      if (railwayAccessTokenIsFresh(current, now)) return { value: current };
+      const oauth = withRailwayGrantScope(
+        current.oauth,
+        await dependencies.refreshCustomMcp({
+          mcpUrl: RAILWAY_API_ORIGIN,
+          oauth: current.oauth,
+          redirectUrl: integrationCallbackUrl("railway"),
+        }),
+      );
+      if (oauth === current.oauth) return { value: current };
+      const updated = { ...current, oauth, tokenIssuedAt: now };
+      return {
+        encryptedCredentials: encryptCredentials(updated),
+        value: updated,
+      };
+    },
+    organizationId: claim.organizationId,
+    provider: "railway",
+  });
+  if (typeof credentials?.oauth.tokens?.access_token !== "string") {
+    throw new Error("Reconnect the Railway OAuth connection");
+  }
+  assertRailwayGrant(credentials.oauth.tokens, credentials.accessLevel);
+  return credentials;
+}
+
+// Railway has no MCP server for these tools, so the broker serves them.
+async function railwayResponse(
+  claim: AutomationContextBrokerClaim,
+  request: z.infer<typeof requestSchema>,
+  signal: AbortSignal,
+  dependencies: ContextBrokerDependencies,
+): Promise<Response> {
+  if (request.method.startsWith("notifications/")) {
+    return new Response(null, { status: 202 });
+  }
+  if (request.method === "initialize") {
+    const requestedVersion = z.string().safeParse(request.params?.protocolVersion);
+    return Response.json(rpcResult(request.id, {
+      capabilities: { tools: {} },
+      protocolVersion: requestedVersion.success
+        ? requestedVersion.data
+        : "2025-03-26",
+      serverInfo: { name: "responder-railway", version: "1" },
+    }));
+  }
+  if (request.method === "ping") return Response.json(rpcResult(request.id, {}));
+  if (request.method !== "tools/list" && request.method !== "tools/call") {
+    return Response.json(rpcError(request.id, -32601, "Method not found"), {
+      status: 404,
+    });
+  }
+  if (!claim.account.encryptedCredentials) {
+    return Response.json(rpcError(request.id, -32601, "Connection does not expose context tools"), {
+      status: 404,
+    });
+  }
+  const { accessLevel } = parseRailwayCredentials(
+    decryptCredentials<Record<string, unknown>>(claim.account.encryptedCredentials),
+  );
+  const tools = railwayToolDefinitions(accessLevel);
+  if (request.method === "tools/list") {
+    return Response.json(rpcResult(request.id, { tools }));
+  }
+  const toolName = z.string().safeParse(request.params?.name);
+  if (!toolName.success || !tools.some((tool) => tool.name === toolName.data)) {
+    return Response.json(rpcError(request.id, -32602, "Unknown tool"), {
+      status: 400,
+    });
+  }
+  const credentials = await railwayCredentials(claim, dependencies);
+  return Response.json(rpcResult(request.id, await callRailwayContextTool({
+    args: request.params?.arguments,
+    connection: {
+      accessLevel: credentials.accessLevel,
+      accessToken: credentials.oauth.tokens!.access_token,
+      workspaces: railwayClaimWorkspaces(claim),
+    },
+    dependencies: dependencies.railway,
+    name: toolName.data,
+    signal,
+  })));
 }
 
 // Serves one MCP request for a managed server: the broker answers tool
@@ -759,6 +875,14 @@ export function createAutomationContextBrokerRoutes(
       }
       if (claim.account.provider === "vercel") {
         return await vercelResponse(
+          claim,
+          parsed.data,
+          context.req.raw.signal,
+          dependencies,
+        );
+      }
+      if (claim.account.provider === "railway") {
+        return await railwayResponse(
           claim,
           parsed.data,
           context.req.raw.signal,

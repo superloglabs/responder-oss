@@ -26,6 +26,15 @@ import {
   type CloudflareAccount,
 } from "../integrations/cloudflare.js";
 import {
+  assertRailwayGrant,
+  parseRailwayCredentials,
+  RAILWAY_API_ORIGIN,
+  railwayWorkspacesSchema,
+  withRailwayGrantScope,
+  type RailwayAccessLevel,
+  type RailwayWorkspace,
+} from "../integrations/railway.js";
+import {
   CLICKSTACK_CLOUD_MCP_URL,
   CLICKSTACK_CLOUD_OAUTH_ISSUER,
   CLICKSTACK_CLOUD_OAUTH_RESOURCE,
@@ -1360,6 +1369,15 @@ export interface RuntimeCloudflareConnection {
   mcpUrl: string;
 }
 
+export interface RuntimeRailwayConnection {
+  accessLevel: RailwayAccessLevel;
+  accessToken: string;
+  accountId: string;
+  displayName: string;
+  /** The workspaces the person shared when connecting. */
+  workspaces: RailwayWorkspace[];
+}
+
 export type RuntimeGrafanaConnection =
   | {
       accessToken: string;
@@ -1751,6 +1769,7 @@ function mcpOAuthRedirectUrl(
     | "grafana"
     | "linear"
     | "posthog"
+    | "railway"
     | "supabase",
 ): string {
   const baseUrl =
@@ -2257,6 +2276,93 @@ export async function getRuntimeCloudflareConnections(
       },
       organizationId: config.organizationId,
       provider: "cloudflare",
+    });
+    if (connection) connections.push(connection);
+  }
+
+  return connections;
+}
+
+export async function getRuntimeRailwayConnections(
+  versionId: string,
+): Promise<RuntimeRailwayConnection[]> {
+  const configRows = await getDatabase()
+    .select({
+      contextAccountIds: agentConfigVersions.contextAccountIds,
+      organizationId: agents.organizationId,
+    })
+    .from(agentConfigVersions)
+    .innerJoin(agents, eq(agents.id, agentConfigVersions.agentId))
+    .where(eq(agentConfigVersions.id, versionId))
+    .limit(1);
+  const config = configRows[0];
+  if (!config) return [];
+  const accountIds = [...new Set(config.contextAccountIds)];
+  if (accountIds.length === 0) return [];
+
+  const accountRows = await getDatabase()
+    .select({
+      id: integrationAccounts.id,
+      displayName: integrationAccounts.displayName,
+      metadata: integrationAccounts.metadata,
+    })
+    .from(integrationAccounts)
+    .where(
+      and(
+        eq(integrationAccounts.organizationId, config.organizationId),
+        eq(integrationAccounts.provider, "railway"),
+        eq(integrationAccounts.status, "connected"),
+        inArray(integrationAccounts.id, accountIds),
+      ),
+    );
+  const accountsById = new Map(accountRows.map((account) => [account.id, account]));
+  const connections: RuntimeRailwayConnection[] = [];
+
+  for (const accountId of accountIds) {
+    const account = accountsById.get(accountId);
+    if (!account) continue;
+    const workspaces = railwayWorkspacesSchema.safeParse(
+      (account.metadata as Record<string, unknown> | null)?.workspaces,
+    );
+    const connection = await withIntegrationAccountCredentialLease({
+      allowedStatuses: ["connected"],
+      integrationAccountId: account.id,
+      operation: async (encryptedCredentials) => {
+        const credentials = parseRailwayCredentials(
+          decryptCredentials<Record<string, unknown>>(encryptedCredentials),
+        );
+        const oauth = withRailwayGrantScope(
+          credentials.oauth,
+          await refreshCustomMcpOAuth({
+            mcpUrl: RAILWAY_API_ORIGIN,
+            oauth: credentials.oauth,
+            redirectUrl: mcpOAuthRedirectUrl("railway"),
+          }),
+        );
+        const accessToken = oauth.tokens?.access_token;
+        if (!accessToken) throw new Error("Reconnect the Railway OAuth connection");
+        assertRailwayGrant(oauth.tokens, credentials.accessLevel);
+        return {
+          ...(oauth === credentials.oauth
+            ? {}
+            : {
+                encryptedCredentials: encryptCredentials({
+                  ...credentials,
+                  oauth,
+                  tokenIssuedAt: Date.now(),
+                }),
+              }),
+          value: {
+            accessLevel: credentials.accessLevel,
+            accessToken,
+            accountId: account.id,
+            displayName: account.displayName,
+            workspaces: workspaces.success ? workspaces.data : [],
+          },
+        };
+      },
+      organizationId: config.organizationId,
+      provider: "railway",
     });
     if (connection) connections.push(connection);
   }

@@ -31,6 +31,7 @@ import { AppShell } from "../components/app-shell";
 import { IntegrationRowsSkeleton } from "../components/screen-skeletons";
 import { LangfuseConnectionDialog } from "../components/langfuse-connection-dialog";
 import { SupabaseConnectionDialog } from "../components/supabase-connection-dialog";
+import { RailwayConnectionDialog } from "../components/railway-connection-dialog";
 import { useOrganizationCapabilities } from "../organization-capabilities";
 import { availableTagModeConfiguration } from "../tag-mode-configuration";
 import { currentProjectSelectionState } from "../project-selection";
@@ -68,6 +69,7 @@ const multiAccountContextProviders = new Set<IntegrationSummary["id"]>([
   "posthog",
   "grafana",
   "cloudflare",
+  "railway",
 ]);
 
 const contextProviderOrder: ContextAccount["provider"][] = [
@@ -75,6 +77,7 @@ const contextProviderOrder: ContextAccount["provider"][] = [
   "aws",
   "gcp",
   "cloudflare",
+  "railway",
   "upstash",
   "langfuse",
   "supabase",
@@ -105,6 +108,10 @@ function accountDetail(account: ContextAccount): string {
       return "Asset inventory, logs, metrics, and alerting state";
     case "cloudflare":
       return `${prefix}Workers logs and analytics, deployments, and zones`;
+    case "railway":
+      return account.displayName.endsWith(" · redeploy")
+        ? `${prefix}Deployments, logs, metrics, and redeploys`
+        : `${prefix}Deployments, logs, and metrics`;
     case "upstash":
       return `${prefix}Redis, Vector, Search, QStash, and Workflow`;
     case "langfuse":
@@ -165,6 +172,7 @@ export function TagModeSettingsPage() {
   );
   const [connectingClickStack, setConnectingClickStack] = useState(false);
   const [connectingGrafana, setConnectingGrafana] = useState(false);
+  const [connectingRailway, setConnectingRailway] = useState(false);
   const [configuration, setConfiguration] =
     useState<SlackThreadModeConfiguration>(defaultConfiguration);
   const [configurationTarget, setConfigurationTarget] =
@@ -419,6 +427,10 @@ export function TagModeSettingsPage() {
       setConnectingGrafana(true);
       return;
     }
+    if (integration.id === "railway") {
+      setConnectingRailway(true);
+      return;
+    }
     setConnectingProvider(integration.id);
     const url = new URL(connectionUrl, window.location.origin);
     url.searchParams.set("returnTo", "/settings/tag-mode");
@@ -470,6 +482,12 @@ export function TagModeSettingsPage() {
         connectUrl={integrations.find((item) => item.id === "clickstack")?.connectUrl ?? ""}
         onCancel={() => setConnectingClickStack(false)}
         open={connectingClickStack}
+        returnTo="/settings/tag-mode"
+      />
+      <RailwayConnectionDialog
+        connectUrl={integrations.find((item) => item.id === "railway")?.connectUrl ?? ""}
+        onCancel={() => setConnectingRailway(false)}
+        open={connectingRailway}
         returnTo="/settings/tag-mode"
       />
       <GrafanaConnectionDialog

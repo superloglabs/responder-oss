@@ -38,6 +38,7 @@ export function integrationCallbackUrl(
     | "grafana"
     | "linear"
     | "posthog"
+    | "railway"
     | "sentry"
     | "slack"
     | "supabase"

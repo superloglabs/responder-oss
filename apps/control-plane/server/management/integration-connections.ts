@@ -8,7 +8,7 @@ import { defineOperation, ManagementError } from "./operation.js";
 
 const consentProviders = new Set([
   "slack", "github", "sentry", "discord", "vercel", "linear", "gcp", "axiom", "posthog",
-  "cloudflare",
+  "cloudflare", "railway",
 ]);
 const provider = z.enum(productIntegrationIds);
 const connectionType = z.enum(["oauth", "secure_setup"]);

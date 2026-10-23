@@ -15,8 +15,8 @@ Use `list_available_integrations` to discover configured providers, then
 are `GET /api/v1/integrations/available` and `POST /api/v1/integrations/connect`.
 
 Slack, GitHub, Sentry, Discord (only in workspaces with the `automations` capability),
-Vercel, Linear, Google Cloud, Axiom, PostHog, and Cloudflare normally return a provider consent
-URL. Sentry may recover an existing installation and return `connected` without
+Vercel, Linear, Google Cloud, Axiom, PostHog, Cloudflare, and Railway normally return a provider
+consent URL. Railway connected this way is read-only. Sentry may recover an existing installation and return `connected` without
 another consent prompt. The person opens the consent link, approves access, and
 returns to chat. The browser must be signed into the same Superlog user and
 workspace that authorized the MCP client; callback identity checks are unchanged.
@@ -509,6 +509,49 @@ OAuth token, checks the grant, lists tools itself, and forwards calls only to
 the same four tools.
 
 Cloudflare is context only. Runs start from another trigger, such as a watched
+Slack channel or a schedule.
+
+## Railway
+
+Railway gives investigations, tag mode, and automations its projects,
+deployments, runtime, build, and HTTP logs, and resource and HTTP metrics.
+Connect it from Settings, the agent or tag mode settings, or the automation
+editor, and choose an access level:
+
+- **Read only** requests `workspace:viewer`.
+- **Read and redeploy** requests `workspace:member`. Tag mode and automations
+  can then redeploy or restart a deployment when asked. Alert investigations
+  and scans still only read.
+
+Railway does not register OAuth clients dynamically. Its client ID is the URL
+of a client metadata document that Responder serves, so no deployment-level
+Railway client ID, secret, or API token is required. Railway must reach both
+URLs over public HTTPS:
+
+```text
+<public>/api/integrations/railway/client-metadata.json
+<public>/api/integrations/railway/callback
+```
+
+Railway's consent screen asks which workspaces to share.
+
+Responder refuses a grant with any scope beyond the chosen level, at
+connection and after every token refresh. Each Railway user and access level
+is one connection, so reconnecting updates it. Responder stores the shared
+workspaces and passes their names and IDs to the agent.
+
+The tools are `list_railway_projects`, `list_railway_deployments`,
+`get_railway_deployment_logs`, `get_railway_environment_logs`,
+`get_railway_http_logs`, `get_railway_metrics`, and `get_railway_http_metrics`,
+plus `redeploy_railway_deployment` and `restart_railway_deployment` for
+redeploy connections. Each runs one fixed query against Railway's public
+GraphQL API; none reads environment variables. The worker serves them to
+investigations, and the run-scoped context broker at
+`/api/automation-context-broker/v1/<connection>` serves them to automations.
+Railway access tokens last an hour; the broker refreshes one before it
+expires. The OAuth tokens stay outside the investigation sandbox.
+
+Railway is context only. Runs start from another trigger, such as a watched
 Slack channel or a schedule.
 
 ## Axiom

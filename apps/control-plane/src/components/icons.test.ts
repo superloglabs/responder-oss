@@ -25,6 +25,7 @@ describe("ProviderGlyph", () => {
     ["honeycomb", "Honeycomb", "HO"],
     ["linear", "Linear", "LI"],
     ["posthog", "PostHog", "PH"],
+    ["railway", "Railway", "RW"],
     ["sentry", "Sentry", "SE"],
     ["signoz", "SigNoz", "SZ"],
     ["slack", "Slack", "SL"],

@@ -19,6 +19,7 @@ import { SignozConnectionDialog } from "../components/signoz-connection-dialog";
 import { HoneycombConnectionDialog } from "../components/honeycomb-connection-dialog";
 import { BetterStackConnectionDialog } from "../components/betterstack-connection-dialog";
 import { SupabaseConnectionDialog } from "../components/supabase-connection-dialog";
+import { RailwayConnectionDialog } from "../components/railway-connection-dialog";
 import { currentProjectSelectionState } from "../project-selection";
 import {
   Dash0ConnectionDialog,
@@ -50,6 +51,7 @@ interface IntegrationSummary {
     | "posthog"
     | "grafana"
     | "cloudflare"
+    | "railway"
     | "axiom"
     | "upstash"
     | "langfuse"
@@ -409,6 +411,7 @@ function DefaultIntegrationCard({
     integration.id === "supabase" && Boolean(supabaseSelectionState),
   );
   const [connectingDash0, setConnectingDash0] = useState(false);
+  const [connectingRailway, setConnectingRailway] = useState(false);
   const returnedAccountId = new URLSearchParams(window.location.search).get(
     "integration_account_id",
   );
@@ -462,6 +465,10 @@ function DefaultIntegrationCard({
     }
     if (integration.id === "supabase") {
       setConnectingSupabase(true);
+      return;
+    }
+    if (integration.id === "railway") {
+      setConnectingRailway(true);
       return;
     }
     if (integration.id === "clickstack") {
@@ -574,6 +581,12 @@ function DefaultIntegrationCard({
         connectUrl={integration.connectUrl ?? ""}
         onCancel={() => setConnectingDash0(false)}
         open={connectingDash0}
+        returnTo="/settings"
+      />
+      <RailwayConnectionDialog
+        connectUrl={integration.connectUrl ?? ""}
+        onCancel={() => setConnectingRailway(false)}
+        open={connectingRailway}
         returnTo="/settings"
       />
       <Dash0WebhookSetupDialog

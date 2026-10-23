@@ -167,6 +167,7 @@ function humanizeToolName(value: string): string {
     honeycomb: "Honeycomb",
     mcp: "MCP",
     pr: "PR",
+    railway: "Railway",
     rum: "RUM",
     sentry: "Sentry",
     signoz: "SigNoz",
@@ -325,6 +326,9 @@ function sourceLabel(url: string): string {
   if (host.includes("grafana")) return "Open in Grafana";
   if (host === "cloudflare.com" || host.endsWith(".cloudflare.com")) {
     return "Open in Cloudflare";
+  }
+  if (host === "railway.com" || host.endsWith(".railway.com") || host.endsWith(".railway.app")) {
+    return "Open in Railway";
   }
   if (host.includes("clickhouse") || host.includes("hyperdx")) {
     return "Open in ClickStack";

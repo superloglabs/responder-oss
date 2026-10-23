@@ -75,6 +75,12 @@ types. `drizzle/` contains the ordered schema history.
   refuses a grant with any scope that can change resources, at connection and
   after every token refresh. Only the API, spec search, docs, and identity
   tools are exposed.
+- Railway OAuth uses a client ID metadata document: the client ID is a public
+  Responder URL that serves the client's metadata. Each tool runs one fixed GraphQL operation;
+  none takes a query from the agent or reads environment variables. A
+  read-only connection holds only viewer scopes, checked at connection and
+  after every refresh. A redeploy connection holds member access, and its
+  redeploy and restart tools are offered only to tag mode and automations.
 - Linear context uses its read-only MCP endpoint. Ticket creation goes through
   a separate controlled tool that records a stable request before writing and
   stores the resulting Linear identifier and link. Automations reach Linear
