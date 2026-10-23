@@ -125,6 +125,7 @@ const toolNameProviders = [
   "github",
   "grafana",
   "langfuse",
+  "railway",
   "sentry",
   "slack",
   "supabase",

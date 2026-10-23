@@ -71,11 +71,21 @@ export class CustomMcpOAuthProvider implements OAuthClientProvider {
 
   constructor(
     private readonly options: {
+      /**
+       * An HTTPS URL that serves this client's metadata. Authorization servers
+       * that support client ID metadata documents use it as the client ID
+       * instead of registering a client.
+       */
+      clientMetadataUrl?: string;
       connectionState?: string;
       redirectUrl: string;
       stored?: StoredCustomMcpOAuthState;
     },
   ) {}
+
+  get clientMetadataUrl(): string | undefined {
+    return this.options.clientMetadataUrl;
+  }
 
   get redirectUrl(): string {
     return this.options.redirectUrl;
@@ -406,6 +416,7 @@ export async function safeCustomMcpFetch(
 }
 
 export async function beginCustomMcpOAuth(input: {
+  clientMetadataUrl?: string;
   connectionState: string;
   mcpUrl: string;
   redirectUrl: string;
@@ -420,6 +431,7 @@ export async function beginCustomMcpOAuth(input: {
   });
   const oauthChallenge = await discoverCustomMcpOAuthChallenge(mcpUrl);
   const provider = new CustomMcpOAuthProvider({
+    ...(input.clientMetadataUrl ? { clientMetadataUrl: input.clientMetadataUrl } : {}),
     connectionState: input.connectionState,
     redirectUrl: input.redirectUrl,
   });

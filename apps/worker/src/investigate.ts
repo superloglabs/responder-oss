@@ -20,6 +20,7 @@ import {
   getRuntimePostHogConnections,
   getRuntimeGrafanaConnections,
   getRuntimeCloudflareConnections,
+  getRuntimeRailwayConnections,
   getRuntimeClickStackConnection,
   getRuntimeLinearConnection,
   getRuntimeLangfuseConnections,
@@ -117,6 +118,7 @@ import {
   workspaceSecretUsageInstructions,
 } from "./secret-safety.js";
 import { createVercelTools } from "./vercel.js";
+import { createRailwayTools, railwayConnectionLabel } from "./railway.js";
 import {
   createThreadPullRequestFollowUpTools,
   createThreadPullRequestTool,
@@ -428,6 +430,7 @@ export function investigationInstructions(input: {
   postHogAccountNames?: string[];
   grafanaInstanceNames?: string[];
   cloudflareAccountNames?: string[];
+  railwayWorkspaceNames?: string[];
   clickStackConnected: boolean;
   repositories: CheckedOutRepository[];
   repositoryInstructions?: string[];
@@ -473,6 +476,7 @@ export function investigationInstructions(input: {
   const postHogAccountNames = input.postHogAccountNames ?? [];
   const grafanaInstanceNames = input.grafanaInstanceNames ?? [];
   const cloudflareAccountNames = input.cloudflareAccountNames ?? [];
+  const railwayWorkspaceNames = input.railwayWorkspaceNames ?? [];
   const gcpProjectNames = input.gcpProjectNames ?? [];
   const langfuseProjectNames = input.langfuseProjectNames ?? [];
   const supabaseConnections = input.supabaseConnections ?? [];
@@ -490,6 +494,7 @@ export function investigationInstructions(input: {
     postHogAccountNames.length > 0 ||
     grafanaInstanceNames.length > 0 ||
     cloudflareAccountNames.length > 0 ||
+    railwayWorkspaceNames.length > 0 ||
     input.axiomConnected ||
     input.sentryConnected ||
     input.clickStackConnected ||
@@ -540,6 +545,9 @@ export function investigationInstructions(input: {
       : null,
     cloudflareAccountNames.length > 0
       ? prompt("cloudflare", { value1: cloudflareAccountNames.join(", ") })
+      : null,
+    railwayWorkspaceNames.length > 0
+      ? prompt(assistant ? "railwayAssistant" : "railway", { value1: railwayWorkspaceNames.join(", ") })
       : null,
     input.axiomConnected
       ? prompt(assistant ? "axiomAssistant" : "axiom")
@@ -788,6 +796,7 @@ export async function runInvestigationAgent(
     postHogConnections,
     grafanaConnections,
     cloudflareConnections,
+    railwayConnections,
     sentryConnection,
     customMcpConnections,
     clickStackConnection,
@@ -811,6 +820,7 @@ export async function runInvestigationAgent(
     getRuntimePostHogConnections(job.config.id),
     getRuntimeGrafanaConnections(job.config.id),
     getRuntimeCloudflareConnections(job.config.id),
+    getRuntimeRailwayConnections(job.config.id),
     loadSentryConnectionForInvestigation({
       investigationId: job.investigationId,
       investigationInput,
@@ -899,6 +909,7 @@ export async function runInvestigationAgent(
     ...postHogConnections,
     ...grafanaConnections,
     ...cloudflareConnections,
+    ...railwayConnections,
     sentryConnection,
     ...customMcpConnections,
     clickStackConnection,
@@ -1142,6 +1153,10 @@ export async function runInvestigationAgent(
       session,
     });
     const vercelTools = createVercelTools(vercelConnections);
+    // Only tag mode may redeploy; alert investigations and scans only read.
+    const railwayTools = createRailwayTools(railwayConnections, {
+      allowWrites: Boolean(assistant),
+    });
     const awsInspectionTools = createAwsInspectionTools(awsConnections, {
       environment,
     });
@@ -1203,6 +1218,7 @@ export async function runInvestigationAgent(
           ? cloudflareAccountList(connection.accounts)
           : JSON.stringify(connection.displayName),
       ),
+      railwayWorkspaceNames: railwayConnections.map(railwayConnectionLabel),
       repositories,
       runtimeSystemPrompt: runtimeProfile?.systemPrompt,
       runtimePromptParts: runtimeProfile?.promptParts,
@@ -1273,6 +1289,7 @@ export async function runInvestigationAgent(
         ...repositoryInspectionTools,
         ...upstashTools,
         ...vercelTools,
+        ...railwayTools,
       ],
     });
     const result = await run(

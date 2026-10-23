@@ -60,6 +60,7 @@ import { CustomMcpConnectionDialog } from "../components/custom-mcp-dialog";
 import { UpstashConnectionDialog } from "../components/upstash-connection-dialog";
 import { LangfuseConnectionDialog } from "../components/langfuse-connection-dialog";
 import { SupabaseConnectionDialog } from "../components/supabase-connection-dialog";
+import { RailwayConnectionDialog } from "../components/railway-connection-dialog";
 import { currentProjectSelectionState } from "../project-selection";
 import {
   Dash0ConnectionDialog,
@@ -108,6 +109,7 @@ const MULTI_ACCOUNT_CONTEXT_PROVIDERS = new Set<IntegrationSummary["id"]>([
   "posthog",
   "grafana",
   "cloudflare",
+  "railway",
 ]);
 
 const EMPTY_OPTIONS: AgentOptions = {
@@ -449,6 +451,7 @@ export function AgentCreatePage({ initialAgent }: { initialAgent?: AgentDetail }
   const postHogJustConnected = successfulConnectionReturn("posthog");
   const grafanaJustConnected = successfulConnectionReturn("grafana");
   const cloudflareJustConnected = successfulConnectionReturn("cloudflare");
+  const railwayJustConnected = successfulConnectionReturn("railway");
   const axiomJustConnected = successfulConnectionReturn("axiom");
   const upstashJustConnected = successfulConnectionReturn("upstash");
   const langfuseJustConnected = successfulConnectionReturn("langfuse");
@@ -500,6 +503,7 @@ export function AgentCreatePage({ initialAgent }: { initialAgent?: AgentDetail }
   const [connectingUpstash, setConnectingUpstash] = useState(false);
   const [connectingLangfuse, setConnectingLangfuse] = useState(false);
   const supabaseSelectionState = currentProjectSelectionState("supabase");
+  const [connectingRailway, setConnectingRailway] = useState(false);
   const [connectingSupabase, setConnectingSupabase] = useState(
     Boolean(supabaseSelectionState),
   );
@@ -742,6 +746,20 @@ export function AgentCreatePage({ initialAgent }: { initialAgent?: AgentDetail }
         ) {
           loadedDraft.contextAccountIds.push(connectedCloudflare.id);
         }
+        const connectedRailway = returnedIntegrationAccountId
+          ? loadedOptions.accounts.find(
+              (account) =>
+                account.id === returnedIntegrationAccountId &&
+                account.provider === "railway",
+            )
+          : accountsFor(loadedOptions, "railway")[0];
+        if (
+          railwayJustConnected &&
+          connectedRailway &&
+          !loadedDraft.contextAccountIds.includes(connectedRailway.id)
+        ) {
+          loadedDraft.contextAccountIds.push(connectedRailway.id);
+        }
         const connectedAxiom = accountsFor(loadedOptions, "axiom")[0];
         if (
           axiomJustConnected &&
@@ -903,6 +921,7 @@ export function AgentCreatePage({ initialAgent }: { initialAgent?: AgentDetail }
     postHogJustConnected,
     grafanaJustConnected,
     cloudflareJustConnected,
+    railwayJustConnected,
     draftStorageKey,
     githubJustConnected,
     isEditing,
@@ -967,6 +986,10 @@ export function AgentCreatePage({ initialAgent }: { initialAgent?: AgentDetail }
   );
   const cloudflareAccounts = useMemo(
     () => accountsFor(options, "cloudflare"),
+    [options],
+  );
+  const railwayAccounts = useMemo(
+    () => accountsFor(options, "railway"),
     [options],
   );
   const axiomAccounts = useMemo(
@@ -1225,7 +1248,8 @@ export function AgentCreatePage({ initialAgent }: { initialAgent?: AgentDetail }
       provider === "clickstack" ||
       provider === "upstash" ||
       provider === "langfuse" ||
-      provider === "supabase"
+      provider === "supabase" ||
+      provider === "railway"
     ) {
       saveDraftToSessionStorage(draftStorageKey, currentDraft, options);
       if (provider === "aws") setConnectingAws(true);
@@ -1236,6 +1260,7 @@ export function AgentCreatePage({ initialAgent }: { initialAgent?: AgentDetail }
       else if (provider === "grafana") setConnectingGrafana(true);
       else if (provider === "langfuse") setConnectingLangfuse(true);
       else if (provider === "supabase") setConnectingSupabase(true);
+      else if (provider === "railway") setConnectingRailway(true);
       else setConnectingUpstash(true);
       return;
     }
@@ -1578,6 +1603,9 @@ export function AgentCreatePage({ initialAgent }: { initialAgent?: AgentDetail }
     cloudflareAccounts.filter((account) =>
       draft.contextAccountIds.includes(account.id),
     ).length +
+    railwayAccounts.filter((account) =>
+      draft.contextAccountIds.includes(account.id),
+    ).length +
     axiomAccounts.filter((account) =>
       draft.contextAccountIds.includes(account.id),
     ).length +
@@ -1666,6 +1694,12 @@ export function AgentCreatePage({ initialAgent }: { initialAgent?: AgentDetail }
         open={connectingSupabase && Boolean(supabaseConnectUrl)}
         returnTo={returnTo}
         selectionState={supabaseSelectionState}
+      />
+      <RailwayConnectionDialog
+        connectUrl={integrationFor("railway")?.connectUrl ?? ""}
+        onCancel={() => setConnectingRailway(false)}
+        open={connectingRailway}
+        returnTo={returnTo}
       />
       <ClickStackConnectionDialog
         connectUrl={integrationFor("clickstack")?.connectUrl ?? ""}
@@ -2834,6 +2868,26 @@ export function AgentCreatePage({ initialAgent }: { initialAgent?: AgentDetail }
                         key={account.id}
                         label={label}
                         provider="cloudflare"
+                      />
+                    );
+                  })}
+                  {railwayAccounts.map((account) => {
+                    const connected = draft.contextAccountIds.includes(account.id);
+                    const label = railwayAccounts.length > 1 ? account.displayName : "Railway";
+                    return (
+                      <ContextRow
+                        action={
+                          <ContextIntegrationControls
+                            showConfigureLabel
+                            enabled={connected}
+                            label={label}
+                            onToggle={() => toggleContextAccount(account.id)}
+                          />
+                        }
+                        detail={`${account.displayName} · Deployments, logs, and metrics`}
+                        key={account.id}
+                        label={label}
+                        provider="railway"
                       />
                     );
                   })}

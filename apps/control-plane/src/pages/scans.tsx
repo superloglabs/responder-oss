@@ -225,6 +225,17 @@ const initialSources: ScanSource[] = [
     resources: [],
   },
   {
+    id: "railway",
+    kind: "account",
+    connected: false,
+    description: "Deployments, logs, and metrics",
+    enabled: false,
+    name: "Railway",
+    provider: "railway",
+    resourceLabel: "connections",
+    resources: [],
+  },
+  {
     id: "upstash",
     kind: "account",
     connected: false,

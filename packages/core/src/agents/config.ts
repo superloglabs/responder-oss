@@ -173,6 +173,7 @@ export const contextIntegrationProviders = [
   "posthog",
   "grafana",
   "cloudflare",
+  "railway",
   "axiom",
   "clickstack",
   "upstash",

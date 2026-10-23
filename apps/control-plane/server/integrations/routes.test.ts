@@ -63,6 +63,7 @@ import {
   linearAuthorizeUrl,
 } from "../../../../packages/core/src/integrations/linear.js";
 import { langfuseProject } from "./langfuse.js";
+import { railwayConnectionProfile } from "./railway.js";
 import { exchangeSlackCode, listSlackChannels } from "./slack.js";
 import { startDefaultSlackThreadMode } from "../../../../packages/core/src/db/agents.js";
 import { getActiveTenant } from "../tenant.js";
@@ -142,7 +143,10 @@ vi.mock("../../../../packages/core/src/integrations/gcp-setup.js", async (import
   };
 });
 
-vi.mock("../../../../packages/core/src/integrations/custom-mcp.js", () => ({
+vi.mock("../../../../packages/core/src/integrations/custom-mcp.js", async (importOriginal) => ({
+  CustomMcpOAuthProvider: (
+    await importOriginal<typeof import("../../../../packages/core/src/integrations/custom-mcp.js")>()
+  ).CustomMcpOAuthProvider,
   beginCustomMcpOAuth: vi.fn(),
   callCustomMcpTool: vi.fn(),
   finishCustomMcpOAuth: vi.fn(),
@@ -190,6 +194,11 @@ vi.mock("./langfuse.js", async (importOriginal) => {
     langfuseProject: vi.fn(),
   };
 });
+
+vi.mock("./railway.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./railway.js")>()),
+  railwayConnectionProfile: vi.fn(),
+}));
 
 vi.mock("../investigations/queue.js", () => ({
   queueGcpProjectSetup: vi.fn(),
@@ -3288,6 +3297,155 @@ describe("integration callback routing", () => {
         status: "connected",
       }),
     );
+  });
+
+  it("starts Railway OAuth with redeploy access when asked", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(encryptCredentials).mockReturnValue("encrypted-credentials");
+    vi.mocked(createIntegrationConnectionState).mockResolvedValue("oauth-state");
+    vi.mocked(beginCustomMcpOAuth).mockResolvedValue({
+      authorizationUrl: "https://backboard.railway.com/oauth/auth",
+      oauth: { codeVerifier: "pkce-verifier" },
+    });
+    vi.mocked(updateIntegrationConnectionStateMetadata).mockResolvedValue(true);
+
+    const redeploy = await app.request(
+      "/api/integrations/railway/start?mode=redeploy&returnTo=%2Fsettings%2Ftag-mode",
+    );
+    const readOnly = await app.request("/api/integrations/railway/start?mode=admin");
+
+    expect(redeploy.status).toBe(302);
+    expect(readOnly.status).toBe(302);
+    expect(redeploy.headers.get("location")).toBe("https://backboard.railway.com/oauth/auth");
+    expect(vi.mocked(beginCustomMcpOAuth).mock.calls.map(([input]) => input.scope)).toEqual([
+      "openid email profile offline_access workspace:member",
+      "openid email profile offline_access workspace:viewer",
+    ]);
+    expect(beginCustomMcpOAuth).toHaveBeenCalledWith(expect.objectContaining({
+      clientMetadataUrl: "https://responder.example/api/integrations/railway/client-metadata.json",
+      mcpUrl: "https://backboard.railway.com",
+      redirectUrl: "https://responder.example/api/integrations/railway/callback",
+    }));
+    expect(vi.mocked(encryptCredentials).mock.calls.map(([credentials]) => (credentials as { accessLevel: string }).accessLevel))
+      .toEqual(["redeploy", "read_only"]);
+    expect(upsertIntegrationAccount).not.toHaveBeenCalled();
+  });
+
+  it("serves the Railway client metadata document at its client ID", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+
+    const response = await app.request("/api/integrations/railway/client-metadata.json");
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      client_id: "https://responder.example/api/integrations/railway/client-metadata.json",
+      client_name: "Responder",
+      grant_types: ["authorization_code", "refresh_token"],
+      redirect_uris: ["https://responder.example/api/integrations/railway/callback"],
+      token_endpoint_auth_method: "none",
+    });
+  });
+
+  it("finishes Railway OAuth and keeps the shared workspaces", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(consumeIntegrationConnectionState).mockResolvedValue({
+      organizationId: tenant.organizationId,
+      userId: tenant.user.id,
+      returnTo: "/settings/tag-mode",
+      codeVerifier: null,
+      metadata: { encryptedCredentials: "pending-credentials" },
+    });
+    vi.mocked(decryptCredentials).mockReturnValue({
+      accessLevel: "redeploy",
+      authType: "oauth",
+      oauth: { codeVerifier: "pkce-verifier" },
+    });
+    vi.mocked(finishCustomMcpOAuth).mockResolvedValue({
+      tokens: {
+        access_token: "railway-access-token",
+        expires_in: 3600,
+        refresh_token: "railway-refresh-token",
+        scope: "openid email profile offline_access workspace:member",
+        token_type: "bearer",
+      },
+    });
+    vi.mocked(railwayConnectionProfile).mockResolvedValue({
+      displayName: "Acme · redeploy",
+      email: "ops@acme.example",
+      externalAccountId: "user-1:redeploy",
+      workspaces: [{ id: "w1", name: "Acme" }],
+    });
+    vi.mocked(encryptCredentials).mockReturnValue("connected-credentials");
+    vi.mocked(upsertIntegrationAccount).mockResolvedValue(
+      "30000000-0000-4000-8000-000000000000",
+    );
+
+    const response = await app.request(
+      "/api/integrations/railway/callback?state=oauth-state&code=oauth-code",
+    );
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(
+      "https://responder.example/settings/tag-mode" +
+        "?integration=railway&status=connected" +
+        "&integration_account_id=30000000-0000-4000-8000-000000000000",
+    );
+    expect(finishCustomMcpOAuth).toHaveBeenCalledWith(expect.objectContaining({
+      authorizationCode: "oauth-code",
+      mcpUrl: "https://backboard.railway.com",
+    }));
+    expect(railwayConnectionProfile).toHaveBeenCalledWith({
+      accessLevel: "redeploy",
+      accessToken: "railway-access-token",
+    });
+    expect(encryptCredentials).toHaveBeenCalledWith(expect.objectContaining({
+      accessLevel: "redeploy",
+      tokenIssuedAt: expect.any(Number),
+    }));
+    expect(upsertIntegrationAccount).toHaveBeenCalledWith(expect.objectContaining({
+      displayName: "Acme · redeploy",
+      encryptedCredentials: "connected-credentials",
+      externalAccountId: "user-1:redeploy",
+      metadata: expect.objectContaining({
+        accessLevel: "redeploy",
+        workspaces: [{ id: "w1", name: "Acme" }],
+      }),
+      provider: "railway",
+      status: "connected",
+    }));
+  });
+
+  it("refuses a read-only Railway grant with member access", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(consumeIntegrationConnectionState).mockResolvedValue({
+      organizationId: tenant.organizationId,
+      userId: tenant.user.id,
+      returnTo: "/settings",
+      codeVerifier: null,
+      metadata: { encryptedCredentials: "pending-credentials" },
+    });
+    vi.mocked(decryptCredentials).mockReturnValue({
+      accessLevel: "read_only",
+      authType: "oauth",
+      oauth: { codeVerifier: "pkce-verifier" },
+    });
+    vi.mocked(finishCustomMcpOAuth).mockResolvedValue({
+      tokens: {
+        access_token: "railway-access-token",
+        scope: "openid workspace:member",
+        token_type: "bearer",
+      },
+    });
+
+    const response = await app.request(
+      "/api/integrations/railway/callback?state=oauth-state&code=oauth-code",
+    );
+
+    expect(response.headers.get("location")).toBe(
+      "https://responder.example/settings?integration=railway&status=error&reason=write_scopes",
+    );
+    expect(railwayConnectionProfile).not.toHaveBeenCalled();
+    expect(upsertIntegrationAccount).not.toHaveBeenCalled();
   });
 
   it("refuses a Cloudflare grant that can change resources", async () => {

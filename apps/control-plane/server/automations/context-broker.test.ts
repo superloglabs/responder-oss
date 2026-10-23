@@ -25,9 +25,9 @@ function claim(provider: string, credentials: Record<string, unknown>) {
       encryptedCredentials: encryptCredentials(credentials),
       externalAccountId: "external-account",
       id: accountId,
-      metadata: provider === "sentry"
+      metadata: (provider === "sentry"
         ? { organizationSlug: "acme" }
-        : {},
+        : {}) as Record<string, unknown>,
       provider,
     },
     organizationId: "15151515-1515-4515-8515-151515151515",
@@ -496,6 +496,128 @@ describe("automation context broker", () => {
       expect(servicePath.status).toBe(404);
       expect(resources.status).toBe(404);
       expect(dependencies.aws.fetch).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("Railway", () => {
+    beforeEach(() => {
+      vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 4).toString("base64"));
+    });
+
+    function railwayClaim(accessLevel: "read_only" | "redeploy", issuedAt: number) {
+      const base = claim("railway", {
+        accessLevel,
+        authType: "oauth",
+        oauth: {
+          tokens: {
+            access_token: "current-railway-token",
+            expires_in: 3600,
+            refresh_token: "railway-refresh-token",
+            scope: accessLevel === "redeploy"
+              ? "openid offline_access workspace:member"
+              : "openid offline_access workspace:viewer",
+            token_type: "bearer",
+          },
+        },
+        tokenIssuedAt: issuedAt,
+      });
+      return {
+        ...base,
+        account: { ...base.account, metadata: { accessLevel, workspaces: [{ id: "w1", name: "Acme" }] } },
+      };
+    }
+
+    const call = (app: Hono, id: number, name: string, args: unknown) => app.request(
+      `/api/automation-context-broker/v1/${accountId}`,
+      rpcRequest({ id, jsonrpc: "2.0", method: "tools/call", params: { arguments: args, name } }),
+    );
+    const list = async (app: Hono) => {
+      const response = await app.request(
+        `/api/automation-context-broker/v1/${accountId}`,
+        rpcRequest({ id: 1, jsonrpc: "2.0", method: "tools/list" }),
+      );
+      const body = await response.json() as { result: { tools: Array<{ annotations: { readOnlyHint: boolean }; name: string }> } };
+      return body.result.tools;
+    };
+
+    it("serves only read tools for a read-only connection and keeps a fresh token", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(Response.json({ data: { logs: [] } }));
+      vi.stubGlobal("fetch", fetchMock);
+      const { app, dependencies } = appFor(railwayClaim("read_only", Date.now()));
+
+      try {
+        const tools = await list(app);
+        expect(tools.map((tool) => tool.name)).not.toContain("redeploy_railway_deployment");
+        expect(tools.every((tool) => tool.annotations.readOnlyHint)).toBe(true);
+
+        const refused = await call(app, 2, "redeploy_railway_deployment", { deploymentId: "d1" });
+        expect(refused.status).toBe(400);
+
+        const logs = await call(app, 3, "get_railway_environment_logs", { environmentId: "e1" });
+        expect(await logs.json()).toMatchObject({ result: { content: [{ text: '{"logs":[]}' }] } });
+        const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+        expect(new Headers(init.headers).get("authorization")).toBe("Bearer current-railway-token");
+        expect(dependencies.refreshCustomMcp).not.toHaveBeenCalled();
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it("refreshes an expiring token and redeploys with redeploy access", async () => {
+      const fetchMock = vi.fn().mockResolvedValue(Response.json({
+        data: { deploymentRedeploy: { createdAt: "2026-10-23T10:00:00.000Z", id: "d2", status: "QUEUED" } },
+      }));
+      vi.stubGlobal("fetch", fetchMock);
+      const { app, dependencies } = appFor(railwayClaim("redeploy", Date.now() - 58 * 60_000));
+      dependencies.refreshCustomMcp.mockResolvedValue({
+        tokens: {
+          access_token: "fresh-railway-token",
+          expires_in: 3600,
+          refresh_token: "rotated-refresh-token",
+          token_type: "bearer",
+        },
+      });
+
+      try {
+        const tools = await list(app);
+        expect(tools.map((tool) => tool.name)).toEqual(expect.arrayContaining([
+          "redeploy_railway_deployment",
+          "restart_railway_deployment",
+        ]));
+
+        const redeployed = await call(app, 2, "redeploy_railway_deployment", { deploymentId: "d1" });
+        expect(await redeployed.text()).toContain("QUEUED");
+        const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+        expect(new Headers(init.headers).get("authorization")).toBe("Bearer fresh-railway-token");
+        expect(dependencies.refreshCustomMcp).toHaveBeenCalledWith(expect.objectContaining({
+          mcpUrl: "https://backboard.railway.com",
+          redirectUrl: expect.stringMatching(/\/api\/integrations\/railway\/callback$/u),
+        }));
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it("refuses calls when a read-only grant gained member access", async () => {
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+      const { app, dependencies } = appFor(railwayClaim("read_only", 0));
+      dependencies.refreshCustomMcp.mockResolvedValue({
+        tokens: {
+          access_token: "fresh-railway-token",
+          expires_in: 3600,
+          scope: "openid workspace:member",
+          token_type: "bearer",
+        },
+      });
+
+      try {
+        const response = await call(app, 1, "list_railway_projects", {});
+        expect(response.status).toBe(502);
+        expect(fetchMock).not.toHaveBeenCalled();
+      } finally {
+        vi.unstubAllGlobals();
+      }
     });
   });
 

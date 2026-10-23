@@ -11,6 +11,7 @@ export const automationContextProviders = [
   "grafana",
   "honeycomb",
   "linear",
+  "railway",
   "sentry",
   "signoz",
   "slack",

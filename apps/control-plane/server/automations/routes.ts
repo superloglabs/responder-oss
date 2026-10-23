@@ -312,6 +312,7 @@ export const automationRoutes = new Hono()
           "posthog",
           "custom_mcp",
           "linear",
+          "railway",
           "vercel",
         ].includes(account.provider)
       ),

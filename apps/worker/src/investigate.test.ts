@@ -492,6 +492,31 @@ describe("sandbox agent configuration", () => {
     });
   });
 
+  it("keeps Railway investigations read-only and lets tag mode redeploy when asked", () => {
+    const base = {
+      agentPrompt: "Inspect the reported failure.",
+      clickStackConnected: false,
+      datadogConnected: false,
+      railwayWorkspaceNames: ['"Acme" (workspaceId w1)'],
+      repositories: [],
+      sentryConnected: false,
+    };
+
+    const investigation = investigationInstructions(base);
+    expect(investigation).toContain("connected read-only Railway tools");
+    expect(investigation).toContain("Never attempt to redeploy, restart, or change Railway resources");
+    expect(investigation).toContain('Connected Railway workspaces: "Acme" (workspaceId w1).');
+    expect(investigation).not.toContain("No observability data source is connected");
+
+    const tagMode = investigationInstructions({
+      ...base,
+      assistant: { integrationsUrl: "https://responder.example/settings", pullRequests: false },
+      threadMode: true,
+    });
+    expect(tagMode).toContain("Redeploy or restart a deployment only when the latest message asks for it");
+    expect(tagMode).not.toContain("Never attempt to redeploy");
+  });
+
   it("keeps Cloudflare investigation access read-only and names the accounts", () => {
     const instructions = investigationInstructions({
       agentPrompt: "Inspect the reported failure.",

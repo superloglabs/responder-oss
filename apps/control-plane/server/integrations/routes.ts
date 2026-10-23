@@ -61,6 +61,14 @@ import {
   parseCloudflareCredentials,
 } from "../../../../packages/core/src/integrations/cloudflare.js";
 import {
+  assertRailwayGrant,
+  parseRailwayCredentials,
+  RAILWAY_API_ORIGIN,
+  railwayAccessLevelSchema,
+  railwayOAuthScope,
+  RailwayScopeError,
+} from "../../../../packages/core/src/integrations/railway.js";
+import {
   GRAFANA_CLOUD_OAUTH_SCOPE,
   normalizeGrafanaCloudStackUrl,
   normalizeGrafanaUrl,
@@ -186,6 +194,11 @@ import {
   grafanaServiceAccountOrganization,
 } from "./grafana.js";
 import { cloudflareConnectionProfile } from "./cloudflare.js";
+import {
+  railwayClientMetadataDocument,
+  railwayClientMetadataUrl,
+  railwayConnectionProfile,
+} from "./railway.js";
 import {
   langfuseProject,
   LangfuseCredentialsError,
@@ -477,6 +490,7 @@ type BrowserOAuthProvider =
   | "grafana"
   | "linear"
   | "posthog"
+  | "railway"
   | "sentry"
   | "slack"
   | "supabase"
@@ -1120,6 +1134,41 @@ export async function startIntegrationConnection(input: {
     } catch (error) {
       logCustomMcpError("connect", error);
       return Response.redirect(settingsRedirect(input.returnTo ?? "/settings", "cloudflare", "error", "connection_failed"));
+    }
+  }
+  if (parsedProvider.data === "railway") {
+    // `mode=redeploy` asks for member access, which can also redeploy and
+    // restart. Without it the connection only reads.
+    const accessLevel = railwayAccessLevelSchema.catch("read_only").parse(input.mode);
+    try {
+      const connectionState = await createIntegrationConnectionState({
+        organizationId: tenant.organizationId,
+        userId: tenant.user.id,
+        provider: "railway",
+        returnTo: input.returnTo,
+        routingUrl: cellCallbackUrl("railway"),
+      });
+      const oauthResult = await beginCustomMcpOAuth({
+        clientMetadataUrl: railwayClientMetadataUrl(),
+        connectionState,
+        mcpUrl: RAILWAY_API_ORIGIN,
+        redirectUrl: integrationCallbackUrl("railway"),
+        scope: railwayOAuthScope(accessLevel),
+      });
+      const updated = await updateIntegrationConnectionStateMetadata({
+        metadata: { encryptedCredentials: encryptCredentials({
+          accessLevel, authType: "oauth", oauth: oauthResult.oauth,
+        }) },
+        organizationId: tenant.organizationId,
+        userId: tenant.user.id,
+        provider: "railway",
+        state: connectionState,
+      });
+      if (!updated) throw new Error("The Railway OAuth state was superseded");
+      return Response.redirect(oauthResult.authorizationUrl);
+    } catch (error) {
+      logCustomMcpError("connect", error);
+      return Response.redirect(settingsRedirect(input.returnTo ?? "/settings", "railway", "error", "connection_failed"));
     }
   }
   const state = await createIntegrationConnectionState({
@@ -2892,6 +2941,103 @@ export const integrationRoutes = new Hono()
           "cloudflare",
           "error",
           error instanceof CloudflareWriteScopeError
+            ? "write_scopes"
+            : browserOAuthErrorReason(context.req.query("error")),
+        ),
+      );
+    }
+  })
+  // Railway fetches this document to identify Responder's OAuth client.
+  .get("/railway/client-metadata.json", (context) => {
+    context.header("cache-control", "public, max-age=300");
+    return context.json(railwayClientMetadataDocument());
+  })
+  .get("/railway/callback", async (context) => {
+    const state = context.req.query("state");
+    if (!state) {
+      return context.redirect(
+        settingsRedirect("/settings", "railway", "error", "invalid_state"),
+      );
+    }
+
+    let connectionState: Awaited<
+      ReturnType<typeof consumeIntegrationConnectionState>
+    > = null;
+    try {
+      connectionState = await consumeBrowserOAuthConnectionState({
+        headers: context.req.raw.headers,
+        provider: "railway",
+        state,
+      });
+      if (!connectionState) {
+        return context.redirect(
+          settingsRedirect("/settings", "railway", "error", "invalid_state"),
+        );
+      }
+      const authorizationCode = z.string().min(1).parse(context.req.query("code"));
+      const credentials = parseRailwayCredentials(
+        decryptCredentials<Record<string, unknown>>(
+          pendingConnectionCredentialsSchema.parse(connectionState.metadata)
+            .encryptedCredentials,
+        ),
+      );
+      const oauth = await finishCustomMcpOAuth({
+        authorizationCode,
+        mcpUrl: RAILWAY_API_ORIGIN,
+        oauth: credentials.oauth,
+        redirectUrl: integrationCallbackUrl("railway"),
+      });
+      const accessToken = oauth.tokens?.access_token;
+      if (!accessToken) throw new Error("The Railway OAuth access token is missing");
+      assertRailwayGrant(oauth.tokens, credentials.accessLevel);
+      const profile = await railwayConnectionProfile({
+        accessLevel: credentials.accessLevel,
+        accessToken,
+      });
+      const accountId = await upsertIntegrationAccount({
+        organizationId: connectionState.organizationId,
+        provider: "railway",
+        externalAccountId: profile.externalAccountId,
+        displayName: profile.displayName,
+        encryptedCredentials: encryptCredentials({
+          ...credentials,
+          oauth,
+          tokenIssuedAt: Date.now(),
+        }),
+        credentialKeyVersion: 1,
+        metadata: {
+          accessLevel: credentials.accessLevel,
+          authType: "oauth",
+          ...(profile.email ? { email: profile.email } : {}),
+          workspaces: profile.workspaces,
+        },
+        status: "connected",
+      });
+      await captureAnalyticsEvent({
+        distinctId: connectionState.userId,
+        event: "integration connected",
+        organizationId: connectionState.organizationId,
+        properties: {
+          access_level: credentials.accessLevel,
+          integration_account_id: accountId,
+          provider: "railway",
+          resource_count: profile.workspaces.length,
+        },
+      });
+      return context.redirect(
+        withIntegrationAccountId(
+          settingsRedirect(connectionState.returnTo, "railway", "connected"),
+          accountId,
+        ),
+      );
+    } catch (error) {
+      logCustomMcpError("callback", error);
+      return context.redirect(
+        settingsRedirect(
+          connectionState?.returnTo ?? "/settings",
+          "railway",
+          "error",
+          error instanceof RailwayScopeError
             ? "write_scopes"
             : browserOAuthErrorReason(context.req.query("error")),
         ),
