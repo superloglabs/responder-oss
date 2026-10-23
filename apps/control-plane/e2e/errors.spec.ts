@@ -58,7 +58,7 @@ async function mockWorkspace(page: Page, capabilities: string[], contextDelayMs 
 
 const issueId = "33333333-3333-4333-8333-333333333333";
 const now = Date.now();
-const issue = { id: issueId, title: "TypeError: Cannot read payment method", exceptionType: "TypeError", service: "checkout", kind: "span", status: "open", eventCount: 1284, firstSeenAt: new Date(now - 86400000).toISOString(), lastSeenAt: new Date(now - 60000).toISOString(), regressedAt: null, statusChangedAt: null, topFrame: "payment.ts:84", fingerprint: "v1:test", frames: ["payment.ts:84"], message: "Cannot read payment method", lastSample: { seenAt: new Date(now - 60000).toISOString(), kind: "span", message: "Cannot read payment method", stacktrace: "TypeError: Cannot read payment method\n    at processPayment (payment.ts:84:29)", traceId: "abc123", attributes: {}, resourceAttributes: { "deployment.environment.name": "production", "service.version": "2.18.0" } } };
+const issue = { id: issueId, title: "TypeError: Cannot read payment method", exceptionType: "TypeError", service: "checkout", kind: "span", status: "open", eventCount: 1284, firstSeenAt: new Date(now - 86400000).toISOString(), lastSeenAt: new Date(now - 60000).toISOString(), regressedAt: null, statusChangedAt: null, topFrame: "payment.ts:84", fingerprint: "v1:test", frames: ["payment.ts:84"], message: "Cannot read payment method", lastSample: { seenAt: new Date(now - 60000).toISOString(), kind: "span", message: "Cannot read payment method", stacktrace: "TypeError: Cannot read payment method\n    at processPayment (payment.ts:84:29)", traceId: "abc123", attributes: {}, resourceAttributes: { "deployment.environment.name": "production", "service.version": "0123456789abcdef0123456789abcdef01234567-abcdef0123456789abcdef0123456789abcdef01" } } };
 
 async function setup(page: Page, pageSize = 1) {
   await mockWorkspace(page, ["telemetry", "alerts", "simplified_navigation"]);
@@ -86,6 +86,8 @@ test("combines checkbox filters, removes chips, and preserves search in the URL"
   await expect(page.getByRole("link", { name: issue.title })).toBeVisible();
   await page.getByRole("button", { name: "Filter", exact: true }).click();
   await page.getByRole("menuitem", { name: "Status", exact: true }).hover();
+  await expect(page.getByRole("menuitemcheckbox", { name: "Resolved", exact: true })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("errors-filter-checkboxes.png") });
   await page.getByRole("menuitemcheckbox", { name: "Resolved", exact: true }).click();
   await expect.poll(() => queries.at(-1)?.getAll("statuses")).toEqual(["open", "resolved"]);
   await expect(page.getByRole("menuitemcheckbox", { name: "Resolved", exact: true })).toBeChecked();
@@ -117,7 +119,10 @@ test("opens the detail and resolves an error", async ({ page }, testInfo) => {
   await page.getByRole("button", { name: "Reject All", exact: true }).click();
   await page.getByRole("link", { name: issue.title }).click();
   await expect(page.getByRole("heading", { name: issue.title })).toBeVisible();
-  await expect(page.getByText("Still happening", { exact: true })).toBeVisible();
+  await expect(page.getByText("Still happening", { exact: true })).toHaveCount(0);
+  await expect(page.locator(".errorIssue__properties")).toContainText("Unresolved");
+  await expect(page.locator(".errorIssue__properties")).toContainText("Service version");
+  await expect(page.locator(".errorIssue__version")).toHaveAttribute("title", issue.lastSample.resourceAttributes["service.version"]);
   await expect(page.getByText("production", { exact: true }).first()).toBeVisible();
   await page.getByRole("button", { name: "Resolve", exact: true }).click();
   await expect(page.getByRole("button", { name: "Reopen", exact: true })).toBeVisible();
@@ -145,6 +150,9 @@ test("supports a narrow viewport without overflowing the page", async ({ page })
   await setup(page); await page.goto("/errors");
   await page.getByRole("button", { name: "Reject All", exact: true }).click();
   await expect(page.getByRole("link", { name: issue.title })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.getByRole("link", { name: issue.title }).click();
+  await expect(page.locator(".errorIssue__properties")).toContainText("Service version");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 

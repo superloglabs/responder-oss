@@ -5,8 +5,6 @@ import { AppShell } from "../components/app-shell";
 import { TimeseriesChart } from "../components/timeseries-chart";
 import { Badge, Button } from "../design-system";
 import {
-  errorActivity,
-  errorState,
   errorIssueChart,
   errorIssueStatusLabels,
   fetchErrorIssue,
@@ -138,18 +136,18 @@ export function ErrorIssuePage() {
         {error || loadError ? <p className="formError" role="alert">{error ?? loadError}</p> : null}
         <section className="errorIssue__overview" aria-label="Error overview">
           <div className="errorIssue__summary">
-            <div className="errorIssue__states"><ErrorIssueStatusBadge status={issue.status} /><span>{errorState(issue)}</span><span data-active={errorActivity(issue.lastSeenAt) === "active"}>{errorActivity(issue.lastSeenAt) === "active" ? "Still happening" : "No longer happening"}</span></div>
             <p className="errorIssue__message">{issue.message ?? issue.title}</p>
             <p className="dashboardPage__meta">{formatEventCount(issue.eventCount)} total events · {issue.kind === "span" ? "Span exception" : "Error log"}{issue.regressedAt ? ` · Reopened ${relativeTime(issue.regressedAt)}` : ""}</p>
           </div>
           <dl className="errorIssue__properties">
+            <div><dt>Status</dt><dd><ErrorIssueStatusBadge status={issue.status} /></dd></div>
             {[
               ["Service", issue.service ?? "—"],
               ["Environment", sample.resourceAttributes["deployment.environment.name"] ?? sample.resourceAttributes["deployment.environment"] ?? sample.attributes["deployment.environment.name"] ?? sample.attributes["deployment.environment"] ?? "—"],
-              ["Release", sample.resourceAttributes["service.version"] ?? "—"],
+              ["Service version", sample.resourceAttributes["service.version"] ?? "—"],
               ["First seen", new Date(issue.firstSeenAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })],
               ["Last seen", relativeTime(issue.lastSeenAt)],
-            ].map(([name, value]) => <div key={name}><dt>{name}</dt><dd>{value}</dd></div>)}
+            ].map(([name, value]) => <div key={name}><dt>{name}</dt><dd className={name === "Service version" ? "errorIssue__version" : undefined} title={value}>{value}</dd></div>)}
           </dl>
         </section>
 
@@ -159,7 +157,7 @@ export function ErrorIssuePage() {
             <span className="dashboardPage__meta">{formatEventCount(recent)} events · Daily, last 30 days</span>
           </header>
           <div className="syntheticCheck__chart">
-            <TimeseriesChart chart={chart} chartType="bar" label="Occurrences per day" showLegend={false} />
+            <TimeseriesChart chart={chart} chartType="bar" density="compact" label="Occurrences per day" showLegend={false} />
           </div>
         </section>
 

@@ -49,8 +49,6 @@
 .errorIssue__overview { display: grid; grid-template-columns: minmax(0, 1fr) 242px; gap: 71px; }
 .errorIssue__summary { display: flex; flex-direction: column; gap: 16px; }
 .errorIssue__summary p { margin: 0; }
-.errorIssue__states { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; color: var(--ds-text-muted); font-size: 13px; }
-.errorIssue__states [data-active="true"] { color: var(--workspace-accent, #4e58f9); }
 .errorIssue__properties { display: flex; flex-direction: column; gap: 10px; margin: 0; font-size: 13px; line-height: 20px; }
 .errorIssue__properties > div { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 8px; }
 .errorIssue__properties dt { color: var(--ds-text-muted); }
@@ -83,3 +81,21 @@
 .appShell--workspace .errorIssues .dsSelect__trigger { min-height: 26px; height: 26px; padding: 3px 7px; font-size: 13px; }
 .errorIssues__filterRow .dsSelect__trigger { border: 0; background: transparent; box-shadow: none; }
 .appShell--workspace .errorIssues .dsDataTable--workspace :is(th, td):nth-child(4) { border-right: .5px solid #e6e8ec; }
+
+/* The filter menu uses the square checkbox token, including its empty state. */
+.errorFilterMenu [data-slot="dropdown-menu-checkbox-item"] > span:first-child { width: 14px; height: 14px; border: 1px solid #ddd; border-radius: 3px; background: #fff; }
+.errorFilterMenu [data-slot="dropdown-menu-checkbox-item"][data-state="checked"] > span:first-child { border-color: #3f4af8; background: #4e58f9; color: #fdfdfd; }
+.errorFilterMenu [data-slot="dropdown-menu-checkbox-item"] > span:first-child svg { width: 12px; height: 12px; stroke-width: 1.4; }
+
+/* Match the detail prototype's system type and compact control rhythm. */
+.errorIssue { --ds-font-sans: system-ui, sans-serif; font-family: var(--ds-font-sans); line-height: 20px; }
+.errorIssue__titleRow { align-items: center; }
+.errorIssue__message, .errorIssue .dashboardPage__meta { font-size: 13px; line-height: 20px; }
+.errorIssue .syntheticCheck__section > header h2 { font-size: 13px; font-weight: 500; line-height: 20px; }
+.appShell--workspace .errorIssue .dsButton { font-family: var(--ds-font-sans); }
+.appShell--workspace .errorIssue .dsButton--primary { min-height: 24px; height: 24px; padding: 4px 6px; box-shadow: inset 0 -3px 4px #64646408, 0 4px 4px #00000005; }
+.errorIssue__properties > div { grid-template-columns: 96px minmax(0, 1fr); }
+.errorIssue__version { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: help; }
+.errorIssue .syntheticCheck__chart { height: 142px; --chart-0: #4e58f9; }
+.errorIssue .timeseriesChart__bar { opacity: .62; }
+.errorIssue .timeseriesChart__grid { stroke: #e8e8e8; stroke-width: .5; stroke-dasharray: none; }

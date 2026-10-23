@@ -41,6 +41,7 @@ function seriesTotal(values: Array<number | null>): number {
 export function TimeseriesChart({
   chart,
   chartType = "bar",
+  density = "default",
   hiddenSeries,
   highlights = [],
   label,
@@ -55,6 +56,7 @@ export function TimeseriesChart({
 }: {
   chart: ChartData;
   chartType?: "bar" | "line";
+  density?: "default" | "compact";
   // Series hidden by a legend outside the chart, which replaces the chart's
   // own legend. Without it the chart's own legend hides and shows series.
   hiddenSeries?: ReadonlySet<string>;
@@ -119,12 +121,13 @@ export function TimeseriesChart({
   const ticks = axisTicks(minimum, maximum);
   const top = ticks[ticks.length - 1]!;
   const bottom = ticks[0]!;
-  const left = showYAxis ? 52 : 4;
+  const left = showYAxis ? (density === "compact" ? 32 : 52) : 4;
   const footer = showXAxis ? 20 : 4;
   const width = Math.max(0, size.width - left - 4);
   const height = Math.max(0, size.height - footer - 6);
   const y = (value: number) => 6 + height - ((value - bottom) / (top - bottom || 1)) * height;
   const band = count > 0 ? width / count : width;
+  const barWidth = Math.min(density === "compact" ? 6 : Infinity, Math.max(1, band - Math.min(2, band * 0.2)));
   const x = (index: number) => left + (stacked ? index * band + band / 2 : count > 1 ? (index / (count - 1)) * width : width / 2);
   const spanMs = count > 1 ? chart.buckets[count - 1]! - chart.buckets[0]! : 0;
   const labelEvery = Math.max(1, Math.ceil(count / Math.max(1, Math.floor(width / 90))));
@@ -300,8 +303,9 @@ export function TimeseriesChart({
                       className={`timeseriesChart__bar timeseriesChart__color--${colorOf.get(segment.name)}`}
                       height={Math.max(0.5, Math.abs(y(segment.from) - y(segment.to)))}
                       key={`${index}-${segment.name}`}
-                      width={Math.max(1, band - Math.min(2, band * 0.2))}
-                      x={left + index * band + Math.min(1, band * 0.1)}
+                      width={barWidth}
+                      rx={density === "compact" ? 1 : 0}
+                      x={x(index) - barWidth / 2}
                       y={Math.min(y(segment.from), y(segment.to))}
                     />
                   )),
