@@ -9,7 +9,9 @@ import {
   IconFileDiffFilled,
   IconFileTextFilled,
   IconLayoutDashboardFilled,
+  IconPuzzleFilled,
   IconSitemapFilled,
+  IconTagFilled,
   IconWorldFilled,
 } from "@tabler/icons-react";
 import {
@@ -18,9 +20,7 @@ import {
   GearIcon,
   LightningIcon,
   ListBulletsIcon,
-  PlugsConnectedIcon,
   ScanIcon,
-  TagIcon,
 } from "@phosphor-icons/react";
 import type { NavigationSection } from "../primary-navigation";
 
@@ -31,7 +31,7 @@ const navigationIcons: Record<NavigationSection, typeof GearIcon | typeof IconBo
   automations: IconBoltFilled,
   dashboards: IconLayoutDashboardFilled,
   errors: IconBugFilled,
-  integrations: PlugsConnectedIcon,
+  integrations: IconPuzzleFilled,
   issues: ListBulletsIcon,
   logs: IconFileTextFilled,
   metrics: IconChartAreaLineFilled,
@@ -41,7 +41,7 @@ const navigationIcons: Record<NavigationSection, typeof GearIcon | typeof IconBo
   skills: IconBookFilled,
   suggestions: FlagIcon,
   synthetics: IconWorldFilled,
-  "tag-mode": TagIcon,
+  "tag-mode": IconTagFilled,
   "telemetry-overview": IconCompassFilled,
   traces: IconSitemapFilled,
 };
