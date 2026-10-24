@@ -6,16 +6,23 @@ import { initializeErrorMonitoring, reportWorkerException } from "./monitoring.j
 // Runs the real Sentry client so the event is prepared and normalized as it
 // would be in production, and records it instead of sending it.
 const sent: Event[] = [];
+const transactions: Event[] = [];
 const transport: NonNullable<NodeOptions["transport"]> = () => ({
   flush: async () => true,
   send: async (envelope) => {
     for (const [header, payload] of envelope[1]) {
       if (header.type === "event") sent.push(payload as Event);
+      if (header.type === "transaction") transactions.push(payload as Event);
     }
     return {};
   },
 });
-Sentry.init({ defaultIntegrations: false, dsn: "https://public@example.invalid/1", transport });
+Sentry.init({
+  defaultIntegrations: false,
+  dsn: "https://public@example.invalid/1",
+  tracesSampleRate: 1,
+  transport,
+});
 
 afterAll(async () => {
   await Sentry.close();
@@ -37,5 +44,16 @@ describe("worker error monitoring with the Sentry client", () => {
     expect(sent.at(-1)?.contexts?.aggregated_errors).toEqual({
       error_1: "Error: The usage allowance for this billing period is used up",
     });
+  });
+
+  it("sends transactions without walking into Sentry's own client", async () => {
+    initializeErrorMonitoring({ SENTRY_DSN: "https://public@example.invalid/1" });
+    const errorsBefore = sent.length;
+
+    Sentry.startSpan({ name: "worker job", forceTransaction: true }, () => {});
+    await Sentry.flush(2_000);
+
+    expect(transactions.at(-1)?.transaction).toBe("worker job");
+    expect(sent.slice(errorsBefore)).toEqual([]);
   });
 });
