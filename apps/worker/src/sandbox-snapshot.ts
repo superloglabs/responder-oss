@@ -12,10 +12,11 @@ export const sandboxSnapshotBaseImage = "debian:12.9";
 export const sandboxSnapshotResources = { cpu: 2, disk: 10, memory: 4 };
 
 // The repositories' toolchain. pnpm switches to each project's pinned version.
-const nodeVersion = "24.21.0";
+const nodeVersion = "24.22.1";
 const nodeArchive = `node-v${nodeVersion}-linux-x64.tar.xz`;
-const nodeArchiveSha256 = "fd8e59d5a511510f6a298afb548f18c7d2b1be404d8b4a27d94fbe49f56cb2d6";
+const nodeArchiveSha256 = "6c172a9ab6718f7b801fb5a7bd486af2ee5e32758086a04b84fcce2aa77095e6";
 const pnpmVersion = "11.15.0";
+const bunVersion = "1.4.4";
 
 function npmInstall(root: string, packageSpec: string): string {
   return `npm install --prefix ${root} --ignore-scripts --no-audit --no-fund --no-package-lock --no-save ${packageSpec}`;
@@ -37,7 +38,10 @@ export function sandboxSnapshotCommands(): string[] {
       `[ "$(node --version)" = "v${nodeVersion}" ]`,
     ].join(" && "),
     `npm install --global --no-audit --no-fund pnpm@${pnpmVersion}`,
-    "curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash",
+    [
+      `curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash -s bun-v${bunVersion}`,
+      `[ "$(bun --version)" = "${bunVersion}" ]`,
+    ].join(" && "),
     npmInstall(codexRoot, `@openai/codex@${codexCliVersion}`),
     npmInstall(claudeRoot, `@anthropic-ai/claude-agent-sdk@${claudeAgentSdkVersion}`),
     npmInstall(openCodeRoot, `opencode-ai@${openCodeVersion}`),
