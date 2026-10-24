@@ -18,10 +18,12 @@ describe("sandbox snapshot", () => {
     expect(commands).toContain("build-essential ca-certificates curl git python3 ripgrep tar unzip xz-utils");
   });
 
-  it("installs a checksum-verified Node.js 24 and pnpm for the repositories", () => {
+  it("installs a checksum-verified Node.js 24, pnpm, and Bun for the repositories", () => {
     const commands = sandboxSnapshotCommands().join("\n");
     expect(commands).toMatch(/sha256sum -c -/u);
-    expect(commands).toContain('[ "$(node --version)" = "v24.21.0" ]');
+    expect(commands).toContain('[ "$(node --version)" = "v24.22.1" ]');
+    expect(commands).toContain("BUN_INSTALL=/usr/local bash -s bun-v1.4.4");
+    expect(commands).toContain('[ "$(bun --version)" = "1.4.4" ]');
     expect(commands).toContain("pnpm@11.15.0");
   });
 
