@@ -41,7 +41,11 @@ import { notifyBillingLimitReached } from "@responder/core/billing/notifications
 import { usageLimitFromAllowance } from "@responder/core/billing/usage-limit";
 import { refreshSlackChannelResources } from "@responder/core/integrations/slack-channels";
 import { usageWaiverStart, waiveAutomationRunUsage } from "@responder/core/billing/usage-waivers";
-import { getOrganizationModelCredential, selectOrganizationModelCredential } from "@responder/core/db/automation-model-credentials";
+import {
+  getOrganizationModelCredential,
+  selectOrganizationModelCredential,
+  SubscriptionCredentialUnavailableError,
+} from "@responder/core/db/automation-model-credentials";
 import { listProviderModels, matchProviderModel, ModelCatalogError } from "@responder/core/automations/model-catalog";
 import { modelProvider, type ModelProviderId } from "@responder/core/automations/model-providers";
 import { parseSubscriptionAuth, subscriptionAuthForSandbox } from "@responder/core/automations/chatgpt-subscription";
@@ -66,7 +70,7 @@ import {
   runInFreshAutomationSandbox,
   type PausedAutomationSandbox,
 } from "./automation-sandbox.js";
-import { runCodexAutomation } from "./codex-automation-harness.js";
+import { runCodexAutomation, SubscriptionLoginRejectedError } from "./codex-automation-harness.js";
 import { runClaudeAutomation } from "./claude-automation-harness.js";
 import { runOpenCodeAutomation } from "./opencode-automation-harness.js";
 import { responderIntegrationsUrl, safeInvestigationError } from "./investigate.js";
@@ -74,6 +78,7 @@ import { reportWorkerException } from "./monitoring.js";
 import {
   createSubscriptionRunSecret,
   deleteSubscriptionRunSecret,
+  refreshSubscriptionInSandbox,
   subscriptionAuthCoveringRun,
   subscriptionSecretEnvironmentVariable,
   type SubscriptionRunSecret,
@@ -181,6 +186,7 @@ export interface AutomationRunDependencies {
   subscriptionAuth: (owner: { credentialId: string; organizationId: string }, validUntil: Date) => Promise<string>;
   createSubscriptionSecret: (input: { accessToken: string; runId: string }) => Promise<SubscriptionRunSecret>;
   deleteSubscriptionSecret: (secretId: string) => Promise<void>;
+  refreshSubscription: (owner: { credentialId: string; organizationId: string }) => Promise<void>;
   updateEvent: typeof updateAutomationRunEvent;
   usageWaiverStart: typeof usageWaiverStart;
   waiveUsage: typeof waiveAutomationRunUsage;
@@ -235,6 +241,7 @@ export const defaultAutomationRunDependencies: AutomationRunDependencies = {
   subscriptionAuth: (owner, validUntil) => subscriptionAuthCoveringRun(owner, validUntil),
   createSubscriptionSecret: (input) => createSubscriptionRunSecret(input),
   deleteSubscriptionSecret: (secretId) => deleteSubscriptionRunSecret(secretId),
+  refreshSubscription: (owner) => refreshSubscriptionInSandbox(owner),
   updateEvent: updateAutomationRunEvent,
   usageWaiverStart,
   waiveUsage: waiveAutomationRunUsage,
@@ -1122,6 +1129,20 @@ export async function processAutomationRun(
                 runId: run.runId,
               }).catch(() => false);
             if (allowanceExhausted) throw new AutomationAllowanceExhaustedError("usage_credit", machinesUseCredit);
+          }
+          // Renews the login now so the next run does not fail the same way.
+          // This run still fails; it holds no refresh token of its own. A
+          // concurrent run that renews the login first holds it meanwhile.
+          if (error instanceof SubscriptionLoginRejectedError && credentialId) {
+            await dependencies.refreshSubscription({ credentialId, organizationId: run.organizationId })
+              .catch((refreshError: unknown) => refreshError instanceof SubscriptionCredentialUnavailableError
+                ? undefined
+                : dependencies.reportException(refreshError, {
+                  jobId,
+                  operation: "automation",
+                  organizationId: run.organizationId,
+                  requestId: run.runId,
+                }).catch(() => undefined));
           }
           throw error;
         }

@@ -91,6 +91,14 @@ function harnessFailure(output: string): string {
   return reason ? `Codex automation harness failed: ${reason}` : "Codex automation harness failed";
 }
 
+// ChatGPT can reject a subscription login before its stated expiry. The run
+// holds no refresh token, so the worker renews the stored login instead.
+export class SubscriptionLoginRejectedError extends AutomationHarnessError {}
+
+function subscriptionLoginRejected(output: string): boolean {
+  return /unauthorized \(401\)|\b401 Unauthorized\b/iu.test(codexError(output) ?? "");
+}
+
 // Names the ChatGPT refusals the organization can fix itself.
 function subscriptionRefusal(output: string, model: string): string | null {
   const failure = turnFailure(output) ?? "";
@@ -313,6 +321,8 @@ export async function runCodexAutomation(
   if (!commandSucceeded(output)) {
     const refusal = input.model.subscription ? subscriptionRefusal(output, input.model.model) : null;
     if (refusal) throw new AutomationHarnessError(refusal, output, true);
+    if (input.model.subscription && subscriptionLoginRejected(output))
+      throw new SubscriptionLoginRejectedError(harnessFailure(output), output);
     throw new AutomationHarnessError(harnessFailure(output), output);
   }
   return { eventStream: output };
