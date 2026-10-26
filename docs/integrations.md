@@ -1025,9 +1025,10 @@ it runs beside the system it replaces. The pause is a row in
 are still checked and error issues still grouped, but alerts post nothing to
 Slack and start no automations, and the Errors trigger starts no runs. An
 activation that opens while paused is never announced, even if it is still
-firing when the pause ends, and its page shows the notification as Paused.
-Issues that opened while paused are not new afterward; only a later
-regression starts a run.
+firing when the pause ends, and its page shows the notification as Paused. An
+activation announced before the pause gets its recovery reply after the pause
+ends, if it recovered within the last hour. Issues that opened while paused are
+not new afterward; only a later regression starts a run.
 
 ## Webhook trigger
 

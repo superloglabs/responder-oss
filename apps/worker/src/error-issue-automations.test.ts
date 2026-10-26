@@ -49,7 +49,6 @@ function dependencies(overrides: Partial<ErrorIssueAutomationDependencies> = {})
     find: vi.fn(async () => [{ automationId: "automation-1" }]),
     issue: vi.fn(async (_organizationId: string, id: string) => ({ ...issue, id })),
     origin: "https://superlog.sh",
-    paused: vi.fn(async () => new Set<string>()),
     queue: vi.fn(async () => undefined),
     ...overrides,
   };
@@ -59,7 +58,7 @@ describe("startErrorIssueAutomations", () => {
   it("starts a run per matching automation with the issue as its trigger", async () => {
     const deps = dependencies({ find: vi.fn(async () => [{ automationId: "automation-1" }, { automationId: "automation-2" }]) });
 
-    expect(await startErrorIssueAutomations([{ issueId, organizationId, transition: "new" }], deps)).toBe(2);
+    expect(await startErrorIssueAutomations([{ issueId, notificationsPaused: false, organizationId, transition: "new" }], deps)).toBe(2);
     expect(deps.find).toHaveBeenCalledWith({ eventType: "new_issue", organizationId, service: "api" });
     expect(deps.begin).toHaveBeenCalledWith({
       automationId: "automation-1",
@@ -74,22 +73,20 @@ describe("startErrorIssueAutomations", () => {
     expect(deps.queue).toHaveBeenCalledTimes(2);
   });
 
-  it("starts nothing for workspaces whose notifications are paused", async () => {
-    const pausedOrganizationId = "0b9f6b9e-2f4a-4c1e-9d2b-3f8a6c1d7e02";
-    const deps = dependencies({ paused: vi.fn(async () => new Set([pausedOrganizationId])) });
+  it("starts nothing for changes recorded while notifications were paused", async () => {
+    const deps = dependencies();
 
     expect(await startErrorIssueAutomations([
-      { issueId: "22222222-2222-4222-8222-222222222222", organizationId: pausedOrganizationId, transition: "new" },
-      { issueId, organizationId, transition: "new" },
+      { issueId: "22222222-2222-4222-8222-222222222222", notificationsPaused: true, organizationId, transition: "new" },
+      { issueId, notificationsPaused: false, organizationId, transition: "new" },
     ], deps)).toBe(1);
-    expect(deps.paused).toHaveBeenCalledWith([pausedOrganizationId, organizationId]);
     expect(deps.issue).toHaveBeenCalledTimes(1);
     expect(deps.issue).toHaveBeenCalledWith(organizationId, issueId);
   });
 
   it("runs once per regression, keyed by when the issue reopened", async () => {
     const deps = dependencies();
-    await startErrorIssueAutomations([{ issueId, organizationId, transition: "regressed" }], deps);
+    await startErrorIssueAutomations([{ issueId, notificationsPaused: false, organizationId, transition: "regressed" }], deps);
 
     expect(deps.find).toHaveBeenCalledWith(expect.objectContaining({ eventType: "regression" }));
     expect(deps.begin).toHaveBeenCalledWith(expect.objectContaining({
@@ -101,7 +98,7 @@ describe("startErrorIssueAutomations", () => {
     const deps = dependencies({
       begin: vi.fn(async () => ({ created: false as const, organizationId, runId: "run" })) as unknown as ErrorIssueAutomationDependencies["begin"],
     });
-    expect(await startErrorIssueAutomations([{ issueId, organizationId, transition: "new" }], deps)).toBe(0);
+    expect(await startErrorIssueAutomations([{ issueId, notificationsPaused: false, organizationId, transition: "new" }], deps)).toBe(0);
     expect(deps.queue).not.toHaveBeenCalled();
   });
 
@@ -110,8 +107,8 @@ describe("startErrorIssueAutomations", () => {
     const queue = vi.fn().mockRejectedValueOnce(new Error("queue down")).mockResolvedValue(undefined);
     const deps = dependencies({ queue });
     const changes = [
-      { issueId, organizationId, transition: "new" as const },
-      { issueId: "22222222-2222-4222-8222-222222222222", organizationId, transition: "new" as const },
+      { issueId, notificationsPaused: false, organizationId, transition: "new" as const },
+      { issueId: "22222222-2222-4222-8222-222222222222", notificationsPaused: false, organizationId, transition: "new" as const },
     ];
 
     expect(await startErrorIssueAutomations(changes, deps)).toBe(1);
@@ -127,6 +124,7 @@ describe("startErrorIssueAutomations", () => {
     const deps = dependencies({ queue });
     const changes = Array.from({ length: errorRunsPerAutomationPerPass + 2 }, (_, index) => ({
       issueId: `issue-${index}`,
+      notificationsPaused: false,
       organizationId,
       transition: "new" as const,
     }));
@@ -140,6 +138,7 @@ describe("startErrorIssueAutomations", () => {
     const deps = dependencies();
     const changes = Array.from({ length: errorRunsPerAutomationPerPass + 3 }, (_, index) => ({
       issueId: `issue-${index}`,
+      notificationsPaused: false,
       organizationId,
       transition: "new" as const,
     }));
@@ -151,11 +150,11 @@ describe("startErrorIssueAutomations", () => {
 
   it("skips issues without a matching automation or that no longer exist", async () => {
     const deps = dependencies({ find: vi.fn(async () => []) });
-    expect(await startErrorIssueAutomations([{ issueId, organizationId, transition: "new" }], deps)).toBe(0);
+    expect(await startErrorIssueAutomations([{ issueId, notificationsPaused: false, organizationId, transition: "new" }], deps)).toBe(0);
     expect(deps.begin).not.toHaveBeenCalled();
 
     const gone = dependencies({ issue: vi.fn(async () => null) });
-    expect(await startErrorIssueAutomations([{ issueId, organizationId, transition: "new" }], gone)).toBe(0);
+    expect(await startErrorIssueAutomations([{ issueId, notificationsPaused: false, organizationId, transition: "new" }], gone)).toBe(0);
     expect(gone.find).not.toHaveBeenCalled();
   });
 });

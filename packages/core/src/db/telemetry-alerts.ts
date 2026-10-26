@@ -284,7 +284,11 @@ export async function deleteTelemetryAlert(organizationId: string, alertId: stri
   return deleted.length > 0;
 }
 
-export type DueTelemetryAlert = TelemetryAlert & { organizationId: string };
+export type DueTelemetryAlert = TelemetryAlert & {
+  // Whether the workspace's notifications are paused now.
+  notificationsPaused: boolean;
+  organizationId: string;
+};
 
 // Claims enabled alerts whose interval has passed, for workspaces that can
 // use alerts. Claiming stamps the check time, so
@@ -305,6 +309,7 @@ export async function claimDueTelemetryAlerts(limit: number): Promise<DueTelemet
     last_evaluated_at: Date | string | null;
     metric_name: string | null;
     name: string;
+    notifications_paused: boolean;
     organization_id: string;
     slack_channel_id: string | null;
     slack_integration_account_id: string | null;
@@ -327,7 +332,8 @@ export async function claimDueTelemetryAlerts(limit: number): Promise<DueTelemet
       limit ${limit}
       for update of alert skip locked
     )
-    returning *
+    returning *, exists (select 1 from ${telemetryNotificationPauses} pause
+      where pause.organization_id = ${telemetryAlerts.organizationId}) as notifications_paused
   `);
   const time = (value: Date | string) => new Date(value).toISOString();
   return result.rows.map((row) => ({
@@ -345,6 +351,7 @@ export async function claimDueTelemetryAlerts(limit: number): Promise<DueTelemet
     lastEvaluatedAt: row.last_evaluated_at ? time(row.last_evaluated_at) : null,
     metricName: row.metric_name,
     name: row.name,
+    notificationsPaused: row.notifications_paused,
     organizationId: row.organization_id,
     slack:
       row.slack_channel_id && row.slack_integration_account_id

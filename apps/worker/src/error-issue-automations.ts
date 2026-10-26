@@ -4,7 +4,6 @@ import {
   findAutomationsForErrorIssue,
 } from "@responder/core/db/automations";
 import { findErrorIssue, type ErrorIssue } from "@responder/core/db/error-issues";
-import { pausedTelemetryNotificationOrganizations } from "@responder/core/db/telemetry-notification-pauses";
 import { responderErrorIssueUrl } from "@responder/core/responder-urls";
 import type { ErrorIssueChange } from "./error-issues.js";
 
@@ -14,7 +13,6 @@ export interface ErrorIssueAutomationDependencies {
   find: typeof findAutomationsForErrorIssue;
   issue: typeof findErrorIssue;
   origin: string | null;
-  paused: typeof pausedTelemetryNotificationOrganizations;
   queue: (run: { organizationId: string; runId: string }) => Promise<void>;
 }
 
@@ -24,7 +22,6 @@ export const defaultErrorIssueAutomationDependencies: Omit<ErrorIssueAutomationD
   find: findAutomationsForErrorIssue,
   issue: findErrorIssue,
   origin: process.env.RESPONDER_APP_URL ?? process.env.BETTER_AUTH_URL ?? null,
-  paused: pausedTelemetryNotificationOrganizations,
 };
 
 // Runs one automation starts per pass. A deploy that breaks many things at
@@ -95,9 +92,8 @@ export async function startErrorIssueAutomations(
 ): Promise<number> {
   const startedPerAutomation = new Map<string, number>();
   let started = 0;
-  const paused = changes.length > 0 ? await dependencies.paused(changes.map((change) => change.organizationId)) : new Set<string>();
   for (const change of changes) {
-    if (paused.has(change.organizationId)) continue;
+    if (change.notificationsPaused) continue;
     try {
       const issue = await dependencies.issue(change.organizationId, change.issueId);
       if (!issue) continue;

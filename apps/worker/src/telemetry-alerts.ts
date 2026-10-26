@@ -100,7 +100,9 @@ export async function checkTelemetryAlert(
 
   async function announce(episode: OpenTelemetryAlertEpisode, value: number) {
     const target = slackTarget(episode);
-    if (!target || episode.notificationsPaused || episode.slackMessageTs || announcements >= announcementsPerCheck) return;
+    // An episode opened while paused stays unannounced after the pause ends.
+    if (!target || alert.notificationsPaused || episode.notificationsPaused) return;
+    if (episode.slackMessageTs || announcements >= announcementsPerCheck) return;
     announcements += 1;
     const content = alertFiringMessage(message(episode.groupKey, value));
     const [delivery] = await dependencies.post({
@@ -143,6 +145,8 @@ export async function checkTelemetryAlert(
       await dependencies.markRecoveryNotified(episode.id);
       return;
     }
+    // Posted once the pause ends, if the recovery is still recent.
+    if (alert.notificationsPaused) return;
     const content = alertRecoveredMessage({
       ...message(episode.groupKey, value),
       firingForMs: episode.endedAt.getTime() - episode.startedAt.getTime(),

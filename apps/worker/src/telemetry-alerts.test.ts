@@ -20,6 +20,7 @@ const alert: DueTelemetryAlert = {
   lastEvaluatedAt: null,
   metricName: null,
   name: "Checkout errors",
+  notificationsPaused: false,
   organizationId: "org-1",
   slack,
   source: "logs",
@@ -132,6 +133,25 @@ describe("checkTelemetryAlert", () => {
       expect(deps.post).not.toHaveBeenCalled();
       expect(deps.recordCheck).toHaveBeenCalledWith("alert-1", null);
     }
+    expect(startAutomations).not.toHaveBeenCalled();
+  });
+
+  it("posts nothing while the workspace is paused, even for episodes opened before", async () => {
+    const paused = { ...alert, notificationsPaused: true };
+    const startAutomations = vi.fn(async () => 1);
+    const retried = dependencies({ openEpisodes: vi.fn(async () => [episode({ slackMessageTs: null })]), startAutomations });
+    await checkTelemetryAlert(paused, {} as never, retried);
+
+    const recovered = dependencies({
+      openEpisodes: vi.fn(async () => [episode()]),
+      values: vi.fn(async () => [{ group: "", value: 4 }]),
+    });
+    await checkTelemetryAlert(paused, {} as never, recovered);
+    expect(recovered.resolveEpisode).toHaveBeenCalledWith("episode-1", 4);
+    // Left for the reply once the pause ends.
+    expect(recovered.markRecoveryNotified).not.toHaveBeenCalled();
+
+    for (const deps of [retried, recovered]) expect(deps.post).not.toHaveBeenCalled();
     expect(startAutomations).not.toHaveBeenCalled();
   });
 
