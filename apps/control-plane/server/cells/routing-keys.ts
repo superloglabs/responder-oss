@@ -83,3 +83,17 @@ export function webhookRoutingKey(
       return null;
   }
 }
+
+// The provider app a webhook was sent to, where the provider names it: Slack
+// puts `api_app_id` in events and interactions.
+export function webhookAppId(path: string, contentType: string | undefined, body: Uint8Array): string | null {
+  const route = path.replace(/\/$/u, "");
+  if (route === "/api/webhooks/slack/actions") {
+    if (!contentType?.toLowerCase().includes("application/x-www-form-urlencoded")) return null;
+    const payload = new URLSearchParams(new TextDecoder().decode(body)).get("payload");
+    return payload ? text(parseJson(new TextEncoder().encode(payload))?.api_app_id) : null;
+  }
+  if (route === "/api/webhooks/slack") return text(parseJson(body)?.api_app_id);
+  return null;
+}
+

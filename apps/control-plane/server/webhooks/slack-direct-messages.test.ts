@@ -149,6 +149,30 @@ describe("Slack direct messages", () => {
     vi.clearAllMocks();
   });
 
+  it("accepts another configured app's events and looks up only that app's connections", async () => {
+    vi.stubEnv("SLACK_SIGNING_SECRET", "default-app-secret");
+    vi.stubEnv("SLACK_ADDITIONAL_APPS", JSON.stringify([{ appId: "A0OTHER", signingSecret }]));
+
+    const response = await sign(JSON.stringify({
+      api_app_id: "A0OTHER",
+      event: { channel: "D123", channel_type: "im", text: "Hi", ts: "1790000002.000100", type: "message", user: "U123" },
+      event_id: "Ev3",
+      team_id: "T123",
+      type: "event_callback",
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.findAgents).toHaveBeenCalledWith(expect.objectContaining({ appId: "A0OTHER", teamId: "T123" }));
+  });
+
+  it("rejects a request no configured app signed", async () => {
+    vi.stubEnv("SLACK_SIGNING_SECRET", "default-app-secret");
+    vi.stubEnv("SLACK_ADDITIONAL_APPS", JSON.stringify([{ appId: "A0OTHER", signingSecret: "other-secret" }]));
+
+    expect((await directMessage()).status).toBe(401);
+    expect(mocks.findAgents).not.toHaveBeenCalled();
+  });
+
   it("answers a direct message with tag mode in the message's thread", async () => {
     const response = await directMessage();
 

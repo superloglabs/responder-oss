@@ -4,6 +4,7 @@ import { z } from "zod";
 import { captureAnalyticsEvent } from "@responder/core/analytics";
 import { decryptCredentials } from "../../../../packages/core/src/credentials/encryption.js";
 import { findAgentsForSlackEvent } from "../../../../packages/core/src/db/agents.js";
+import { slackSigningSecrets } from "../../../../packages/core/src/integrations/slack-apps.js";
 import {
   automationButtonIndex,
   pressedAutomationButtonBlocks,
@@ -130,6 +131,8 @@ const slackMessageSchema = z.object({
 
 const slackEventCallbackSchema = z.object({
   type: z.literal("event_callback"),
+  // The app the event was sent to.
+  api_app_id: z.string().min(1).optional(),
   team_id: z.string().min(1),
   event_id: z.string().min(1),
   event: slackMessageSchema,
@@ -137,6 +140,7 @@ const slackEventCallbackSchema = z.object({
 // Slack sends this each time a person opens one of the app's tabs.
 const slackAppHomeOpenedSchema = z.object({
   type: z.literal("event_callback"),
+  api_app_id: z.string().min(1).optional(),
   team_id: z.string().min(1),
   event: z.object({
     type: z.literal("app_home_opened"),
@@ -189,6 +193,7 @@ function safeEqual(left: string, right: string): boolean {
   );
 }
 
+// A request may come from any of the Slack apps the instance accepts.
 export function verifySlackSignature(input: {
   rawBody: string;
   signature: string | undefined;
@@ -196,8 +201,9 @@ export function verifySlackSignature(input: {
   signingSecret?: string;
   now?: number;
 }): boolean {
-  const signingSecret = input.signingSecret ?? process.env.SLACK_SIGNING_SECRET;
-  if (!signingSecret || !input.signature || !input.timestamp) return false;
+  const signingSecrets = input.signingSecret ? [input.signingSecret] : slackSigningSecrets();
+  const signature = input.signature;
+  if (signingSecrets.length === 0 || !signature || !input.timestamp) return false;
 
   const timestamp = Number(input.timestamp);
   const now = input.now ?? Date.now();
@@ -208,10 +214,12 @@ export function verifySlackSignature(input: {
     return false;
   }
 
-  const digest = createHmac("sha256", signingSecret)
-    .update(`v0:${input.timestamp}:${input.rawBody}`)
-    .digest("hex");
-  return safeEqual(`v0=${digest}`, input.signature);
+  return signingSecrets.some((signingSecret) => {
+    const digest = createHmac("sha256", signingSecret)
+      .update(`v0:${input.timestamp}:${input.rawBody}`)
+      .digest("hex");
+    return safeEqual(`v0=${digest}`, signature);
+  });
 }
 
 function slackBlockStrings(value: unknown): string[] {
@@ -1102,13 +1110,14 @@ function slackAccountToken(encryptedCredentials: string): string {
 
 // Uses the organization's own token when one is named.
 async function replyInSlackDirectMessage(input: {
+  appId?: string;
   channelId: string;
   integrationAccountId?: string;
   teamId: string;
   text: string;
   threadTimestamp: string;
 }): Promise<void> {
-  const accounts = await listConnectedSlackAccountsForTeam(input.teamId);
+  const accounts = await listConnectedSlackAccountsForTeam(input.teamId, input.appId);
   const account = accounts.find((candidate) => candidate.id === input.integrationAccountId) ??
     accounts[0];
   if (!account?.encryptedCredentials) return;
@@ -1141,6 +1150,7 @@ export function slackDirectMessageBody(event: SlackMessageEvent): string {
 // A direct message works like a mention: tag mode answers in the message's
 // thread, and a reply in that thread continues the conversation.
 export async function answerSlackDirectMessage(input: {
+  appId?: string;
   event: SlackMessageEvent;
   eventId: string;
   teamId: string;
@@ -1154,6 +1164,7 @@ export async function answerSlackDirectMessage(input: {
   const threadTimestamp = event.thread_ts ?? event.ts;
   const body = slackDirectMessageBody(event);
   const matches = await findAgentsForSlackEvent({
+    appId: input.appId,
     channelId: event.channel,
     eventType: "direct_message",
     teamId: input.teamId,
@@ -1161,6 +1172,7 @@ export async function answerSlackDirectMessage(input: {
   });
   if (matches.length === 0) {
     await replyInSlackDirectMessage({
+      appId: input.appId,
       channelId: event.channel,
       teamId: input.teamId,
       text: slackTagModeOffReply,
@@ -1184,6 +1196,7 @@ export async function answerSlackDirectMessage(input: {
   // Another organization on the workspace may still answer.
   if (!started.some(Boolean)) {
     await replyInSlackDirectMessage({
+      appId: input.appId,
       channelId: event.channel,
       integrationAccountId: matches[0]?.integrationAccountId,
       teamId: input.teamId,
@@ -1196,11 +1209,12 @@ export async function answerSlackDirectMessage(input: {
 
 // Welcomes a person the first time they open the app's messages tab.
 export async function welcomeToSlackMessagesTab(input: {
+  appId?: string;
   channelId: string;
   teamId: string;
   userId: string;
 }): Promise<boolean> {
-  const [account] = await listConnectedSlackAccountsForTeam(input.teamId);
+  const [account] = await listConnectedSlackAccountsForTeam(input.teamId, input.appId);
   if (!account?.encryptedCredentials) return false;
   const claim = { teamId: input.teamId, userId: input.userId };
   if (!(await claimSlackDirectMessageWelcome(claim))) return false;
@@ -1253,9 +1267,10 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
 
   const appHomeOpened = slackAppHomeOpenedSchema.safeParse(payload);
   if (appHomeOpened.success) {
-    const { event, team_id: teamId } = appHomeOpened.data;
+    const { api_app_id: appId, event, team_id: teamId } = appHomeOpened.data;
     const welcomed = event.tab === "messages" &&
       await welcomeToSlackMessagesTab({
+        appId,
         channelId: event.channel,
         teamId,
         userId: event.user,
@@ -1296,6 +1311,7 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
       return context.json({ ok: true, ignored: true });
     }
     return context.json(await answerSlackDirectMessage({
+      appId: callback.data.api_app_id,
       event,
       eventId: callback.data.event_id,
       teamId: callback.data.team_id,
@@ -1355,6 +1371,7 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
   // A thread reply also sent to the channel, as Sentry posts a regression.
   const broadcast = event.subtype === "thread_broadcast";
   const automationMatches = await findAutomationsForSlackEvent({
+    appId: callback.data.api_app_id,
     authorIds: author?.ids ?? [],
     broadcast,
     channelId: event.channel,
@@ -1587,6 +1604,7 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
   }
 
   matches = await findAgentsForSlackEvent({
+    appId: callback.data.api_app_id,
     teamId: callback.data.team_id,
     channelId: event.channel,
     eventType: event.type,

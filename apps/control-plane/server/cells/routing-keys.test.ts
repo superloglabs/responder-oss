@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { webhookRoutingKey } from "./routing-keys.js";
+import { webhookAppId, webhookRoutingKey } from "./routing-keys.js";
 
 const json = (value: unknown) => new TextEncoder().encode(JSON.stringify(value));
 
@@ -78,5 +78,15 @@ describe("webhook routing keys", () => {
     expect(webhookRoutingKey("/api/webhooks/unknown", "application/json", json({ team_id: "T1" }))).toBeNull();
     expect(webhookRoutingKey("/api/webhooks/slack", "application/json", new TextEncoder().encode("{"))).toBeNull();
     expect(webhookRoutingKey("/api/webhooks/github", "application/json", json({ installation: {} }))).toBeNull();
+  });
+
+  it("reads the Slack app an event or interaction was sent to", () => {
+    expect(webhookAppId("/api/webhooks/slack", "application/json", json({ api_app_id: "A1", team_id: "T1" }))).toBe("A1");
+    const body = new TextEncoder().encode(
+      `payload=${encodeURIComponent(JSON.stringify({ api_app_id: "A2", team: { id: "T1" } }))}`,
+    );
+    expect(webhookAppId("/api/webhooks/slack/actions", "application/x-www-form-urlencoded", body)).toBe("A2");
+    expect(webhookAppId("/api/webhooks/slack", "application/json", json({ team_id: "T1" }))).toBeNull();
+    expect(webhookAppId("/api/webhooks/github", "application/json", json({ api_app_id: "A1" }))).toBeNull();
   });
 });

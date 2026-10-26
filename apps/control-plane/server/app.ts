@@ -7,8 +7,10 @@ import { cellDirectory } from "../../../packages/core/src/cells.js";
 import {
   hasWebhookTenant,
   webhookTenantSchema,
+  webhookTenantState,
 } from "../../../packages/core/src/db/webhook-tenants.js";
 import { cellCallbackRouter } from "./cells/callback-router.js";
+import { legacyWebhookForwarder } from "./cells/legacy-webhook-forwarder.js";
 import { cellWebhookRouter } from "./cells/webhook-router.js";
 import { getAuthUserSupportIdentity } from "../../../packages/core/src/db/superusers.js";
 import { investigationRequestSchema } from "../../../packages/core/src/investigations/input.js";
@@ -317,6 +319,7 @@ if (Sentry.isInitialized()) {
 instrumentedApp.use("/api/*", requestMetrics());
 // After the body limits and monitoring, before the webhook and OAuth callback
 // handlers.
+instrumentedApp.use("/api/webhooks/*", legacyWebhookForwarder());
 instrumentedApp.use("/api/webhooks/*", cellWebhookRouter());
 instrumentedApp.use("/api/integrations/:provider/callback", cellCallbackRouter());
 
@@ -343,7 +346,12 @@ export const app = instrumentedApp
       await context.req.json().catch(() => null),
     );
     if (!parsed.success) return context.json({ error: "Invalid tenant" }, 400);
-    return context.json({ held: await hasWebhookTenant(parsed.data) });
+    const tenant = parsed.data;
+    if (tenant.provider === "automation" || tenant.provider === "integration_account") {
+      const held = await hasWebhookTenant(tenant);
+      return context.json({ active: held, held });
+    }
+    return context.json(await webhookTenantState(tenant));
   })
   // Public: the sign-in page offers the other regional cells, if any.
   .get("/api/cells", (context) =>
