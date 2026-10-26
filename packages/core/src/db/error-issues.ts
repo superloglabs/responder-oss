@@ -9,6 +9,7 @@ import {
   occurrenceTransition,
 } from "../telemetry/error-issues.js";
 import { getDatabase } from "./client.js";
+import { pausedTelemetryNotificationOrganizations } from "./telemetry-notification-pauses.js";
 import { errorIssueCursors, errorIssueDailyCounts, errorIssueHourlyCounts, errorIssues, organizationCapabilities } from "./schema.js";
 
 type Database = ReturnType<typeof getDatabase>;
@@ -27,6 +28,7 @@ export type RecordedErrorOccurrences = {
 export type ErrorIssueStore = {
   cursor(kind: ErrorIssueKind): Promise<ErrorCandidateCursor | null>;
   organizationIds(): Promise<string[]>;
+  pausedOrganizationIds(): Promise<Set<string>>;
   record(occurrences: ErrorOccurrences): Promise<RecordedErrorOccurrences>;
   saveCursor(kind: ErrorIssueKind, cursor: ErrorCandidateCursor): Promise<void>;
 };
@@ -43,6 +45,7 @@ export async function withErrorIssueStore<T>(pass: (store: ErrorIssueStore) => P
     return pass({
       cursor: (kind) => errorIssueCursor(tx, kind),
       organizationIds: () => telemetryOrganizationIds(tx),
+      pausedOrganizationIds: () => pausedTelemetryNotificationOrganizations(tx),
       // A savepoint per issue, so one failed write does not undo the others.
       record: (occurrences) => tx.transaction((savepoint) => recordErrorOccurrences(savepoint, occurrences)),
       saveCursor: (kind, cursor) => saveErrorIssueCursor(tx, kind, cursor),

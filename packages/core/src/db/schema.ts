@@ -686,6 +686,20 @@ export const organizationCapabilities = pgTable(
   ],
 );
 
+// Workspaces whose telemetry alerts and error issues are checked but announce
+// nothing: no Slack posts, alert automations, or error automations. Operators
+// set it from the control room, for example while a workspace runs beside the
+// system it replaces. Activations opened while paused stay unannounced.
+export const telemetryNotificationPauses = pgTable("telemetry_notification_pauses", {
+  organizationId: uuid("organization_id")
+    .primaryKey()
+    .references(() => organization.id, { onDelete: "cascade" }),
+  pausedBy: uuid("paused_by").references(() => user.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
 // A key an application sends telemetry with. The ingest endpoint tags what it
 // receives with the key's workspace. Only its digest is stored.
 export const telemetryIngestKeys = pgTable(
@@ -900,6 +914,9 @@ export const telemetryAlertEpisodes = pgTable(
     slackMessageTs: text("slack_message_ts"),
     // Set once the recovery is posted, or when there is nothing to post.
     recoveryNotifiedAt: timestamp("recovery_notified_at", { withTimezone: true }),
+    // Opened while the workspace's notifications were paused, so it is never
+    // announced.
+    notificationsPaused: boolean("notifications_paused").notNull().default(false),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

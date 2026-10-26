@@ -593,9 +593,11 @@ function ActivationDetail({ alert, activation }: { alert: TelemetryAlert; activa
                     <td>
                       {notification.sent
                         ? "Delivered"
-                        : notification.label === "Recovered" && activation.endReason === "configuration_changed"
-                          ? "Not sent"
-                          : "Not confirmed"}
+                        : activation.notificationsPaused
+                          ? "Paused"
+                          : notification.label === "Recovered" && activation.endReason === "configuration_changed"
+                            ? "Not sent"
+                            : "Not confirmed"}
                     </td>
                     <td>
                       {notification.sent ? (

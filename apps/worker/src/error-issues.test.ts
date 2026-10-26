@@ -35,6 +35,7 @@ function store(overrides: Partial<ErrorIssueStore> = {}) {
     cursor: vi.fn(async (kind: ErrorIssueKind) => cursors.get(kind) ?? null),
     cursors,
     organizationIds: vi.fn(async () => [organizationId]),
+    pausedOrganizationIds: vi.fn(async () => new Set<string>()),
     record: vi.fn<ErrorIssueStore["record"]>(async () => ({ issueId: "issue-1", transition: "new" })),
     saveCursor: vi.fn(async (kind: ErrorIssueKind, cursor: ErrorCandidateCursor) => {
       cursors.set(kind, cursor);
@@ -82,14 +83,23 @@ describe("ingestErrorIssues", () => {
     ]);
 
     expect(await ingestErrorIssues(deps)).toEqual([
-      { issueId: "span-issue", organizationId, transition: "new" },
-      { issueId: "log-issue", organizationId, transition: "regressed" },
+      { issueId: "span-issue", notificationsPaused: false, organizationId, transition: "new" },
+      { issueId: "log-issue", notificationsPaused: false, organizationId, transition: "regressed" },
     ]);
     expect(deps.candidates).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
       kind: "span",
       organizationIds: [organizationId],
     }));
     expect(fake.saveCursor).toHaveBeenCalledTimes(2);
+  });
+
+  it("marks issues that opened in a workspace whose notifications are paused", async () => {
+    const fake = store({ pausedOrganizationIds: vi.fn(async () => new Set([organizationId])) });
+    const deps = dependencies(fake, (kind) => (kind === "span" ? [candidate({ kind })] : []));
+
+    expect(await ingestErrorIssues(deps)).toEqual([
+      { issueId: "issue-1", notificationsPaused: true, organizationId, transition: "new" },
+    ]);
   });
 
   it("does not report occurrences of open or silenced issues", async () => {
@@ -122,7 +132,7 @@ describe("ingestErrorIssues", () => {
         ]
         : []);
 
-    expect(await ingestErrorIssues(deps)).toEqual([{ issueId: "good", organizationId, transition: "new" }]);
+    expect(await ingestErrorIssues(deps)).toEqual([{ issueId: "good", notificationsPaused: false, organizationId, transition: "new" }]);
     expect(fake.cursors.get("span")).toBeDefined();
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("error_issue_record_failed"));
     warn.mockRestore();

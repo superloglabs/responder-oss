@@ -14,6 +14,9 @@ const candidatesPerPass = 1_000;
 // An issue that opened, or opened again, in a pass.
 export type ErrorIssueChange = {
   issueId: string;
+  // The workspace's notifications were paused during the pass, so the
+  // change starts nothing.
+  notificationsPaused: boolean;
   organizationId: string;
   transition: "new" | "regressed";
 };
@@ -64,6 +67,7 @@ export async function ingestErrorIssues(
   if (!client) return [];
   const changes = await dependencies.withStore(async (store) => {
     const organizationIds = await store.organizationIds();
+    const paused = await store.pausedOrganizationIds();
     const opened: ErrorIssueChange[] = [];
     for (const kind of errorIssueKinds) {
       const window = errorCandidateWindow(await store.cursor(kind), dependencies.now());
@@ -79,6 +83,7 @@ export async function ingestErrorIssues(
           if (recorded.transition === "new" || recorded.transition === "regressed") {
             opened.push({
               issueId: recorded.issueId,
+              notificationsPaused: paused.has(occurrences.organizationId),
               organizationId: occurrences.organizationId,
               transition: recorded.transition,
             });
