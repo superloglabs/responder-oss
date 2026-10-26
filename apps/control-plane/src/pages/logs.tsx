@@ -1,6 +1,7 @@
+import { LogFacets } from "../components/log-facets";
 import { NavigationIcon } from "../components/navigation-icon";
-import { ArrowClockwiseIcon, CaretDownIcon, CaretUpIcon, TreeStructureIcon } from "@phosphor-icons/react";
-import { useMemo, useState } from "react";
+import { ArrowClockwiseIcon, ArrowLeftIcon, ArrowRightIcon, CaretDownIcon, CaretUpIcon, TreeStructureIcon } from "@phosphor-icons/react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { AppShell } from "../components/app-shell";
 import { DataTableSkeleton, ExplorerSkeleton } from "../components/screen-skeletons";
@@ -8,10 +9,8 @@ import { CountHistogram, HistogramLegend, type HistogramSeries } from "../compon
 import { DashboardTimePicker } from "../components/dashboard-time-picker";
 import { TelemetryGate } from "../components/telemetry";
 import {
-  AttributeFacets,
   AttributeTable,
   ExplorerDrawer,
-  ExplorerFacet,
   ExplorerFilterBar,
   type FilterChip,
 } from "../components/telemetry-explorer";
@@ -168,8 +167,9 @@ function logKeyForAttributes(log: LogRecord): string {
   return log.service;
 }
 
-function LogExplorer({ query, refresh, setQuery, timeZone }: {
+function LogExplorer({ query, refresh, setQuery, timeZone, now }: {
   query: LogExplorerQuery;
+  now: number;
   // Changes when someone asks to reload.
   refresh: number;
   setQuery: (update: Partial<LogExplorerQuery>) => void;
@@ -180,10 +180,21 @@ function LogExplorer({ query, refresh, setQuery, timeZone }: {
   const params = logExplorerParams({ ...query, facets: [] });
   const key = `${params}#${refresh}`;
   const rangeKey = `${["range", "from", "to"].map((name) => params.get(name) ?? "").join("|")}#${refresh}`;
-  const logs = useTelemetryQuery(key, () => fetchExplorerLogs(query));
-  const histogram = useTelemetryQuery(key, () => fetchLogHistogram(query));
-  const facets = useTelemetryQuery(key, () => fetchLogFacets(query));
-  const attributeKeys = useTelemetryQuery(rangeKey, () => fetchAttributeKeys(resolveTimeRange(query.range, Date.now()), "logs"));
+  const [pagination, setPagination] = useState({ key, page: 0 });
+  const page = pagination.key === key ? pagination.page : 0;
+  if (pagination.key !== key) setPagination({ key, page: 0 });
+  const window = resolveTimeRange(query.range, now);
+  const requestQuery: LogExplorerQuery = { ...query, range: { kind: "absolute", from: window.since, to: window.until } };
+  const logs = useTelemetryQuery(`${key}#${page}`, () => fetchExplorerLogs(requestQuery, page * 100), false, true);
+  const histogram = useTelemetryQuery(key, () => fetchLogHistogram(requestQuery), false, true);
+  const facets = useTelemetryQuery(key, () => fetchLogFacets(requestQuery), false, true);
+  const attributeKeys = useTelemetryQuery(rangeKey, () => fetchAttributeKeys(resolveTimeRange(query.range, now), "logs"));
+
+  const tableWrap = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const viewport = tableWrap.current?.querySelector(".dsDataTable");
+    if (viewport && !logs.isFetching) viewport.scrollTop = 0;
+  }, [logs.data, logs.isFetching]);
 
   const bars = useMemo(
     () => (histogram.data ? histogramBars(histogram.data, levelSeriesNames, levelSeries) : null),
@@ -256,7 +267,7 @@ function LogExplorer({ query, refresh, setQuery, timeZone }: {
           placeholder="Search messages, key=value or a trace ID"
         />
       </div>
-      <section aria-label="Log volume" className="explorerVolume">
+      <section aria-label="Log volume" aria-busy={histogram.isFetching} className="explorerVolume">
         <div className="explorerVolume__summary">
           <strong>{total === undefined ? "…" : `${total.toLocaleString()} ${total === 1 ? "log" : "logs"}`}</strong>
           <HistogramLegend bars={bars} series={levelChart} />
@@ -269,39 +280,20 @@ function LogExplorer({ query, refresh, setQuery, timeZone }: {
           <button onClick={() => { logs.retry(); histogram.retry(); facets.retry(); }} type="button">Retry</button>
         </div>
       ) : null}
-      <div className="explorerBody">
-        <div aria-label="Log filters" className="explorerFacets" role="group">
-          <ExplorerFacet
-            loading={!facets.data}
-            onToggle={(value) => toggle("severities", value)}
-            options={(facets.data?.severities ?? [])
-              .filter((item) => item.group)
-              .toSorted((a, b) => levelRank(a.group) - levelRank(b.group))
-              .map((item) => ({ count: item.value, label: levelLabel(item.group), value: item.group }))}
-            selected={query.severities}
-            title="Level"
-          />
-          <ExplorerFacet
-            loading={!facets.data}
-            onToggle={(value) => toggle("services", value)}
-            options={(facets.data?.services ?? [])
-              .filter((item) => item.group)
-              .map((item) => ({ count: item.value, label: item.group, value: item.group }))}
-            selected={query.services}
-            title="Service"
-          />
-          <AttributeFacets
-            dataKey={key}
-            filters={query.filters}
-            keys={attributeKeys.data}
-            load={(facetKey) => fetchLogAttributeFacet(query, facetKey)}
-            onFiltersChange={(filters) => setQuery({ filters })}
-            onOpenChange={(facets) => setQuery({ facets })}
-            open={query.facets}
-            scopes={[{ label: "Log attributes", prefix: "log." }, { label: "Resource attributes", prefix: "resource." }]}
-          />
-        </div>
-        <div className="agentListTable explorerTableWrap">
+      <div className="explorerBody explorerBody--logs">
+        <LogFacets
+          dataKey={key}
+          filters={query.filters}
+          keys={attributeKeys.data}
+          load={(facetKey) => fetchLogAttributeFacet(requestQuery, facetKey)}
+          onFiltersChange={(filters) => setQuery({ filters })}
+          onOpenChange={(facets) => setQuery({ facets })}
+          open={query.facets}
+          services={{ loading: !facets.data, selected: query.services, onToggle: value => toggle("services", value), options: (facets.data?.services ?? []).filter(item => item.group).map(item => ({ count: item.value, label: item.group, value: item.group })) }}
+          levels={{ loading: !facets.data, selected: query.severities, onToggle: value => toggle("severities", value), options: (facets.data?.severities ?? []).filter(item => item.group).toSorted((a, b) => levelRank(a.group) - levelRank(b.group)).map(item => ({ count: item.value, label: levelLabel(item.group), value: item.group, color: severityTextTone(item.group) === "danger" ? "#d77878" : severityTextTone(item.group) === "warning" ? "#d8b971" : "#4e58f9" })) }}
+        />
+        <div className="agentListTable explorerTableWrap" ref={tableWrap}>
+          <div className="logResults" aria-busy={logs.isFetching}>
           {logs.data === null ? (
             logs.error ? null : (
               <DataTableSkeleton
@@ -309,7 +301,7 @@ function LogExplorer({ query, refresh, setQuery, timeZone }: {
                 columns={[
                   { header: "Time", key: "time", width: withDate ? "176px" : "124px" },
                   { cell: "badge", header: "Level", key: "severity", width: "76px" },
-                  { header: "Service", key: "service", width: "128px" },
+                  { header: "Service", key: "service", width: "220px" },
                   { header: "Message", key: "message" },
                 ]}
                 label="Loading logs…"
@@ -324,7 +316,7 @@ function LogExplorer({ query, refresh, setQuery, timeZone }: {
                   header: "Time",
                   key: "time",
                   render: (log) => (
-                    <time className="explorerCell--muted" dateTime={logTimestamp(log.timestamp)?.toISOString()}>
+                    <time className="explorerCell--muted logTime" dateTime={logTimestamp(log.timestamp)?.toISOString()}>
                       {formatExplorerTime(log.timestamp, withDate, timeZone)}
                     </time>
                   ),
@@ -339,8 +331,8 @@ function LogExplorer({ query, refresh, setQuery, timeZone }: {
                 {
                   header: "Service",
                   key: "service",
-                  render: (log) => <span className="explorerCell--muted" title={log.service || undefined}>{log.service || "—"}</span>,
-                  width: "128px",
+                  render: (log) => <span className="logService" title={log.service || undefined}>{log.service || "—"}</span>,
+                  width: "220px",
                 },
                 {
                   header: "Message",
@@ -367,7 +359,13 @@ function LogExplorer({ query, refresh, setQuery, timeZone }: {
               variant="workspace"
             />
           )}
-          {rows.length >= 100 ? <p className="explorerMore">Showing the newest 100 logs. Narrow the filters to see others.</p> : null}
+          </div>
+          <nav className="logPagination" aria-label="Log pagination">
+            <span>{logs.data && !logs.isFetching ? `${rows.length ? page * 100 + 1 : 0}–${page * 100 + rows.length} of ${total?.toLocaleString() ?? "…"} logs` : "Loading logs…"}</span>
+            <span>Page {page + 1}{total !== undefined ? ` of ${Math.max(1, Math.ceil(total / 100))}` : ""}</span>
+            <button className="dsButton dsButton--secondary dsButton--small" type="button" disabled={page === 0 || logs.isFetching || logs.data === null} onClick={() => { setSelected(null); setPagination({ key, page: page - 1 }); }}><ArrowLeftIcon size={12} />Previous</button>
+            <button className="dsButton dsButton--secondary dsButton--small" type="button" disabled={logs.isFetching || logs.data === null || rows.length < 100 || (total !== undefined && (page + 1) * 100 >= total)} onClick={() => { setSelected(null); setPagination({ key, page: page + 1 }); }}>Next<ArrowRightIcon size={12} /></button>
+          </nav>
         </div>
       </div>
       {selectedLog ? (
@@ -428,7 +426,7 @@ export function LogsPage() {
           ) : null}
         </header>
         <TelemetryGate signal="Logs" skeleton={<ExplorerSkeleton label="Loading logs…" />} state={telemetry}>
-          <LogExplorer query={query} refresh={refresh} setQuery={setQuery} timeZone={timeZone} />
+          <LogExplorer now={now} query={query} refresh={refresh} setQuery={setQuery} timeZone={timeZone} />
         </TelemetryGate>
       </div>
     </AppShell>

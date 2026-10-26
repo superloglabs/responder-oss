@@ -404,8 +404,10 @@ export function logApiParams(query: LogExplorerQuery, now = Date.now()): URLSear
   return params;
 }
 
-export function fetchExplorerLogs(query: LogExplorerQuery): Promise<LogRecord[]> {
-  return telemetryJson<{ logs: LogRecord[] }>(`/api/telemetry/logs?${logApiParams(query)}`).then((body) => body.logs);
+export function fetchExplorerLogs(query: LogExplorerQuery, offset = 0): Promise<LogRecord[]> {
+  const params = logApiParams(query);
+  params.set("offset", String(offset));
+  return telemetryJson<{ logs: LogRecord[] }>(`/api/telemetry/logs?${params}`).then((body) => body.logs);
 }
 
 export function fetchLogHistogram(query: LogExplorerQuery): Promise<Histogram> {

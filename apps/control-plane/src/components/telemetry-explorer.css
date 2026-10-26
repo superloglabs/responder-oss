@@ -210,3 +210,56 @@
 @media (max-width: 1100px) {
   .overviewTiles, .overviewColumns { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* Logs: one searchable, independently scrolling facet hierarchy. */
+.explorerBody--logs { grid-template-columns: 272px minmax(0, 1fr); gap: 16px; }
+.logFacets { position: relative; display: flex; flex-direction: column; gap: 8px; min-width: 0; min-height: 0; padding: 0 8px; }
+.logFacets > .explorerKeyFacets__search { flex-shrink: 0; max-width: none; }
+.logFacets__viewport { flex: 1; min-height: 0; overflow: auto; scrollbar-width: thin; scrollbar-color: #d4d4d4 transparent; }
+.logFacets__content { display: flex; flex-direction: column; gap: 12px; }
+.logFacets__group { display: flex; flex-direction: column; gap: 4px; }
+.logFacets__heading { display: flex; align-items: center; justify-content: space-between; min-height: 32px; padding: 6px 8px; border: 0; border-radius: 4px; background: #f5f5f5; color: #434343; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.logFacets__heading svg { flex-shrink: 0; color: #666; }
+.logFacets__heading:focus-visible { outline: 2px solid #4e58f9; outline-offset: 2px; }
+.logFacets .explorerAttribute { height: 30px; padding: 0 8px; color: #434343; font-weight: 500; }
+.logFacets .explorerAttribute > svg { order: 2; margin-left: auto; }
+.logFacets .explorerFacet { padding: 0 8px 4px; }
+.logFacets .explorerFacet legend { padding: 0; font-size: 13px; line-height: 20px; }
+.logFacets .explorerFacet__toggle { width: 100%; height: 26px; justify-content: space-between; }
+.logFacets .explorerFacet__toggle svg { order: 2; }
+.explorerFacet--gauges .explorerFacet__option { display: grid; grid-template-columns: 14px minmax(0, 1fr) 80px; grid-template-rows: 20px 16px; gap: 2px 8px; height: auto; margin: 4px 0 4px 8px; }
+.explorerFacet--gauges .explorerFacet__box { grid-column: 1; grid-row: 1; }
+.explorerFacet--gauges .explorerFacet__label { grid-column: 2 / 4; grid-row: 1; color: #434343; overflow: visible; white-space: normal; overflow-wrap: anywhere; }
+.explorerFacet--gauges .explorerFacet__option { grid-template-rows: minmax(20px, auto) 16px; }
+.explorerFacet--gauges .explorerFacet__count { grid-column: 3; grid-row: 2; font-size: 11px; color: #666; text-align: right; }
+.explorerFacet__gauge { grid-column: 2; grid-row: 2; display: flex; height: 4px; border-radius: 2px; overflow: hidden; background: #e8e8e8; }
+.explorerFacet__gauge > span { height: 100%; border-radius: inherit; background: #4e58f9; }
+.logResults { min-height: 0; min-width: 0; }
+.explorerBody--logs .dsDataTable { height: 100%; overflow: auto; overscroll-behavior: none; overflow-anchor: none; scrollbar-width: thin; scrollbar-gutter: stable; }
+.explorerBody--logs .dsDataTable thead { position: sticky; top: 0; z-index: 1; background: #fafafa; }
+.logResults > .dsDataTableGroup { height: 100%; min-height: 0; }
+.logResults[aria-busy="true"] { cursor: progress; }
+.logFacets__viewport { overscroll-behavior: none; overflow-anchor: none; }
+.explorerBody--logs .logTime { color: #666; }
+.logService { color: #434343; white-space: nowrap; }
+.logPagination { display: flex; align-items: center; gap: 8px; margin-top: 16px; color: #666; font-size: 12px; }
+.logPagination > span:first-child { margin-right: auto; }
+.logPagination button { display: flex; align-items: center; gap: 8px; }
+@media (max-width: 800px) {
+  .explorerBody--logs { grid-template-columns: minmax(0, 1fr); }
+  .logFacets { height: 336px; margin-bottom: 0; }
+}
+.explorerFacet--gauges .explorerFacet__option input { top: 3px; left: 0; width: 14px; height: 14px; z-index: 1; cursor: pointer; }
+
+@media (min-width: 801px) {
+  .workspaceContent--wide:has(.explorerBody--logs) { height: 100%; box-sizing: border-box; padding-bottom: 0; min-height: 0; }
+  .explorer:has(.explorerBody--logs) { flex: 1; min-height: 0; }
+  .explorer:has(.explorerBody--logs) > :not(.explorerBody--logs) { flex-shrink: 0; }
+  .explorerBody--logs { flex: 1; min-height: 0; grid-template-rows: minmax(0, 1fr); align-items: stretch; }
+  .explorerBody--logs .explorerTableWrap { display: flex; flex-direction: column; min-height: 0; padding-bottom: 12px; }
+  .explorerBody--logs .logResults { flex: 1; }
+  .explorerBody--logs .logPagination { flex-shrink: 0; }
+}
+@media (max-width: 800px) {
+  .logResults { height: 360px; }
+}

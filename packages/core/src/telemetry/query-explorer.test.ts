@@ -45,6 +45,14 @@ describe("count series groupings", () => {
 });
 
 describe("explorer value lists", () => {
+  it("paginates logs with a bound offset and deterministic tie ordering", async () => {
+    const calls: Call[] = [];
+    await queryLogs(client(calls), "project-1", { limit: 100, offset: 200, range });
+    expect(calls[0]!.params).toMatchObject({ limit: 100, offset: 200 });
+    expect(calls[0]!.query).toContain("LIMIT {limit:UInt32} OFFSET {offset:UInt32}");
+    expect(calls[0]!.query).toContain("ORDER BY Timestamp DESC, ServiceName, TraceId, SpanId, Body");
+  });
+
   it("matches any listed service or level in logs and their counts", async () => {
     const calls: Call[] = [];
     const ch = client(calls);

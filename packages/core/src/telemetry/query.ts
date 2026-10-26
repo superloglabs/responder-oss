@@ -266,6 +266,7 @@ export async function queryLogs(
     services?: string[];
     severities?: string[];
     limit: number;
+    offset?: number;
   },
 ) {
   const { sinceSql, untilSql, sinceExpr, untilExpr } = resolveRange(params.range);
@@ -317,8 +318,8 @@ export async function queryLogs(
       LogAttributes['exception.stacktrace'] AS exception_stacktrace
     FROM otel_logs
     WHERE ${conds.join(" AND ")}
-    ORDER BY Timestamp DESC
-    LIMIT {limit:UInt32}
+    ORDER BY Timestamp DESC, ServiceName, TraceId, SpanId, Body
+    LIMIT {limit:UInt32} OFFSET {offset:UInt32}
   `;
   return retryOneConnectionReset(async () => {
     const r = await ch.query({
@@ -332,6 +333,7 @@ export async function queryLogs(
         search: params.search ?? "",
         traceId: params.traceId ?? "",
         limit: params.limit,
+        offset: params.offset ?? 0,
         ...attr.params,
         ...logAttr.params,
         ...field.params,

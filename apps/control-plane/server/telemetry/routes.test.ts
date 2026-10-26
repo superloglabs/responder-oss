@@ -118,6 +118,15 @@ describe("telemetry routes", () => {
     });
   });
 
+  it("validates and forwards log page offsets", async () => {
+    const { app, dependencies } = routes();
+    expect((await app.request("/logs?offset=100")).status).toBe(200);
+    expect(dependencies.queryLogs).toHaveBeenCalledWith(expect.anything(), organizationId, expect.objectContaining({ limit: 100, offset: 100 }));
+    for (const offset of ["-1", "1.5", "NaN", "1000001"]) {
+      expect((await app.request(`/logs?offset=${offset}`)).status).toBe(400);
+    }
+  });
+
   it("matches any of repeated values and attribute filters in the log explorer", async () => {
     const { app, dependencies } = routes();
 
