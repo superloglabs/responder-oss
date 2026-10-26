@@ -1,7 +1,7 @@
 import { CaretDownIcon, CaretRightIcon, CheckIcon, MagnifyingGlassIcon, XIcon } from "@phosphor-icons/react";
 import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { IconButton, SegmentedControl } from "../design-system";
-import { telemetryRanges, type ExplorerFilter, type FacetCount, type TelemetryRange } from "../telemetry-api";
+import { maxOpenFacets, telemetryRanges, type ExplorerFilter, type FacetCount, type TelemetryRange } from "../telemetry-api";
 import { useTelemetryQuery } from "../use-telemetry-query";
 import { ListSkeleton } from "./screen-skeletons";
 import "./telemetry-explorer.css";
@@ -167,9 +167,6 @@ export function ExplorerFacet({
     </fieldset>
   );
 }
-
-// How many attribute facets stay open. Opening another closes the oldest.
-const maxOpenFacets = 10;
 
 // One open attribute facet, which loads its own values.
 function AttributeFacet({

@@ -297,6 +297,9 @@ function explorerRange(params: URLSearchParams): TelemetryRange {
   return explorerRanges.has(range) ? (range as TelemetryRange) : "1h";
 }
 
+// How many attribute facets stay open. Opening another closes the oldest.
+export const maxOpenFacets = 10;
+
 function uniqueValues(params: URLSearchParams, name: string): string[] {
   return [...new Set(params.getAll(name).map((value) => value.trim()).filter(Boolean))];
 }
@@ -312,7 +315,7 @@ function explorerFilters(params: URLSearchParams): ExplorerFilter[] {
 // API reads, so a link reopens the same view.
 export function logExplorerQuery(params: URLSearchParams): LogExplorerQuery {
   return {
-    facets: uniqueValues(params, "facet"),
+    facets: uniqueValues(params, "facet").slice(-maxOpenFacets),
     filters: explorerFilters(params),
     range: timeRangeFromParams(params),
     search: params.get("search")?.trim() ?? "",
@@ -324,7 +327,7 @@ export function logExplorerQuery(params: URLSearchParams): LogExplorerQuery {
 export function traceExplorerQuery(params: URLSearchParams): TraceExplorerQuery {
   const minDurationMs = Number(params.get("minDurationMs"));
   return {
-    facets: uniqueValues(params, "facet"),
+    facets: uniqueValues(params, "facet").slice(-maxOpenFacets),
     filters: explorerFilters(params),
     minDurationMs: Number.isFinite(minDurationMs) && minDurationMs > 0 ? minDurationMs : 0,
     operations: uniqueValues(params, "operation"),

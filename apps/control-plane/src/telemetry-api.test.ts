@@ -69,6 +69,14 @@ describe("explorer queries", () => {
     expect(logApiParams(query).has("facet")).toBe(false);
   });
 
+  it("keeps at most ten open facets from the URL, the latest ones", () => {
+    const keys = Array.from({ length: 12 }, (_, index) => `log.key${index}`);
+    const params = new URLSearchParams(keys.map((key) => ["facet", key]));
+
+    expect(logExplorerQuery(params).facets).toEqual(keys.slice(2));
+    expect(traceExplorerQuery(params).facets).toEqual(keys.slice(2));
+  });
+
   it("keeps a fixed log window in the URL and sends the API its bounds", () => {
     const query = logExplorerQuery(new URLSearchParams(
       "from=2026-10-14T13:00:00.000Z&to=2026-10-14T14:00:00.000Z&severity=error",
