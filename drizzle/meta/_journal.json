@@ -680,6 +680,13 @@
       "when": 1792763518107,
       "tag": "0096_add_railway_context",
       "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "7",
+      "when": 1793011630121,
+      "tag": "0097_telemetry_notification_pauses",
+      "breakpoints": true
     }
   ]
 }

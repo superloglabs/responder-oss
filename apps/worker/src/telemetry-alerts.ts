@@ -100,7 +100,7 @@ export async function checkTelemetryAlert(
 
   async function announce(episode: OpenTelemetryAlertEpisode, value: number) {
     const target = slackTarget(episode);
-    if (!target || episode.slackMessageTs || announcements >= announcementsPerCheck) return;
+    if (!target || episode.notificationsPaused || episode.slackMessageTs || announcements >= announcementsPerCheck) return;
     announcements += 1;
     const content = alertFiringMessage(message(episode.groupKey, value));
     const [delivery] = await dependencies.post({

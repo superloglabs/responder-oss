@@ -1017,6 +1017,18 @@ ten runs per pass; issues past that are logged and skipped. Error runs report
 to notification channels and keep an issue catalog, like alert runs. The
 **Investigate new errors** template uses the trigger.
 
+### Paused notifications
+
+An operator can pause a workspace's telemetry notifications, for example while
+it runs beside the system it replaces. The pause is a row in
+`telemetry_notification_pauses`, which the hosted control room sets. Alerts
+are still checked and error issues still grouped, but alerts post nothing to
+Slack and start no automations, and the Errors trigger starts no runs. An
+activation that opens while paused is never announced, even if it is still
+firing when the pause ends, and its page shows the notification as Paused.
+Issues that opened while paused are not new afterward; only a later
+regression starts a run.
+
 ## Webhook trigger
 
 Any system that can send an HTTP request can start an automation with the

@@ -32,6 +32,7 @@ function episode(overrides: Partial<OpenTelemetryAlertEpisode> = {}): OpenTeleme
   return {
     groupKey: "",
     id: "episode-1",
+    notificationsPaused: false,
     peakValue: 20,
     slackChannelId: slack.channelId,
     slackIntegrationAccountId: slack.integrationAccountId,
@@ -103,6 +104,35 @@ describe("checkTelemetryAlert", () => {
       timestamp: "1700000000.000200",
       title: "Checkout errors is firing",
     }));
+  });
+
+  it("posts nothing for an episode opened while notifications were paused", async () => {
+    const startAutomations = vi.fn(async () => 1);
+    const opened = dependencies({ openEpisode: vi.fn(async () => episode({ notificationsPaused: true, slackMessageTs: null })), startAutomations });
+    await checkTelemetryAlert(alert, {} as never, opened);
+    expect(opened.openEpisode).toHaveBeenCalled();
+
+    // Still firing after notifications resume: it is not announced late.
+    const continued = dependencies({
+      openEpisodes: vi.fn(async () => [episode({ notificationsPaused: true, slackMessageTs: null })]),
+      startAutomations,
+    });
+    await checkTelemetryAlert(alert, {} as never, continued);
+    expect(continued.continueEpisode).toHaveBeenCalled();
+
+    // Recovered: nothing to reply to, so the recovery is settled quietly.
+    const recovered = dependencies({
+      openEpisodes: vi.fn(async () => [episode({ notificationsPaused: true, slackMessageTs: null })]),
+      values: vi.fn(async () => [{ group: "", value: 4 }]),
+    });
+    await checkTelemetryAlert(alert, {} as never, recovered);
+    expect(recovered.markRecoveryNotified).toHaveBeenCalledWith("episode-1");
+
+    for (const deps of [opened, continued, recovered]) {
+      expect(deps.post).not.toHaveBeenCalled();
+      expect(deps.recordCheck).toHaveBeenCalledWith("alert-1", null);
+    }
+    expect(startAutomations).not.toHaveBeenCalled();
   });
 
   it("updates a firing episode without posting again", async () => {

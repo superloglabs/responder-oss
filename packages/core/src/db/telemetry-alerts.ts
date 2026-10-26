@@ -7,6 +7,7 @@ import {
   organizationCapabilities,
   telemetryAlertEpisodes,
   telemetryAlerts,
+  telemetryNotificationPauses,
 } from "./schema.js";
 
 export type TelemetryAlert = AlertRule & {
@@ -155,6 +156,8 @@ export async function listTelemetryAlertIntervals(alertId: string, since: Date, 
 }
 
 export type TelemetryAlertActivation = TelemetryAlertEpisode & {
+  // Opened while the workspace's notifications were paused, so not posted.
+  notificationsPaused: boolean;
   ruleSnapshot: AlertUpdate | null;
   endReason: "recovered" | "configuration_changed" | null;
   slackChannelId: string | null;
@@ -171,7 +174,7 @@ export async function findTelemetryAlertActivation(alertId: string, activationId
     id: row.id, groupKey: row.groupKey, state: row.state,
     startedAt: row.startedAt.toISOString(), endedAt: row.endedAt?.toISOString() ?? null,
     openValue: row.openValue, lastValue: row.lastValue, peakValue: row.peakValue,
-    ruleSnapshot: row.ruleSnapshot, endReason: row.endReason,
+    ruleSnapshot: row.ruleSnapshot, endReason: row.endReason, notificationsPaused: row.notificationsPaused,
     slackChannelId: row.slackChannelId, slackMessageTs: row.slackMessageTs,
     recoveryNotifiedAt: row.endReason === "recovered" && row.slackMessageTs && row.slackIntegrationAccountId ? row.recoveryNotifiedAt?.toISOString() ?? null : null,
   };
@@ -361,6 +364,8 @@ export async function recordTelemetryAlertCheck(alertId: string, error: string |
 export type OpenTelemetryAlertEpisode = {
   groupKey: string;
   id: string;
+  // Opened while the workspace's notifications were paused: never announced.
+  notificationsPaused: boolean;
   peakValue: number;
   slackChannelId: string | null;
   slackIntegrationAccountId: string | null;
@@ -371,6 +376,7 @@ export type OpenTelemetryAlertEpisode = {
 const openEpisodeColumns = {
   groupKey: telemetryAlertEpisodes.groupKey,
   id: telemetryAlertEpisodes.id,
+  notificationsPaused: telemetryAlertEpisodes.notificationsPaused,
   peakValue: telemetryAlertEpisodes.peakValue,
   slackChannelId: telemetryAlertEpisodes.slackChannelId,
   slackIntegrationAccountId: telemetryAlertEpisodes.slackIntegrationAccountId,
@@ -386,7 +392,8 @@ export async function openTelemetryAlertEpisodes(alertId: string): Promise<OpenT
 }
 
 // Null when the group already has an open episode, or when the alert was
-// disabled or changed since `ruleUpdatedAt`, the version the check used.
+// disabled or changed since `ruleUpdatedAt`, the version the check used. The
+// episode records whether the workspace's notifications are paused.
 export async function openTelemetryAlertEpisode(input: {
   alertId: string;
   groupKey: string;
@@ -397,6 +404,7 @@ export async function openTelemetryAlertEpisode(input: {
   const result = await getDatabase().execute<{
     group_key: string;
     id: string;
+    notifications_paused: boolean;
     peak_value: number;
     slack_channel_id: string | null;
     slack_integration_account_id: string | null;
@@ -404,9 +412,12 @@ export async function openTelemetryAlertEpisode(input: {
     started_at: Date | string;
   }>(sql`
     insert into ${telemetryAlertEpisodes}
-      (alert_id, group_key, open_value, peak_value, last_value, slack_channel_id, slack_integration_account_id, rule_snapshot)
+      (alert_id, group_key, open_value, peak_value, last_value, slack_channel_id, slack_integration_account_id,
+        notifications_paused, rule_snapshot)
     select ${input.alertId}, ${input.groupKey}, ${input.value}, ${input.value}, ${input.value},
       ${input.slack?.channelId ?? null}, ${input.slack?.integrationAccountId ?? null},
+      exists (select 1 from ${telemetryNotificationPauses} pause
+        where pause.organization_id = ${telemetryAlerts.organizationId}),
       jsonb_build_object(
         'aggregation', aggregation, 'comparator', comparator, 'field', field, 'filter', filter,
         'groupBy', group_by, 'groupMode', group_mode, 'metricName', metric_name, 'source', source,
@@ -420,13 +431,14 @@ export async function openTelemetryAlertEpisode(input: {
       -- The version is read back in JavaScript, which keeps milliseconds.
       and date_trunc('milliseconds', ${telemetryAlerts.updatedAt}) = ${input.ruleUpdatedAt}::timestamptz
     on conflict do nothing
-    returning id, group_key, peak_value, slack_channel_id, slack_integration_account_id, slack_message_ts, started_at
+    returning id, group_key, notifications_paused, peak_value, slack_channel_id, slack_integration_account_id, slack_message_ts, started_at
   `);
   const row = result.rows[0];
   return row
     ? {
         groupKey: row.group_key,
         id: row.id,
+        notificationsPaused: row.notifications_paused,
         peakValue: Number(row.peak_value),
         slackChannelId: row.slack_channel_id,
         slackIntegrationAccountId: row.slack_integration_account_id,

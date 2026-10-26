@@ -180,7 +180,7 @@ const activation = {
   id: activationId, groupKey: "api", state: "resolved" as const,
   startedAt: "2026-10-14T11:35:00.000Z", endedAt: "2026-10-14T11:40:00.000Z",
   openValue: 12, peakValue: 20, lastValue: 4, ruleSnapshot: { ...alert, groupMode: "per_group" as const, groupBy: "service" },
-  endReason: "recovered" as const, slackChannelId: "C1", slackMessageTs: null, recoveryNotifiedAt: null,
+  endReason: "recovered" as const, notificationsPaused: false, slackChannelId: "C1", slackMessageTs: null, recoveryNotifiedAt: null,
 };
 
 describe("activation details", () => {
