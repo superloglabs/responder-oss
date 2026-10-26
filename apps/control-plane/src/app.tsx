@@ -53,6 +53,7 @@ import {
   PricingPage,
   ProductUpdateArticlePage,
   SecurityPage,
+  SmsConsentPage,
   SubprocessorsPage,
   SupportPage,
   TeamPage,
@@ -109,6 +110,7 @@ export function App() {
       <Route element={<SecurityPage />} path="/security" />
       <Route element={<SubprocessorsPage />} path="/subprocessors" />
       <Route element={<SupportPage />} path="/support" />
+      <Route element={<SmsConsentPage />} path="/sms" />
       <Route element={<SharedAutomationTemplatePage />} path="/templates/:slug" />
       <Route element={<OAuthAuthorizePage />} path="/oauth/authorize" />
       <Route element={<ResetPasswordPage />} path="/reset-password" />

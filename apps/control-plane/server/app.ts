@@ -27,6 +27,7 @@ import {
 } from "../../../packages/core/src/db/legacy-account-redirect.js";
 import { billingRoutes } from "./billing/routes.js";
 import { consentBasePath, handleConsentRequest } from "./consent.js";
+import { smsConsentRoutes } from "./sms-consent.js";
 import { integrationRoutes } from "./integrations/routes.js";
 import { issueRoutes } from "./issues/routes.js";
 import { createSyntheticRoutes } from "./synthetics/routes.js";
@@ -465,6 +466,8 @@ export const app = instrumentedApp
   .all(`${consentBasePath}/*`, (context) =>
     handleConsentRequest(context.req.raw),
   )
+  // Public: the SMS opt-in form records each consent.
+  .route("/api/sms-consent", smsConsentRoutes)
   .get("/api/context", async (context) => {
     const tenant = await getActiveTenant(context.req.raw.headers);
     if (tenant.ok === false) {

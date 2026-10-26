@@ -687,6 +687,13 @@
       "when": 1793011630121,
       "tag": "0097_telemetry_notification_pauses",
       "breakpoints": true
+    },
+    {
+      "idx": 98,
+      "version": "7",
+      "when": 1793012966493,
+      "tag": "0098_sms_consents",
+      "breakpoints": true
     }
   ]
 }

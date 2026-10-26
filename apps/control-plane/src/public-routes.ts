@@ -8,6 +8,7 @@ export const publicDocumentRoutes = [
   { output: "team/index.html", pathname: "/team" },
   { output: "privacy/index.html", pathname: "/privacy" },
   { output: "tos/index.html", pathname: "/tos" },
+  { output: "sms/index.html", pathname: "/sms" },
   {
     output: "blog/kill-alert-fatigue-automating-on-call-with-ai/index.html",
     pathname: blogArticlePath,
