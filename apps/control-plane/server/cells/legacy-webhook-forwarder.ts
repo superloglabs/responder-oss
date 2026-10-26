@@ -84,19 +84,60 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-// Whether a workspace that is not paused holds the tenant in any cell. A cell
-// that cannot be asked counts as not holding it, so the old product answers.
-async function activeAnywhere(tenant: ProviderTenant, dependencies: LegacyWebhookForwarderDependencies) {
-  if ((await dependencies.tenantState(tenant)).active) return true;
+// Where a workspace that is not paused holds the tenant: this cell, another
+// cell, or none. Stops at the first active answer, and a cell that cannot be
+// asked counts as not holding the tenant, so the old product answers.
+async function activeHolder(
+  tenant: ProviderTenant,
+  dependencies: LegacyWebhookForwarderDependencies,
+): Promise<"here" | Cell | null> {
+  if ((await dependencies.tenantState(tenant)).active) return "here";
   const directory = dependencies.directory();
   const token = dependencies.cellToken();
-  if (!directory || !token) return false;
-  const answers = await Promise.all(
-    directory.cells
-      .filter((cell) => cell.id !== directory.current)
-      .map((cell) => dependencies.askCell(cell, tenant, token).catch(() => ({ active: false, held: false }))),
-  );
-  return answers.some((answer) => answer.active);
+  if (!directory || !token) return null;
+  const others = directory.cells.filter((cell) => cell.id !== directory.current);
+  if (others.length === 0) return null;
+  return new Promise((resolve) => {
+    let pending = others.length;
+    for (const cell of others) {
+      dependencies.askCell(cell, tenant, token)
+        .catch(() => ({ active: false, held: false }))
+        .then((answer) => {
+          if (answer.active) resolve(cell);
+          pending -= 1;
+          if (pending === 0) resolve(null);
+        });
+    }
+  });
+}
+
+// Hands an interaction to the cell whose active workspace holds the tenant.
+// The forwarded header keeps that cell from routing it again.
+async function forwardToCell(
+  context: Context,
+  cell: Cell,
+  body: Uint8Array<ArrayBuffer>,
+  currentCell: string,
+  dependencies: LegacyWebhookForwarderDependencies,
+): Promise<Response> {
+  const headers = new Headers();
+  context.req.raw.headers.forEach((value, name) => {
+    if (forwardedHeaderPattern.test(name)) headers.set(name, value);
+  });
+  headers.set(forwardedHeader, currentCell);
+  const url = new URL(context.req.url);
+  const forwarded = await dependencies.forward(new URL(url.pathname + url.search, cell.url).toString(), {
+    body,
+    headers,
+    method: "POST",
+    signal: AbortSignal.timeout(forwardTimeoutMs),
+  });
+  return new Response(await forwarded.arrayBuffer(), {
+    headers: forwarded.headers.get("content-type")
+      ? { "content-type": forwarded.headers.get("content-type")! }
+      : {},
+    status: forwarded.status,
+  });
 }
 
 async function forwardToLegacy(
@@ -142,11 +183,21 @@ export function legacyWebhookForwarder(
 
     if (interactivePaths.test(path)) {
       const tenant = webhookRoutingKey(path, contentType, body);
-      const application = tenant &&
-        tenant.provider !== "automation" &&
-        tenant.provider !== "integration_account" &&
-        await activeAnywhere(tenant, dependencies).catch(() => false);
-      if (application) return next();
+      const holder = tenant && tenant.provider !== "automation" && tenant.provider !== "integration_account"
+        ? await activeHolder(tenant, dependencies).catch(() => null)
+        : null;
+      // The cell router keeps a tenant held here. Another cell gets the
+      // interaction directly: the router routes by holding alone and could
+      // pick a cell whose copy is paused.
+      if (holder === "here") return next();
+      if (holder) {
+        try {
+          return await forwardToCell(context, holder, body, dependencies.directory()!.current, dependencies);
+        } catch (error) {
+          console.error(JSON.stringify({ cell: holder.id, errorMessage: errorMessage(error), event: "legacy_webhook_cell_forward_failed", path }));
+          return context.json({ error: "The tenant's cell is unavailable" }, 502);
+        }
+      }
       try {
         return await forwardToLegacy(context, route, body, dependencies);
       } catch (error) {

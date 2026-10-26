@@ -117,14 +117,39 @@ describe("legacy webhook forwarder", () => {
       .toEqual({ from: "application" });
     expect(local.dependencies.forward).not.toHaveBeenCalled();
 
-    const otherCell = harness({ askCell: vi.fn(async () => ({ active: true, held: true })) });
-    expect(await (await otherCell.app.request("/api/webhooks/slack/actions", interaction(legacyApp))).json())
-      .toEqual({ from: "application" });
-    expect(otherCell.dependencies.askCell).toHaveBeenCalledWith(
-      directory.cells[1],
-      { key: "T123", provider: "slack" },
-      "cell-token",
-    );
+  });
+
+  it("hands an interaction to the cell whose active workspace holds the tenant", async () => {
+    const { app, dependencies, handled } = harness({
+      askCell: vi.fn(async () => ({ active: true, held: true })),
+      // A paused copy here must not take it.
+      tenantState: vi.fn(async () => ({ active: false, held: true })),
+    });
+
+    await app.request("/api/webhooks/slack/actions", interaction(legacyApp));
+
+    expect(handled).not.toHaveBeenCalled();
+    expect(dependencies.askCell).toHaveBeenCalledWith(directory.cells[1], { key: "T123", provider: "slack" }, "cell-token");
+    const [url, init] = vi.mocked(dependencies.forward).mock.calls[0]!;
+    expect(url).toBe("https://us.superlog.sh/api/webhooks/slack/actions");
+    expect(new Headers(init.headers).get("x-responder-cell-forwarded")).toBe("eu");
+  });
+
+  it("stops asking cells at the first active answer", async () => {
+    const threeCells: CellDirectory = {
+      ...directory,
+      cells: [...directory.cells, { id: "ap", label: "Asia", url: "https://ap.superlog.sh" }],
+    };
+    const { app, dependencies } = harness({
+      askCell: vi.fn(async (cell) => cell.id === "us"
+        ? { active: true, held: true }
+        : new Promise<never>(() => undefined)),
+      directory: () => threeCells,
+    });
+
+    await app.request("/api/webhooks/slack/actions", interaction(legacyApp));
+
+    expect(vi.mocked(dependencies.forward).mock.calls[0]![0]).toBe("https://us.superlog.sh/api/webhooks/slack/actions");
   });
 
   it("does nothing without configured routes, and rejects a malformed configuration", async () => {
