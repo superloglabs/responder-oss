@@ -1,0 +1,1 @@
+ALTER TABLE "automation_issues" ADD COLUMN "severity" "severity";

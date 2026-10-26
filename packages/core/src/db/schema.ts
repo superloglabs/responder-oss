@@ -1558,6 +1558,9 @@ export const automationIssues = pgTable(
       .references(() => automations.id, { onDelete: "cascade" }),
     title: text("title").notNull(),
     summary: text("summary").notNull(),
+    // The severity the agent gave the issue when it filed it. Issues filed
+    // before agents chose one have none.
+    severity: severity("severity"),
     occurrences: integer("occurrences").notNull().default(1),
     firstSeenAt: timestamp("first_seen_at", { withTimezone: true })
       .notNull()

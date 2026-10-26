@@ -263,6 +263,8 @@ export interface AutomationIssue {
   lastSeenAt: string;
   links: Array<{ label?: string; url: string }>;
   occurrences: number;
+  // The severity the agent gave the issue. Older issues have none.
+  severity: "SEV-1" | "SEV-2" | "SEV-3" | null;
   summary: string;
   title: string;
 }
