@@ -4,6 +4,7 @@
 // tables also keep as SuperlogProjectId or project_id.
 import type { ClickHouseClient } from "@clickhouse/client";
 import {
+  AI_FAILED_CONDITION,
   AI_MODEL_EXPR,
   AI_PROVIDER_EXPR,
   AI_TIER_EXPR,
@@ -3175,13 +3176,15 @@ export async function aiModelsInWindow(
   });
 }
 
-// Model calls in the window whose span reports no token counts, such as an
-// OpenAI stream started without usage reporting. Their cost is unknown.
+// Completed model calls in the window whose span reports no token counts,
+// such as an OpenAI stream started without usage reporting. Their cost is
+// unknown. Failed calls used no tokens, so they are not counted.
 export async function aiCallsWithoutUsage(ch: ClickHouseClient, organizationId: string, filter: SeriesFilter): Promise<number> {
   const { conds, params } = countConditions(organizationId, "traces", filter);
   conds.push(
     "SpanAttributes['gen_ai.operation.name'] IN ('chat', 'text_completion', 'generate_content', 'embeddings')",
     `NOT ${AI_USAGE_CONDITION}`,
+    `NOT ${AI_FAILED_CONDITION}`,
   );
   const r = await ch.query({
     query: `SELECT count() AS c FROM otel_traces WHERE ${conds.join(" AND ")}`,

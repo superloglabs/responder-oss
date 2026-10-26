@@ -39,6 +39,8 @@ const ai = (overrides: Partial<OverviewAi> = {}): OverviewAi => ({
   callsWithModel: 0,
   callsWithOutput: 0,
   callsWithoutUsage: 0,
+  completedCalls: 0,
+  completedGenerations: 0,
   models: [],
   services: [],
   ...overrides,
@@ -150,7 +152,9 @@ describe("serviceProblems", () => {
 
 describe("aiCostCallout", () => {
   it("stays hidden when every model call reports usage, or the calls were not counted", () => {
-    expect(aiCostCallout(ai({ calls: 10, callsWithInput: 10, callsWithModel: 10, callsWithOutput: 10 }), "24h")).toBeNull();
+    expect(
+      aiCostCallout(ai({ calls: 10, callsWithInput: 10, callsWithModel: 10, callsWithOutput: 10, completedCalls: 10, completedGenerations: 10 }), "24h"),
+    ).toBeNull();
     expect(aiCostCallout(null, "24h")).toBeNull();
   });
 
@@ -160,6 +164,8 @@ describe("aiCostCallout", () => {
         calls: 1_612,
         callsWithModel: 1_612,
         callsWithoutUsage: 1_612,
+        completedCalls: 1_612,
+        completedGenerations: 1_512,
         models: [
           { calls: 1_204, model: "gpt-4.1-mini" },
           { calls: 296, model: "claude-haiku-4-5" },
@@ -172,7 +178,7 @@ describe("aiCostCallout", () => {
     );
 
     expect(callout!.detail).toBe(
-      "checkout made 1,612 model calls in the last 24 hours, but none report token usage. Add the missing attributes and Superlog prices every call by model and service.",
+      "checkout completed 1,612 model calls in the last 24 hours, but none report token usage. Add the missing attributes and Superlog prices every call by model and service.",
     );
     expect(callout!.attributes).toEqual([
       { key: "gen_ai.request.model", note: "found on every call", state: "found" },
@@ -192,6 +198,8 @@ describe("aiCostCallout", () => {
         callsWithModel: 200,
         callsWithOutput: 150,
         callsWithoutUsage: 50,
+        completedCalls: 200,
+        completedGenerations: 200,
         services: [
           { calls: 120, callsWithoutUsage: 20, service: "api" },
           { calls: 50, callsWithoutUsage: 20, service: "worker" },
@@ -201,8 +209,41 @@ describe("aiCostCallout", () => {
       "1h",
     );
 
-    expect(callout!.detail).toMatch(/^api, worker and 1 more made 200 model calls in the last hour, but 50 don't report token usage\./u);
+    expect(callout!.detail).toMatch(/^api, worker and 1 more completed 200 model calls in the last hour, but 50 don't report token usage\./u);
     expect(callout!.attributes[1]).toEqual({ key: "gen_ai.usage.input_tokens", note: "on 75% of calls", state: "partial" });
+  });
+
+  it("does not expect token counts from failed calls or output tokens from embeddings", () => {
+    const callout = aiCostCallout(
+      ai({
+        calls: 2_032,
+        callsWithInput: 1_826,
+        callsWithModel: 2_032,
+        callsWithOutput: 1_699,
+        callsWithoutUsage: 10,
+        completedCalls: 1_836,
+        completedGenerations: 1_699,
+        services: [{ calls: 2_032, callsWithoutUsage: 10, service: "api" }],
+      }),
+      "24h",
+    );
+
+    expect(callout!.detail).toMatch(/^api completed 1,836 model calls in the last 24 hours, but 10 don't report token usage\./u);
+    expect(callout!.attributes).toEqual([
+      { key: "gen_ai.request.model", note: "found on every call", state: "found" },
+      { key: "gen_ai.usage.input_tokens", note: "on 99% of calls", state: "partial" },
+      { key: "gen_ai.usage.output_tokens", note: "found on every call", state: "found" },
+    ]);
+    expect(aiCostCallout(ai({ calls: 30, callsWithModel: 30, callsWithInput: 30, completedCalls: 30 }), "24h")).toBeNull();
+  });
+
+  it("leaves out output tokens when every completed call is an embedding", () => {
+    const callout = aiCostCallout(
+      ai({ calls: 40, callsWithModel: 40, callsWithoutUsage: 40, completedCalls: 40, services: [{ calls: 40, callsWithoutUsage: 40, service: "search" }] }),
+      "24h",
+    );
+
+    expect(callout!.attributes.map((attribute) => attribute.key)).toEqual(["gen_ai.request.model", "gen_ai.usage.input_tokens"]);
   });
 });
 

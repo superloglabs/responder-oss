@@ -69,7 +69,7 @@ function routes(overrides: Partial<TelemetryRouteDependencies> = {}) {
     now: () => now,
     overview: vi.fn(async () => ({ ai: null, bucketSeconds: 1_800, services: [] })),
     overviewDetails: vi.fn(async () => ({
-      ai: { calls: 0, callsWithInput: 0, callsWithModel: 0, callsWithOutput: 0, callsWithoutUsage: 0, models: [], services: [] },
+      ai: { calls: 0, callsWithInput: 0, callsWithModel: 0, callsWithOutput: 0, callsWithoutUsage: 0, completedCalls: 0, completedGenerations: 0, models: [], services: [] },
       errorsWithoutException: null,
       requests: [],
       withTrace: { checkout: 4 },

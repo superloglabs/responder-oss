@@ -232,18 +232,23 @@ function list(names: string[]): string {
   return `${names.slice(0, 2).join(", ")} and ${names.length - 2} more`;
 }
 
-// Shown when model calls arrive without token usage, so their cost is unknown.
+// Shown when completed model calls arrive without token usage, so their cost
+// is unknown. Failed calls used no tokens, and embeddings produce no output, so
+// they are not counted against the token attributes.
 export function aiCostCallout(ai: OverviewAi | null, range: TelemetryRange): AiCostCallout | null {
   if (!ai || ai.callsWithoutUsage === 0) return null;
   const services = ai.services.filter((service) => service.callsWithoutUsage > 0).map((service) => service.service || "unknown_service");
-  const callsWithoutUsage = ai.callsWithoutUsage === ai.calls ? "none report" : `${formatCount(ai.callsWithoutUsage)} don't report`;
+  const callsWithoutUsage = ai.callsWithoutUsage === ai.completedCalls ? "none report" : `${formatCount(ai.callsWithoutUsage)} don't report`;
+  const attributes = [
+    attribute("gen_ai.request.model", ai.callsWithModel, ai.calls),
+    attribute("gen_ai.usage.input_tokens", ai.callsWithInput, ai.completedCalls),
+  ];
+  if (ai.completedGenerations > 0) {
+    attributes.push(attribute("gen_ai.usage.output_tokens", ai.callsWithOutput, ai.completedGenerations));
+  }
   return {
-    attributes: [
-      attribute("gen_ai.request.model", ai.callsWithModel, ai.calls),
-      attribute("gen_ai.usage.input_tokens", ai.callsWithInput, ai.calls),
-      attribute("gen_ai.usage.output_tokens", ai.callsWithOutput, ai.calls),
-    ],
-    detail: `${list(services)} made ${formatCount(ai.calls)} model calls in ${rangeLabel(range)}, but ${callsWithoutUsage} token usage. Add the missing attributes and Superlog prices every call by model and service.`,
+    attributes,
+    detail: `${list(services)} completed ${formatCount(ai.completedCalls)} model calls in ${rangeLabel(range)}, but ${callsWithoutUsage} token usage. Add the missing attributes and Superlog prices every call by model and service.`,
     models: ai.models.slice(0, 3),
     prompt: aiUsagePrompt(services, ai.models.slice(0, 5).map((model) => model.model)),
   };

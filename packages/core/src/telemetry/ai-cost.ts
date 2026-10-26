@@ -98,6 +98,14 @@ export const AI_OUTPUT_REPORTED_CONDITION = `isNotNull(${numberOf(TOKEN_KEYS.out
 // A span that reports token usage.
 export const AI_USAGE_CONDITION = `(isNotNull(${reportedInput}) OR isNotNull(${numberOf(TOKEN_KEYS.output)}))`;
 
+// A call that failed, such as one the provider refused. It used no tokens, so
+// it has no usage to report. The ClickHouse exporter writes Error; older
+// exporters wrote STATUS_CODE_ERROR.
+export const AI_FAILED_CONDITION = "StatusCode IN ('Error', 'STATUS_CODE_ERROR')";
+
+// An embeddings call, which produces no output tokens.
+export const AI_EMBEDDINGS_CONDITION = "SpanAttributes['gen_ai.operation.name'] = 'embeddings'";
+
 const priceKey = `concat(${AI_PROVIDER_EXPR}, '|', ${AI_MODEL_EXPR}, '|', ${AI_TIER_EXPR})`;
 // The price row for the span's model, tier and time; 0 when there is none.
 const priceIndex = `arrayFirstIndex((k, f, t) -> k = ${priceKey} AND toUnixTimestamp(Timestamp) >= f AND toUnixTimestamp(Timestamp) < t, {aiPriceKey:Array(String)}, {aiPriceFrom:Array(Int64)}, {aiPriceTo:Array(Int64)})`;

@@ -1,5 +1,7 @@
 import type { ClickHouseClient } from "@clickhouse/client";
 import {
+  AI_EMBEDDINGS_CONDITION,
+  AI_FAILED_CONDITION,
   AI_INPUT_REPORTED_CONDITION,
   AI_MODEL_EXPR,
   AI_OUTPUT_REPORTED_CONDITION,
@@ -55,10 +57,15 @@ export type OverviewAiService = { calls: number; callsWithoutUsage: number; serv
 
 export type OverviewAi = {
   calls: number;
+  // Token counts are expected only from calls that did not fail, and output
+  // tokens only from those that generate output, not embeddings.
+  completedCalls: number;
+  completedGenerations: number;
   callsWithInput: number;
   callsWithModel: number;
   callsWithOutput: number;
-  // Calls that report neither input nor output tokens; their cost is unknown.
+  // Completed calls that report neither input nor output tokens; their cost
+  // is unknown.
   callsWithoutUsage: number;
   models: OverviewAiModel[];
   services: OverviewAiService[];
@@ -97,6 +104,8 @@ const EXCEPTION_LOG =
 const ENTRY_SPAN = "(SpanKind IN ('SPAN_KIND_SERVER', 'SPAN_KIND_CONSUMER') OR ParentSpanId = '')";
 // A model call, whether or not it reports its token usage.
 const AI_CALL = `(SpanAttributes['gen_ai.operation.name'] IN ('chat', 'text_completion', 'generate_content', 'embeddings') OR ${AI_USAGE_CONDITION})`;
+const AI_COMPLETED = `NOT ${AI_FAILED_CONDITION}`;
+const AI_GENERATED = `${AI_COMPLETED} AND NOT ${AI_EMBEDDINGS_CONDITION}`;
 
 const number = (value: unknown) => Number(value) || 0;
 
@@ -261,9 +270,11 @@ export async function telemetryOverviewDetails(
             ${AI_MODEL_EXPR} AS model,
             count() AS calls,
             countIf(${AI_MODEL_EXPR} != '') AS with_model,
-            countIf(${AI_INPUT_REPORTED_CONDITION}) AS with_input,
-            countIf(${AI_OUTPUT_REPORTED_CONDITION}) AS with_output,
-            countIf(NOT ${AI_USAGE_CONDITION}) AS without_usage
+            countIf(${AI_COMPLETED}) AS completed,
+            countIf(${AI_GENERATED}) AS generated,
+            countIf(${AI_COMPLETED} AND ${AI_INPUT_REPORTED_CONDITION}) AS with_input,
+            countIf(${AI_GENERATED} AND ${AI_OUTPUT_REPORTED_CONDITION}) AS with_output,
+            countIf(${AI_COMPLETED} AND NOT ${AI_USAGE_CONDITION}) AS without_usage
           FROM otel_traces
           WHERE ${window.spans} AND ${AI_CALL}
           GROUP BY service, model
@@ -367,6 +378,8 @@ export function summarizeAi(rows: Array<Record<string, string | number>>): Overv
     callsWithModel: 0,
     callsWithOutput: 0,
     callsWithoutUsage: 0,
+    completedCalls: 0,
+    completedGenerations: 0,
     models: [],
     services: [],
   };
@@ -378,6 +391,8 @@ export function summarizeAi(rows: Array<Record<string, string | number>>): Overv
     ai.callsWithModel += number(row.with_model);
     ai.callsWithOutput += number(row.with_output);
     ai.callsWithoutUsage += withoutUsage;
+    ai.completedCalls += number(row.completed);
+    ai.completedGenerations += number(row.generated);
     const model = String(row.model ?? "");
     if (model) models.set(model, (models.get(model) ?? 0) + calls);
     const name = String(row.service ?? "");
