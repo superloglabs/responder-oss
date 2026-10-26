@@ -24,6 +24,7 @@ import type { AutomationUserMessageEventData } from "../automations/transcript.j
 import { member } from "./auth-schema.js";
 import { getDatabase } from "./client.js";
 import type { RuntimeRepository } from "./investigations.js";
+import { slackAccountOfApp } from "./integrations.js";
 import { getOldestOrganizationOwner } from "./organizations.js";
 import {
   agents,
@@ -98,6 +99,8 @@ export async function findAutomationsForSlackEvent(input: {
   // A message the app posted for the workspace, such as a telemetry alert,
   // which may start runs. Other messages from the app never do.
   ownMessage?: boolean;
+  // The Slack app the event was sent to.
+  appId?: string;
   teamId: string;
   text: string;
   threadTimestamp?: string;
@@ -142,6 +145,7 @@ export async function findAutomationsForSlackEvent(input: {
         eq(integrationAccounts.provider, "slack"),
         eq(integrationAccounts.externalAccountId, input.teamId),
         eq(integrationAccounts.status, "connected"),
+        slackAccountOfApp(input.appId),
       ),
     )
     .innerJoin(

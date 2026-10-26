@@ -11,6 +11,7 @@ import { LINEAR_AUTH_VERSION } from "../integrations/linear.js";
 import { member } from "./auth-schema.js";
 import { getDatabase } from "./client.js";
 import { organizationHasCapability } from "./organization-capabilities.js";
+import { slackAccountOfApp } from "./integrations.js";
 import { getOldestOrganizationOwner } from "./organizations.js";
 import {
   agentConfigVersions,
@@ -53,6 +54,8 @@ export class AgentConfigurationError extends Error {
 
 // A direct message reaches tag mode only, as a mention does.
 export async function findAgentsForSlackEvent(input: {
+  // The Slack app the event was sent to.
+  appId?: string;
   teamId: string;
   channelId: string;
   eventType: "message" | "app_mention" | "direct_message";
@@ -89,6 +92,7 @@ export async function findAgentsForSlackEvent(input: {
         eq(integrationAccounts.provider, "slack"),
         eq(integrationAccounts.externalAccountId, input.teamId),
         eq(integrationAccounts.status, "connected"),
+        slackAccountOfApp(input.appId),
       ),
     )
     .where(

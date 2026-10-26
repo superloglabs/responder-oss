@@ -111,6 +111,21 @@ Configure a distributed Slack app with:
 - Environment: `SLACK_CLIENT_ID`, `SLACK_CLIENT_SECRET`, and
   `SLACK_SIGNING_SECRET`
 
+New connections install this app. Connections made through an earlier app
+keep working when `SLACK_ADDITIONAL_APPS` lists it as JSON,
+`[{ "appId": "A…", "signingSecret": "…" }]`. Requests signed by any listed app
+are accepted, and each event is handled only by connections of the app it was
+sent to (`api_app_id`), so a workspace with both apps installed runs once.
+Reconnecting moves a connection to the default app.
+
+While customers move from another product that uses the same Slack app,
+`LEGACY_WEBHOOK_FORWARDS` passes that app's requests on to it, as JSON:
+`[{ "path": "/api/webhooks/slack", "appIds": ["A…"], "url": "https://…" }]`,
+with a second entry for `/api/webhooks/slack/actions`. Events go to both
+products, and the other product's answer is returned, so Slack retries when it
+misses one. An interaction goes to the other product unless a workspace whose
+telemetry notifications are not paused holds the Slack workspace.
+
 Connecting Slack turns tag mode on with its starting settings, unless the
 workspace has already saved tag mode settings.
 

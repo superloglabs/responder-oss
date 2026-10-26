@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { getDatabase } from "./client.js";
-import { automations, integrationAccounts } from "./schema.js";
+import { automations, integrationAccounts, telemetryNotificationPauses } from "./schema.js";
 
 // A provider tenant, as named in a webhook: an external account of a provider,
 // one of this cell's integration accounts by ID, or one of its automations by
@@ -42,4 +42,24 @@ export async function hasWebhookTenant(tenant: WebhookTenant): Promise<boolean> 
     .where(condition)
     .limit(1);
   return rows.length > 0;
+}
+
+// Whether this cell holds a provider tenant, and whether a workspace holding
+// it is active: not paused while it runs beside the old product it replaces
+// (ADR 0010).
+export async function webhookTenantState(
+  tenant: Extract<WebhookTenant, { provider: "discord" | "github" | "linear" | "sentry" | "slack" }>,
+): Promise<{ active: boolean; held: boolean }> {
+  const rows = await getDatabase()
+    .select({ paused: telemetryNotificationPauses.organizationId })
+    .from(integrationAccounts)
+    .leftJoin(
+      telemetryNotificationPauses,
+      eq(telemetryNotificationPauses.organizationId, integrationAccounts.organizationId),
+    )
+    .where(and(
+      eq(integrationAccounts.provider, tenant.provider),
+      eq(integrationAccounts.externalAccountId, tenant.key),
+    ));
+  return { active: rows.some((row) => row.paused === null), held: rows.length > 0 };
 }

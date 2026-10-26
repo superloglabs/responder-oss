@@ -1158,9 +1158,22 @@ export async function getSlackChannelConnection(input: {
   return rows[0] ?? null;
 }
 
-// Every organization connected to a Slack workspace shares the workspace's
-// app, so any of their tokens can write to a person's messages tab.
-export async function listConnectedSlackAccountsForTeam(teamId: string) {
+// A Slack event belongs to the app it was sent to. A workspace can have
+// connections through more than one app, and each app receives its own copy
+// of an event, so each copy is handled only by that app's connections.
+// Connections that did not record their app match any.
+export function slackAccountOfApp(appId: string | undefined) {
+  return appId
+    ? or(
+      sql`${integrationAccounts.metadata}->>'appId' = ${appId}`,
+      sql`${integrationAccounts.metadata}->>'appId' is null`,
+    )
+    : undefined;
+}
+
+// Every organization connected to a Slack workspace through the same app can
+// write to a person's messages tab with any of their tokens.
+export async function listConnectedSlackAccountsForTeam(teamId: string, appId?: string) {
   return getDatabase()
     .select({
       id: integrationAccounts.id,
@@ -1175,6 +1188,7 @@ export async function listConnectedSlackAccountsForTeam(teamId: string) {
         eq(integrationAccounts.externalAccountId, teamId),
         eq(integrationAccounts.status, "connected"),
         isNotNull(integrationAccounts.encryptedCredentials),
+        slackAccountOfApp(appId),
       ),
     )
     .orderBy(integrationAccounts.createdAt);
