@@ -435,6 +435,7 @@ const logFilterSchema = windowSchema.extend({
 });
 
 const logsSchema = logFilterSchema.extend({
+  offset: z.coerce.number().int().min(0).max(1_000_000).default(0),
   limit: z.coerce.number().int().min(1).max(500).default(100),
 });
 
@@ -697,6 +698,7 @@ export function createTelemetryRoutes(
       const { filter } = request;
       const logs = await dependencies.queryLogs(request.client, request.organizationId, {
         limit: request.query.limit,
+        ...(request.query.offset ? { offset: request.query.offset } : {}),
         range: filter.range,
         ...(filter.resourceAttrs.length ? { resourceAttrs: filter.resourceAttrs } : {}),
         ...(filter.search ? { search: filter.search } : {}),

@@ -95,6 +95,7 @@ export function ExplorerFilterBar({
 
 export interface FacetOption {
   count?: number;
+  color?: string;
   label: string;
   value: string;
 }
@@ -102,6 +103,7 @@ export interface FacetOption {
 // A filter group in the explorer sidebar. Checked values are listed even when
 // the window has none of them.
 export function ExplorerFacet({
+  gauges = false,
   error,
   loading,
   onCollapse,
@@ -111,6 +113,7 @@ export function ExplorerFacet({
   title,
   tooltip,
 }: {
+  gauges?: boolean;
   error?: string | null;
   loading: boolean;
   // Closes a facet that the sidebar lists as a key.
@@ -125,8 +128,9 @@ export function ExplorerFacet({
     ...options,
     ...selected.filter((value) => !options.some((option) => option.value === value)).map((value) => ({ label: value, value })),
   ];
+  const total = options.reduce((sum, option) => sum + (option.count ?? 0), 0);
   return (
-    <fieldset className="explorerFacet">
+    <fieldset className={`explorerFacet${gauges ? " explorerFacet--gauges" : ""}`}>
       <legend title={tooltip}>
         {onCollapse ? (
           <button aria-expanded="true" className="explorerFacet__toggle" onClick={onCollapse} type="button">
@@ -154,10 +158,16 @@ export function ExplorerFacet({
               <span aria-hidden="true" className="explorerFacet__box">{checked ? <CheckIcon size={10} weight="bold" /> : null}</span>
               <span className="explorerFacet__label" title={option.label}>{option.label}</span>
               {option.count !== undefined ? (
-                <span className="explorerFacet__count">
+                <span className="explorerFacet__count" title={gauges ? "Count · percentage of listed values" : undefined}>
                   {option.count >= 10_000
                     ? option.count.toLocaleString(undefined, { maximumFractionDigits: 1, notation: "compact" }).toLowerCase()
                     : option.count.toLocaleString()}
+                  {gauges ? ` · ${total > 0 ? (option.count / total * 100).toFixed(1) : "0.0"}%` : null}
+                </span>
+              ) : null}
+              {gauges && option.count !== undefined ? (
+                <span aria-hidden="true" className="explorerFacet__gauge">
+                  <span style={{ width: `${total > 0 ? option.count / total * 100 : 0}%`, backgroundColor: option.color, minWidth: option.count > 0 ? 1 : 0 }} />
                 </span>
               ) : null}
             </label>
@@ -169,7 +179,8 @@ export function ExplorerFacet({
 }
 
 // One open attribute facet, which loads its own values.
-function AttributeFacet({
+export function AttributeFacet({
+  gauges = false,
   dataKey,
   facetKey,
   filters,
@@ -179,6 +190,7 @@ function AttributeFacet({
   onFiltersChange,
   title,
 }: {
+  gauges?: boolean;
   dataKey: string;
   facetKey: string;
   filters: ExplorerFilter[];
@@ -188,9 +200,10 @@ function AttributeFacet({
   onFiltersChange: (filters: ExplorerFilter[]) => void;
   title: string;
 }) {
-  const values = useTelemetryQuery(`${dataKey}#${facetKey}`, () => load(facetKey), live);
+  const values = useTelemetryQuery(`${dataKey}#${facetKey}`, () => load(facetKey), live, gauges);
   return (
     <ExplorerFacet
+      gauges={gauges}
       error={values.error}
       loading={!values.data}
       onCollapse={onCollapse}
