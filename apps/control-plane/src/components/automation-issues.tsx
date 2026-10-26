@@ -8,6 +8,7 @@ import {
 } from "../automations-api";
 import { dateGroupLabel } from "../date-presentation";
 import { DataTable } from "../design-system";
+import { IssueSeverity } from "./issue-severity";
 import { AutomationRunHistorySkeleton } from "./screen-skeletons";
 import "./automation-run-history.css";
 
@@ -93,16 +94,22 @@ export function AutomationIssues({ automationId }: { automationId: string }) {
               <small title={issue.summary}>{issue.summary}</small>
             </span>;
           },
-          width: "46%",
+          width: "39%",
+        },
+        {
+          header: "Severity",
+          key: "severity",
+          render: (issue) => issue.severity ? <IssueSeverity severity={issue.severity} /> : <span className="agentTableCell">—</span>,
+          width: "9%",
         },
         {
           header: "Occurrences",
           key: "occurrences",
           render: (issue) => <span className="agentTableCell automationIssues__count">{issue.occurrences.toLocaleString()}</span>,
-          width: "11%",
+          width: "10%",
         },
-        { header: "First seen", key: "firstSeen", render: (issue) => <SeenCell value={issue.firstSeenAt} />, width: "13.5%" },
-        { header: "Last seen", key: "lastSeen", render: (issue) => <SeenCell value={issue.lastSeenAt} />, width: "13.5%" },
+        { header: "First seen", key: "firstSeen", render: (issue) => <SeenCell value={issue.firstSeenAt} />, width: "13%" },
+        { header: "Last seen", key: "lastSeen", render: (issue) => <SeenCell value={issue.lastSeenAt} />, width: "13%" },
         {
           header: "Links",
           key: "links",

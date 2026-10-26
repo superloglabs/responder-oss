@@ -694,6 +694,13 @@
       "when": 1793012966493,
       "tag": "0098_sms_consents",
       "breakpoints": true
+    },
+    {
+      "idx": 99,
+      "version": "7",
+      "when": 1793026246969,
+      "tag": "0099_automation_issue_severity",
+      "breakpoints": true
     }
   ]
 }

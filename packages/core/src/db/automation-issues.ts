@@ -5,6 +5,7 @@ import {
   automationIssueRuns,
   automationIssues,
   automationRuns,
+  severity,
   type AutomationIssueLink,
   type AutomationIssueSlackMessage,
 } from "./schema.js";
@@ -15,6 +16,7 @@ const issueColumns = {
   lastSeenAt: automationIssues.lastSeenAt,
   links: automationIssues.links,
   occurrences: automationIssues.occurrences,
+  severity: automationIssues.severity,
   slackMessages: automationIssues.slackMessages,
   summary: automationIssues.summary,
   title: automationIssues.title,
@@ -26,10 +28,13 @@ export interface AutomationIssue {
   lastSeenAt: Date;
   links: AutomationIssueLink[];
   occurrences: number;
+  severity: AutomationIssueSeverity | null;
   slackMessages: AutomationIssueSlackMessage[];
   summary: string;
   title: string;
 }
+
+export type AutomationIssueSeverity = (typeof severity.enumValues)[number];
 
 export class AutomationIssueRunLinkedError extends Error {
   constructor(readonly issueId: string) {
@@ -86,6 +91,7 @@ export async function fileAutomationIssue(input: RunScope & {
   embedding: IssueEmbedding | null;
   laterRunIds: string[];
   links: AutomationIssueLink[];
+  severity: AutomationIssueSeverity;
   summary: string;
   title: string;
 }): Promise<{
@@ -108,6 +114,7 @@ export async function fileAutomationIssue(input: RunScope & {
         embeddingModel: input.embedding?.model ?? null,
         links: input.links,
         organizationId: input.organizationId,
+        severity: input.severity,
         summary: input.summary,
         title: input.title,
       })

@@ -33,6 +33,7 @@ function issue(id = issueId, title = "US sync checks time out") {
     lastSeenAt: new Date("2026-10-12T06:28:00.000Z"),
     links: [],
     occurrences: 3,
+    severity: "SEV-2" as const,
     slackMessages: [],
     summary: "Hourly validation checks in usnv return 504.",
     title,
@@ -144,6 +145,7 @@ describe("issue catalog", () => {
     const { value } = await call(catalog, "file_issue", {
       laterRunIds: ["80000000-0000-4000-8000-000000000000", "80000000-0000-4000-8000-000000000001"],
       links: [{ url: "https://linear.app/example/issue/SYNC-4101" }],
+      severity: "SEV-2",
       summary: "Hourly validation checks in usnv return 504.",
       title: "US sync checks time out",
     });
@@ -154,10 +156,11 @@ describe("issue catalog", () => {
       embedding: { model: "openai/text-embedding-3-small", vector: [1, 0] },
       laterRunIds: ["80000000-0000-4000-8000-000000000000", "80000000-0000-4000-8000-000000000001"],
       links: [{ url: "https://linear.app/example/issue/SYNC-4101" }],
+      severity: "SEV-2",
       summary: "Hourly validation checks in usnv return 504.",
       title: "US sync checks time out",
     });
-    expect(value).toMatchObject({ filed: true, issue: { id: issueId } });
+    expect(value).toMatchObject({ filed: true, issue: { id: issueId, severity: "SEV-2" } });
     expect(deps.append).toHaveBeenCalledWith({
       issueId,
       links: [],
@@ -181,7 +184,7 @@ describe("issue catalog", () => {
     deps.file.mockResolvedValue({ issue: issue(), status: "attached_by_earlier_run" });
     const catalog = createIssueCatalog(scope, deps);
 
-    const { isError, value } = await call(catalog, "file_issue", { summary: "A summary.", title: "A title" });
+    const { isError, value } = await call(catalog, "file_issue", { severity: "SEV-3", summary: "A summary.", title: "A title" });
 
     expect(isError).toBe(false);
     expect(value).toMatchObject({ alreadyReported: true, issue: { id: issueId } });
@@ -193,7 +196,7 @@ describe("issue catalog", () => {
     const catalog = createIssueCatalog(scope, deps);
 
     for (const url of ["javascript:alert(1)", "data:text/html,hi", "file:///etc/passwd"]) {
-      const { isError } = await call(catalog, "file_issue", { links: [{ url }], summary: "A summary.", title: "A title" });
+      const { isError } = await call(catalog, "file_issue", { links: [{ url }], severity: "SEV-3", summary: "A summary.", title: "A title" });
       expect(isError).toBe(true);
     }
     expect(deps.file).not.toHaveBeenCalled();
@@ -206,7 +209,7 @@ describe("issue catalog", () => {
     const catalog = createIssueCatalog(scope, deps);
     await catalog.recordAction({ externalReference: url, kind: "open_github_pull_request", title: "Retry checks" });
 
-    await call(catalog, "file_issue", { links: [{ url }], summary: "A summary.", title: "A title" });
+    await call(catalog, "file_issue", { links: [{ url }], severity: "SEV-3", summary: "A summary.", title: "A title" });
     await catalog.recordAction({ externalReference: url, kind: "open_github_pull_request", title: "Retry checks" });
 
     expect(deps.append).not.toHaveBeenCalled();
@@ -216,9 +219,20 @@ describe("issue catalog", () => {
     const deps = dependencies();
     const catalog = createIssueCatalog(scope, deps);
 
-    await call(catalog, "file_issue", { summary: "A summary.", title: "A title" });
+    await call(catalog, "file_issue", { severity: "SEV-3", summary: "A summary.", title: "A title" });
 
-    expect(deps.file.mock.calls[0]![0]).toMatchObject({ laterRunIds: [], links: [] });
+    expect(deps.file.mock.calls[0]![0]).toMatchObject({ laterRunIds: [], links: [], severity: "SEV-3" });
+  });
+
+  it("requires a known severity to file an issue", async () => {
+    const deps = dependencies();
+    const catalog = createIssueCatalog(scope, deps);
+
+    for (const severity of [undefined, "SEV-4", "critical"]) {
+      const { isError } = await call(catalog, "file_issue", { severity, summary: "A summary.", title: "A title" });
+      expect(isError).toBe(true);
+    }
+    expect(deps.file).not.toHaveBeenCalled();
   });
 
   it("attaches the run to an existing issue", async () => {

@@ -28,4 +28,4 @@
 .automationIssues__links { display: flex; flex-wrap: wrap; gap: 4px 10px; min-width: 0; }
 .automationIssues__links a { overflow: hidden; color: #4e58c7; text-decoration: none; text-overflow: ellipsis; white-space: nowrap; }
 .automationIssues__links a:hover { text-decoration: underline; }
-.appShell--workspace .automationIssues .dsDataTable--workspace :is(th, td):nth-child(4) { border-right: .5px solid #e6e8ec; }
+.appShell--workspace .automationIssues .dsDataTable--workspace :is(th, td):nth-child(5) { border-right: .5px solid #e6e8ec; }

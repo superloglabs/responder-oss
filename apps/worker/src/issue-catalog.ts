@@ -1,4 +1,5 @@
 import { issueCatalogTriggerKinds } from "@responder/core/automations/issue-catalog";
+import { issueSeveritySchema } from "@responder/core/investigations/report";
 import {
   appendAutomationIssueRecords,
   attachAutomationIssue,
@@ -67,6 +68,8 @@ const fileIssueSchema = z.object({
     .describe("Ids of the runs that started after this one for the same problem, from list_runs. Each counts as an occurrence."),
   links: z.array(linkSchema).max(10).default([])
     .describe("Tickets or other pages about this issue."),
+  severity: issueSeveritySchema
+    .describe("The severity you gave this problem, shown with the issue. SEV-1: a broad outage, data loss, or a security breach. SEV-2: a feature broken or badly degraded for many users. SEV-3: a limited or minor problem. Use the automation's own severity levels when its instructions define them."),
   summary: z.string().trim().min(1).max(4_000)
     .describe("What fails, why, and what it affects, in a few sentences."),
   title: z.string().trim().min(1).max(240),
@@ -105,6 +108,7 @@ function serializeIssue(issue: AutomationIssue, similarity?: number) {
     lastSeenAt: issue.lastSeenAt.toISOString(),
     links: issue.links,
     occurrences: issue.occurrences,
+    severity: issue.severity,
     slackMessages: issue.slackMessages,
     summary: issue.summary,
     title: issue.title,
@@ -239,6 +243,7 @@ export function createIssueCatalog(
         embedding,
         links: args.links.map((link) => ({ ...(link.label ? { label: link.label } : {}), url: link.url })),
         laterRunIds: args.laterRunIds,
+        severity: args.severity,
         summary: args.summary,
         title: args.title,
       });
