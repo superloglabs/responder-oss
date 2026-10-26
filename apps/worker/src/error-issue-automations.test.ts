@@ -49,6 +49,7 @@ function dependencies(overrides: Partial<ErrorIssueAutomationDependencies> = {})
     find: vi.fn(async () => [{ automationId: "automation-1" }]),
     issue: vi.fn(async (_organizationId: string, id: string) => ({ ...issue, id })),
     origin: "https://superlog.sh",
+    paused: vi.fn(async () => new Set<string>()),
     queue: vi.fn(async () => undefined),
     ...overrides,
   };
@@ -82,6 +83,13 @@ describe("startErrorIssueAutomations", () => {
     ], deps)).toBe(1);
     expect(deps.issue).toHaveBeenCalledTimes(1);
     expect(deps.issue).toHaveBeenCalledWith(organizationId, issueId);
+  });
+
+  it("starts nothing for a workspace paused after the pass recorded its changes", async () => {
+    const deps = dependencies({ paused: vi.fn(async () => new Set([organizationId])) });
+
+    expect(await startErrorIssueAutomations([{ issueId, notificationsPaused: false, organizationId, transition: "new" }], deps)).toBe(0);
+    expect(deps.issue).not.toHaveBeenCalled();
   });
 
   it("runs once per regression, keyed by when the issue reopened", async () => {
