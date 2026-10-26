@@ -49,6 +49,10 @@ export function SupportPage() {
   return <Navigate replace to="/app" />;
 }
 
+export function SmsConsentPage() {
+  return <Navigate replace to="/app" />;
+}
+
 export function EnterprisePage() {
   return <Navigate replace to="/app" />;
 }

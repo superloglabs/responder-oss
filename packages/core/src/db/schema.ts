@@ -2631,3 +2631,26 @@ export const apiKeys = pgTable(
     index("api_keys_organization_idx").on(table.organizationId),
   ],
 );
+
+// One row per SMS opt-in from the public consent form, kept as the record
+// carriers ask for: who agreed, the number, the exact wording they agreed to,
+// and where and when. Rows are only ever inserted.
+export const smsConsents = pgTable(
+  "sms_consents",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    email: text("email").notNull(),
+    phoneE164: text("phone_e164").notNull(),
+    consentText: text("consent_text").notNull(),
+    pageUrl: text("page_url"),
+    // Masked as for cookie consent: the last IPv4 octet, or all but the first
+    // 48 bits of an IPv6 address, are zeroed.
+    ipAddress: text("ip_address"),
+    userAgent: text("user_agent"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [index("sms_consents_phone_idx").on(table.phoneE164)],
+);
