@@ -20,6 +20,7 @@ import {
   alertUpdateSchema,
   alertCountsEmptyAsZero,
   evaluateAlert,
+  rankAlertEvaluations,
   type AlertRule,
   type AlertSlackTarget,
 } from "../../../../packages/core/src/telemetry/alerts.js";
@@ -213,11 +214,7 @@ export function createAlertRoutes(dependencies: AlertRouteDependencies = default
         dependencies.values(granted.client, granted.organizationId, rule, now),
         dependencies.series(granted.client, granted.organizationId, rule, now, range),
       ]);
-      // Breaching groups first, then furthest past the threshold.
-      const severity = rule.comparator === "gt" ? 1 : -1;
-      const evaluations = evaluateAlert(rule, values, [])
-        .sort((a, b) => Number(b.breaching) - Number(a.breaching) || severity * (b.value - a.value))
-        .slice(0, 50);
+      const evaluations = rankAlertEvaluations(rule, evaluateAlert(rule, values, [])).slice(0, 50);
       // Buckets are one window long.
       const stepMs = rule.windowMinutes * 60_000;
       return context.json({
