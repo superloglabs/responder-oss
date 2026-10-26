@@ -101,13 +101,14 @@ function LogDrawer({
   const logAttrs = Object.fromEntries(Object.entries(log.log_attrs).filter(([key]) => !key.startsWith("exception.")));
   return (
     <ExplorerDrawer
+      fullHeight
       header={(
         <>
           <LogLevel severity={log.severity} />
           <time className="explorerCell--number" dateTime={logTimestamp(log.timestamp)?.toISOString()}>
             {formatExplorerTime(log.timestamp, true, timeZone)}
           </time>
-          <span className="explorerCell--muted">{log.service || "—"}</span>
+          <span className="logDrawer__service">{log.service || "—"}</span>
           <span className="explorerDrawer__spacer" />
           <IconButton aria-label="Previous log" className="explorerDrawer__nav" disabled={index === 0} onClick={() => onMove(index - 1)} size="small">
             <CaretUpIcon size={14} />
@@ -147,6 +148,7 @@ function LogDrawer({
         </section>
       ) : null}
       <AttributeTable
+        grouped
         key={logKeyForAttributes(log)}
         leading={[
           ...(log.trace_id ? [{ key: "trace_id", value: <Link to={traceHref(log.trace_id)}>{log.trace_id}</Link> }] : []),
@@ -155,14 +157,14 @@ function LogDrawer({
         onFilter={(key, op, value) => onFilter({ key, op, value })}
         scopes={[
           { label: "Log", prefix: "log.", values: logAttrs },
-          { label: "Resource", prefix: "resource.", values: log.resource_attrs },
+          { label: "Resource", prefix: "resource.", values: log.resource_attrs, defaultCollapsed: true },
         ]}
       />
     </ExplorerDrawer>
   );
 }
 
-// Keeps the attribute table's tab and search across logs from one source.
+// Keeps the attribute table's groups and search across logs from one source.
 function logKeyForAttributes(log: LogRecord): string {
   return log.service;
 }
