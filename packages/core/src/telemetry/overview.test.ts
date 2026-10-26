@@ -138,22 +138,30 @@ describe("telemetry overview details", () => {
     const { ch } = client([], (query) =>
       query.includes("gen_ai.operation.name")
         ? [
-            { calls: 1_204, model: "gpt-4.1-mini", service: "checkout", with_input: 0, with_model: 1_204, with_output: 0, without_usage: 1_204 },
-            { calls: 296, model: "claude-haiku-4-5", service: "checkout", with_input: 296, with_model: 296, with_output: 296, without_usage: 0 },
-            { calls: 12, model: "", service: "search", with_input: 0, with_model: 0, with_output: 0, without_usage: 12 },
+            { calls: 1_204, completed: 1_204, generated: 1_204, model: "gpt-4.1-mini", service: "checkout", with_input: 0, with_model: 1_204, with_output: 0, without_usage: 1_204 },
+            { calls: 300, completed: 296, generated: 296, model: "claude-haiku-4-5", service: "checkout", with_input: 296, with_model: 300, with_output: 296, without_usage: 0 },
+            { calls: 12, completed: 12, generated: 0, model: "", service: "search", with_input: 0, with_model: 0, with_output: 0, without_usage: 12 },
           ]
         : [],
     );
 
     const { ai } = await telemetryOverviewDetails(ch, "project-1", range);
 
-    expect(ai).toMatchObject({ calls: 1_512, callsWithInput: 296, callsWithModel: 1_500, callsWithOutput: 296, callsWithoutUsage: 1_216 });
+    expect(ai).toMatchObject({
+      calls: 1_516,
+      callsWithInput: 296,
+      callsWithModel: 1_504,
+      callsWithOutput: 296,
+      callsWithoutUsage: 1_216,
+      completedCalls: 1_512,
+      completedGenerations: 1_500,
+    });
     expect(ai!.models).toEqual([
       { calls: 1_204, model: "gpt-4.1-mini" },
-      { calls: 296, model: "claude-haiku-4-5" },
+      { calls: 300, model: "claude-haiku-4-5" },
     ]);
     expect(ai!.services).toEqual([
-      { calls: 1_500, callsWithoutUsage: 1_204, service: "checkout" },
+      { calls: 1_504, callsWithoutUsage: 1_204, service: "checkout" },
       { calls: 12, callsWithoutUsage: 12, service: "search" },
     ]);
   });
