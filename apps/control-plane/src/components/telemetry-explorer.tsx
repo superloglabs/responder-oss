@@ -1,7 +1,8 @@
-import { CheckIcon, MagnifyingGlassIcon, XIcon } from "@phosphor-icons/react";
+import { CaretDownIcon, CaretRightIcon, CheckIcon, MagnifyingGlassIcon, XIcon } from "@phosphor-icons/react";
 import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
-import { IconButton, SegmentedControl, SelectField } from "../design-system";
-import { telemetryRanges, type TelemetryRange } from "../telemetry-api";
+import { IconButton, SegmentedControl } from "../design-system";
+import { maxOpenFacets, telemetryRanges, type ExplorerFilter, type FacetCount, type TelemetryRange } from "../telemetry-api";
+import { useTelemetryQuery } from "../use-telemetry-query";
 import { ListSkeleton } from "./screen-skeletons";
 import "./telemetry-explorer.css";
 
@@ -101,19 +102,24 @@ export interface FacetOption {
 // A filter group in the explorer sidebar. Checked values are listed even when
 // the window has none of them.
 export function ExplorerFacet({
+  error,
   loading,
-  onRemove,
+  onCollapse,
   onToggle,
   options,
   selected,
   title,
+  tooltip,
 }: {
+  error?: string | null;
   loading: boolean;
-  onRemove?: () => void;
+  // Closes a facet that the sidebar lists as a key.
+  onCollapse?: () => void;
   onToggle: (value: string) => void;
   options: FacetOption[];
   selected: string[];
   title: string;
+  tooltip?: string;
 }) {
   const listed: FacetOption[] = [
     ...options,
@@ -121,16 +127,24 @@ export function ExplorerFacet({
   ];
   return (
     <fieldset className="explorerFacet">
-      <legend>
-        <span>{title}</span>
-        {onRemove ? (
-          <button aria-label={`Remove the ${title} facet`} onClick={onRemove} type="button">
-            <XIcon size={11} />
+      <legend title={tooltip}>
+        {onCollapse ? (
+          <button aria-expanded="true" className="explorerFacet__toggle" onClick={onCollapse} type="button">
+            <CaretDownIcon aria-hidden="true" size={10} weight="bold" />
+            <span>{title}</span>
           </button>
-        ) : null}
+        ) : (
+          <span>{title}</span>
+        )}
       </legend>
       {listed.length === 0 ? (
-        loading ? <ListSkeleton rows={3} /> : <p className="explorerFacet__empty">None in this window</p>
+        error ? (
+          <p className="explorerFacet__empty">Values did not load</p>
+        ) : loading ? (
+          <ListSkeleton rows={3} />
+        ) : (
+          <p className="explorerFacet__empty">None in this window</p>
+        )
       ) : (
         listed.map((option) => {
           const checked = selected.includes(option.value);
@@ -154,20 +168,135 @@ export function ExplorerFacet({
   );
 }
 
-
-// Adds an attribute key as a facet.
-export function AddFacet({ keys, onAdd }: { keys: string[]; onAdd: (key: string) => void }) {
-  if (keys.length === 0) return null;
+// One open attribute facet, which loads its own values.
+function AttributeFacet({
+  dataKey,
+  facetKey,
+  filters,
+  live,
+  load,
+  onCollapse,
+  onFiltersChange,
+  title,
+}: {
+  dataKey: string;
+  facetKey: string;
+  filters: ExplorerFilter[];
+  live: boolean;
+  load: (key: string) => Promise<FacetCount[]>;
+  onCollapse: () => void;
+  onFiltersChange: (filters: ExplorerFilter[]) => void;
+  title: string;
+}) {
+  const values = useTelemetryQuery(`${dataKey}#${facetKey}`, () => load(facetKey), live);
   return (
-    <SelectField
-      className="explorerAddFacet"
-      label="Add facet"
-      onChange={(key) => { if (key) onAdd(key); }}
-      options={[{ label: "Add facet", value: "" }, ...keys.map((key) => ({ label: key, value: key }))]}
-      searchable
-      searchPlaceholder="Search attributes…"
-      value=""
+    <ExplorerFacet
+      error={values.error}
+      loading={!values.data}
+      onCollapse={onCollapse}
+      onToggle={(value) => {
+        const existing = filters.find((filter) => filter.key === facetKey && filter.op === "eq" && filter.value === value);
+        // One value per key: attribute filters on a key must all match.
+        onFiltersChange(existing
+          ? filters.filter((filter) => filter !== existing)
+          : [...filters.filter((filter) => filter.key !== facetKey), { key: facetKey, op: "eq", value }]);
+      }}
+      options={(values.data ?? []).filter((item) => item.group).map((item) => ({ count: item.value, label: item.group, value: item.group }))}
+      selected={filters.filter((filter) => filter.key === facetKey && filter.op === "eq").map((filter) => filter.value)}
+      title={title}
+      tooltip={facetKey}
     />
+  );
+}
+
+// Every attribute key in the window, grouped by scope. A key opens into a
+// facet with its values; keys that are open or filtered on stay listed even
+// when the window no longer has them.
+export function AttributeFacets({
+  dataKey,
+  filters,
+  keys,
+  live = false,
+  load,
+  onFiltersChange,
+  onOpenChange,
+  open,
+  scopes,
+}: {
+  // Changes whenever the explorer's query does.
+  dataKey: string;
+  filters: ExplorerFilter[];
+  keys: string[] | null;
+  live?: boolean;
+  load: (key: string) => Promise<FacetCount[]>;
+  onFiltersChange: (filters: ExplorerFilter[]) => void;
+  onOpenChange: (open: string[]) => void;
+  open: string[];
+  scopes: Array<{ label: string; prefix: string }>;
+}) {
+  const [search, setSearch] = useState("");
+  if (keys === null) return <ListSkeleton rows={4} />;
+  const inScope = (key: string) => scopes.some((scope) => key.startsWith(scope.prefix));
+  const extra = [...open, ...filters.map((filter) => filter.key)].filter((key) => inScope(key) && !keys.includes(key));
+  const needle = search.trim().toLowerCase();
+  const listed = [...new Set([...extra, ...keys])].filter((key) => !needle || key.toLowerCase().includes(needle));
+  if (keys.length === 0 && extra.length === 0) return null;
+  return (
+    <div className="explorerKeyFacets">
+      <label className="explorerKeyFacets__search">
+        <MagnifyingGlassIcon aria-hidden="true" size={12} />
+        <input
+          aria-label="Search attributes"
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="Search attributes"
+          type="search"
+          value={search}
+        />
+      </label>
+      {scopes.map((scope) => {
+        const scoped = listed.filter((key) => key.startsWith(scope.prefix));
+        if (scoped.length === 0) return null;
+        return (
+          <section aria-label={scope.label} className="explorerKeyFacets__group" key={scope.prefix}>
+            <h3>{scope.label}</h3>
+            {scoped.map((key) => {
+              const title = key.slice(scope.prefix.length);
+              if (open.includes(key)) {
+                return (
+                  <AttributeFacet
+                    dataKey={dataKey}
+                    facetKey={key}
+                    filters={filters}
+                    key={key}
+                    live={live}
+                    load={load}
+                    onCollapse={() => onOpenChange(open.filter((item) => item !== key))}
+                    onFiltersChange={onFiltersChange}
+                    title={title}
+                  />
+                );
+              }
+              const active = filters.filter((filter) => filter.key === key).length;
+              return (
+                <button
+                  aria-expanded="false"
+                  className="explorerAttribute"
+                  key={key}
+                  onClick={() => onOpenChange([...open, key].slice(-maxOpenFacets))}
+                  title={key}
+                  type="button"
+                >
+                  <CaretRightIcon aria-hidden="true" size={10} weight="bold" />
+                  <span>{title}</span>
+                  {active ? <span className="explorerAttribute__active">{active}</span> : null}
+                </button>
+              );
+            })}
+          </section>
+        );
+      })}
+      {listed.length === 0 ? <p className="explorerFacet__empty">No matching attributes</p> : null}
+    </div>
   );
 }
 
