@@ -1,4 +1,3 @@
-import { CaretRightIcon } from "@phosphor-icons/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
@@ -6,41 +5,16 @@ import {
   type AutomationIssue,
   type AutomationIssuePage,
 } from "../automations-api";
+import { relativeTime } from "../agents-api";
 import { dateGroupLabel } from "../date-presentation";
 import { DataTable } from "../design-system";
 import { IssueSeverity } from "./issue-severity";
 import { AutomationRunHistorySkeleton } from "./screen-skeletons";
 import "./automation-run-history.css";
-
-function seenLabel(value: string): string {
-  const time = new Intl.DateTimeFormat(undefined, { hour: "2-digit", hourCycle: "h23", minute: "2-digit" }).format(new Date(value));
-  const day = dateGroupLabel(value);
-  if (day === "Today" || day === "Yesterday") return `${day}, ${time}`;
-  return `${new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short" }).format(new Date(value))}, ${time}`;
-}
-
-function linkLabel(link: AutomationIssue["links"][number]): string {
-  if (link.label) return link.label;
-  try {
-    return new URL(link.url).hostname.replace(/^www\./u, "");
-  } catch {
-    return link.url;
-  }
-}
-
-// Only web pages are shown as links.
-function webLinks(issue: AutomationIssue): AutomationIssue["links"] {
-  return issue.links.filter((link) => {
-    try {
-      return ["http:", "https:"].includes(new URL(link.url).protocol);
-    } catch {
-      return false;
-    }
-  });
-}
+import "./automation-issues.css";
 
 function SeenCell({ value }: { value: string }) {
-  return <time className="agentTableCell" dateTime={value} title={new Date(value).toLocaleString()}>{seenLabel(value)}</time>;
+  return <time className="agentTableCell" dateTime={value} title={new Date(value).toLocaleString()}>{relativeTime(value)}</time>;
 }
 
 // The issues the automation reported. Repeats of an alert are counted on its
@@ -49,6 +23,7 @@ export function AutomationIssues({ automationId }: { automationId: string }) {
   const [page, setPage] = useState(1);
   const [result, setResult] = useState<AutomationIssuePage | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [now, setNow] = useState(() => new Date());
   const request = useRef(0);
   const navigate = useNavigate();
   const runPath = (issue: AutomationIssue) => issue.filedRunId ? `/automations/${automationId}/runs/${issue.filedRunId}` : null;
@@ -70,6 +45,11 @@ export function AutomationIssues({ automationId }: { automationId: string }) {
     return () => { request.current += 1; };
   }, [load]);
 
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
   if (!result) {
     return error
       ? <div className="automationRuns__message" role="alert"><p>{error}</p><button onClick={() => { setError(null); void load(); }} type="button">Retry</button></div>
@@ -79,7 +59,7 @@ export function AutomationIssues({ automationId }: { automationId: string }) {
   const first = (result.page - 1) * result.pageSize;
   const lastPage = Math.max(1, Math.ceil(result.total / result.pageSize));
 
-  return <section className="automationRuns automationIssues agentListTable" aria-label="Issues">
+  return <section className="automationIssues agentListTable" aria-label="Issues">
     {error ? <p className="formError" role="alert">{error}</p> : null}
     <DataTable<AutomationIssue>
       aria-label="Automation issues"
@@ -91,41 +71,26 @@ export function AutomationIssues({ automationId }: { automationId: string }) {
             const path = runPath(issue);
             return <span className="agentTableTitle">
               {path ? <Link title={issue.title} to={path}><strong>{issue.title}</strong></Link> : <strong title={issue.title}>{issue.title}</strong>}
-              <small title={issue.summary}>{issue.summary}</small>
             </span>;
           },
-          width: "39%",
         },
         {
           header: "Severity",
           key: "severity",
           render: (issue) => issue.severity ? <IssueSeverity severity={issue.severity} /> : <span className="agentTableCell">—</span>,
-          width: "9%",
+          width: "100px",
         },
         {
+          align: "right",
           header: "Occurrences",
           key: "occurrences",
           render: (issue) => <span className="agentTableCell automationIssues__count">{issue.occurrences.toLocaleString()}</span>,
-          width: "10%",
+          width: "120px",
         },
-        { header: "First seen", key: "firstSeen", render: (issue) => <SeenCell value={issue.firstSeenAt} />, width: "13%" },
-        { header: "Last seen", key: "lastSeen", render: (issue) => <SeenCell value={issue.lastSeenAt} />, width: "13%" },
-        {
-          header: "Links",
-          key: "links",
-          render: (issue) => webLinks(issue).length > 0
-            ? <span className="automationIssues__links">{webLinks(issue).map((link) => <a href={link.url} key={link.url} onClick={(event) => event.stopPropagation()} rel="noreferrer" target="_blank" title={link.url}>{linkLabel(link)}</a>)}</span>
-            : <span className="agentTableCell">—</span>,
-          width: "16%",
-        },
-        {
-          header: "",
-          key: "open",
-          render: (issue) => runPath(issue) ? <CaretRightIcon aria-hidden="true" className="automationRuns__open" size={14} /> : null,
-          width: "44px",
-        },
+        { header: "Last seen", key: "lastSeen", render: (issue) => <SeenCell value={issue.lastSeenAt} />, width: "124px" },
       ]}
       emptyMessage="No issues yet. Each problem this automation reports is listed here, and repeats of its alert are counted on it."
+      getRowGroup={(issue) => dateGroupLabel(issue.lastSeenAt, now)}
       getRowKey={(issue) => issue.id}
       onRowClick={(issue) => {
         const path = runPath(issue);
