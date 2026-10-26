@@ -446,3 +446,46 @@ test("hides notifications for a Slack-triggered automation", async ({ page }) =>
   await expect(page.getByRole("heading", { name: "Answer questions" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Notifications" })).toHaveCount(0);
 });
+
+test("issue titles wrap while severity, counts and relative last-seen dates stay aligned", async ({ page }, testInfo) => {
+  await page.clock.install({ time: new Date("2026-10-26T16:07:00") });
+  const title = "Zendesk change dropped when the event-forwarding connector acknowledges a webhook before the downstream handler has finished processing the required workspace configuration";
+  const issue = {
+    id: "issue-1", title, summary: "Optional summary", severity: "SEV-3",
+    filedRunId: "run-12", firstSeenAt: "2026-10-23T10:00:00",
+    lastSeenAt: "2026-10-26T15:52:00", occurrences: 1234, links: [],
+  };
+  await page.route(`**/api/automations/${automationId}/issues?*`, (route) => route.fulfill({ json: {
+    issues: [issue, { ...issue, id: "issue-2", title: "Previous day issue", severity: null, filedRunId: null, lastSeenAt: "2026-10-25T18:24:00" }],
+    page: 1, pageSize: 25, total: 2,
+  } }));
+  await page.setViewportSize({ width: 1024, height: 900 });
+  await page.goto(`/automations/${automationId}/issues`);
+  const today = page.getByRole("region", { name: "Automation issues: Today", exact: true });
+  await expect(today.getByRole("columnheader")).toHaveText(["Issue", "Severity", "Occurrences", "Last seen"]);
+  await expect(today.getByRole("link", { name: title })).toHaveAttribute("href", `/automations/${automationId}/runs/run-12`);
+  await expect(today.getByText("15m ago")).toBeVisible();
+  await expect(today.locator("time")).toHaveAttribute("datetime", issue.lastSeenAt);
+  await expect(today.locator("time")).toHaveAttribute("title", /2026/);
+  await expect(page.getByRole("region", { name: "Automation issues: Yesterday", exact: true })).toContainText("Previous day issue");
+  await expect(today.locator(".issueSeverity__dot")).toBeVisible();
+  const geometry = await today.locator("tbody tr").evaluate((row) => {
+    const cells = row.querySelectorAll("td");
+    const strong = row.querySelector("strong")!;
+    const severity = row.querySelector(".issueSeverity")!;
+    const titleStyle = getComputedStyle(strong);
+    const cell = cells[1].getBoundingClientRect();
+    const badge = severity.getBoundingClientRect();
+    return {
+      wrapped: strong.getBoundingClientRect().height > parseFloat(titleStyle.lineHeight),
+      clipped: strong.scrollWidth > cells[0].clientWidth,
+      centered: Math.abs((badge.top + badge.bottom) / 2 - (cell.top + cell.bottom) / 2) < 2,
+      severityAlign: getComputedStyle(cells[1]).textAlign,
+      countAlign: getComputedStyle(cells[2]).textAlign,
+    };
+  });
+  expect(geometry).toEqual({ wrapped: true, clipped: false, centered: true, severityAlign: "left", countAlign: "right" });
+  await page.screenshot({ path: testInfo.outputPath("automation-issues.png"), fullPage: true });
+  await page.clock.fastForward("01:00");
+  await expect(today.getByText("16m ago")).toBeVisible();
+});
