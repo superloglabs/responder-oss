@@ -203,3 +203,90 @@ test("groups facets, filters values, scrolls, and paginates a fixed window", asy
   await expect(page.locator(".logResults .dsDataTable")).toHaveCSS("overscroll-behavior", "none");
   await page.screenshot({ path: testInfo.outputPath("log-facets.png") });
 });
+
+test("log drawer fills the viewport and groups attributes without losing search or actions", async ({ page, context }, testInfo) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await mockWorkspace(page, ["telemetry", "simplified_navigation"]);
+  await page.route("**/api/c15t/**", (route) => route.abort());
+  await page.route("**/api/telemetry/**", async (route) => {
+    const url = new URL(route.request().url());
+    let json: unknown = { available: true };
+    if (url.pathname.endsWith("/logs")) {
+      json = { logs: [0, 1].map((index) => ({
+        timestamp: `2026-10-26T17:56:3${index}.551Z`,
+        severity: "ERROR",
+        service: "responder-control-plane",
+        body: `scheduled_scan_failed ${index}`,
+        trace_id: "",
+        span_id: "span-123",
+        log_attrs: { error: "Agent is missing an active configuration", event: "scheduled_scan_failed" },
+        resource_attrs: { "cloud.region": "eu-west-3", "service.name": "responder-control-plane" },
+      })) };
+    } else if (url.pathname.endsWith("/histogram")) {
+      json = { buckets: [], since: "2026-10-26T17:00:00Z", until: "2026-10-26T18:00:00Z", stepMs: 60000 };
+    } else if (url.pathname.endsWith("/facets")) {
+      json = { services: [], severities: [] };
+    } else if (url.pathname.includes("attribute-keys")) json = { keys: [] };
+    await route.fulfill({ json });
+  });
+  await page.goto("/logs");
+  const consent = page.getByRole("button", { name: "Reject All", exact: true });
+  if (await consent.isVisible()) await consent.click();
+  await page.getByText("scheduled_scan_failed 0", { exact: true }).click();
+  const drawer = page.getByRole("complementary", { name: "Log details" });
+  await expect(drawer).toBeVisible();
+  const rect = await drawer.boundingBox();
+  expect(rect).toMatchObject({ y: 0, width: 600, height: 1000 });
+  expect(rect!.x + rect!.width).toBe(1440);
+  await expect(drawer.getByRole("group", { name: "Attribute scope" })).toHaveCount(0);
+  await expect(drawer.getByText("Attributes 5", { exact: true })).toBeVisible();
+  await expect(drawer.getByText("span-123", { exact: true })).toBeVisible();
+  const logGroup = drawer.getByRole("button", { name: "Log attributes 2" });
+  const resourceGroup = drawer.getByRole("button", { name: "Resource attributes 2" });
+  await expect(logGroup).toHaveAttribute("aria-expanded", "true");
+  await expect(resourceGroup).toHaveAttribute("aria-expanded", "false");
+  await expect(drawer.getByText("eu-west-3", { exact: true })).toBeHidden();
+  await resourceGroup.focus();
+  await page.keyboard.press("Enter");
+  await expect(drawer.getByText("eu-west-3", { exact: true })).toBeVisible();
+  await resourceGroup.click();
+  await logGroup.click();
+  await expect(drawer.getByText("Agent is missing an active configuration", { exact: true })).toBeHidden();
+  const search = drawer.getByRole("searchbox", { name: "Filter attribute keys" });
+  await search.fill("CLOUD");
+  await expect(drawer.getByText("eu-west-3", { exact: true })).toBeVisible();
+  await expect(drawer.getByRole("button", { name: "Resource attributes 1" })).toHaveAttribute("aria-expanded", "true");
+  await search.fill("no-such-key");
+  await expect(drawer.getByText("No attributes match.")).toBeVisible();
+  await search.fill("");
+  const resourceRow = drawer.locator(".explorerAttributes__row").filter({ has: page.getByText("cloud.region", { exact: true }) });
+  await resourceRow.hover();
+  await resourceRow.getByRole("button", { name: "Copy", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe("eu-west-3");
+  await expect(drawer.getByRole("button", { name: "Previous log" })).toBeDisabled();
+  const next = drawer.getByRole("button", { name: "Next log" });
+  await expect(next).toHaveCSS("height", "26px");
+  await expect(next).toHaveCSS("width", "30px");
+  await expect(next).toHaveCSS("border-radius", "6px");
+  const timestampColor = await drawer.locator("time").evaluate((node) => getComputedStyle(node).color);
+  await expect(drawer.locator(".logDrawer__service")).toHaveCSS("color", timestampColor);
+  await next.click();
+  await expect(drawer.getByText("scheduled_scan_failed 1", { exact: true })).toBeVisible();
+  await expect(next).toBeDisabled();
+  await expect(resourceGroup).toHaveAttribute("aria-expanded", "true");
+  await resourceGroup.click();
+  await page.screenshot({ path: testInfo.outputPath("log-drawer-desktop.png") });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(drawer).toBeVisible();
+  expect(await drawer.boundingBox()).toMatchObject({ x: 0, y: 0, width: 390, height: 844 });
+  await expect(drawer.getByRole("button", { name: "Close log details" })).toBeInViewport();
+  await page.screenshot({ path: testInfo.outputPath("log-drawer-mobile.png") });
+  await page.keyboard.press("Escape");
+  await expect(drawer).toHaveCount(0);
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.getByText("scheduled_scan_failed 0", { exact: true }).click();
+  await drawer.getByRole("button", { name: "Resource attributes 2" }).click();
+  await resourceRow.hover();
+  await resourceRow.getByRole("button", { name: "Filter", exact: true }).click();
+  await expect.poll(() => new URL(page.url()).searchParams.getAll("filter").join(" ")).toContain("resource.cloud.region");
+});

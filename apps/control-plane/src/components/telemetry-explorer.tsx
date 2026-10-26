@@ -1,5 +1,5 @@
 import { CaretDownIcon, CaretRightIcon, CheckIcon, MagnifyingGlassIcon, XIcon } from "@phosphor-icons/react";
-import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
+import { type FormEvent, type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { IconButton, SegmentedControl } from "../design-system";
 import { maxOpenFacets, telemetryRanges, type ExplorerFilter, type FacetCount, type TelemetryRange } from "../telemetry-api";
 import { useTelemetryQuery } from "../use-telemetry-query";
@@ -319,12 +319,14 @@ export function ExplorerDrawer({
   header,
   label,
   onClose,
+  fullHeight = false,
   wide = false,
 }: {
   children: ReactNode;
   header: ReactNode;
   label: string;
   onClose: () => void;
+  fullHeight?: boolean;
   wide?: boolean;
 }) {
   const panel = useRef<HTMLElement>(null);
@@ -345,7 +347,7 @@ export function ExplorerDrawer({
   return (
     <aside
       aria-label={label}
-      className={wide ? "explorerDrawer explorerDrawer--wide" : "explorerDrawer"}
+      className={`explorerDrawer${wide ? " explorerDrawer--wide" : ""}${fullHeight ? " explorerDrawer--fullHeight" : ""}`}
       ref={panel}
       tabIndex={-1}
     >
@@ -365,32 +367,39 @@ export interface AttributeScope {
   // The filter key prefix for this scope, such as "log." or "resource.".
   prefix: string;
   values: Record<string, string>;
+  defaultCollapsed?: boolean;
 }
 
 // Key and value rows for a log or span, by scope. Each row can add a filter
 // on its value, exclude it, or copy it.
 export function AttributeTable({
+  grouped = false,
   leading = [],
   onFilter,
   scopes,
 }: {
+  grouped?: boolean;
   // Rows shown first under "All", such as IDs that link elsewhere.
   leading?: Array<{ key: string; value: ReactNode }>;
   onFilter?: (key: string, op: "eq" | "neq", value: string) => void;
   scopes: AttributeScope[];
 }) {
+  const tableId = useId();
   const [scope, setScope] = useState("all");
+  const [collapsed, setCollapsed] = useState(() => scopes.filter((item) => item.defaultCollapsed).map((item) => item.prefix));
   const [search, setSearch] = useState("");
   const [copied, setCopied] = useState<string | null>(null);
-  const rows = scopes
-    .filter((item) => scope === "all" || item.prefix === scope)
-    .flatMap((item) =>
-      Object.entries(item.values)
+  const groups = scopes
+    .filter((item) => grouped || scope === "all" || item.prefix === scope)
+    .map((item) => ({
+      ...item,
+      rows: Object.entries(item.values)
         .sort(([a], [b]) => a.localeCompare(b))
-        .map(([key, value]) => ({ filterKey: `${item.prefix}${key}`, key, value })),
-    )
-    .filter((row) => !search || row.key.toLowerCase().includes(search.toLowerCase()));
-  const leadingRows = scope === "all" ? leading.filter((row) => !search || row.key.includes(search.toLowerCase())) : [];
+        .map(([key, value]) => ({ filterKey: `${item.prefix}${key}`, key, value }))
+        .filter((row) => !search || row.key.toLowerCase().includes(search.toLowerCase())),
+    }));
+  const rows = groups.flatMap((group) => group.rows);
+  const leadingRows = grouped || scope === "all" ? leading.filter((row) => !search || row.key.toLowerCase().includes(search.toLowerCase())) : [];
   const total = scopes.reduce((sum, item) => sum + Object.keys(item.values).length, 0);
 
   function copy(id: string, value: string) {
@@ -403,7 +412,7 @@ export function AttributeTable({
   return (
     <section className="explorerAttributes">
       <div className="explorerAttributes__toolbar">
-        <div aria-label="Attribute scope" className="explorerPills" role="group">
+        {grouped ? <span className="explorerAttributes__title">Attributes {total + leading.length}</span> : <div aria-label="Attribute scope" className="explorerPills" role="group">
           {[{ label: "All attributes", prefix: "all", values: {} as Record<string, string> }, ...scopes].map((item) => (
             <button
               aria-pressed={scope === item.prefix}
@@ -415,12 +424,15 @@ export function AttributeTable({
               <span>{item.prefix === "all" ? total + leading.length : Object.keys(item.values).length}</span>
             </button>
           ))}
-        </div>
+        </div>}
         <label className="explorerAttributes__search">
           <MagnifyingGlassIcon aria-hidden="true" size={12} />
           <input
             aria-label="Filter attribute keys"
-            onChange={(event) => setSearch(event.target.value)}
+            onChange={(event) => {
+              setSearch(event.target.value);
+              if (event.target.value) setCollapsed([]);
+            }}
             placeholder="Filter keys"
             type="search"
             value={search}
@@ -442,23 +454,42 @@ export function AttributeTable({
               <span className="explorerAttributes__value">{row.value}</span>
             </div>
           ))}
-          {rows.map((row) => (
-            <div className="explorerAttributes__row" key={row.filterKey}>
-              <span className="explorerAttributes__key" title={row.key}>{row.key}</span>
-              <span className="explorerAttributes__value">
-                <span title={row.value}>{row.value === "" ? <em>(empty)</em> : row.value}</span>
-                <span className="explorerAttributes__actions">
-                  {onFilter ? (
-                    <>
-                      <button onClick={() => onFilter(row.filterKey, "eq", row.value)} type="button">Filter</button>
-                      <button onClick={() => onFilter(row.filterKey, "neq", row.value)} type="button">Exclude</button>
-                    </>
-                  ) : null}
-                  <button onClick={() => copy(row.filterKey, row.value)} type="button">
-                    {copied === row.filterKey ? "Copied" : "Copy"}
-                  </button>
-                </span>
-              </span>
+          {(grouped ? groups.filter((group) => group.rows.length > 0) : [{ prefix: "all", label: "", rows }]).map((group) => (
+            <div className={grouped ? "explorerAttributes__group" : undefined} key={group.prefix}>
+              {grouped ? (
+                <button
+                  aria-controls={`${tableId}-${group.prefix}`}
+                  aria-expanded={!collapsed.includes(group.prefix)}
+                  className="explorerAttributes__groupHeading"
+                  onClick={() => setCollapsed((current) => current.includes(group.prefix) ? current.filter((prefix) => prefix !== group.prefix) : [...current, group.prefix])}
+                  type="button"
+                >
+                  <CaretDownIcon aria-hidden="true" size={12} />
+                  <span>{group.label} attributes</span>
+                  <span>{group.rows.length}</span>
+                </button>
+              ) : null}
+              <div className="explorerAttributes__rows" hidden={grouped && collapsed.includes(group.prefix)} id={`${tableId}-${group.prefix}`}>
+                {group.rows.map((row) => (
+                  <div className="explorerAttributes__row" key={row.filterKey}>
+                    <span className="explorerAttributes__key" title={row.key}>{row.key}</span>
+                    <span className="explorerAttributes__value">
+                      <span title={row.value}>{row.value === "" ? <em>(empty)</em> : row.value}</span>
+                      <span className="explorerAttributes__actions">
+                        {onFilter ? (
+                          <>
+                            <button onClick={() => onFilter(row.filterKey, "eq", row.value)} type="button">Filter</button>
+                            <button onClick={() => onFilter(row.filterKey, "neq", row.value)} type="button">Exclude</button>
+                          </>
+                        ) : null}
+                        <button onClick={() => copy(row.filterKey, row.value)} type="button">
+                          {copied === row.filterKey ? "Copied" : "Copy"}
+                        </button>
+                      </span>
+                    </span>
+                  </div>
+                ))}
+              </div>
             </div>
           ))}
         </div>
