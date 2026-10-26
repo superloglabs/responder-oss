@@ -5,6 +5,7 @@ import { errorSchema } from "./schemas.js";
 type JsonSchema = Record<string, unknown>;
 
 const tagDescriptions: Record<ManagementTag, string> = {
+  Alerts: "Threshold alerts on the workspace's telemetry that post to Slack.",
   "API keys": "Keys that authenticate the management API and MCP server.",
   Automations: "Create and change automations.",
   Dashboards: "Create and change dashboards over the workspace's telemetry.",
@@ -126,7 +127,7 @@ function openApiOperation(operation: ManagementOperation) {
         ? { "400": errorResponse("The request is invalid. `issues` lists each invalid field.") }
         : {}),
       "401": errorResponse("The API key is missing, revoked, or its creator left the workspace."),
-      ...(pathNames.length > 0 || operation.requiresAutomations || operation.tag === "Telemetry" || operation.tag === "Dashboards" || operation.tag === "Errors"
+      ...(pathNames.length > 0 || operation.requiresAutomations || operation.tag === "Telemetry" || operation.tag === "Dashboards" || operation.tag === "Errors" || operation.tag === "Alerts"
         ? { "404": errorResponse("The resource does not exist in this workspace, or the feature it belongs to is not enabled.") }
         : {}),
       ...(operation.effect !== "read"
@@ -163,7 +164,7 @@ export function buildOpenApiDocument(
     },
     info: {
       description:
-        "Manage a Superlog workspace's automations, runs, tag mode, model access, and secrets, read its telemetry, and build dashboards over it. Every request acts as the member who created the API key.",
+        "Manage a Superlog workspace's automations, runs, tag mode, model access, and secrets, read its telemetry, and build dashboards and alerts over it. Every request acts as the member who created the API key.",
       title: "Superlog management API",
       version: "1.0.0",
     },

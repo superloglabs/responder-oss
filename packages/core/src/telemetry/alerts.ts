@@ -153,6 +153,15 @@ export function evaluateAlert(
   return [evaluation("", rows.reduce((sum, row) => sum + row.value, 0))];
 }
 
+// Groups past the threshold first, then those furthest past it.
+export function rankAlertEvaluations(
+  rule: Pick<AlertRule, "comparator">,
+  evaluations: AlertEvaluation[],
+): AlertEvaluation[] {
+  const severity = rule.comparator === "gt" ? 1 : -1;
+  return [...evaluations].sort((a, b) => Number(b.breaching) - Number(a.breaching) || severity * (b.value - a.value));
+}
+
 export type AlertTransition = "opened" | "continued" | "recovered";
 
 // What a group's evaluation does to its episode.
