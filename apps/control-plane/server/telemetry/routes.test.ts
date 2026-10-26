@@ -198,22 +198,23 @@ describe("telemetry routes", () => {
   it("counts each log facet without its own filter", async () => {
     const { app, dependencies } = routes();
 
-    const response = await app.request(
-      `/logs/facets?severity=ERROR&service=api&facet=log.http.route` +
-        `&filter=${encodeURIComponent("log.http.route=/checkout")}`,
-    );
+    const filters = `severity=ERROR&service=api&filter=${encodeURIComponent("log.http.route=/checkout")}`;
 
+    const response = await app.request(`/logs/facets?${filters}`);
     await expect(response.json()).resolves.toEqual({
-      attributes: { "log.http.route": [{ group: "log.http.route-top", value: 7 }] },
       services: [{ group: "service-top", value: 7 }],
       severities: [{ group: "severity-top", value: 7 }],
     });
+    const attribute = await app.request(`/logs/facets/attribute?key=log.http.route&${filters}`);
+    await expect(attribute.json()).resolves.toEqual({ values: [{ group: "log.http.route-top", value: 7 }] });
+
     const calls = vi.mocked(dependencies.countAggregate).mock.calls;
     const byGroup = Object.fromEntries(calls.map((call) => [call[4], call[3]]));
     expect(byGroup.severity).toMatchObject({ services: ["api"], severities: undefined });
     expect(byGroup.service).toMatchObject({ services: undefined, severities: ["ERROR"] });
     expect(byGroup["log.http.route"]).toMatchObject({ resourceAttrs: [], services: ["api"], severities: ["ERROR"] });
-    expect((await app.request("/logs/facets?facet=a&facet=b&facet=c&facet=d&facet=e&facet=f")).status).toBe(400);
+    expect((await app.request("/logs/facets/attribute")).status).toBe(400);
+    expect((await app.request(`/logs/facets/attribute?key=${"a".repeat(201)}`)).status).toBe(400);
   });
 
   it("lists services seen in the window", async () => {
@@ -293,7 +294,6 @@ describe("telemetry routes", () => {
 
     const facets = await app.request("/traces/facets?status=error&operation=checkout");
     await expect(facets.json()).resolves.toEqual({
-      attributes: {},
       operations: [{ group: "operation-top", value: 7 }],
       services: [{ group: "service-top", value: 7 }],
       statuses: [{ group: "status-top", value: 7 }],
@@ -302,6 +302,20 @@ describe("telemetry routes", () => {
     const byGroup = Object.fromEntries(calls.map((call) => [call[4], call[3]]));
     expect(byGroup.status).toMatchObject({ spanNames: ["checkout"], statusCodes: undefined });
     expect(byGroup.operation).toMatchObject({ spanNames: undefined, statusCodes: ["STATUS_CODE_ERROR"] });
+
+    const attribute = await app.request(
+      `/traces/facets/attribute?key=span.http.route&status=error&filter=${encodeURIComponent("span.http.route=/cart")}` +
+        `&filter=${encodeURIComponent("resource.deployment.environment=production")}`,
+    );
+    await expect(attribute.json()).resolves.toEqual({ values: [{ group: "span.http.route-top", value: 7 }] });
+    expect(vi.mocked(dependencies.countAggregate).mock.lastCall?.slice(2, 5)).toEqual([
+      "traces",
+      expect.objectContaining({
+        resourceAttrs: [{ key: "resource.deployment.environment", op: "eq", value: "production" }],
+        statusCodes: ["STATUS_CODE_ERROR"],
+      }),
+      "span.http.route",
+    ]);
   });
 
   it("summarizes requests into a service for the traces overview", async () => {

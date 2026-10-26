@@ -13,6 +13,7 @@ import {
   spanKindLabel,
   spanStatus,
   spanWaterfall,
+  traceApiParams,
   traceHref,
   traceExplorerParams,
   traceExplorerQuery,
@@ -65,6 +66,7 @@ describe("explorer queries", () => {
       "range=6h&search=timeout&service=api&severity=ERROR&severity=WARN" +
         "&filter=log.http.route%3D%2Fcheckout&filter=resource.deployment.environment%21%3Dstaging&facet=log.http.route",
     );
+    expect(logApiParams(query).has("facet")).toBe(false);
   });
 
   it("keeps a fixed log window in the URL and sends the API its bounds", () => {
@@ -90,12 +92,15 @@ describe("explorer queries", () => {
   });
 
   it("reads the trace list's older status links and ignores unknown ranges", () => {
-    const query = traceExplorerQuery(new URLSearchParams("range=90d&status=error&minDurationMs=-5&operation=GET"));
+    const query = traceExplorerQuery(
+      new URLSearchParams("range=90d&status=error&minDurationMs=-5&operation=GET&facet=span.http.route"),
+    );
 
     expect(query).toMatchObject({ minDurationMs: 0, operations: ["GET"], range: "1h", statuses: ["STATUS_CODE_ERROR"] });
     expect(traceExplorerParams({ ...query, minDurationMs: 500 }).toString()).toBe(
-      "range=1h&operation=GET&status=STATUS_CODE_ERROR&minDurationMs=500",
+      "range=1h&operation=GET&status=STATUS_CODE_ERROR&minDurationMs=500&facet=span.http.route",
     );
+    expect(traceApiParams(query).toString()).toBe("range=1h&operation=GET&status=STATUS_CODE_ERROR");
   });
 
   it("sets and clears the environment filter", () => {

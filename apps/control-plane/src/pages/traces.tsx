@@ -6,7 +6,7 @@ import { DataTableSkeleton, ExplorerSkeleton } from "../components/screen-skelet
 import { CountHistogram, HistogramLegend, type HistogramSeries } from "../components/count-histogram";
 import { TelemetryGate } from "../components/telemetry";
 import {
-  AddFacet,
+  AttributeFacets,
   ExplorerFacet,
   ExplorerFilterBar,
   ExplorerTimeControls,
@@ -19,6 +19,7 @@ import {
   environmentFilter,
   explorerFilterText,
   fetchExplorerTraces,
+  fetchTraceAttributeFacet,
   fetchTraceFacets,
   fetchTraceHistogram,
   formatDuration,
@@ -27,6 +28,7 @@ import {
   logTimestamp,
   parseExplorerFilter,
   telemetryRangeWindow,
+  traceApiParams,
   traceExplorerParams,
   traceExplorerQuery,
   withEnvironment,
@@ -86,7 +88,8 @@ function TraceExplorer({
   query: TraceExplorerQuery;
   setQuery: (update: Partial<TraceExplorerQuery>) => void;
 }) {
-  const key = traceExplorerParams(query).toString();
+  // Opening a facet does not reload the rest of the page.
+  const key = traceApiParams(query).toString();
   const traces = useTelemetryQuery(key, () => fetchExplorerTraces(query), live);
   const histogram = useTelemetryQuery(key, () => fetchTraceHistogram(query), live);
   const facets = useTelemetryQuery(key, () => fetchTraceFacets(query), live);
@@ -102,7 +105,7 @@ function TraceExplorer({
   const environment = environmentFilter(query.filters);
   const withDate = query.range === "7d" || query.range === "24h";
   const longest = Math.max(1, ...(traces.data ?? []).map((trace) => trace.duration_ms));
-  const listState: TraceListState = { traceList: key };
+  const listState: TraceListState = { traceList: traceExplorerParams(query).toString() };
 
   function toggle(list: "operations" | "services" | "statuses", value: string) {
     const current = query[list];
@@ -216,31 +219,16 @@ function TraceExplorer({
             selected={query.minDurationMs > 0 ? [String(query.minDurationMs)] : []}
             title="Trace duration"
           />
-          {query.facets.map((facetKey) => (
-            <ExplorerFacet
-              key={facetKey}
-              loading={!facets.data}
-              onRemove={() => setQuery({
-                facets: query.facets.filter((item) => item !== facetKey),
-                filters: query.filters.filter((filter) => filter.key !== facetKey),
-              })}
-              onToggle={(value) => {
-                const existing = query.filters.find((filter) => filter.key === facetKey && filter.op === "eq" && filter.value === value);
-                // One value per key: attribute filters on a key must all match.
-                setQuery({
-                  filters: existing
-                    ? query.filters.filter((filter) => filter !== existing)
-                    : [...query.filters.filter((filter) => filter.key !== facetKey), { key: facetKey, op: "eq", value }],
-                });
-              }}
-              options={(facets.data?.attributes[facetKey] ?? []).filter((item) => item.group).map((item) => ({ count: item.value, label: item.group, value: item.group }))}
-              selected={query.filters.filter((filter) => filter.key === facetKey && filter.op === "eq").map((filter) => filter.value)}
-              title={facetKey.replace(/^(span|resource)\./u, "")}
-            />
-          ))}
-          <AddFacet
-            keys={(attributeKeys.data ?? []).filter((item) => !query.facets.includes(item))}
-            onAdd={(facetKey) => setQuery({ facets: [...query.facets, facetKey] })}
+          <AttributeFacets
+            dataKey={key}
+            filters={query.filters}
+            keys={attributeKeys.data}
+            live={live}
+            load={(facetKey) => fetchTraceAttributeFacet(query, facetKey)}
+            onFiltersChange={(filters) => setQuery({ filters })}
+            onOpenChange={(facets) => setQuery({ facets })}
+            open={query.facets}
+            scopes={[{ label: "Span attributes", prefix: "span." }, { label: "Resource attributes", prefix: "resource." }]}
           />
         </div>
         <div className="agentListTable explorerTableWrap">

@@ -37,8 +37,10 @@
 .explorerFacet { display: flex; flex-direction: column; gap: 2px; min-width: 0; margin: 0; padding: 0; border: 0; }
 .explorerFacet legend { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 0 0 6px; color: #434343; font-size: 12px; font-weight: 500; line-height: 16px; }
 .explorerFacet legend > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.explorerFacet legend button { display: grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 4px; background: none; color: #999; cursor: pointer; }
-.explorerFacet legend button:hover { background: #f0f0f0; color: #444; }
+.explorerFacet__toggle, .explorerAttribute { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 0; border: 0; background: none; color: inherit; cursor: pointer; font: inherit; text-align: left; }
+.explorerFacet__toggle > span, .explorerAttribute > span:not(.explorerAttribute__active) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.explorerFacet__toggle svg, .explorerAttribute svg { flex-shrink: 0; color: #999; }
+.explorerFacet__toggle:focus-visible, .explorerAttribute:focus-visible { outline: 2px solid #4e58f9; outline-offset: 2px; border-radius: 2px; }
 .explorerFacet__option { position: relative; display: flex; align-items: center; gap: 8px; height: 28px; cursor: pointer; }
 .explorerFacet__option input { position: absolute; width: 1px; height: 1px; margin: 0; opacity: 0; }
 .explorerFacet__box { display: grid; flex-shrink: 0; place-items: center; width: 14px; height: 14px; border: 1px solid #ddd; border-radius: 4px; background: #fff; color: #fff; }
@@ -50,9 +52,18 @@
 .explorerFacet__option input:checked ~ .explorerFacet__count { color: #666; }
 .explorerFacet__option:hover .explorerFacet__label { color: #1a1a1a; }
 .explorerFacet__empty { margin: 0; color: #999; font-size: 12px; line-height: 28px; }
-.explorerAddFacet { width: fit-content; max-width: 100%; }
-.explorerAddFacet .dsField__label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-.explorerAddFacet .dsSelect__trigger { height: 26px; padding: 0 8px; border-color: #ddd; border-radius: 6px; background: #fff; color: #444; font-size: 13px; box-shadow: 0 1px 3px #00000008; }
+.explorerKeyFacets { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.explorerKeyFacets__search { display: flex; align-items: center; gap: 6px; box-sizing: border-box; width: 100%; height: 28px; padding: 0 8px; border: 1px solid #e3e3e3; border-radius: 6px; background: #fff; color: #999; }
+.explorerKeyFacets__search:focus-within { border-color: #b9b9b9; }
+.explorerKeyFacets__search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: #1a1a1a; font: inherit; font-size: 12px; line-height: 16px; }
+.explorerKeyFacets__search input::placeholder { color: #999; }
+.explorerKeyFacets__search input::-webkit-search-cancel-button { display: none; }
+.explorerKeyFacets__group { display: flex; flex-direction: column; min-width: 0; }
+.explorerKeyFacets__group h3 { margin: 0 0 4px; color: #999; font-size: 11px; font-weight: 500; line-height: 16px; }
+.explorerKeyFacets__group .explorerFacet { margin: 4px 0 8px; }
+.explorerAttribute { width: 100%; height: 26px; color: #666; font-size: 13px; line-height: 18px; }
+.explorerAttribute:hover { color: #1a1a1a; }
+.explorerAttribute__active { flex-shrink: 0; margin-left: auto; padding: 0 5px; border-radius: 8px; background: #f1f2fe; color: #4e58f9; font-size: 11px; font-variant-numeric: tabular-nums; line-height: 16px; }
 
 .explorerTableWrap { min-width: 0; }
 .appShell--workspace .agentListTable.explorerTableWrap .dsDataTable--workspace td { padding: 5px 12px; font-size: 13px; line-height: 20px; }
@@ -125,6 +136,10 @@
   .explorerBody { grid-template-columns: minmax(0, 1fr); }
   .explorerFacets { flex-direction: row; flex-wrap: wrap; gap: 16px 32px; }
   .explorerFacet { width: 200px; }
+  .explorerKeyFacets { width: 100%; }
+  .explorerKeyFacets__search { max-width: 280px; }
+  .explorerKeyFacets__group { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); column-gap: 32px; align-items: start; }
+  .explorerKeyFacets__group h3 { grid-column: 1 / -1; }
 }
 @media (max-width: 760px) {
   .explorerToolbar { flex-wrap: wrap; }

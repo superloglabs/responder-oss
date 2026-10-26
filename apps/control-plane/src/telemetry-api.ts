@@ -271,7 +271,7 @@ export function withEnvironment(filters: ExplorerFilter[], environment: string):
 }
 
 export interface LogExplorerQuery {
-  // Attribute keys shown as extra facets.
+  // Attribute facets open in the sidebar.
   facets: string[];
   filters: ExplorerFilter[];
   range: DashboardTimeRange;
@@ -380,22 +380,20 @@ export interface FacetCount {
 }
 
 export interface LogFacets {
-  attributes: Record<string, FacetCount[]>;
   services: FacetCount[];
   severities: FacetCount[];
 }
 
 export interface TraceFacets {
-  attributes: Record<string, FacetCount[]>;
   operations: FacetCount[];
   services: FacetCount[];
   statuses: FacetCount[];
 }
 
 // The log API takes the window as `since` and `until`; a range that ends now
-// resolves when the request is made.
+// resolves when the request is made. Open facets only matter to the page.
 export function logApiParams(query: LogExplorerQuery, now = Date.now()): URLSearchParams {
-  const params = logExplorerParams(query);
+  const params = logExplorerParams({ ...query, facets: [] });
   const { since, until } = resolveTimeRange(query.range, now);
   for (const name of ["range", "from", "to"]) params.delete(name);
   params.set("since", new Date(since).toISOString());
@@ -415,18 +413,36 @@ export function fetchLogFacets(query: LogExplorerQuery): Promise<LogFacets> {
   return telemetryJson<LogFacets>(`/api/telemetry/logs/facets?${logApiParams(query)}`);
 }
 
+// Counts per value of one attribute key, ignoring filters on that key.
+export function fetchLogAttributeFacet(query: LogExplorerQuery, key: string): Promise<FacetCount[]> {
+  const params = logApiParams(query);
+  params.set("key", key);
+  return telemetryJson<{ values: FacetCount[] }>(`/api/telemetry/logs/facets/attribute?${params}`).then((body) => body.values);
+}
+
+// The trace query as the API reads it, without the page's open facets.
+export function traceApiParams(query: TraceExplorerQuery): URLSearchParams {
+  return traceExplorerParams({ ...query, facets: [] });
+}
+
 export function fetchExplorerTraces(query: TraceExplorerQuery): Promise<TraceSummary[]> {
-  return telemetryJson<{ traces: TraceSummary[] }>(`/api/telemetry/traces?${traceExplorerParams(query)}`).then(
+  return telemetryJson<{ traces: TraceSummary[] }>(`/api/telemetry/traces?${traceApiParams(query)}`).then(
     (body) => body.traces,
   );
 }
 
 export function fetchTraceHistogram(query: TraceExplorerQuery): Promise<Histogram> {
-  return telemetryJson<Histogram>(`/api/telemetry/traces/histogram?${traceExplorerParams(query)}`);
+  return telemetryJson<Histogram>(`/api/telemetry/traces/histogram?${traceApiParams(query)}`);
 }
 
 export function fetchTraceFacets(query: TraceExplorerQuery): Promise<TraceFacets> {
-  return telemetryJson<TraceFacets>(`/api/telemetry/traces/facets?${traceExplorerParams(query)}`);
+  return telemetryJson<TraceFacets>(`/api/telemetry/traces/facets?${traceApiParams(query)}`);
+}
+
+export function fetchTraceAttributeFacet(query: TraceExplorerQuery, key: string): Promise<FacetCount[]> {
+  const params = traceApiParams(query);
+  params.set("key", key);
+  return telemetryJson<{ values: FacetCount[] }>(`/api/telemetry/traces/facets/attribute?${params}`).then((body) => body.values);
 }
 
 export interface TraceOverviewStats {

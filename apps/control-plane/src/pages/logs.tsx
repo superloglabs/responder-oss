@@ -8,7 +8,7 @@ import { CountHistogram, HistogramLegend, type HistogramSeries } from "../compon
 import { DashboardTimePicker } from "../components/dashboard-time-picker";
 import { TelemetryGate } from "../components/telemetry";
 import {
-  AddFacet,
+  AttributeFacets,
   AttributeTable,
   ExplorerDrawer,
   ExplorerFacet,
@@ -21,6 +21,7 @@ import { DataTable, IconButton } from "../design-system";
 import {
   explorerFilterText,
   fetchExplorerLogs,
+  fetchLogAttributeFacet,
   fetchLogFacets,
   fetchLogHistogram,
   formatExplorerTime,
@@ -175,7 +176,8 @@ function LogExplorer({ query, refresh, setQuery, timeZone }: {
   timeZone: string;
 }) {
   const [selected, setSelected] = useState<string | null>(null);
-  const params = logExplorerParams(query);
+  // Opening a facet does not reload the rest of the page.
+  const params = logExplorerParams({ ...query, facets: [] });
   const key = `${params}#${refresh}`;
   const rangeKey = `${["range", "from", "to"].map((name) => params.get(name) ?? "").join("|")}#${refresh}`;
   const logs = useTelemetryQuery(key, () => fetchExplorerLogs(query));
@@ -288,38 +290,15 @@ function LogExplorer({ query, refresh, setQuery, timeZone }: {
             selected={query.services}
             title="Service"
           />
-          {query.facets.map((facetKey) => {
-            const selectedValues = query.filters
-              .filter((filter) => filter.key === facetKey && filter.op === "eq")
-              .map((filter) => filter.value);
-            return (
-              <ExplorerFacet
-                key={facetKey}
-                loading={!facets.data}
-                onRemove={() => setQuery({
-                  facets: query.facets.filter((item) => item !== facetKey),
-                  filters: query.filters.filter((filter) => filter.key !== facetKey),
-                })}
-                onToggle={(value) => {
-                  const existing = query.filters.find((filter) => filter.key === facetKey && filter.op === "eq" && filter.value === value);
-                  // One value per key: attribute filters on a key must all match.
-                  setQuery({
-                    filters: existing
-                      ? query.filters.filter((filter) => filter !== existing)
-                      : [...query.filters.filter((filter) => filter.key !== facetKey), { key: facetKey, op: "eq", value }],
-                  });
-                }}
-                options={(facets.data?.attributes[facetKey] ?? [])
-                  .filter((item) => item.group)
-                  .map((item) => ({ count: item.value, label: item.group, value: item.group }))}
-                selected={selectedValues}
-                title={facetKey.replace(/^(log|resource)\./u, "")}
-              />
-            );
-          })}
-          <AddFacet
-            keys={(attributeKeys.data ?? []).filter((item) => !query.facets.includes(item))}
-            onAdd={(facetKey) => setQuery({ facets: [...query.facets, facetKey] })}
+          <AttributeFacets
+            dataKey={key}
+            filters={query.filters}
+            keys={attributeKeys.data}
+            load={(facetKey) => fetchLogAttributeFacet(query, facetKey)}
+            onFiltersChange={(filters) => setQuery({ filters })}
+            onOpenChange={(facets) => setQuery({ facets })}
+            open={query.facets}
+            scopes={[{ label: "Log attributes", prefix: "log." }, { label: "Resource attributes", prefix: "resource." }]}
           />
         </div>
         <div className="agentListTable explorerTableWrap">

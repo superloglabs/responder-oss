@@ -482,8 +482,7 @@ export function parseValueLists(
   return lists;
 }
 
-// Attribute keys shown as extra facets, and the values listed per facet.
-const maxFacetKeys = 5;
+// Values listed per facet.
 const facetLimit = 20;
 
 // About 120 count buckets across the window.
@@ -666,25 +665,23 @@ export function createTelemetryRoutes(
     );
   }
 
-  // Extra facets over attribute keys, each ignoring filters on its own key.
-  function attributeFacets(
-    request: { client: ClickHouseClient; filter: ExplorerFilter; organizationId: string },
+  // Counts per value of one attribute key, ignoring filters on that key. The
+  // explorers load each opened attribute facet on its own.
+  async function attributeFacet<Query extends z.infer<typeof windowSchema>>(
+    request: QueryRequest,
     signal: TelemetrySignal,
-    keys: string[],
-  ): Promise<Record<string, Array<{ group: string; value: number }>>> {
-    return Promise.all(
-      keys.map(async (key) => [
-        key,
-        await facet(request, signal, key, {
-          resourceAttrs: request.filter.resourceAttrs.filter((filter) => filter.key !== key),
-        }),
-      ] as const),
-    ).then(Object.fromEntries);
-  }
-
-  function facetKeys(request: QueryRequest): string[] | null {
-    const keys = [...new Set((request.queries("facet") ?? []).map((key) => key.trim()).filter(Boolean))];
-    return keys.length > maxFacetKeys || keys.some((key) => key.length > 200) ? null : keys;
+    schema: z.ZodType<Query>,
+  ) {
+    const key = request.query().key?.trim() ?? "";
+    const explorer = await explorerRequest(request, signal, schema);
+    if (!explorer.ok) return explorer;
+    if (!key || key.length > 200) {
+      return { error: `Invalid ${signal === "logs" ? "log" : "trace"} query`, ok: false as const, status: 400 as const };
+    }
+    const values = await facet(explorer, signal, key, {
+      resourceAttrs: explorer.filter.resourceAttrs.filter((filter) => filter.key !== key),
+    });
+    return { ok: true as const, values };
   }
 
   return new Hono()
@@ -715,16 +712,18 @@ export function createTelemetryRoutes(
       return context.json(await histogram(request, "logs", "severity"));
     })
     .get("/logs/facets", async (context) => {
-      const keys = facetKeys(context.req);
       const request = await explorerRequest(context.req, "logs", logFilterSchema);
       if (!request.ok) return context.json({ error: request.error }, request.status);
-      if (!keys) return context.json({ error: "Invalid log query" }, 400);
-      const [severities, services, attributes] = await Promise.all([
+      const [severities, services] = await Promise.all([
         facet(request, "logs", "severity", { severities: undefined }),
         facet(request, "logs", "service", { services: undefined }),
-        attributeFacets(request, "logs", keys),
       ]);
-      return context.json({ attributes, services, severities });
+      return context.json({ services, severities });
+    })
+    .get("/logs/facets/attribute", async (context) => {
+      const result = await attributeFacet(context.req, "logs", logFilterSchema);
+      if (!result.ok) return context.json({ error: result.error }, result.status);
+      return context.json({ values: result.values });
     })
     .get("/services", async (context) => {
       const granted = await access(context.req.raw.headers);
@@ -764,17 +763,19 @@ export function createTelemetryRoutes(
       return context.json(await histogram(request, "traces", "status"));
     })
     .get("/traces/facets", async (context) => {
-      const keys = facetKeys(context.req);
       const request = await explorerRequest(context.req, "traces", traceFilterSchema);
       if (!request.ok) return context.json({ error: request.error }, request.status);
-      if (!keys) return context.json({ error: "Invalid trace query" }, 400);
-      const [statuses, services, operations, attributes] = await Promise.all([
+      const [statuses, services, operations] = await Promise.all([
         facet(request, "traces", "status", { statusCodes: undefined }),
         facet(request, "traces", "service", { services: undefined }),
         facet(request, "traces", "operation", { spanNames: undefined }),
-        attributeFacets(request, "traces", keys),
       ]);
-      return context.json({ attributes, operations, services, statuses });
+      return context.json({ operations, services, statuses });
+    })
+    .get("/traces/facets/attribute", async (context) => {
+      const result = await attributeFacet(context.req, "traces", traceFilterSchema);
+      if (!result.ok) return context.json({ error: result.error }, result.status);
+      return context.json({ values: result.values });
     })
     // How requests into a service behaved over the window.
     .get("/traces/overview", async (context) => {
