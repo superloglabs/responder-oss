@@ -8,6 +8,7 @@ import {
   configureDaytonaSandboxLifecycle,
   createDaytonaSandboxSession,
   deleteDaytonaSandboxByName,
+  deleteExpiredArchivedSandboxes,
   type DaytonaCleanupDependencies,
   pauseDaytonaSandbox,
   prepareDaytonaPatchSandbox,
@@ -640,8 +641,10 @@ describe("Daytona sandbox cleanup", () => {
   it("keeps a thread sandbox after it pauses", async () => {
     const harness = cleanupHarness();
     const setAutoDeleteInterval = vi.fn().mockResolvedValue(undefined);
+    const setAutoArchiveInterval = vi.fn().mockResolvedValue(undefined);
     harness.get.mockResolvedValue({
       id: "sandbox-1",
+      setAutoArchiveInterval,
       setAutoDeleteInterval,
     });
 
@@ -654,6 +657,76 @@ describe("Daytona sandbox cleanup", () => {
     );
 
     expect(setAutoDeleteInterval).toHaveBeenCalledWith(-1);
+    expect(setAutoArchiveInterval).toHaveBeenCalledWith(1);
+  });
+
+  it("archives a paused sandbox a minute after it stops", async () => {
+    const harness = cleanupHarness();
+    const setAutoDeleteInterval = vi.fn().mockResolvedValue(undefined);
+    const setAutoArchiveInterval = vi.fn().mockResolvedValue(undefined);
+    harness.get.mockResolvedValue({
+      id: "sandbox-1",
+      setAutoArchiveInterval,
+      setAutoDeleteInterval,
+    });
+
+    await configureDaytonaSandboxLifecycle(
+      harness.session,
+      { daytonaApiKey: "daytona-test" },
+      [],
+      24 * 60,
+      harness.dependencies,
+    );
+    await configureDaytonaSandboxLifecycle(
+      harness.session,
+      { daytonaApiKey: "daytona-test" },
+      [],
+      0,
+      harness.dependencies,
+    );
+
+    expect(setAutoDeleteInterval.mock.calls).toEqual([[24 * 60], [0]]);
+    expect(setAutoArchiveInterval.mock.calls).toEqual([[1]]);
+  });
+
+  it("deletes archived worker sandboxes past their deletion interval", async () => {
+    const harness = cleanupHarness();
+    const now = new Date("2026-10-27T12:00:00Z");
+    const hoursAgo = (hours: number) =>
+      new Date(now.getTime() - hours * 3_600_000).toISOString();
+    const sandboxes = [
+      { autoDeleteInterval: 1440, id: "expired", name: "responder-automation-run-1", updatedAt: hoursAgo(25) },
+      { autoDeleteInterval: 1440, id: "missing", name: "responder-investigation-thread-1", updatedAt: hoursAgo(30) },
+      { autoDeleteInterval: 1440, id: "recent", name: "responder-automation-run-2", updatedAt: hoursAgo(2) },
+      { autoDeleteInterval: -1, id: "kept", name: "responder-automation-run-3", updatedAt: hoursAgo(300) },
+      { autoDeleteInterval: 1440, id: "foreign", name: "someone-else", updatedAt: hoursAgo(300) },
+    ];
+    const list = vi.fn(async function* () {
+      yield* sandboxes;
+    });
+    harness.deleteSandbox.mockImplementation(async (sandbox: { id: string }) => {
+      if (sandbox.id === "missing") {
+        throw Object.assign(new Error("missing"), { statusCode: 404 });
+      }
+    });
+    const dependencies = {
+      ...harness.dependencies,
+      createClient: () => ({
+        delete: harness.deleteSandbox,
+        get: harness.get,
+        list,
+        [Symbol.asyncDispose]: harness.dispose,
+      }),
+    } as unknown as DaytonaCleanupDependencies;
+
+    await expect(
+      deleteExpiredArchivedSandboxes({ daytonaApiKey: "daytona-test" }, now, dependencies),
+    ).resolves.toBe(1);
+
+    expect(list).toHaveBeenCalledWith({ name: "responder-", states: ["archived"] });
+    expect(harness.deleteSandbox.mock.calls.map(([sandbox]) => sandbox.id)).toEqual(["expired", "missing"]);
+    expect(harness.reportException).not.toHaveBeenCalled();
+    expect(harness.dispose).toHaveBeenCalledOnce();
   });
 
   it("retries transient lifecycle failures", async () => {

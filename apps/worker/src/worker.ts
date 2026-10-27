@@ -97,6 +97,8 @@ import {
 } from "./automation-run.js";
 import { processGcpProjectSetupJob } from "@responder/core/integrations/gcp-setup-job";
 import { purgeAutomationModelBrokerGrants } from "@responder/core/db/automation-model-broker";
+import { requireDaytonaClientConfig } from "@responder/core/daytona-config";
+import { deleteExpiredArchivedSandboxes } from "./sandbox.js";
 import { settleUnbilledAutomationModelUsage } from "@responder/core/automations/model-usage-billing";
 import { settleUnbilledUsage } from "@responder/core/billing/usage-billing";
 import { BILLING_NOTICE_RETRY_WINDOW_MS } from "@responder/core/billing/notifications";
@@ -145,6 +147,7 @@ const pollers: {
   automationSuggestions?: NodeJS.Timeout;
   automationUsageBilling?: NodeJS.Timeout;
   brokerGrantCleanup?: NodeJS.Timeout;
+  archivedSandboxCleanup?: NodeJS.Timeout;
   errorIssues?: NodeJS.Timeout;
   gcpTelemetry?: NodeJS.Timeout;
   linearTicket?: NodeJS.Timeout;
@@ -257,6 +260,25 @@ async function purgeExpiredAutomationBrokerGrants(): Promise<void> {
     }
   } catch (error) {
     await reportWorkerException(error, { operation: "worker" }).catch(
+      () => undefined,
+    );
+  }
+}
+
+async function deleteExpiredSandboxes(): Promise<void> {
+  if (!process.env.DAYTONA_API_KEY) return;
+  try {
+    const deleted = await deleteExpiredArchivedSandboxes(
+      requireDaytonaClientConfig(),
+    );
+    if (deleted > 0) {
+      console.log(JSON.stringify({
+        deleted,
+        event: "archived_sandboxes_deleted",
+      }));
+    }
+  } catch (error) {
+    await reportWorkerException(error, { operation: "sandbox_cleanup" }).catch(
       () => undefined,
     );
   }
@@ -589,6 +611,9 @@ async function shutdown(signal: string): Promise<void> {
   stopping = true;
   if (pollers.replayRequest) clearInterval(pollers.replayRequest);
   if (pollers.brokerGrantCleanup) clearInterval(pollers.brokerGrantCleanup);
+  if (pollers.archivedSandboxCleanup) {
+    clearInterval(pollers.archivedSandboxCleanup);
+  }
   if (pollers.automationUsageBilling) {
     clearInterval(pollers.automationUsageBilling);
   }
@@ -1169,6 +1194,12 @@ pollers.brokerGrantCleanup = setInterval(
   60 * 60 * 1_000,
 );
 pollers.brokerGrantCleanup.unref();
+void deleteExpiredSandboxes();
+pollers.archivedSandboxCleanup = setInterval(
+  () => void deleteExpiredSandboxes(),
+  60 * 60 * 1_000,
+);
+pollers.archivedSandboxCleanup.unref();
 pollers.automationUsageBilling = setInterval(
   () => void settleAutomationUsageBilling(),
   60 * 1_000,
