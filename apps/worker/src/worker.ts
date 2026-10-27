@@ -140,6 +140,9 @@ const linearTicketJobQueue = {
   ) => boss.send(name, data, options),
 };
 let stopping = false;
+// Aborts when the worker starts to stop, so automation runs go back to the
+// queue instead of running past the task's stop timeout.
+const automationRunShutdown = new AbortController();
 let replayRequestDrain: Promise<void> | undefined;
 let linearTicketDrain: Promise<void> | undefined;
 let remediationRecoveryDrain: Promise<void> | undefined;
@@ -609,6 +612,11 @@ boss.on("error", (error: unknown) => {
 async function shutdown(signal: string): Promise<void> {
   if (stopping) return;
   stopping = true;
+  // Stop taking automation runs before handing the active ones back, so this
+  // worker does not fetch them again.
+  await Promise.all([automationRunQueue, legacyAutomationRunQueue].map((queue) =>
+    boss.offWork(queue, { wait: false })));
+  automationRunShutdown.abort();
   if (pollers.replayRequest) clearInterval(pollers.replayRequest);
   if (pollers.brokerGrantCleanup) clearInterval(pollers.brokerGrantCleanup);
   if (pollers.archivedSandboxCleanup) {
@@ -683,6 +691,7 @@ await boss.work(workerHealthQueue, { localConcurrency: 1 }, tracedJobHandler(wor
 }));
 const automationRunDependencies = {
   ...defaultAutomationRunDependencies,
+  shutdownSignal: automationRunShutdown.signal,
   requeueRun: async (run: { organizationId: string; runId: string }) => {
     const queued = await boss.send(automationRunQueue, {
       kind: "automation_run",

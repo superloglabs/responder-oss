@@ -129,6 +129,7 @@ function dependencies() {
     notify: vi.fn().mockResolvedValue(undefined),
     now: () => new Date("2026-09-22T19:00:00.000Z"),
     postedInSlackThread: vi.fn().mockResolvedValue(false),
+    releaseLease: vi.fn<AutomationRunDependencies["releaseLease"]>().mockResolvedValue(true),
     reopenRun: vi.fn().mockResolvedValue(true),
     reportException: vi.fn().mockResolvedValue(undefined),
     requeueRun: vi.fn().mockResolvedValue(undefined),
@@ -1041,6 +1042,75 @@ describe("automation run processor", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  describe("worker shutdown", () => {
+    const job = { kind: "automation_run" as const, queuedAt: "2026-09-22T19:00:00.000Z", runId };
+
+    // A sandbox that runs until the run is aborted.
+    function runUntilAborted(deps: ReturnType<typeof dependencies>) {
+      deps.runInSandbox.mockImplementation((input) => new Promise((_, reject) => {
+        input.signal!.addEventListener("abort", () => reject(input.signal!.reason));
+      }));
+    }
+
+    it("hands a running run to the next worker when the worker stops", async () => {
+      vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+      vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+      const deps = dependencies();
+      runUntilAborted(deps);
+      const shutdown = new AbortController();
+
+      const processing = processAutomationRun("job-1", job, process.env, { ...deps, shutdownSignal: shutdown.signal });
+      await vi.waitFor(() => expect(deps.runInSandbox).toHaveBeenCalled());
+      shutdown.abort();
+      await expect(processing).resolves.toEqual({ runId });
+
+      expect(deps.releaseLease).toHaveBeenCalledWith({ leaseId: claimedRun().leaseId, runId });
+      expect(deps.requeueRun).toHaveBeenCalledWith({ organizationId, runId });
+      // The next worker never shares this turn's grant.
+      expect(deps.revokeGrant.mock.invocationCallOrder[0]!)
+        .toBeLessThan(deps.releaseLease.mock.invocationCallOrder[0]!);
+      expect(deps.setStatus).not.toHaveBeenCalled();
+      expect(deps.appendEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: "run_failed" }));
+      expect(deps.notify).not.toHaveBeenCalled();
+      expect(deps.reportException).not.toHaveBeenCalled();
+      // The interrupted turn is not charged.
+      expect(deps.waiveUsage).toHaveBeenCalled();
+    });
+
+    it("hands back a run claimed after the worker started to stop without starting it", async () => {
+      const deps = dependencies();
+      const shutdown = new AbortController();
+      shutdown.abort();
+
+      await processAutomationRun("job-1", job, process.env, { ...deps, shutdownSignal: shutdown.signal });
+
+      expect(deps.requeueRun).toHaveBeenCalledWith({ organizationId, runId });
+      expect(deps.appendEvent).not.toHaveBeenCalled();
+      expect(deps.runInSandbox).not.toHaveBeenCalled();
+    });
+
+    it("does not queue a run that another worker or a cancel took first", async () => {
+      const deps = dependencies();
+      deps.releaseLease.mockResolvedValue(false);
+      const shutdown = new AbortController();
+      shutdown.abort();
+
+      await processAutomationRun("job-1", job, process.env, { ...deps, shutdownSignal: shutdown.signal });
+
+      expect(deps.requeueRun).not.toHaveBeenCalled();
+    });
+
+    it("fails the job so the queue retries it when the run cannot be queued again", async () => {
+      const deps = dependencies();
+      deps.requeueRun.mockRejectedValue(new Error("queue unavailable"));
+      const shutdown = new AbortController();
+      shutdown.abort();
+
+      await expect(processAutomationRun("job-1", job, process.env, { ...deps, shutdownSignal: shutdown.signal }))
+        .rejects.toThrow("queue unavailable");
+    });
   });
 
   describe("claiming", () => {
