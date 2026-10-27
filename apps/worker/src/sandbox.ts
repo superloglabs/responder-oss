@@ -1,5 +1,7 @@
 import {
   Daytona,
+  SandboxState,
+  type ListSandboxesQuery,
   type Sandbox,
 } from "@daytona/sdk";
 import type {
@@ -23,6 +25,7 @@ export interface DaytonaSandboxSecretMount {
 interface DaytonaCleanupClient {
   delete(sandbox: Sandbox, timeout?: number, wait?: boolean): Promise<void>;
   get(sandboxIdOrName: string): Promise<Sandbox>;
+  list(query?: ListSandboxesQuery): AsyncIterableIterator<Sandbox>;
   [Symbol.asyncDispose](): Promise<void>;
 }
 
@@ -425,6 +428,64 @@ function reportAbandonedSandboxDeletions(
   }
 }
 
+// A paused sandbox is archived this long after it stops. Stopped sandboxes
+// count toward the Daytona organization's disk limit and archived ones do
+// not, so a day of paused runs no longer fills it. Resuming an archived
+// sandbox restores it first, which takes longer.
+export const pausedSandboxArchiveMinutes = 60;
+
+// Only sandboxes the worker names, so a sweep never touches others in the
+// same Daytona organization.
+const workerSandboxNamePrefix = "responder-";
+
+// Daytona's auto-delete applies to stopped sandboxes but not to archived
+// ones, so the worker deletes an archived sandbox once its deletion interval
+// has passed since it was archived. Returns how many it deleted.
+export async function deleteExpiredArchivedSandboxes(
+  config: DaytonaCleanupConfig,
+  now: Date = new Date(),
+  dependencies: DaytonaCleanupDependencies = defaultCleanupDependencies,
+): Promise<number> {
+  const client = dependencies.createClient(config);
+  let deleted = 0;
+  try {
+    const expired: Sandbox[] = [];
+    for await (const sandbox of client.list({
+      name: workerSandboxNamePrefix,
+      states: [SandboxState.ARCHIVED],
+    })) {
+      const interval = sandbox.autoDeleteInterval;
+      const archivedAt = sandbox.updatedAt ? Date.parse(sandbox.updatedAt) : Number.NaN;
+      if (
+        sandbox.name?.startsWith(workerSandboxNamePrefix) &&
+        interval !== undefined &&
+        interval > 0 &&
+        archivedAt + interval * 60_000 <= now.getTime()
+      ) {
+        expired.push(sandbox);
+      }
+    }
+    for (const sandbox of expired) {
+      try {
+        await retryTransientDaytonaOperation(
+          () => client.delete(sandbox, 60, false),
+          dependencies,
+        );
+        deleted += 1;
+      } catch (error) {
+        if (isDaytonaNotFound(error)) continue;
+        await dependencies.reportException(error, {
+          operation: "sandbox_cleanup",
+          sandboxId: sandbox.id,
+        });
+      }
+    }
+  } finally {
+    await client[Symbol.asyncDispose]().catch(() => undefined);
+  }
+  return deleted;
+}
+
 export async function configureDaytonaSandboxLifecycle(
   session: DaytonaSandboxSession,
   config: DaytonaCleanupConfig,
@@ -465,6 +526,12 @@ export async function configureDaytonaSandboxLifecycle(
       () => sandbox.setAutoDeleteInterval(autoDeleteInterval),
       dependencies,
     );
+    if (autoDeleteInterval !== 0) {
+      await retryTransientDaytonaOperation(
+        () => sandbox.setAutoArchiveInterval(pausedSandboxArchiveMinutes),
+        dependencies,
+      );
+    }
   } finally {
     await client[Symbol.asyncDispose]().catch(() => undefined);
   }
