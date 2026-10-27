@@ -428,11 +428,12 @@ function reportAbandonedSandboxDeletions(
   }
 }
 
-// A paused sandbox is archived this long after it stops. Stopped sandboxes
-// count toward the Daytona organization's disk limit and archived ones do
-// not, so a day of paused runs no longer fills it. Resuming an archived
-// sandbox restores it first, which takes longer.
-export const pausedSandboxArchiveMinutes = 60;
+// A paused sandbox is archived this long after it stops, Daytona's shortest
+// interval. Stopped sandboxes count toward the Daytona organization's disk
+// limit and archived ones do not, so a day of paused runs no longer fills
+// it. About 1% of runs get a follow-up, most within a minute of stopping;
+// the rest resume from the archive, which takes longer.
+export const pausedSandboxArchiveMinutes = 1;
 
 // Only sandboxes the worker names, so a sweep never touches others in the
 // same Daytona organization.

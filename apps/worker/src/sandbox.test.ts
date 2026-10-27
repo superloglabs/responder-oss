@@ -657,10 +657,10 @@ describe("Daytona sandbox cleanup", () => {
     );
 
     expect(setAutoDeleteInterval).toHaveBeenCalledWith(-1);
-    expect(setAutoArchiveInterval).toHaveBeenCalledWith(60);
+    expect(setAutoArchiveInterval).toHaveBeenCalledWith(1);
   });
 
-  it("archives a paused sandbox an hour after it stops", async () => {
+  it("archives a paused sandbox a minute after it stops", async () => {
     const harness = cleanupHarness();
     const setAutoDeleteInterval = vi.fn().mockResolvedValue(undefined);
     const setAutoArchiveInterval = vi.fn().mockResolvedValue(undefined);
@@ -686,7 +686,7 @@ describe("Daytona sandbox cleanup", () => {
     );
 
     expect(setAutoDeleteInterval.mock.calls).toEqual([[24 * 60], [0]]);
-    expect(setAutoArchiveInterval.mock.calls).toEqual([[60]]);
+    expect(setAutoArchiveInterval.mock.calls).toEqual([[1]]);
   });
 
   it("deletes archived worker sandboxes past their deletion interval", async () => {
