@@ -474,7 +474,9 @@ export async function deleteExpiredArchivedSandboxes(
         );
         deleted += 1;
       } catch (error) {
-        if (isDaytonaNotFound(error)) continue;
+        // Every cell's worker sweeps the same Daytona organization, so
+        // another worker may have deleted the sandbox or be deleting it.
+        if (isDaytonaNotFound(error) || isDaytonaConflict(error)) continue;
         await dependencies.reportException(error, {
           operation: "sandbox_cleanup",
           sandboxId: sandbox.id,

@@ -689,7 +689,7 @@ describe("Daytona sandbox cleanup", () => {
     expect(setAutoArchiveInterval.mock.calls).toEqual([[1]]);
   });
 
-  it("deletes archived worker sandboxes past their deletion interval", async () => {
+  it("deletes archived worker sandboxes past their deletion interval, skipping ones another worker removes", async () => {
     const harness = cleanupHarness();
     const now = new Date("2026-10-27T12:00:00Z");
     const hoursAgo = (hours: number) =>
@@ -697,6 +697,8 @@ describe("Daytona sandbox cleanup", () => {
     const sandboxes = [
       { autoDeleteInterval: 1440, id: "expired", name: "responder-automation-run-1", updatedAt: hoursAgo(25) },
       { autoDeleteInterval: 1440, id: "missing", name: "responder-investigation-thread-1", updatedAt: hoursAgo(30) },
+      { autoDeleteInterval: 1440, id: "deleting", name: "responder-automation-run-4", updatedAt: hoursAgo(30) },
+      { autoDeleteInterval: 1440, id: "failing", name: "responder-automation-run-5", updatedAt: hoursAgo(30) },
       { autoDeleteInterval: 1440, id: "recent", name: "responder-automation-run-2", updatedAt: hoursAgo(2) },
       { autoDeleteInterval: -1, id: "kept", name: "responder-automation-run-3", updatedAt: hoursAgo(300) },
       { autoDeleteInterval: 1440, id: "foreign", name: "someone-else", updatedAt: hoursAgo(300) },
@@ -707,6 +709,15 @@ describe("Daytona sandbox cleanup", () => {
     harness.deleteSandbox.mockImplementation(async (sandbox: { id: string }) => {
       if (sandbox.id === "missing") {
         throw Object.assign(new Error("missing"), { statusCode: 404 });
+      }
+      if (sandbox.id === "deleting") {
+        throw Object.assign(new Error("Sandbox state change in progress"), {
+          name: "DaytonaConflictError",
+          statusCode: 409,
+        });
+      }
+      if (sandbox.id === "failing") {
+        throw Object.assign(new Error("forbidden"), { statusCode: 403 });
       }
     });
     const dependencies = {
@@ -724,8 +735,12 @@ describe("Daytona sandbox cleanup", () => {
     ).resolves.toBe(1);
 
     expect(list).toHaveBeenCalledWith({ name: "responder-", states: ["archived"] });
-    expect(harness.deleteSandbox.mock.calls.map(([sandbox]) => sandbox.id)).toEqual(["expired", "missing"]);
-    expect(harness.reportException).not.toHaveBeenCalled();
+    expect(harness.deleteSandbox.mock.calls.map(([sandbox]) => sandbox.id)).toEqual(["expired", "missing", "deleting", "failing"]);
+    expect(harness.reportException).toHaveBeenCalledOnce();
+    expect(harness.reportException).toHaveBeenCalledWith(
+      expect.objectContaining({ statusCode: 403 }),
+      { operation: "sandbox_cleanup", sandboxId: "failing" },
+    );
     expect(harness.dispose).toHaveBeenCalledOnce();
   });
 
