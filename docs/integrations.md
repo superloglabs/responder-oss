@@ -103,7 +103,7 @@ Configure a distributed Slack app with:
 - Bot events: `app_home_opened`, `app_mention`, `message.channels`,
   `message.groups`, and `message.im`
 - Bot scopes: `app_mentions:read`, `channels:history`, `channels:join`,
-  `channels:read`, `chat:write`, `chat:write.public`, `groups:history`,
+  `channels:read`, `chat:write`, `chat:write.public`, `files:write`, `groups:history`,
   `groups:read`, `im:history`, and `reactions:write`
 - User scope: `search:read`
 - App Home: turn on the **Messages Tab** and allow users to send messages
@@ -1155,3 +1155,7 @@ pnpm tunnel:release
 ```
 
 The connection tool also supplies an inline connection card. It opens a signed handoff to provider consent, checks `list_integrations`, and requests a continuation only after the provider appears connected. Hosts that support conversation return addresses pass one to the handoff; successful consent then returns to that conversation. Other hosts show a focused completion page. Automatic continuation requires an active card and host support; plain MCP clients can check `list_integrations` on the next turn. Return addresses are restricted to supported chat origins and bound to the requesting user, workspace, and expiring connection ticket.
+
+Slack alert notifications include an evaluation graph uploaded as a private Slack image.
+Existing Slack connections must be reauthorized to grant `files:write`. If chart
+rendering or upload fails, the text alert is still delivered.
