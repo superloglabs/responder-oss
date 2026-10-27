@@ -25,6 +25,7 @@
     "@openai/agents-extensions": "0.14.2",
     "@opentelemetry/api": "1.9.1",
     "@responder/core": "workspace:*",
+    "@resvg/resvg-js": "^2.6.2",
     "@sentry/node": "10.69.0",
     "@smithy/protocol-http": "5.6.2",
     "@smithy/signature-v4": "5.7.2",

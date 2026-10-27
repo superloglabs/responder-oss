@@ -7,6 +7,7 @@ import {
   setSlackThreadStatus,
   stopSlackResponseStream,
   updateSlackMessage,
+  uploadSlackImage,
 } from "./slack.js";
 
 describe("Slack delivery client", () => {
@@ -348,5 +349,38 @@ describe("Slack delivery client", () => {
         }),
       }),
     );
+  });
+});
+
+
+describe("Slack image uploads", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("uploads bytes and finalizes privately for an image block", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ ok: true, upload_url: "https://files.slack.com/upload/example", file_id: "F123" }))
+      .mockResolvedValueOnce(new Response("OK"))
+      .mockResolvedValueOnce(Response.json({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await uploadSlackImage({ accessToken: "token", png: Buffer.from("png"), title: "Evaluation" })).toBe("F123");
+    expect(JSON.parse(fetchMock.mock.calls[0]![1].body)).toEqual({ filename: "evaluation.png", length: 3 });
+    expect(fetchMock.mock.calls[1]![1].headers).toEqual({ "content-type": "application/octet-stream" });
+    expect(JSON.parse(fetchMock.mock.calls[2]![1].body)).toEqual({ files: [{ id: "F123", title: "Evaluation" }] });
+  });
+
+  it("does not finalize a failed byte upload", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ ok: true, upload_url: "https://files.slack.com/upload/example", file_id: "F123" }))
+      .mockResolvedValueOnce(new Response("failed", { status: 500 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(uploadSlackImage({ accessToken: "token", png: Buffer.from("png"), title: "Evaluation" })).rejects.toThrow("HTTP 500");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("can disable both link and media unfurls", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: true, ts: "123" }));
+    vi.stubGlobal("fetch", fetchMock);
+    await postSlackMessage({ accessToken: "token", channelId: "C1", text: "Alert", unfurlLinks: false });
+    expect(JSON.parse(fetchMock.mock.calls[0]![1].body)).toMatchObject({ unfurl_links: false, unfurl_media: false });
   });
 });
