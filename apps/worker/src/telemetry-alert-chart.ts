@@ -90,6 +90,8 @@ export async function renderAlertChart(input: {
   });
   const svg = alertChartSvg({ ...input, chart });
   const png = new Resvg(svg, {
+    // Preserve sharp text on high-density Slack displays.
+    fitTo: { mode: "zoom", value: 3 },
     font: { fontFiles: [fileURLToPath(new URL("../assets/Inter.ttf", import.meta.url))], loadSystemFonts: false, defaultFontFamily: "Inter" },
   }).render().asPng();
   return {

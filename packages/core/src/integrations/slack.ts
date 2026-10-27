@@ -87,16 +87,16 @@ export class SlackApiError extends Error {
 async function callSlackApi(
   accessToken: string,
   method: string,
-  body: Record<string, unknown>,
+  body: Record<string, unknown> | URLSearchParams,
   signal?: AbortSignal,
 ) {
   const response = await fetch(`https://slack.com/api/${method}`, {
     method: "POST",
     headers: {
       authorization: `Bearer ${accessToken}`,
-      "content-type": "application/json",
+      "content-type": body instanceof URLSearchParams ? "application/x-www-form-urlencoded" : "application/json",
     },
-    body: JSON.stringify(body),
+    body: body instanceof URLSearchParams ? body.toString() : JSON.stringify(body),
     ...(signal ? { signal } : {}),
   });
   const responseText = await response.text();
@@ -192,10 +192,10 @@ export async function uploadSlackImage(input: {
   png: Buffer;
   title: string;
 }): Promise<string> {
-  const ticket = await callSlackApi(input.accessToken, "files.getUploadURLExternal", {
+  const ticket = await callSlackApi(input.accessToken, "files.getUploadURLExternal", new URLSearchParams({
     filename: "evaluation.png",
-    length: input.png.byteLength,
-  }, AbortSignal.timeout(15_000));
+    length: String(input.png.byteLength),
+  }), AbortSignal.timeout(15_000));
   const { upload_url: uploadUrl, file_id: fileId } = z.object({
     upload_url: z.url(), file_id: z.string().min(1),
   }).parse(ticket);
@@ -206,9 +206,9 @@ export async function uploadSlackImage(input: {
     signal: AbortSignal.timeout(15_000),
   });
   if (!response.ok) throw new Error(`Slack image upload failed (HTTP ${response.status})`);
-  await callSlackApi(input.accessToken, "files.completeUploadExternal", {
-    files: [{ id: fileId, title: input.title }],
-  }, AbortSignal.timeout(15_000));
+  await callSlackApi(input.accessToken, "files.completeUploadExternal", new URLSearchParams({
+    files: JSON.stringify([{ id: fileId, title: input.title }]),
+  }), AbortSignal.timeout(15_000));
   return fileId;
 }
 

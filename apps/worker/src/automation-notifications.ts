@@ -1,3 +1,4 @@
+import { setTimeout as delay } from "node:timers/promises";
 import { createHash } from "node:crypto";
 import type { AutomationNotification } from "@responder/core/automations/config";
 import { decryptCredentials } from "@responder/core/credentials/encryption";
@@ -17,6 +18,7 @@ export interface AutomationNotificationDependencies {
   getAccount: typeof getAutomationNotificationAccount;
   post: typeof postSlackMessage;
   uploadImage?: typeof uploadSlackImage;
+  wait?: (milliseconds: number) => Promise<unknown>;
 }
 
 const defaultDependencies: AutomationNotificationDependencies = {
@@ -124,17 +126,26 @@ export async function postAutomationNotification(input: {
         ...(input.unfurlLinks === undefined ? {} : { unfurlLinks: input.unfurlLinks }),
         ...(input.threadTimestamp ? { threadTimestamp: input.threadTimestamp } : {}),
       };
+      const imageMessage = { ...message, blocks: imageBlock && input.imageLayout
+        ? [...input.imageLayout.before, imageBlock, ...input.imageLayout.after]
+        : [...message.blocks, ...(imageBlock ? [imageBlock] : [])] };
       let timestamp: string | null;
-      try {
-        timestamp = await dependencies.post({ ...message, blocks: imageBlock && input.imageLayout
-          ? [...input.imageLayout.before, imageBlock, ...input.imageLayout.after]
-          : [...message.blocks, ...(imageBlock ? [imageBlock] : [])] });
-      } catch (error) {
-        // An inaccessible or rejected image must not suppress the alert.
-        // Only retry an explicit rejection; ambiguous failures keep their
-        // normal delivery retry behavior and the same deduplication key.
-        if (!imageBlock || !(error instanceof SlackApiError) || error.code !== "invalid_blocks") throw error;
-        timestamp = await dependencies.post(message);
+      for (let attempt = 0; ; attempt++) {
+        try {
+          timestamp = await dependencies.post(imageMessage);
+          break;
+        } catch (error) {
+          // A completed upload may still be processing. Retry only Slack's
+          // explicit rejection, retaining the same delivery key.
+          if (!imageBlock || !(error instanceof SlackApiError) || error.code !== "invalid_blocks") throw error;
+          if (attempt < 3 && error.diagnostics.some((message) => message.includes("invalid slack file"))) {
+            await (dependencies.wait ?? delay)((attempt + 1) * 1000);
+            continue;
+          }
+          // An inaccessible image must not suppress the alert.
+          timestamp = await dependencies.post(message);
+          break;
+        }
       }
       deliveries.push({ notification, timestamp });
     } catch (error) {

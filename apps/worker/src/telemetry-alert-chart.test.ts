@@ -16,8 +16,8 @@ describe("alert evaluation graph", () => {
     const image = await renderAlertChart({ client: {} as never, groupKey: "eu", now, organizationId: "org-1", rule });
     expect(alertSeries).toHaveBeenCalledWith({}, "org-1", rule, now, { since: "2026-10-27T07:20:00.000Z", until: now.toISOString() }, "eu");
     expect(image.png.subarray(0, 8).toString("hex")).toBe("89504e470d0a1a0a");
-    expect(image.png.readUInt32BE(16)).toBe(768);
-    expect(image.png.readUInt32BE(20)).toBe(296);
+    expect(image.png.readUInt32BE(16)).toBe(2304);
+    expect(image.png.readUInt32BE(20)).toBe(888);
     expect(image.altText).toContain("eu. Alert when above 0");
   });
 

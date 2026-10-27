@@ -214,6 +214,23 @@ describe("notification images", () => {
     expect(await postAutomationNotification(input, deps)).toEqual([{ notification, timestamp: "123" }]);
     expect(deps.post).toHaveBeenCalledWith(expect.objectContaining({ blocks: [{ type: "markdown", text: "Alert" }] }));
   });
+  it("waits for image processing and preserves the image and delivery key", async () => {
+    const deps = { ...dependencies(), wait: vi.fn().mockResolvedValue(undefined) };
+    deps.post.mockRejectedValueOnce(new SlackApiError("chat.postMessage", "invalid_blocks", ["invalid slack file"]));
+    expect(await postAutomationNotification(input, deps)).toEqual([{ notification, timestamp: "123" }]);
+    expect(deps.wait).toHaveBeenCalledWith(1000);
+    expect(deps.post.mock.calls[1]![0]).toEqual(deps.post.mock.calls[0]![0]);
+  });
+  it("bounds image readiness retries and still delivers text", async () => {
+    const deps = { ...dependencies(), wait: vi.fn().mockResolvedValue(undefined) };
+    for (let attempt = 0; attempt < 4; attempt++) {
+      deps.post.mockRejectedValueOnce(new SlackApiError("chat.postMessage", "invalid_blocks", ["invalid slack file"]));
+    }
+    expect(await postAutomationNotification(input, deps)).toEqual([{ notification, timestamp: "123" }]);
+    expect(deps.wait.mock.calls).toEqual([[1000], [2000], [3000]]);
+    expect(deps.post.mock.calls[4]![0].blocks).toHaveLength(1);
+    expect(deps.post.mock.calls[4]![0].clientMessageId).toBe(deps.post.mock.calls[0]![0].clientMessageId);
+  });
   it("falls back to text when Slack rejects the image block, preserving the delivery key", async () => {
     const deps = dependencies();
     deps.post.mockRejectedValueOnce(new SlackApiError("chat.postMessage", "invalid_blocks"));
