@@ -315,6 +315,7 @@ export const automationRoutes = new Hono()
           "custom_mcp",
           "linear",
           "railway",
+          "supabase",
           "vercel",
         ].includes(account.provider)
       ),

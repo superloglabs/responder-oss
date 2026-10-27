@@ -180,8 +180,8 @@ export function SupabaseConnectionDialog({
           </h2>
           <p>
             {selectingProject
-              ? "Select the project Responder may use during investigations."
-              : "Choose the maximum access its investigation tools may use."}
+              ? "Select the project Responder may use."
+              : "Choose the maximum access its tools may use."}
           </p>
         </header>
 
