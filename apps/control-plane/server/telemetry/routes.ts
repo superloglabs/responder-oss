@@ -320,6 +320,7 @@ const traceFilterSchema = windowSchema.extend({
 });
 
 const tracesSchema = traceFilterSchema.extend({
+  offset: z.coerce.number().int().min(0).max(1_000_000).optional(),
   limit: z.coerce.number().int().min(1).max(200).default(50),
 });
 
@@ -749,6 +750,7 @@ export function createTelemetryRoutes(
       const { filter } = request;
       const traces = await dependencies.queryTraces(request.client, request.organizationId, {
         limit: request.query.limit,
+        ...(request.query.offset !== undefined ? { offset: request.query.offset } : {}),
         range: filter.range,
         ...(filter.resourceAttrs.length ? { resourceAttrs: filter.resourceAttrs } : {}),
         ...(filter.minTraceDurationMs ? { minDurationMs: filter.minTraceDurationMs } : {}),

@@ -53,6 +53,34 @@ describe("explorer value lists", () => {
     expect(calls[0]!.query).toContain("ORDER BY Timestamp DESC, ServiceName, TraceId, SpanId, Body");
   });
 
+  it("paginates the full trace set with stable ordering even when recent rollups exist", async () => {
+    const calls: Call[] = [];
+    const ch = client(calls, { tables: ["otel_traces_recent", "otel_traces_summary"] });
+    for (const offset of [0, 50]) {
+      await queryTracesAggregated(ch, "project-1", { limit: 51, offset, range });
+      const call = calls.at(-1)!;
+      expect(call.params).toMatchObject({ limit: 51, offset });
+      expect(call.query).toContain("ORDER BY min(Timestamp) DESC, TraceId");
+      expect(call.query).toContain("LIMIT {limit:UInt32} OFFSET {offset:UInt32}");
+      expect(call.query).not.toContain("otel_traces_recent");
+    }
+  });
+
+  it("paginates all summaries when rollup coverage is complete", async () => {
+    const calls: Call[] = [];
+    const ch = client(calls, {
+      tables: ["otel_traces_recent", "otel_traces_summary"],
+      rows: (query) => query.includes("SELECT count() AS c") ? [{ c: 1 }] : [],
+    });
+    await queryTracesAggregated(ch, "project-1", { limit: 51, offset: 500, range });
+    const call = calls.at(-1)!;
+    expect(call.query).toContain("FROM otel_traces_summary");
+    expect(call.query).not.toContain("WITH recent_ids");
+    expect(call.query).not.toContain("trace_id IN (recent_ids)");
+    expect(call.query).toContain("ORDER BY start_time DESC, trace_id");
+    expect(call.params).toMatchObject({ limit: 51, offset: 500 });
+  });
+
   it("matches any listed service or level in logs and their counts", async () => {
     const calls: Call[] = [];
     const ch = client(calls);

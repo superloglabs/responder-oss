@@ -1,4 +1,4 @@
-import { ArrowClockwiseIcon } from "@phosphor-icons/react";
+import { ArrowClockwiseIcon, ArrowLeftIcon, ArrowRightIcon } from "@phosphor-icons/react";
 import { ExplorerFacets } from "../components/explorer-facets";
 import { DashboardTimePicker } from "../components/dashboard-time-picker";
 import { resolveTimeRange, zoomOutTimeRange } from "../dashboard-time-range";
@@ -16,7 +16,7 @@ import {
 } from "../components/telemetry-explorer";
 import { TraceDrawer } from "../components/trace-drawer";
 import { fetchAttributeKeys } from "../dashboards-api";
-import { Badge, DataTable, IconButton } from "../design-system";
+import { DataTable, IconButton } from "../design-system";
 import {
   explorerFilterText,
   fetchExplorerTraces,
@@ -24,7 +24,7 @@ import {
   fetchTraceFacets,
   fetchTraceHistogram,
   formatDuration,
-  formatExplorerTime,
+  formatTraceTimestamp,
   histogramBars,
   logTimestamp,
   parseExplorerFilter,
@@ -88,7 +88,12 @@ function TraceExplorer({ now, refresh, timeZone, onOpenTrace, openTrace, query, 
   const rangeKey = `${["range", "from", "to"].map((name) => params.get(name) ?? "").join("|")}#${refresh}`;
   const window = resolveTimeRange(query.range, now);
   const requestQuery: TraceSearchQuery = { ...query, range: { kind: "absolute", from: window.since, to: window.until } };
-  const traces = useTelemetryQuery(key, () => fetchExplorerTraces(requestQuery), false, true);
+  const [pagination, setPagination] = useState({ key, page: 0 });
+  const page = pagination.key === key ? pagination.page : 0;
+  if (pagination.key !== key) setPagination({ key, page: 0 });
+  const traces = useTelemetryQuery(`${key}#${page}`, () => fetchExplorerTraces(requestQuery, page * 50), false, true);
+  const rows = traces.data?.slice(0, 50) ?? [];
+  const hasNext = (traces.data?.length ?? 0) > 50;
   const histogram = useTelemetryQuery(key, () => fetchTraceHistogram(requestQuery), false, true);
   const facets = useTelemetryQuery(key, () => fetchTraceFacets(requestQuery), false, true);
   const attributeKeys = useTelemetryQuery(rangeKey, () => fetchAttributeKeys(window, "traces"));
@@ -102,8 +107,7 @@ function TraceExplorer({ now, refresh, timeZone, onOpenTrace, openTrace, query, 
     [histogram.data],
   );
   const total = bars?.reduce((sum, bar) => sum + bar.total, 0);
-  const withDate = query.range.kind === "absolute" || query.range.minutes >= 1_440;
-  const longest = Math.max(1, ...(traces.data ?? []).map((trace) => trace.duration_ms));
+  const longest = Math.max(1, ...rows.map((trace) => trace.duration_ms));
   const listState: TraceListState = { traceList: traceExplorerParams(query).toString() };
 
   function toggle(list: "operations" | "services" | "statuses", value: string) {
@@ -217,11 +221,11 @@ function TraceExplorer({ now, refresh, timeZone, onOpenTrace, openTrace, query, 
               <DataTableSkeleton
                 className=""
                 columns={[
-                  { header: "Started", key: "time", width: withDate ? "176px" : "124px" },
+                  { header: "Started", key: "time", width: "200px" },
                   { header: "Root span", key: "root" },
                   { header: "Duration", key: "duration", width: "180px" },
                   { align: "right", header: "Spans", key: "spans", width: "72px" },
-                  { cell: "badge", header: "Status", key: "status", width: "104px" },
+                  { header: "Status", key: "status", width: "104px" },
                 ]}
                 label="Loading traces…"
                 rows={12}
@@ -235,11 +239,11 @@ function TraceExplorer({ now, refresh, timeZone, onOpenTrace, openTrace, query, 
                   header: "Started",
                   key: "time",
                   render: (trace) => (
-                    <time className="explorerCell--muted" dateTime={logTimestamp(trace.start_time)?.toISOString()}>
-                      {formatExplorerTime(trace.start_time, withDate, timeZone)}
+                    <time className="traceRow__timestamp" dateTime={logTimestamp(trace.start_time)?.toISOString()}>
+                      {formatTraceTimestamp(trace.start_time, timeZone)}
                     </time>
                   ),
-                  width: withDate ? "176px" : "124px",
+                  width: "200px",
                 },
                 {
                   header: "Root span",
@@ -286,21 +290,26 @@ function TraceExplorer({ now, refresh, timeZone, onOpenTrace, openTrace, query, 
                   header: "Status",
                   key: "status",
                   render: (trace) => count(trace.error_count) > 0
-                    ? <Badge tone="danger">{count(trace.error_count) === 1 ? "Error" : `${count(trace.error_count)} errors`}</Badge>
-                    : <Badge tone="live">OK</Badge>,
+                    ? <span className="traceRow__status traceRow__status--error"><i aria-hidden="true" />Error</span>
+                    : <span className="traceRow__status"><i aria-hidden="true" />OK</span>,
                   width: "104px",
                 },
               ]}
               emptyMessage="No traces match these filters in this time range."
               getRowKey={(trace) => trace.trace_id}
               onRowClick={(trace) => onOpenTrace(trace.trace_id === openTrace ? null : trace.trace_id)}
-              rows={traces.data}
+              rows={rows}
               selectedRowKey={openTrace}
               variant="workspace"
             />
           )}
           </div>
-          {(traces.data?.length ?? 0) >= 50 ? <p className="explorerMore">Showing the newest 50 traces. Narrow the filters to see others.</p> : null}
+          <nav className="logPagination" aria-label="Trace pagination">
+            <span>{traces.data && !traces.isFetching ? `${rows.length ? page * 50 + 1 : 0}–${page * 50 + rows.length} traces` : "Loading traces…"}</span>
+            <span>Page {page + 1}</span>
+            <button className="dsButton dsButton--secondary dsButton--small" type="button" disabled={page === 0 || traces.isFetching || traces.data === null} onClick={() => { onOpenTrace(null); setPagination({ key, page: page - 1 }); }}><ArrowLeftIcon size={12} />Previous</button>
+            <button className="dsButton dsButton--secondary dsButton--small" type="button" disabled={!hasNext || traces.isFetching || traces.data === null} onClick={() => { onOpenTrace(null); setPagination({ key, page: page + 1 }); }}>Next<ArrowRightIcon size={12} /></button>
+          </nav>
         </div>
       </div>
       {openTrace ? (

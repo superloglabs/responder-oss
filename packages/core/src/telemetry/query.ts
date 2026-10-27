@@ -429,6 +429,7 @@ export async function queryTraces(
 }
 
 type TracesAggregatedParams = {
+  offset?: number;
   range?: TimeRange;
   service?: string;
   spanName?: string;
@@ -529,7 +530,8 @@ async function queryTracesAggregatedFromSummary(
 ) {
   const { sinceSql, untilSql, sinceExpr, untilExpr } = resolveRange(params.range);
   const candidateLimit = params.limit * TRACE_CANDIDATE_OVERFETCH;
-  const query = `
+  // Pagination must cover all matching summaries, beyond the recent-index cap.
+  const candidates = params.offset !== undefined ? "" : `
     WITH recent_ids AS (
       SELECT trace_id
       FROM (
@@ -544,7 +546,9 @@ async function queryTracesAggregatedFromSummary(
       GROUP BY trace_id
       ORDER BY min(ts) DESC
       LIMIT ${candidateLimit}
-    )
+    )`;
+  const query = `
+    ${candidates}
     SELECT
       trace_id,
       toString(min(start)) AS start_time,
@@ -557,17 +561,17 @@ async function queryTracesAggregatedFromSummary(
       toFloat64(max(end_unix_nano) - min(start_unix_nano)) / 1000000 AS duration_ms
     FROM otel_traces_summary
     WHERE project_id = {organizationId:String}
-      AND trace_id IN (recent_ids)
+      ${params.offset !== undefined ? "" : "AND trace_id IN (recent_ids)"}
       AND start >= ${sinceExpr}
       AND start <= ${untilExpr}
     GROUP BY project_id, trace_id
-    ORDER BY start_time DESC
-    LIMIT {limit:UInt32}
+    ORDER BY start_time DESC, trace_id
+    LIMIT {limit:UInt32} OFFSET {offset:UInt32}
   `;
   return retryOneConnectionReset(async () => {
     const r = await ch.query({
       query,
-      query_params: { organizationId, since: sinceSql, until: untilSql, limit: params.limit },
+      query_params: { organizationId, since: sinceSql, until: untilSql, limit: params.limit, offset: params.offset ?? 0 },
       format: "JSONEachRow",
     });
     return r.json();
@@ -659,8 +663,8 @@ export async function queryTracesAggregated(
       ${traceIdSubquery}
     GROUP BY TraceId
     ${havingMinDuration}
-    ORDER BY min(Timestamp) DESC
-    LIMIT {limit:UInt32}
+    ORDER BY min(Timestamp) DESC, TraceId
+    LIMIT {limit:UInt32} OFFSET {offset:UInt32}
   `;
   return retryOneConnectionReset(async () => {
     const r = await ch.query({
@@ -673,6 +677,7 @@ export async function queryTracesAggregated(
         spanName: params.spanName ?? "",
         statusCode: params.statusCode ?? "",
         limit: params.limit,
+        offset: params.offset ?? 0,
         ...attr.params,
         ...spanAttr.params,
         ...field.params,

@@ -292,3 +292,8 @@
 .explorerResults--traces .traceRow__root { flex-direction: column; align-items: stretch; gap: 2px; }
 .explorerResults--traces .traceRow__root > span { overflow: hidden; text-overflow: ellipsis; }
 .explorerBody--search .explorerMore { flex-shrink: 0; }
+
+.traceRow__timestamp { color: #777; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.traceRow__status { display: inline-flex; align-items: center; gap: 6px; color: #168255; white-space: nowrap; }
+.traceRow__status--error { color: #b94d4d; }
+.traceRow__status > i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }

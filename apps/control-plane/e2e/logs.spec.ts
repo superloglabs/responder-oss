@@ -301,11 +301,14 @@ test("trace search shares grouped facets and keeps its window while filtering", 
     let json: unknown = { available: true };
     if (url.pathname.endsWith("/traces")) {
       queries.push(url.searchParams);
-      json = { traces: Array.from({ length: 50 }, (_, i) => ({
+      const offset = Number(url.searchParams.get("offset") ?? 0);
+      json = { traces: Array.from({ length: offset >= 100 ? 12 : 51 }, (_, index) => {
+        const i = offset + index;
+        return ({
         trace_id: i.toString(16).padStart(32, "0"), root_span_name: `GET /orders/${i}`,
         root_service: "api", start_time: "2026-10-14T12:30:00Z", duration_ms: 600,
         span_count: 4, service_count: 2, error_count: 1,
-      })) };
+      }); }) };
     } else if (url.pathname.endsWith("/histogram")) {
       json = { buckets: [{ bucket: "2026-10-14T12:30:00Z", count: 200, group: "STATUS_CODE_ERROR" }], since: "2026-10-14T12:00:00Z", until: "2026-10-14T13:00:00Z", stepMs: 60000 };
     } else if (url.pathname.endsWith("/facets")) {
@@ -323,9 +326,27 @@ test("trace search shares grouped facets and keeps its window while filtering", 
   const filters = page.getByRole("complementary", { name: "Trace filters" });
   await expect(filters.getByText("150 · 75.0%")).toBeVisible();
   await expect(page.locator(".explorerResults tbody tr")).toHaveCount(50);
+  await expect(page.locator(".traceRow__timestamp").first()).toHaveText(/2026-10-14 \d{2}:30:00\.000/);
+  await expect(page.locator(".traceRow__status").first()).toHaveText("Error");
+  await expect(page.locator(".traceRow__status").first()).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+  const next = page.getByRole("button", { name: "Next", exact: true });
+  const previous = page.getByRole("button", { name: "Previous", exact: true });
+  await expect(previous).toBeDisabled();
+  await next.click();
+  await expect(page.getByText("51–100 traces", { exact: true })).toBeVisible();
+  await expect.poll(() => queries.at(-1)?.get("offset")).toBe("50");
+  expect(queries.at(-1)?.get("until")).toBe(queries[0]?.get("until"));
+  await next.click();
+  await expect(page.getByText("101–112 traces", { exact: true })).toBeVisible();
+  await expect(next).toBeDisabled();
+  await previous.click();
+  await expect(page.getByText("51–100 traces", { exact: true })).toBeVisible();
+
   await filters.getByRole("checkbox", { name: /^worker/ }).click();
   await expect(filters.getByRole("checkbox", { name: /^worker/ })).toBeChecked();
   await expect.poll(() => queries.at(-1)?.getAll("service")).toEqual(["worker"]);
+  await expect.poll(() => queries.at(-1)?.get("offset")).toBe("0");
+  await expect(previous).toBeDisabled();
   expect(queries.at(-1)?.get("until")).toBe("2026-10-14T13:00:00.000Z");
   await filters.getByRole("checkbox", { name: /^Error/ }).click();
   await expect(filters.getByRole("checkbox", { name: /^Error/ })).toBeChecked();

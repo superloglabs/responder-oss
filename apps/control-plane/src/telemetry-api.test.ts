@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   environmentFilter,
   formatDuration,
+  formatTraceTimestamp,
   histogramBars,
   levelSeries,
   logApiParams,
@@ -260,5 +261,13 @@ describe("spanWaterfall", () => {
 
   it("handles an empty trace", () => {
     expect(spanWaterfall([])).toEqual({ durationMs: 0, rows: [] });
+  });
+});
+
+
+describe("trace timestamps", () => {
+  it("uses numeric dates and preserves milliseconds in the selected timezone", () => {
+    expect(formatTraceTimestamp("2026-10-27T23:30:08.123Z", "Europe/Paris")).toBe("2026-10-28 00:30:08.123");
+    expect(formatTraceTimestamp("2026-10-27T23:30:08.123Z", "UTC")).toBe("2026-10-27 23:30:08.123");
   });
 });

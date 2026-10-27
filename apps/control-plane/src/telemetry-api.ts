@@ -447,8 +447,13 @@ export function traceApiParams(query: TraceRequestQuery, now = Date.now()): URLS
   return params;
 }
 
-export function fetchExplorerTraces(query: TraceRequestQuery): Promise<TraceSummary[]> {
-  return telemetryJson<{ traces: TraceSummary[] }>(`/api/telemetry/traces?${traceApiParams(query)}`).then(
+export function fetchExplorerTraces(query: TraceRequestQuery, offset?: number): Promise<TraceSummary[]> {
+  const params = traceApiParams(query);
+  if (offset !== undefined) {
+    params.set("offset", String(offset));
+    params.set("limit", "51"); // One extra row tells the search page whether Next is available.
+  }
+  return telemetryJson<{ traces: TraceSummary[] }>(`/api/telemetry/traces?${params}`).then(
     (body) => body.traces,
   );
 }
@@ -556,6 +561,18 @@ export function levelLabel(severity: string): string {
 }
 
 // Time of day with milliseconds, and the date for windows over a day.
+// Numeric timestamps keep trace rows easy to compare across dates and timezones.
+export function formatTraceTimestamp(value: string, timeZone: string): string {
+  const date = logTimestamp(value);
+  if (!date) return value;
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone, year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", fractionalSecondDigits: 3, hourCycle: "h23",
+  }).formatToParts(date);
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value ?? "";
+  return `${part("year")}-${part("month")}-${part("day")} ${part("hour")}:${part("minute")}:${part("second")}.${part("fractionalSecond")}`;
+}
+
 export function formatExplorerTime(value: string, withDate: boolean, timeZone?: string): string {
   const date = logTimestamp(value);
   if (!date) return value;
