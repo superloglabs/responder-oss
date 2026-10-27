@@ -51,7 +51,8 @@ import {
 } from "../../../../packages/core/src/integrations/dash0.js";
 import {
   parsePostHogCredentials,
-  POSTHOG_MCP_URL,
+  postHogAccessLevelSchema,
+  postHogMcpUrl,
 } from "../../../../packages/core/src/integrations/posthog.js";
 import {
   assertCloudflareReadOnlyGrant,
@@ -1070,6 +1071,10 @@ export async function startIntegrationConnection(input: {
     }
   }
   if (parsedProvider.data === "posthog") {
+    // `mode=read_write` lets automations make changes too. Without it the
+    // connection only reads.
+    const accessLevel = postHogAccessLevelSchema.catch("read_only").parse(input.mode);
+    const mcpUrl = postHogMcpUrl(accessLevel);
     try {
       // Keep incomplete OAuth credentials in the expiring flow, not an account.
       // Replacing or expiring the flow therefore leaves no pending accounts.
@@ -1084,12 +1089,12 @@ export async function startIntegrationConnection(input: {
       });
       const oauthResult = await beginCustomMcpOAuth({
         connectionState,
-        mcpUrl: POSTHOG_MCP_URL,
+        mcpUrl,
         redirectUrl: integrationCallbackUrl("posthog"),
       });
       const updated = await updateIntegrationConnectionStateMetadata({
         metadata: { encryptedCredentials: encryptCredentials({
-          authType: "oauth", mcpUrl: POSTHOG_MCP_URL, oauth: oauthResult.oauth,
+          accessLevel, authType: "oauth", mcpUrl, oauth: oauthResult.oauth,
         }) },
         organizationId: tenant.organizationId,
         userId: tenant.user.id,
@@ -2811,10 +2816,11 @@ export const integrationRoutes = new Hono()
         organizationId: connectionState.organizationId,
         provider: "posthog",
         externalAccountId: callbackState.externalAccountId,
-        displayName: "PostHog",
+        displayName: credentials.accessLevel === "read_write" ? "PostHog · read-write" : "PostHog",
         encryptedCredentials: encryptCredentials({ ...credentials, oauth }),
         credentialKeyVersion: 1,
         metadata: {
+          accessLevel: credentials.accessLevel,
           authType: "oauth",
           mcpUrl: credentials.mcpUrl,
           toolCount,

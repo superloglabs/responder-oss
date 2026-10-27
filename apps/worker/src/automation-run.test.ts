@@ -488,6 +488,55 @@ describe("automation run processor", () => {
     expect(prompt).toContain("Change data or schema only when your instructions or the person ask for it");
   });
 
+  it("serves each PostHog connection as one server and says whether it can write", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    const readOnlyId = "71717171-7171-4171-8171-717171717171";
+    const readWriteId = "72727272-7272-4272-8272-727272727272";
+    deps.getConnections.mockResolvedValue([
+      {
+        displayName: "PostHog",
+        encryptedCredentials: "encrypted-posthog",
+        externalAccountId: "posthog-1",
+        id: readOnlyId,
+        metadata: {},
+        provider: "posthog",
+        role: "context",
+      },
+      {
+        displayName: "PostHog · read-write",
+        encryptedCredentials: "encrypted-posthog",
+        externalAccountId: "posthog-2",
+        id: readWriteId,
+        metadata: { accessLevel: "read_write" },
+        provider: "posthog",
+        role: "context",
+      },
+    ]);
+
+    await processAutomationRun("job-1", {
+      kind: "automation_run",
+      queuedAt: "2026-10-27T10:00:00.000Z",
+      runId,
+    }, process.env, deps);
+
+    const { contextServers, prompt } = deps.runCodex.mock.calls[0]![1];
+    expect(contextServers).toEqual([
+      {
+        name: "posthog_71717171717141718171717171717171",
+        url: `https://responder.example/api/automation-context-broker/v1/${readOnlyId}`,
+      },
+      {
+        name: "posthog_72727272727242728272727272727272",
+        url: `https://responder.example/api/automation-context-broker/v1/${readWriteId}`,
+      },
+    ]);
+    expect(prompt).toContain('- the posthog_71717171717141718171717171717171 server (read-only): "PostHog"');
+    expect(prompt).toContain('- the posthog_72727272727242728272727272727272 server (read-write): "PostHog · read-write"');
+    expect(prompt).toContain("change PostHog only when your instructions or the person ask for it");
+  });
+
   it("serves each Cloudflare context connection as one server and lists its accounts", async () => {
     vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
     vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
