@@ -72,14 +72,17 @@ export function queryWithTokens<T extends SearchQuery>(query: T, tokens: SearchT
 }
 
 export function parseSearchDraft(text: string, fields: SearchField[]): { field: SearchField; op: SearchOperator; value: string } | null {
-  const match = /^([\w.-]+)\s*(!=|[<>]=?|=|:)\s*(.*)$/su.exec(text.trim());
+  const match = /^([\w.-]+)\s*(.*)$/su.exec(text.trim());
   if (!match) return null;
+  const operator = ["!=", ">=", "<=", "=", ">", "<", ":"].find(value => match[2].startsWith(value));
+  if (!operator) return null;
+  const value = match[2].slice(operator.length).trimStart();
   const known = fields.find(f => [f.key, f.label, ...(f.aliases ?? [])].includes(match[1]));
   // Discovery is sampled. A valid attribute can be absent from its suggestions.
   const key = /^(resource|log|span|field)\./u.test(match[1]) ? match[1] : `resource.${match[1]}`;
   const field: SearchField = known ?? { key, label: fieldLabel(key), group: key.startsWith("resource.") ? "Resource attributes" : "Attributes", operators: ["=", "!="] };
-  const op = match[2] === ":" ? "=" : match[2];
+  const op = operator === ":" ? "=" : operator;
   // Do not silently interpret an unsupported comparison as a different one.
   if (!field || !field.operators.includes(op as SearchOperator)) return null;
-  return { field, op: op as SearchOperator, value: match[3].replace(/^"(.*)"$/su, "$1") };
+  return { field, op: op as SearchOperator, value: value.replace(/^"(.*)"$/su, "$1") };
 }
