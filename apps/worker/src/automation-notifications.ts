@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import type { AutomationNotification } from "@responder/core/automations/config";
 import { decryptCredentials } from "@responder/core/credentials/encryption";
 import { getAutomationNotificationAccount } from "@responder/core/db/automations";
-import { postSlackMessage } from "@responder/core/integrations/slack";
+import { postSlackMessage, SlackApiError, uploadSlackImage } from "@responder/core/integrations/slack";
 import { responderAutomationRunUrl } from "@responder/core/responder-urls";
 import { z } from "zod";
 
@@ -16,11 +16,13 @@ export type AutomationRunOutcome =
 export interface AutomationNotificationDependencies {
   getAccount: typeof getAutomationNotificationAccount;
   post: typeof postSlackMessage;
+  uploadImage?: typeof uploadSlackImage;
 }
 
 const defaultDependencies: AutomationNotificationDependencies = {
   getAccount: getAutomationNotificationAccount,
   post: postSlackMessage,
+  uploadImage: uploadSlackImage,
 };
 
 // Slack deduplicates a retried post by this ID, which must be a UUID.
@@ -79,6 +81,9 @@ export type AutomationNotificationDelivery =
 export async function postAutomationNotification(input: {
   // Buttons that continue the run, under the message.
   buttonsBlock?: unknown;
+  image?: { altText: string; png: Buffer };
+  imageLayout?: { before: unknown[]; after: unknown[] };
+  unfurlLinks?: boolean;
   markdown: string;
   notifications: AutomationNotification[];
   organizationId: string;
@@ -98,7 +103,16 @@ export async function postAutomationNotification(input: {
       const { accessToken } = z.object({ accessToken: z.string().min(1) }).parse(
         decryptCredentials<Record<string, unknown>>(account.encryptedCredentials),
       );
-      const timestamp = await dependencies.post({
+      let imageBlock: unknown;
+      if (input.image) {
+        try {
+          const fileId = await (dependencies.uploadImage ?? uploadSlackImage)({ accessToken, png: input.image.png, title: "Alert evaluation" });
+          imageBlock = { type: "image", slack_file: { id: fileId }, alt_text: input.image.altText };
+        } catch (error) {
+          console.warn(JSON.stringify({ event: "notification_image_upload_failed", error: error instanceof Error ? error.message : String(error) }));
+        }
+      }
+      const message = {
         accessToken,
         blocks: [
           { type: "markdown", text: input.markdown },
@@ -107,8 +121,21 @@ export async function postAutomationNotification(input: {
         channelId: notification.channelId,
         clientMessageId: notificationMessageId(input.seed, notification.channelId),
         text: input.text,
+        ...(input.unfurlLinks === undefined ? {} : { unfurlLinks: input.unfurlLinks }),
         ...(input.threadTimestamp ? { threadTimestamp: input.threadTimestamp } : {}),
-      });
+      };
+      let timestamp: string | null;
+      try {
+        timestamp = await dependencies.post({ ...message, blocks: imageBlock && input.imageLayout
+          ? [...input.imageLayout.before, imageBlock, ...input.imageLayout.after]
+          : [...message.blocks, ...(imageBlock ? [imageBlock] : [])] });
+      } catch (error) {
+        // An inaccessible or rejected image must not suppress the alert.
+        // Only retry an explicit rejection; ambiguous failures keep their
+        // normal delivery retry behavior and the same deduplication key.
+        if (!imageBlock || !(error instanceof SlackApiError) || error.code !== "invalid_blocks") throw error;
+        timestamp = await dependencies.post(message);
+      }
       deliveries.push({ notification, timestamp });
     } catch (error) {
       deliveries.push({ error, notification });

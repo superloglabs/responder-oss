@@ -57,6 +57,7 @@ function dependencies(overrides: Partial<TelemetryAlertDependencies> = {}) {
       input.notifications.map((notification) => ({ notification, timestamp: "1700000000.000200" })),
     ),
     recordCheck: vi.fn(async () => undefined),
+    renderChart: vi.fn(async () => ({ altText: "Evaluation graph", png: Buffer.from("png") })),
     resolveEpisode: vi.fn(async () => true),
     setMessage: vi.fn(async () => undefined),
     unannouncedRecoveries: vi.fn(async () => []),
@@ -286,5 +287,29 @@ describe("checkDueTelemetryAlerts", () => {
     expect(await checkDueTelemetryAlerts(deps)).toBe(2);
     expect(deps.claim).toHaveBeenCalledWith(20);
     expect(deps.recordCheck).toHaveBeenCalledWith("alert-2", null);
+  });
+});
+
+describe("alert graph delivery", () => {
+  it("includes the graph and suppresses link previews", async () => {
+    const deps = dependencies();
+    await checkTelemetryAlert(alert, {} as never, deps);
+    expect(deps.renderChart).toHaveBeenCalledWith({ client: {}, groupKey: "", now, organizationId: "org-1", rule: alert });
+    expect(deps.post).toHaveBeenCalledWith(expect.objectContaining({ image: { altText: "Evaluation graph", png: Buffer.from("png") }, unfurlLinks: false }));
+  });
+
+  it("still delivers and records the alert when chart rendering fails", async () => {
+    const deps = dependencies({ renderChart: vi.fn().mockRejectedValue(new Error("query timed out")) });
+    await checkTelemetryAlert(alert, {} as never, deps);
+    expect(deps.post).toHaveBeenCalledWith(expect.objectContaining({ image: undefined }));
+    expect(deps.setMessage).toHaveBeenCalledWith("episode-1", "1700000000.000200");
+    expect(deps.recordCheck).toHaveBeenCalledWith("alert-1", null);
+  });
+
+  it("does not render images for episodes already announced or paused", async () => {
+    const deps = dependencies({ openEpisodes: vi.fn(async () => [episode()]) });
+    await checkTelemetryAlert(alert, {} as never, deps);
+    await checkTelemetryAlert({ ...alert, notificationsPaused: true }, {} as never, deps);
+    expect(deps.renderChart).not.toHaveBeenCalled();
   });
 });

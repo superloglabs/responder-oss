@@ -22,6 +22,8 @@ import {
 } from "@responder/core/telemetry/alerts";
 import { getTelemetryClient, type TelemetryClient } from "@responder/core/telemetry/client";
 import { postAutomationNotification } from "./automation-notifications.js";
+import { alertImageLayout } from "./telemetry-alert-message.js";
+import { renderAlertChart } from "./telemetry-alert-chart.js";
 import type { startAlertAutomations } from "./telemetry-alert-automations.js";
 
 // Alerts claimed per pass, and checked at once. The read-only store limits
@@ -43,6 +45,7 @@ export interface TelemetryAlertDependencies {
   origin: string | null;
   post: typeof postAutomationNotification;
   recordCheck: typeof recordTelemetryAlertCheck;
+  renderChart: typeof renderAlertChart;
   resolveEpisode: typeof resolveTelemetryAlertEpisode;
   setMessage: typeof setTelemetryAlertEpisodeMessage;
   // Starts the automations watching the alert's channel. The worker supplies
@@ -63,6 +66,7 @@ export const defaultTelemetryAlertDependencies: TelemetryAlertDependencies = {
   origin: process.env.RESPONDER_APP_URL ?? process.env.BETTER_AUTH_URL ?? null,
   post: postAutomationNotification,
   recordCheck: recordTelemetryAlertCheck,
+  renderChart: renderAlertChart,
   resolveEpisode: resolveTelemetryAlertEpisode,
   setMessage: setTelemetryAlertEpisodeMessage,
   unannouncedRecoveries: unannouncedTelemetryAlertRecoveries,
@@ -105,8 +109,15 @@ export async function checkTelemetryAlert(
     if (episode.slackMessageTs || announcements >= announcementsPerCheck) return;
     announcements += 1;
     const content = alertFiringMessage(message(episode.groupKey, value));
+    const image = await dependencies.renderChart({ client, groupKey: episode.groupKey, now, organizationId: alert.organizationId, rule: alert }).catch((error: unknown) => {
+      console.warn(JSON.stringify({ alertId: alert.id, error: errorText(error), event: "telemetry_alert_chart_failed" }));
+      return undefined;
+    });
     const [delivery] = await dependencies.post({
       ...content,
+      image,
+      imageLayout: alertImageLayout(message(episode.groupKey, value)),
+      unfurlLinks: false,
       notifications: [target],
       organizationId: alert.organizationId,
       seed: `telemetry-alert-episode:${episode.id}:firing`,

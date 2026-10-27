@@ -98,3 +98,9 @@ The worker and control plane container images include the `mcp-grafana` binary
 from https://github.com/grafana/mcp-grafana, Copyright Grafana Labs, licensed
 under the Apache License, Version 2.0. Each image includes its license at
 `/usr/share/licenses/mcp-grafana/LICENSE`.
+
+## Inter
+
+The evaluation graph uses Inter by The Inter Project Authors
+(https://github.com/rsms/inter), licensed under the SIL Open Font License 1.1.
+See `apps/worker/assets/Inter-OFL.txt`.

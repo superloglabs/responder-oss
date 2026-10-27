@@ -1,3 +1,4 @@
+import { SlackApiError } from "@responder/core/integrations/slack";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { decryptCredentials } from "@responder/core/credentials/encryption";
 import {
@@ -188,5 +189,36 @@ describe("sending automation notifications", () => {
     expect(onError).toHaveBeenCalledWith(notification, expect.objectContaining({
       message: "The Slack connection is unavailable",
     }));
+  });
+});
+
+
+describe("notification images", () => {
+  const input = { markdown: "Alert", text: "Alert", notifications: [notification], organizationId, seed: "episode-1", image: { altText: "Evaluation graph", png: Buffer.from("png") }, unfurlLinks: false };
+  function dependencies() {
+    return { getAccount: vi.fn().mockResolvedValue({ encryptedCredentials: "encrypted" }), uploadImage: vi.fn().mockResolvedValue("F123"), post: vi.fn().mockResolvedValue("123") };
+  }
+  it("embeds the uploaded file in the same message", async () => {
+    const deps = dependencies();
+    await postAutomationNotification(input, deps);
+    expect(deps.post).toHaveBeenCalledWith(expect.objectContaining({ blocks: [{ type: "markdown", text: "Alert" }, { type: "image", slack_file: { id: "F123" }, alt_text: "Evaluation graph" }], unfurlLinks: false }));
+  });
+  it("places an alert link after the image and disables previews", async () => {
+    const deps = dependencies();
+    await postAutomationNotification({ ...input, imageLayout: { before: [{ type: "markdown", text: "Summary" }], after: [{ type: "markdown", text: "View alert" }] } }, deps);
+    expect(deps.post).toHaveBeenCalledWith(expect.objectContaining({ blocks: [{ type: "markdown", text: "Summary" }, { type: "image", slack_file: { id: "F123" }, alt_text: "Evaluation graph" }, { type: "markdown", text: "View alert" }], unfurlLinks: false }));
+  });
+  it("delivers text if the connection lacks file upload permissions", async () => {
+    const deps = dependencies();
+    deps.uploadImage.mockRejectedValue(new SlackApiError("files.getUploadURLExternal", "missing_scope"));
+    expect(await postAutomationNotification(input, deps)).toEqual([{ notification, timestamp: "123" }]);
+    expect(deps.post).toHaveBeenCalledWith(expect.objectContaining({ blocks: [{ type: "markdown", text: "Alert" }] }));
+  });
+  it("falls back to text when Slack rejects the image block, preserving the delivery key", async () => {
+    const deps = dependencies();
+    deps.post.mockRejectedValueOnce(new SlackApiError("chat.postMessage", "invalid_blocks"));
+    expect(await postAutomationNotification(input, deps)).toEqual([{ notification, timestamp: "123" }]);
+    expect(deps.post.mock.calls[1]![0].blocks).toHaveLength(1);
+    expect(deps.post.mock.calls[1]![0].clientMessageId).toBe(deps.post.mock.calls[0]![0].clientMessageId);
   });
 });
