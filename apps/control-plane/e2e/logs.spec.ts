@@ -143,7 +143,7 @@ test("groups facets, filters values, scrolls, and paginates a fixed window", asy
   await filters.getByRole("button", { name: "Service", exact: true }).click();
   await expect(filters.getByText("405 · 94.2%")).toHaveCount(0);
   await filters.getByRole("button", { name: "Service", exact: true }).click();
-  const results = page.locator(".logResults");
+  const results = page.locator(".explorerResults");
   await expect(results).toHaveAttribute("aria-busy", "false");
   const before = await results.boundingBox();
   let release!: () => void;
@@ -200,7 +200,7 @@ test("groups facets, filters values, scrolls, and paginates a fixed window", asy
   await page.setViewportSize({ width: 1280, height: 720 });
   await expect(page.getByRole("button", { name: "Next", exact: true })).toBeInViewport();
   expect(await page.locator(".workspaceSurface").evaluate((node) => node.scrollHeight <= node.clientHeight)).toBe(true);
-  await expect(page.locator(".logResults .dsDataTable")).toHaveCSS("overscroll-behavior", "none");
+  await expect(page.locator(".explorerResults .dsDataTable")).toHaveCSS("overscroll-behavior", "none");
   await page.screenshot({ path: testInfo.outputPath("log-facets.png") });
 });
 
@@ -289,4 +289,68 @@ test("log drawer fills the viewport and groups attributes without losing search 
   await resourceRow.hover();
   await resourceRow.getByRole("button", { name: "Filter", exact: true }).click();
   await expect.poll(() => new URL(page.url()).searchParams.getAll("filter").join(" ")).toContain("resource.cloud.region");
+});
+
+
+test("trace search shares grouped facets and keeps its window while filtering", async ({ page }, testInfo) => {
+  await mockWorkspace(page, ["telemetry", "simplified_navigation"]);
+  await page.route("**/api/c15t/**", (route) => route.abort());
+  const queries: URLSearchParams[] = [];
+  await page.route("**/api/telemetry/**", async (route) => {
+    const url = new URL(route.request().url());
+    let json: unknown = { available: true };
+    if (url.pathname.endsWith("/traces")) {
+      queries.push(url.searchParams);
+      json = { traces: Array.from({ length: 50 }, (_, i) => ({
+        trace_id: i.toString(16).padStart(32, "0"), root_span_name: `GET /orders/${i}`,
+        root_service: "api", start_time: "2026-10-14T12:30:00Z", duration_ms: 600,
+        span_count: 4, service_count: 2, error_count: 1,
+      })) };
+    } else if (url.pathname.endsWith("/histogram")) {
+      json = { buckets: [{ bucket: "2026-10-14T12:30:00Z", count: 200, group: "STATUS_CODE_ERROR" }], since: "2026-10-14T12:00:00Z", until: "2026-10-14T13:00:00Z", stepMs: 60000 };
+    } else if (url.pathname.endsWith("/facets")) {
+      json = { services: [{ group: "api", value: 150 }, { group: "worker", value: 50 }], statuses: [{ group: "STATUS_CODE_ERROR", value: 200 }], operations: [{ group: "GET /orders", value: 200 }] };
+    } else if (url.pathname.endsWith("/attribute")) {
+      json = { values: [{ group: "production", value: 200 }] };
+    } else if (url.pathname.includes("attribute-keys")) {
+      json = { keys: ["resource.deployment.environment", ...Array.from({ length: 30 }, (_, i) => `span.key${i}`)].map((key) => ({ key })) };
+    }
+    await route.fulfill({ json });
+  });
+  await page.goto("/traces/search?from=2026-10-14T12:00:00.000Z&to=2026-10-14T13:00:00.000Z");
+  const consent = page.getByRole("button", { name: "Reject All", exact: true });
+  if (await consent.isVisible()) await consent.click();
+  const filters = page.getByRole("complementary", { name: "Trace filters" });
+  await expect(filters.getByText("150 · 75.0%")).toBeVisible();
+  await expect(page.locator(".explorerResults tbody tr")).toHaveCount(50);
+  await filters.getByRole("checkbox", { name: /^worker/ }).click();
+  await expect(filters.getByRole("checkbox", { name: /^worker/ })).toBeChecked();
+  await expect.poll(() => queries.at(-1)?.getAll("service")).toEqual(["worker"]);
+  expect(queries.at(-1)?.get("until")).toBe("2026-10-14T13:00:00.000Z");
+  await filters.getByRole("checkbox", { name: /^Error/ }).click();
+  await expect(filters.getByRole("checkbox", { name: /^Error/ })).toBeChecked();
+  await expect.poll(() => queries.at(-1)?.getAll("status")).toEqual(["STATUS_CODE_ERROR"]);
+  await filters.getByRole("checkbox", { name: /Over 500 ms/ }).click();
+  await expect(filters.getByRole("checkbox", { name: /Over 500 ms/ })).toBeChecked();
+  await expect.poll(() => queries.at(-1)?.get("minDurationMs")).toBe("500");
+  await filters.getByRole("searchbox").fill("environment");
+  const before = queries.length;
+  await filters.getByRole("button", { name: "deployment.environment", exact: true }).click();
+  await expect(filters.getByRole("checkbox", { name: /production/ })).toBeVisible();
+  expect(queries.length).toBe(before);
+  await filters.getByRole("checkbox", { name: /production/ }).click();
+  await expect(filters.getByRole("checkbox", { name: /production/ })).toBeChecked();
+  await expect.poll(() => queries.at(-1)?.getAll("filter")).toEqual(["resource.deployment.environment=production"]);
+  await page.reload();
+  await expect(filters.getByRole("checkbox", { name: /production/ })).toBeChecked();
+  await expect(filters.getByRole("checkbox", { name: /^worker/ })).toBeChecked();
+  await page.getByRole("button", { name: "Refresh", exact: true }).click();
+  expect(queries.at(-1)?.get("since")).toBe("2026-10-14T12:00:00.000Z");
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await expect(page.locator(".explorerResults .dsDataTable")).toHaveCSS("overflow-y", "auto");
+  expect(await page.locator(".workspaceSurface").evaluate((node) => node.scrollHeight <= node.clientHeight)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath("trace-search.png") });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(filters.getByRole("searchbox")).toBeVisible();
+  expect(await page.locator(".explorerBody--search").evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
 });

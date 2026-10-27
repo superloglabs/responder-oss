@@ -17,6 +17,7 @@ import {
   traceHref,
   traceExplorerParams,
   traceExplorerQuery,
+  traceSearchQuery,
   traceListHref,
   withEnvironment,
   type Span,
@@ -109,6 +110,31 @@ describe("explorer queries", () => {
       "range=1h&operation=GET&status=STATUS_CODE_ERROR&minDurationMs=500&facet=span.http.route",
     );
     expect(traceApiParams(query).toString()).toBe("range=1h&operation=GET&status=STATUS_CODE_ERROR");
+  });
+
+  it("round trips a fixed trace search window and filters without sending open facets", () => {
+    const params = new URLSearchParams({
+      from: "2026-10-14T12:00:00.000Z", to: "2026-10-14T13:00:00.000Z",
+      service: "api", status: "error", operation: "GET /orders", minDurationMs: "500",
+      filter: "resource.deployment.environment=production", facet: "span.http.route",
+    });
+    const query = traceSearchQuery(params);
+    expect(traceSearchQuery(traceExplorerParams(query))).toEqual(query);
+    const api = traceApiParams(query);
+    expect(api.get("since")).toBe(params.get("from"));
+    expect(api.get("until")).toBe(params.get("to"));
+    expect(api.get("status")).toBe("STATUS_CODE_ERROR");
+    expect(api.get("filter")).toBe(params.get("filter"));
+    expect(api.get("minDurationMs")).toBe("500");
+    for (const name of ["facet", "range", "from", "to"]) expect(api.has(name)).toBe(false);
+  });
+
+  it("resolves custom relative trace windows against one clock", () => {
+    const query = traceSearchQuery(new URLSearchParams("range=30m"));
+    expect(traceExplorerParams(query).get("range")).toBe("30m");
+    const api = traceApiParams(query, Date.parse("2026-10-14T14:00:00.000Z"));
+    expect(api.get("since")).toBe("2026-10-14T13:30:00.000Z");
+    expect(api.get("until")).toBe("2026-10-14T14:00:00.000Z");
   });
 
   it("sets and clears the environment filter", () => {
