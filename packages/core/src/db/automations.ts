@@ -2166,6 +2166,27 @@ export async function automationRunLeaseExpiry(
   return rows[0]?.leaseExpiresAt ?? null;
 }
 
+// Frees the lease of a running run its worker hands back while stopping, so
+// the next worker claims it at once instead of waiting for the lease to run
+// out. The run's status stays running.
+export async function releaseAutomationRunLease(input: {
+  leaseId: string;
+  runId: string;
+}): Promise<boolean> {
+  const rows = await getDatabase()
+    .update(automationRuns)
+    .set({ leaseExpiresAt: null, leaseId: null, updatedAt: new Date() })
+    .where(
+      and(
+        eq(automationRuns.id, input.runId),
+        eq(automationRuns.leaseId, input.leaseId),
+        eq(automationRuns.status, "running"),
+      ),
+    )
+    .returning({ id: automationRuns.id });
+  return rows.length > 0;
+}
+
 export async function automationRunCancellationRequested(
   runId: string,
 ): Promise<boolean> {

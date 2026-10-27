@@ -20,6 +20,7 @@ import {
   getAutomationRuntimeConnections,
   heartbeatAutomationRun,
   listAutomationRunConversation,
+  releaseAutomationRunLease,
   reopenAutomationRun,
   saveAutomationRunSandbox,
   setAutomationRunStatus,
@@ -166,6 +167,7 @@ export interface AutomationRunDependencies {
   notifyLimitReached: typeof notifyBillingLimitReached;
   now(): Date;
   postedInSlackThread: typeof automationRunPostedInSlackThread;
+  releaseLease: typeof releaseAutomationRunLease;
   reopenRun: typeof reopenAutomationRun;
   reportException: typeof reportWorkerException;
   // Queues the next turn of a run; the worker's job queue provides it.
@@ -177,6 +179,9 @@ export interface AutomationRunDependencies {
   runInSandbox: typeof runInFreshAutomationSandbox;
   saveSandbox: typeof saveAutomationRunSandbox;
   setStatus: typeof setAutomationRunStatus;
+  // Aborts when the worker starts to stop. Its runs then go back to the queue
+  // for the next worker.
+  shutdownSignal?: AbortSignal;
   sleep(delayMs: number): Promise<void>;
   slackCard: AutomationSlackCardDependencies;
   subscriptionAuth: (owner: { credentialId: string; organizationId: string }, validUntil: Date) => Promise<string>;
@@ -219,6 +224,7 @@ export const defaultAutomationRunDependencies: AutomationRunDependencies = {
   notifyLimitReached: notifyBillingLimitReached,
   now: () => new Date(),
   postedInSlackThread: automationRunPostedInSlackThread,
+  releaseLease: releaseAutomationRunLease,
   reopenRun: reopenAutomationRun,
   reportException: reportWorkerException,
   requeueRun: async () => {
@@ -764,6 +770,11 @@ export async function processAutomationRun(
     run = await dependencies.claimRun(payload.runId);
   }
   if (!run) return { runId: payload.runId };
+  // A run claimed while the worker stops goes straight back to the queue.
+  if (dependencies.shutdownSignal?.aborted) {
+    await handBackRun(dependencies, run);
+    return { runId: run.runId };
+  }
   const triggerPullRequest = githubPullRequestOf(run.triggerInput);
   // Usage recorded from here on belongs to this turn.
   const turnStartedAt = await dependencies.usageWaiverStart();
@@ -801,6 +812,12 @@ export async function processAutomationRun(
     () => runAbort.abort(new AutomationRunTimeoutError()),
     run.maxRuntimeSeconds * 1_000,
   );
+  // A run can outlast the worker's stop timeout, so a stopping worker hands
+  // it to the next worker instead of waiting for it.
+  const handBack = () => runAbort.abort(new AutomationRunHandedBackError());
+  dependencies.shutdownSignal?.addEventListener("abort", handBack, { once: true });
+  if (dependencies.shutdownSignal?.aborted) handBack();
+  let handedBack = false;
   let cancellationCheckRunning = false;
   const cancellationPoll = setInterval(() => {
     if (cancellationCheckRunning || runAbort.signal.aborted) return;
@@ -953,6 +970,8 @@ export async function processAutomationRun(
       names: notificationTargets.map((notification) =>
         `#${channelNames.get(`${notification.integrationAccountId}:${notification.channelId}`) ?? notification.channelId}`),
     };
+    // A run handed back during setup posts no Slack card.
+    runAbort.signal.throwIfAborted();
     slackCard = await startSlackCard(dependencies, run, connections, conversation, firstTurn, button);
     // Workspaces with simplified navigation let a run change their
     // automations and tag mode, as tag mode itself can.
@@ -1225,6 +1244,8 @@ export async function processAutomationRun(
       stopped instanceof AutomationRunCancelledError;
     const timedOut = error instanceof AutomationRunTimeoutError ||
       stopped instanceof AutomationRunTimeoutError;
+    handedBack = error instanceof AutomationRunHandedBackError ||
+      stopped instanceof AutomationRunHandedBackError;
     // The harness runs in the model broker queue, so its failure also comes
     // back from the queue and arrives wrapped with the error the turn raised.
     const causes = [error, ...(error instanceof AggregateError ? error.errors : [])];
@@ -1240,9 +1261,10 @@ export async function processAutomationRun(
       : allowanceExhausted
         ? allowanceExhausted.message
       : safeInvestigationError(organizationRefusal ?? error, environment);
-    // A turn that failed through Responder's fault is not charged. A run
-    // that reached its own runtime limit or allowance is. The waiver comes
-    // first so a failed status write cannot leave the turn charged.
+    // A turn that failed or was handed back through Responder's fault is not
+    // charged. A run that reached its own runtime limit or allowance is. The
+    // waiver comes first so a failed status write cannot leave the turn
+    // charged.
     if (!cancelled && !leaseLost && !timedOut && !allowanceExhausted) {
       await dependencies.waiveUsage({
         leaseId: run.leaseId,
@@ -1256,7 +1278,7 @@ export async function processAutomationRun(
           requestId: run.runId,
         }).catch(() => undefined));
     }
-    if (!leaseLost) {
+    if (!leaseLost && !handedBack) {
       await dependencies.setStatus({
         ...(cancelled
           ? {}
@@ -1279,10 +1301,13 @@ export async function processAutomationRun(
         cancelled ? undefined : { message },
       );
     }
-    turnEnded = !cancelled && !leaseLost;
+    turnEnded = !cancelled && !leaseLost && !handedBack;
     if (turnEnded) outcome = { message, status: "failed" };
-    await slackCard?.finish("error", message);
-    if (!cancelled && !leaseLost && !allowanceExhausted && !organizationRefusal) {
+    await slackCard?.finish(
+      "error",
+      handedBack ? "Responder restarted during this run. The run starts again shortly." : message,
+    );
+    if (!cancelled && !leaseLost && !handedBack && !allowanceExhausted && !organizationRefusal) {
       await dependencies.reportException(error, {
         jobId,
         operation: "automation",
@@ -1291,6 +1316,7 @@ export async function processAutomationRun(
       }).catch(() => undefined);
     }
   } finally {
+    dependencies.shutdownSignal?.removeEventListener("abort", handBack);
     clearInterval(cancellationPoll);
     clearInterval(heartbeat);
     clearTimeout(runtimeTimeout);
@@ -1330,6 +1356,11 @@ export async function processAutomationRun(
         }).catch(() => undefined);
       }
     }
+  }
+  // The grant is revoked first, so the next worker never shares it.
+  if (handedBack) {
+    await handBackRun(dependencies, run);
+    return { runId: run.runId };
   }
   // The agent reports its own result or skips it; channels it did not reach
   // get its final reply, and a failed run is reported to every channel. A
@@ -1391,6 +1422,17 @@ export async function processAutomationRun(
     await answerNewMessages(dependencies, run, answeredThrough, jobId);
   }
   return { runId: run.runId };
+}
+
+// Frees the run's lease and queues the run again for the next worker. When
+// the run cannot be queued, the error fails the job so the queue retries it.
+async function handBackRun(
+  dependencies: AutomationRunDependencies,
+  run: ClaimedAutomationRun,
+): Promise<void> {
+  if (!(await dependencies.releaseLease({ leaseId: run.leaseId, runId: run.runId }))) return;
+  await dependencies.requeueRun({ organizationId: run.organizationId, runId: run.runId });
+  console.log(JSON.stringify({ event: "automation_run_handed_back", runId: run.runId }));
 }
 
 // Starts the next turn for replies that arrived while this one ran. The
@@ -1456,6 +1498,13 @@ class AutomationRunTimeoutError extends Error {
   constructor() {
     super("Automation run exceeded its configured runtime limit");
     this.name = "AutomationRunTimeoutError";
+  }
+}
+
+class AutomationRunHandedBackError extends Error {
+  constructor() {
+    super("Automation run was handed to another worker");
+    this.name = "AutomationRunHandedBackError";
   }
 }
 

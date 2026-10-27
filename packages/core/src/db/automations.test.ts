@@ -15,6 +15,7 @@ import {
   findDueScheduledAutomations,
   getAutomationRunSlackButtons,
   listAutomationPullRequests,
+  releaseAutomationRunLease,
   summarizeAutomationList,
 } from "./automations.js";
 import { getDatabase } from "./client.js";
@@ -477,6 +478,41 @@ describe("claimAutomationRun", () => {
     await expect(claimAutomationRun(runId)).resolves.toBeNull();
     expect(deleted).toHaveLength(0);
     expect(update).not.toHaveBeenCalled();
+  });
+});
+
+describe("releaseAutomationRunLease", () => {
+  const input = { leaseId: "3400aa41-f315-4e0e-b9e0-9468832d98d8", runId: "96751171-8931-4f9b-aaea-098f400f93b2" };
+
+  function releaseDatabase(rows: unknown[]) {
+    const writes: Array<{ set: Record<string, unknown>; where: SQL }> = [];
+    vi.mocked(getDatabase).mockReturnValue({
+      update: () => ({
+        set: (set: Record<string, unknown>) => ({
+          where: (where: SQL) => {
+            writes.push({ set, where });
+            return { returning: async () => rows };
+          },
+        }),
+      }),
+    } as never);
+    return writes;
+  }
+
+  it("clears the lease of the running run that holds it", async () => {
+    const writes = releaseDatabase([{ id: input.runId }]);
+
+    await expect(releaseAutomationRunLease(input)).resolves.toBe(true);
+    expect(writes[0]!.set).toMatchObject({ leaseExpiresAt: null, leaseId: null });
+    expect(writes[0]!.set).not.toHaveProperty("status");
+    const where = new PgDialect().sqlToQuery(writes[0]!.where);
+    expect(where.params).toEqual([input.runId, input.leaseId, "running"]);
+  });
+
+  it("reports a run another lease holds or that already finished", async () => {
+    releaseDatabase([]);
+
+    await expect(releaseAutomationRunLease(input)).resolves.toBe(false);
   });
 });
 
