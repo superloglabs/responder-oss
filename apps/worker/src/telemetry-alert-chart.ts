@@ -61,7 +61,7 @@ export function alertChartSvg(input: {
     <text x="40" y="160" font-size="7" fill="#666666">${timeLabel(since)}</text>
     <text x="268" y="160" text-anchor="middle" font-size="7" fill="#666666">${timeLabel((since + until) / 2)}</text>
     <text x="496" y="160" text-anchor="end" font-size="7" fill="#666666">${timeLabel(until)}</text>
-    <line x1="16" x2="25" y1="189" y2="189" stroke="#888888" stroke-width="1" stroke-dasharray="3 3"/>
+    <line x1="16" x2="25" y1="191.5" y2="191.5" stroke="#888888" stroke-width="1" stroke-dasharray="3 3"/>
     <text x="29" y="194" font-size="7" fill="#444444">Alert when ${xml(describeAlertCondition(rule.comparator, rule.threshold, unit))}</text>
     <text x="496" y="194" text-anchor="end" font-size="7" fill="#666666">${date} · UTC</text>
   </g></svg>`;
