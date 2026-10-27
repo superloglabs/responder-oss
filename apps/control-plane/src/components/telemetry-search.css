@@ -1,0 +1,39 @@
+.telemetrySearch { --color-search-selection: #f1f1fd; --color-search-selection-text: #3039bd; --color-search-focus: #a5a9ed; position: relative; flex: 1; min-width: 0; font-family: var(--ds-font-sans); font-size: 12px; color: #202020; }
+.telemetrySearch__bar { display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 4px 6px 4px 10px; border: 1px solid #e3e3e3; border-radius: 6px; background: #fff; }
+.telemetrySearch__bar:focus-within { border-color: var(--color-search-focus); box-shadow: 0 0 0 2px #4e58f90a; }
+.telemetrySearch__icon { flex-shrink: 0; align-self: flex-start; margin-top: 5px; color: #666; }
+.telemetrySearch button { font: inherit; cursor: pointer; }
+.telemetrySearch button:focus-visible { outline: 2px solid #4e58f9; outline-offset: 2px; }
+.telemetrySearch__entry { display: flex; align-items: center; flex: 1; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.telemetrySearch__chip { display: inline-flex; align-items: center; max-width: 100%; border: 1px solid #e3e3e3; border-radius: 4px; background: #f5f5f5; }
+.telemetrySearch__chip[data-editing=true] { background: #f0f0ff; border-color: #b9bdf7; }
+.telemetrySearch__chip > button { border: 0; border-radius: 3px; background: transparent; color: #202020; padding: 3px 6px; line-height: 16px; text-align: left; overflow-wrap: anywhere; }
+.telemetrySearch__chip > button > span { color: #666; }
+.telemetrySearch__chip > .telemetrySearch__remove { display: grid; place-items: center; flex-shrink: 0; width: 24px; min-height: 22px; color: #777; padding: 0; }
+.telemetrySearch__remove:hover { background: #e8e8e8; }
+.telemetrySearch__composer { display: flex; align-items: center; flex: 1 1 180px; flex-wrap: wrap; gap: 5px; min-width: 0; }
+.telemetrySearch__composer > button { max-width: 100%; border: 0; border-radius: 3px; padding: 0 4px; background: #f5f5f5; color: #444; line-height: 22px; overflow-wrap: anywhere; }
+.telemetrySearch__composer > input { flex: 1 1 100px; width: 100%; min-width: 80px; border: 0; outline: 0; padding: 0; background: transparent; color: #202020; font: inherit; line-height: 22px; }
+.telemetrySearch__composer > input::placeholder { color: #777; }
+.telemetrySearch__clear { display: grid; place-items: center; align-self: flex-start; flex-shrink: 0; width: 24px; height: 24px; border: 0; border-radius: 4px; background: transparent; color: #777; }
+.telemetrySearch__clear:hover { background: #f5f5f5; }
+.telemetrySearch__popup { position: absolute; z-index: 30; top: calc(100% + 6px); left: 0; width: 560px; max-width: 100%; border: 1px solid #e3e3e3; border-radius: 8px; background: #fff; box-shadow: 0 5px 18px #0000000d; overflow: hidden; }
+.telemetrySearch__head { display: flex; align-items: center; gap: 8px; padding: 10px 13px 8px; border-bottom: 1px solid #f0f0f0; color: #666; overflow-wrap: anywhere; }
+.telemetrySearch__head button { display: flex; border: 0; background: transparent; padding: 2px; color: #666; }
+.telemetrySearch__head strong { font-weight: 500; }
+.telemetrySearch__list { max-height: min(390px, 55dvh); overflow-y: auto; padding: 5px; scrollbar-width: thin; }
+.telemetrySearch__group { padding: 9px 9px 5px; font-size: 11px; line-height: 16px; color: #777; }
+.telemetrySearch__option { display: flex; align-items: center; gap: 9px; min-height: 34px; padding: 8px; border-radius: 4px; color: #444; cursor: pointer; }
+.telemetrySearch__option[aria-selected=true] { background: var(--color-search-selection); color: var(--color-search-selection-text); }
+.telemetrySearch__option > span:first-child { flex: 1; min-width: 0; overflow-wrap: anywhere; line-height: 18px; }
+.telemetrySearch__option mark { background: none; color: inherit; font-weight: 600; }
+.telemetrySearch__option > kbd { visibility: hidden; }
+.telemetrySearch__option[aria-selected=true] > kbd { visibility: visible; }
+.telemetrySearch kbd { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; min-width: 20px; height: 20px; padding: 0 4px; border: 1px solid #e8e8e8; border-radius: 4px; background: #f5f5f5; box-shadow: 0 1px 0 #ddd; color: #666; font: 500 11px/1 var(--ds-font-sans); }
+.telemetrySearch__footer { display: flex; align-items: center; gap: 14px; padding: 9px 13px; border-top: 1px solid #f0f0f0; font-size: 11px; color: #777; }
+.telemetrySearch__footer > span { display: flex; align-items: center; gap: 6px; }
+.telemetrySearch__footer > span:last-child { margin-left: auto; }
+.telemetrySearch__notice { margin: 0; padding: 10px 9px; color: #666; line-height: 20px; }
+.telemetrySearch__notice button { border: 0; background: transparent; color: #3039bd; text-decoration: underline; }
+.telemetrySearch__sr { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+@media (max-width: 600px) { .telemetrySearch__footer { gap: 8px; padding-inline: 8px; } }

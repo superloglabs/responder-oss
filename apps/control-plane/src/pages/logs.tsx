@@ -1,3 +1,4 @@
+import { TelemetrySearch } from "../components/telemetry-search";
 import { LogFacets } from "../components/log-facets";
 import { NavigationIcon } from "../components/navigation-icon";
 import { ArrowClockwiseIcon, ArrowLeftIcon, ArrowRightIcon, CaretDownIcon, CaretUpIcon, TreeStructureIcon } from "@phosphor-icons/react";
@@ -11,8 +12,6 @@ import { TelemetryGate } from "../components/telemetry";
 import {
   AttributeTable,
   ExplorerDrawer,
-  ExplorerFilterBar,
-  type FilterChip,
 } from "../components/telemetry-explorer";
 import { resolveTimeRange, zoomOutTimeRange } from "../dashboard-time-range";
 import { fetchAttributeKeys } from "../dashboards-api";
@@ -30,7 +29,6 @@ import {
   logExplorerParams,
   logExplorerQuery,
   logTimestamp,
-  parseExplorerFilter,
   severityTextTone,
   traceHref,
   type ExplorerFilter,
@@ -51,20 +49,12 @@ const levelChart: Array<HistogramSeries<LevelSeries>> = [
 ];
 const levelSeriesNames = levelChart.map((series) => series.name);
 
-const traceIdPattern = /^[0-9a-f]{32}$/iu;
-
 // Most severe first; levels the list does not know go last.
 const levelOrder = ["FATAL", "CRITICAL", "ERROR", "WARN", "WARNING", "INFO", "DEBUG", "TRACE"];
 const levelRank = (severity: string) => {
   const index = levelOrder.indexOf(severity.toUpperCase());
   return index === -1 ? levelOrder.length : index;
 };
-
-// Readable names for filter keys in chips.
-function filterChipLabel(filter: ExplorerFilter): string {
-  const key = filter.key.replace(/^(log|resource|field)\./u, "");
-  return filter.op === "neq" ? `not ${key}` : key;
-}
 
 function logKey(log: LogRecord, index: number): string {
   return `${log.timestamp}-${log.span_id}-${index}`;
@@ -219,54 +209,24 @@ function LogExplorer({ query, refresh, setQuery, timeZone, now }: {
     setQuery({ filters: [...query.filters.filter((item) => explorerFilterText(item) !== text), filter] });
   }
 
-  function submitText(text: string): boolean {
-    if (!text) {
-      if (query.search) setQuery({ search: "" });
-      return true;
-    }
-    if (traceIdPattern.test(text)) {
-      addFilter({ key: "field.trace_id", op: "eq", value: text.toLowerCase() });
-      return true;
-    }
-    const filter = /^[\w.-]+!?=/u.test(text) ? parseExplorerFilter(text) : null;
-    if (filter) {
-      addFilter(filter);
-      return true;
-    }
-    setQuery({ search: text });
-    return false;
-  }
-
-  const chips: FilterChip[] = [
-    ...query.services.map((service) => ({
-      id: `service-${service}`,
-      label: "service",
-      onRemove: () => toggle("services", service),
-      value: service,
-    })),
-    ...query.severities.map((severity) => ({
-      id: `level-${severity}`,
-      label: "level",
-      onRemove: () => toggle("severities", severity),
-      value: levelLabel(severity),
-    })),
-    ...query.filters.map((filter) => ({
-      id: `filter-${explorerFilterText(filter)}`,
-      label: filterChipLabel(filter),
-      onRemove: () => setQuery({ filters: query.filters.filter((item) => item !== filter) }),
-      value: filter.value,
-    })),
-  ];
-
   return (
     <>
       <div className="explorerToolbar">
-        <ExplorerFilterBar
-          chips={chips}
-          initialText={query.search}
-          label="Search logs"
-          onSubmit={submitText}
-          placeholder="Search messages, key=value or a trace ID"
+        <TelemetrySearch
+          signal="logs"
+          query={query}
+          onChange={setQuery}
+          dataKey={key}
+          attributeKeys={attributeKeys.data}
+          keysError={attributeKeys.error}
+          onRetryKeys={attributeKeys.retry}
+          loadValues={async (field) => {
+            if (field === "service" || field === "severity") {
+              const data = facets.data ?? await fetchLogFacets(requestQuery);
+              return field === "service" ? data.services : data.severities;
+            }
+            return fetchLogAttributeFacet(requestQuery, field);
+          }}
         />
       </div>
       <section aria-label="Log volume" aria-busy={histogram.isFetching} className="explorerVolume">

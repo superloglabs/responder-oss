@@ -375,3 +375,104 @@ test("trace search shares grouped facets and keeps its window while filtering", 
   await expect(filters.getByRole("searchbox")).toBeVisible();
   expect(await page.locator(".explorerBody--search").evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
 });
+
+test("search autocomplete shares URL state with facets and cancels chip edits", async ({ page }, testInfo) => {
+  await mockWorkspace(page, ["telemetry", "simplified_navigation"]);
+  await page.route("**/api/c15t/**", route => route.abort());
+  await page.route("**/api/telemetry/**", async route => {
+    const path = new URL(route.request().url()).pathname;
+    let json: unknown = { available: true };
+    if (path.endsWith("/logs")) json = { logs: [] };
+    else if (path.endsWith("/histogram")) json = { buckets: [], since: new Date(Date.now() - 3600000).toISOString(), until: new Date().toISOString(), stepMs: 60000 };
+    else if (path.endsWith("/facets")) json = { services: [{ group: "api", value: 10 }, { group: "worker", value: 5 }], severities: [{ group: "ERROR", value: 5 }] };
+    else if (path.endsWith("/attribute")) json = { values: [{ group: "eu-west-3", value: 10 }] };
+    else if (path.endsWith("/attribute-keys")) json = { keys: [{ key: "resource.cloud.region" }, { key: "log.event" }] };
+    await route.fulfill({ json });
+  });
+  await page.goto("/logs");
+  const consent = page.getByRole("button", { name: "Reject All", exact: true });
+  if (await consent.isVisible()) await consent.click();
+  const search = page.getByRole("combobox", { name: "Search logs" });
+  await search.fill("serv");
+  await expect(page.getByRole("option", { name: "service.name", exact: true })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("search-autocomplete.png") });
+  await page.setViewportSize({ width: 320, height: 740 });
+  const menu = page.locator(".telemetrySearch__popup");
+  const bounds = await menu.boundingBox();
+  expect(bounds!.x).toBeGreaterThanOrEqual(0);
+  expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(320);
+  await page.screenshot({ path: testInfo.outputPath("search-mobile.png") });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await search.press("Enter");
+  await expect(page.getByRole("option", { name: "api", exact: true })).toBeVisible();
+  await search.press("ArrowDown");
+  await search.press("Enter");
+  await expect(page).toHaveURL(/service=worker/);
+  await expect(page.getByRole("complementary", { name: "Log filters" }).getByRole("checkbox", { name: /worker/ })).toBeChecked();
+  await page.getByRole("button", { name: "Edit service.name = worker", exact: true }).click();
+  await search.fill("api");
+  await search.press("Escape");
+  await expect(page).toHaveURL(/service=worker/);
+  await page.getByRole("button", { name: "Edit service.name = worker", exact: true }).click();
+  await search.fill("api");
+  await search.press("Enter");
+  await expect(page).toHaveURL(/service=api/);
+  await expect(page).not.toHaveURL(/service=worker/);
+  await search.fill("cloud");
+  await page.getByRole("option", { name: "cloud.region", exact: true }).click();
+  await expect(page.getByRole("option", { name: "eu-west-3", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Change operator, is", exact: true }).click();
+  await page.getByRole("option", { name: "!= is not", exact: true }).click();
+  await page.getByRole("option", { name: "eu-west-3", exact: true }).click();
+  await expect.poll(() => new URL(page.url()).searchParams.get("filter")).toBe("resource.cloud.region!=eu-west-3");
+  await search.fill("connection timed out");
+  await search.press("Enter");
+  await expect.poll(() => new URL(page.url()).searchParams.get("search")).toBe("connection timed out");
+  await page.getByRole("button", { name: "Clear search", exact: true }).click();
+  await expect.poll(() => new URL(page.url()).searchParams.has("filter")).toBe(false);
+  await expect.poll(() => new URL(page.url()).searchParams.has("search")).toBe(false);
+  await expect.poll(() => new URL(page.url()).searchParams.has("service")).toBe(false);
+});
+
+test("trace search commits minimum duration and ignores stale attribute suggestions", async ({ page }) => {
+  await mockWorkspace(page, ["telemetry", "simplified_navigation"]);
+  await page.route("**/api/c15t/**", route => route.abort());
+  let releaseSlow!: () => void;
+  const slow = new Promise<void>(resolve => { releaseSlow = resolve; });
+  await page.route("**/api/telemetry/**", async route => {
+    const url = new URL(route.request().url());
+    const path = url.pathname;
+    let json: unknown = { available: true };
+    if (path.endsWith("/traces")) json = { traces: [] };
+    else if (path.endsWith("/histogram")) json = { buckets: [], since: new Date(Date.now() - 3600000).toISOString(), until: new Date().toISOString(), stepMs: 60000 };
+    else if (path.endsWith("/facets")) json = { services: [], operations: [], statuses: [{ group: "STATUS_CODE_ERROR", value: 4 }] };
+    else if (path.endsWith("/attribute-keys")) json = { keys: [{ key: "resource.cloud.region" }, { key: "span.http.route" }] };
+    else if (path.endsWith("/attribute")) {
+      if (url.searchParams.get("key") === "resource.cloud.region") { await slow; json = { values: [{ group: "old-region", value: 1 }] }; }
+      else json = { values: [{ group: "/checkout", value: 1 }] };
+    }
+    await route.fulfill({ json });
+  });
+  await page.goto("/traces/search");
+  const consent = page.getByRole("button", { name: "Reject All", exact: true });
+  if (await consent.isVisible()) await consent.click();
+  const search = page.getByRole("combobox", { name: "Filter traces" });
+  await search.fill("duration>=500ms");
+  await search.press("Enter");
+  await expect.poll(() => new URL(page.url()).searchParams.get("minDurationMs")).toBe("500");
+  await search.fill("status");
+  await search.press("Enter");
+  await page.getByRole("option", { name: "Error", exact: true }).click();
+  await expect.poll(() => new URL(page.url()).searchParams.get("status")).toBe("STATUS_CODE_ERROR");
+  await search.fill("cloud");
+  await page.getByRole("option", { name: "cloud.region", exact: true }).click();
+  await expect(page.getByText("Loading values…", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Change attribute", exact: true }).click();
+  await search.fill("http.route");
+  await page.getByRole("option", { name: "http.route", exact: true }).click();
+  await expect(page.getByRole("option", { name: "/checkout", exact: true })).toBeVisible();
+  releaseSlow();
+  await expect(page.getByRole("option", { name: "old-region", exact: true })).toHaveCount(0);
+  await page.getByRole("option", { name: "/checkout", exact: true }).click();
+  await expect.poll(() => new URL(page.url()).searchParams.get("filter")).toBe("span.http.route=/checkout");
+});

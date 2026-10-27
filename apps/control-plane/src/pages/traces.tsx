@@ -1,3 +1,4 @@
+import { TelemetrySearch } from "../components/telemetry-search";
 import { ArrowClockwiseIcon, ArrowLeftIcon, ArrowRightIcon } from "@phosphor-icons/react";
 import { ExplorerFacets } from "../components/explorer-facets";
 import { DashboardTimePicker } from "../components/dashboard-time-picker";
@@ -10,10 +11,6 @@ import { AppShell } from "../components/app-shell";
 import { DataTableSkeleton, ExplorerSkeleton } from "../components/screen-skeletons";
 import { CountHistogram, HistogramLegend, type HistogramSeries } from "../components/count-histogram";
 import { TelemetryGate } from "../components/telemetry";
-import {
-  ExplorerFilterBar,
-  type FilterChip,
-} from "../components/telemetry-explorer";
 import { TraceDrawer } from "../components/trace-drawer";
 import { fetchAttributeKeys } from "../dashboards-api";
 import { DataTable, IconButton } from "../design-system";
@@ -27,7 +24,6 @@ import {
   formatTraceTimestamp,
   histogramBars,
   logTimestamp,
-  parseExplorerFilter,
   traceExplorerParams,
   traceSearchQuery,
   type ExplorerFilter,
@@ -62,15 +58,8 @@ const durations = [
   { label: "Over 5 s", value: "5000" },
 ];
 
-const traceIdPattern = /^[0-9a-f]{32}$/iu;
-
 function count(value: number | string): number {
   return Number(value) || 0;
-}
-
-function filterChipLabel(filter: ExplorerFilter): string {
-  const key = filter.key.replace(/^(span|resource|field)\./u, "");
-  return filter.op === "neq" ? `not ${key}` : key;
 }
 
 function TraceExplorer({ now, refresh, timeZone, onOpenTrace, openTrace, query, setQuery }: {
@@ -120,47 +109,25 @@ function TraceExplorer({ now, refresh, timeZone, onOpenTrace, openTrace, query, 
     setQuery({ filters: [...query.filters.filter((item) => explorerFilterText(item) !== text), filter] });
   }
 
-  function submitText(text: string): boolean {
-    if (!text) return true;
-    if (traceIdPattern.test(text)) {
-      onOpenTrace(text.toLowerCase());
-      return true;
-    }
-    const filter = /^[\w.-]+!?=/u.test(text) ? parseExplorerFilter(text) : null;
-    if (filter) addFilter(filter);
-    else if (!query.operations.includes(text)) setQuery({ operations: [...query.operations, text] });
-    return true;
-  }
-
-  const chips: FilterChip[] = [
-    ...query.services.map((value) => ({ id: `service-${value}`, label: "service", onRemove: () => toggle("services", value), value })),
-    ...query.operations.map((value) => ({ id: `operation-${value}`, label: "span", onRemove: () => toggle("operations", value), value })),
-    ...query.statuses.map((value) => ({
-      id: `status-${value}`,
-      label: "status",
-      onRemove: () => toggle("statuses", value),
-      value: statusLabels[value] ?? value,
-    })),
-    ...(query.minDurationMs > 0
-      ? [{ id: "duration", label: "duration", onRemove: () => setQuery({ minDurationMs: 0 }), value: `> ${formatDuration(query.minDurationMs)}` }]
-      : []),
-    ...query.filters
-      .map((filter) => ({
-        id: `filter-${explorerFilterText(filter)}`,
-        label: filterChipLabel(filter),
-        onRemove: () => setQuery({ filters: query.filters.filter((item) => item !== filter) }),
-        value: filter.value,
-      })),
-  ];
-
   return (
     <>
       <div className="explorerToolbar">
-        <ExplorerFilterBar
-          chips={chips}
-          label="Filter traces"
-          onSubmit={submitText}
-          placeholder="Span name, key=value or a trace ID"
+        <TelemetrySearch
+          signal="traces"
+          query={query}
+          onChange={setQuery}
+          onOpenTrace={onOpenTrace}
+          dataKey={key}
+          attributeKeys={attributeKeys.data}
+          keysError={attributeKeys.error}
+          onRetryKeys={attributeKeys.retry}
+          loadValues={async (field) => {
+            if (["service", "operation", "status"].includes(field)) {
+              const data = facets.data ?? await fetchTraceFacets(requestQuery);
+              return field === "service" ? data.services : field === "operation" ? data.operations : data.statuses;
+            }
+            return fetchTraceAttributeFacet(requestQuery, field);
+          }}
         />
       </div>
       <section aria-label="Span volume" aria-busy={histogram.isFetching} className="explorerVolume">
