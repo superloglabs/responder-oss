@@ -104,7 +104,10 @@ types. `drizzle/` contains the ordered schema history.
   allowlist. Logs-only and read-only presets prevent database writes; read-only
   SQL additionally relies on Supabase enforcing its `read_only` boundary. The
   full SQL preset permits necessary data and schema changes while Supabase
-  administration and platform-configuration tools remain blocked.
+  administration and platform-configuration tools remain blocked. Automations
+  reach the same project-scoped server through the context broker, which
+  refreshes the OAuth session, lists tools itself, and forwards calls only to
+  the same allowlist.
 - Repository work runs in a separate sandbox. GitHub credentials stay outside
   the sandbox; the service streams selected repository snapshots through
   bounded worker scratch storage and into the isolated workspace without

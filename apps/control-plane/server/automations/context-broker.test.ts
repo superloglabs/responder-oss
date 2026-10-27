@@ -111,6 +111,7 @@ function appFor(activeClaim: ReturnType<typeof claim> | null) {
         totalMatches: 0,
       }),
     },
+    supabase: { now: () => Date.now() },
     withCredentialLease: vi.fn(async (input) => {
       if (!activeClaim?.account.encryptedCredentials) return null;
       const result = await input.operation(activeClaim.account.encryptedCredentials);
@@ -741,6 +742,143 @@ describe("automation context broker", () => {
       expect(response.status).toBe(502);
       const calls = dependencies.providerFetch.mock.calls as Array<[string, RequestInit]>;
       expect(calls.some(([, init]) => String(init.body).includes("tools/call"))).toBe(false);
+    });
+  });
+
+  describe("Supabase", () => {
+    beforeEach(() => {
+      vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 4).toString("base64"));
+    });
+
+    const projectRef = "abcdefghijklmnopqrst";
+    const supabaseTools = [
+      { inputSchema: { type: "object" }, name: "get_logs" },
+      { inputSchema: { type: "object" }, name: "execute_sql" },
+      { inputSchema: { type: "object" }, name: "list_tables" },
+      { inputSchema: { type: "object" }, name: "list_extensions" },
+      { inputSchema: { type: "object" }, name: "apply_migration" },
+      { inputSchema: { type: "object" }, name: "deploy_edge_function" },
+    ];
+
+    function supabaseClaim(accessMode: "logs" | "read_only", mcpUrl: string) {
+      return claim("supabase", {
+        accessMode,
+        authType: "oauth",
+        mcpUrl,
+        oauth: {
+          tokens: {
+            access_token: "expired-supabase-token",
+            refresh_token: "supabase-refresh-token",
+          },
+        },
+        projectRef,
+      });
+    }
+
+    function fakeSupabaseMcp() {
+      return vi.fn(async (_url: string, init: RequestInit) => {
+        const body = JSON.parse(String(init.body)) as { id?: string; method: string };
+        if (body.method === "notifications/initialized") {
+          return new Response(null, { status: 202 });
+        }
+        const result = body.method === "initialize"
+          ? { capabilities: { tools: {} }, protocolVersion: "2025-06-18" }
+          : body.method === "tools/list"
+            ? { tools: supabaseTools }
+            : { content: [{ text: "[{\"id\":1}]", type: "text" }] };
+        return Response.json({ id: body.id, jsonrpc: "2.0", result });
+      });
+    }
+
+    it("serves the reviewed log and database tools with a refreshed token", async () => {
+      const mcpUrl = `https://mcp.supabase.com/mcp?project_ref=${projectRef}&features=debugging%2Cdatabase&read_only=true`;
+      const { app, dependencies } = appFor(supabaseClaim("read_only", mcpUrl));
+      dependencies.providerFetch.mockImplementation(fakeSupabaseMcp());
+      dependencies.refreshCustomMcp.mockResolvedValue({
+        tokens: { access_token: "fresh-supabase-token", refresh_token: "refresh-token" },
+      });
+
+      const listed = await app.request(
+        `/api/automation-context-broker/v1/${accountId}`,
+        rpcRequest({ id: 1, jsonrpc: "2.0", method: "tools/list" }),
+      );
+      expect(listed.status).toBe(200);
+      const body = await listed.json() as { result: { tools: Array<{ name: string }> } };
+      expect(body.result.tools.map((tool) => tool.name)).toEqual([
+        "get_logs",
+        "execute_sql",
+        "list_tables",
+        "list_extensions",
+      ]);
+
+      const refused = await app.request(
+        `/api/automation-context-broker/v1/${accountId}`,
+        rpcRequest({
+          id: 2,
+          jsonrpc: "2.0",
+          method: "tools/call",
+          params: { arguments: { name: "init", query: "create table t ()" }, name: "apply_migration" },
+        }),
+      );
+      expect(refused.status).toBe(400);
+
+      const forwarded = await app.request(
+        `/api/automation-context-broker/v1/${accountId}`,
+        rpcRequest({
+          id: 3,
+          jsonrpc: "2.0",
+          method: "tools/call",
+          params: { arguments: { query: "select 1" }, name: "execute_sql" },
+        }),
+      );
+      expect(forwarded.status).toBe(200);
+      expect(await forwarded.text()).toContain("[{\\\"id\\\":1}]");
+      const calls = dependencies.providerFetch.mock.calls as Array<[string, RequestInit]>;
+      expect(calls.every(([url]) => url === mcpUrl)).toBe(true);
+      expect(new Headers(calls.at(-1)![1].headers).get("authorization")).toBe("Bearer fresh-supabase-token");
+      expect(dependencies.refreshCustomMcp).toHaveBeenCalledWith(expect.objectContaining({
+        redirectUrl: expect.stringMatching(/\/api\/integrations\/supabase\/callback$/u),
+      }));
+    });
+
+    it("offers only log tools to a logs connection", async () => {
+      const mcpUrl = `https://mcp.supabase.com/mcp?project_ref=${projectRef}&features=debugging&read_only=true`;
+      const { app, dependencies } = appFor(supabaseClaim("logs", mcpUrl));
+      dependencies.providerFetch.mockImplementation(fakeSupabaseMcp());
+
+      const listed = await app.request(
+        `/api/automation-context-broker/v1/${accountId}`,
+        rpcRequest({ id: 1, jsonrpc: "2.0", method: "tools/list" }),
+      );
+      const body = await listed.json() as { result: { tools: Array<{ name: string }> } };
+      expect(body.result.tools.map((tool) => tool.name)).toEqual(["get_logs"]);
+
+      const refused = await app.request(
+        `/api/automation-context-broker/v1/${accountId}`,
+        rpcRequest({
+          id: 2,
+          jsonrpc: "2.0",
+          method: "tools/call",
+          params: { arguments: { query: "select 1" }, name: "execute_sql" },
+        }),
+      );
+      expect(refused.status).toBe(400);
+    });
+
+    it("refuses a stored MCP URL that does not match the access level", async () => {
+      const { app, dependencies } = appFor(supabaseClaim(
+        "logs",
+        `https://mcp.supabase.com/mcp?project_ref=${projectRef}&features=debugging%2Cdatabase`,
+      ));
+      dependencies.providerFetch.mockImplementation(fakeSupabaseMcp());
+
+      const response = await app.request(
+        `/api/automation-context-broker/v1/${accountId}`,
+        rpcRequest({ id: 1, jsonrpc: "2.0", method: "tools/list" }),
+      );
+
+      expect(response.status).toBe(502);
+      expect(dependencies.providerFetch).not.toHaveBeenCalled();
     });
   });
 

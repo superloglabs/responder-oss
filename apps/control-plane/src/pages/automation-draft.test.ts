@@ -46,6 +46,52 @@ describe("automation draft", () => {
     expect(restored?.draft.name).toBe("Draft");
   });
 
+  it("keeps the draft for Supabase's return after a project is picked", () => {
+    const storage = new Map<string, string>();
+    vi.stubGlobal("window", {
+      sessionStorage: {
+        getItem: (key: string) => storage.get(key) ?? null,
+        removeItem: (key: string) => storage.delete(key),
+        setItem: (key: string, value: string) => storage.set(key, value),
+      },
+    });
+    const triggers = { ...configuration, triggers: [] } as unknown as AutomationConfiguration;
+    saveAutomationDraft({ ...draft("supabase"), configuration: triggers, savedAt: Date.now() });
+
+    const selecting = restoreAutomationDraft(
+      options([{ id: "old", provider: "supabase" }]),
+      { search: "?integration=supabase&status=select_project&selection_state=state" } as Location,
+    );
+    expect(selecting).toMatchObject({ error: null, finishing: false });
+
+    const connected = restoreAutomationDraft(
+      options([{ id: "old", provider: "supabase" }, { id: "new", provider: "supabase" }]),
+      { search: "?integration=supabase&status=connected&integration_account_id=new" } as Location,
+    );
+    expect(connected?.draft.configuration.contextAccountIds).toEqual(["existing", "new"]);
+    expect(storage.size).toBe(0);
+  });
+
+  it("does not keep the Google Cloud draft while a project is picked", () => {
+    const storage = new Map<string, string>();
+    vi.stubGlobal("window", {
+      sessionStorage: {
+        getItem: (key: string) => storage.get(key) ?? null,
+        removeItem: (key: string) => storage.delete(key),
+        setItem: (key: string, value: string) => storage.set(key, value),
+      },
+    });
+    const triggers = { ...configuration, triggers: [] } as unknown as AutomationConfiguration;
+    saveAutomationDraft({ ...draft("gcp"), configuration: triggers, savedAt: Date.now() });
+
+    restoreAutomationDraft(
+      options([]),
+      { search: "?integration=gcp&status=select_project&selection_state=state" } as Location,
+    );
+
+    expect(storage.size).toBe(0);
+  });
+
   it("ignores drafts older than a connection flow", () => {
     expect(isCurrentAutomationDraft(draft("sentry"), 10 * 60_000)).toBe(true);
     expect(isCurrentAutomationDraft(draft("sentry"), 10 * 60_000 + 1)).toBe(false);

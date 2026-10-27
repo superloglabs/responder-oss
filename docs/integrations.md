@@ -770,8 +770,9 @@ project keys outside the repository investigation sandbox.
 
 ## Supabase
 
-Connect Supabase from Settings by choosing an access level and continuing to
-Supabase OAuth. The user authorizes an organization, then Responder discovers
+Connect Supabase from Settings, the agent or tag mode settings, or the
+automation editor by choosing an access level and continuing to Supabase
+OAuth. The user authorizes an organization, then Responder discovers
 its projects through the hosted MCP server. A sole project is selected
 automatically; otherwise the user chooses from a project picker. The hosted MCP
 server dynamically registers the OAuth client, so no project ID,
@@ -809,6 +810,17 @@ whether arbitrary SQL is read-only. Treat full database SQL access as production
 write access and grant it only to agents whose investigation workflow needs it.
 Supabase recommends using its MCP server with development or test projects; if
 you connect production, prefer logs-only or read-only access.
+
+Automations reach Supabase through the run-scoped context broker at
+`/api/automation-context-broker/v1/<connection>`. The broker refreshes the
+OAuth session, lists tools itself, and forwards calls only to the same
+allowlist, so a full-access connection can change data and schema from an
+automation too. Each project and access level is one server, and the run is
+told which project and access level each server has. The OAuth tokens stay
+outside the sandbox.
+
+Supabase is context only. Runs start from another trigger, such as a watched
+Slack channel or a schedule.
 
 ## ClickStack
 

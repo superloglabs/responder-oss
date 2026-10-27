@@ -89,8 +89,11 @@ export function restoreAutomationDraft(options: AutomationOptions, location: Loc
   if (!draft || provider !== draft.connecting || draft.automationId !== automationId) return null;
   const status = search.get("status");
   const connected = status === "connected" || status === "finishing";
-  // Google Cloud returns to pick a project; the editor finishes the connection.
+  // Google Cloud and Supabase return to pick a project. The editor finishes a
+  // Google Cloud connection in place; Supabase returns again once connected,
+  // so its draft is kept for that return.
   const selectingProject = status === "select_project";
+  if (selectingProject && provider === "supabase") saveAutomationDraft({ ...draft, savedAt: Date.now() });
   const returnedAccountId = search.get("integration_account_id");
   const added = connected ? connectedAccountIds(draft, options, returnedAccountId) : [];
   const name = providerDisplayName(provider);

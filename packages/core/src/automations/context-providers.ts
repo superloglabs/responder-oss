@@ -15,6 +15,7 @@ export const automationContextProviders = [
   "sentry",
   "signoz",
   "slack",
+  "supabase",
   "vercel",
 ] as const;
 

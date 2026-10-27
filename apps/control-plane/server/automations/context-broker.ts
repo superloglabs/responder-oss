@@ -48,6 +48,10 @@ import {
   type RailwayCredentials,
 } from "../../../../packages/core/src/integrations/railway.js";
 import {
+  parseSupabaseCredentials,
+  type SupabaseCredentials,
+} from "../../../../packages/core/src/integrations/supabase.js";
+import {
   linearAccessTokenNeedsRefresh,
   parseLinearOAuthCredentials,
   refreshLinearOAuthCredentials,
@@ -87,6 +91,7 @@ import {
   UnknownSlackToolError,
   type SlackToolDependencies,
 } from "./slack-tools.js";
+import { supabaseContextServer } from "./supabase-context.js";
 import {
   callRailwayContextTool,
   defaultRailwayToolDependencies,
@@ -125,6 +130,7 @@ interface ContextBrokerDependencies {
   refreshLinear: typeof refreshLinearOAuthCredentials;
   resolveGrant: ResolveGrant;
   slack: SlackToolDependencies;
+  supabase: { now: () => number };
   vercel: VercelToolDependencies;
   withCredentialLease: typeof withIntegrationAccountCredentialLease;
 }
@@ -142,6 +148,7 @@ const defaultDependencies: ContextBrokerDependencies = {
   refreshLinear: refreshLinearOAuthCredentials,
   resolveGrant: resolveAutomationContextBrokerGrant,
   slack: defaultSlackToolDependencies,
+  supabase: { now: Date.now },
   vercel: defaultVercelToolDependencies,
   withCredentialLease: withIntegrationAccountCredentialLease,
 };
@@ -406,6 +413,39 @@ async function cloudflareAccessToken(
   }
   // The API tool can reach any endpoint the grant allows.
   assertCloudflareReadOnlyGrant(credentials?.oauth.tokens);
+  return accessToken;
+}
+
+async function supabaseAccessToken(
+  claim: AutomationContextBrokerClaim,
+  dependencies: ContextBrokerDependencies,
+): Promise<string> {
+  const credentials = await dependencies.withCredentialLease<SupabaseCredentials>({
+    allowedStatuses: ["connected"],
+    integrationAccountId: claim.account.id,
+    operation: async (encryptedCredentials) => {
+      const current = parseSupabaseCredentials(
+        decryptCredentials<Record<string, unknown>>(encryptedCredentials),
+      );
+      const oauth = await dependencies.refreshCustomMcp({
+        mcpUrl: current.mcpUrl,
+        oauth: current.oauth,
+        redirectUrl: integrationCallbackUrl("supabase"),
+      });
+      if (oauth === current.oauth) return { value: current };
+      const updated = { ...current, oauth };
+      return {
+        encryptedCredentials: encryptCredentials(updated),
+        value: updated,
+      };
+    },
+    organizationId: claim.organizationId,
+    provider: "supabase",
+  });
+  const accessToken = credentials?.oauth.tokens?.access_token;
+  if (typeof accessToken !== "string") {
+    throw new Error("Reconnect the Supabase OAuth connection");
+  }
   return accessToken;
 }
 
@@ -923,6 +963,28 @@ export function createAutomationContextBrokerRoutes(
             fetch: dependencies.providerFetch,
             mcpUrl: credentials.mcpUrl,
             now: dependencies.cloudflare.now,
+          }),
+        });
+      }
+      if (claim.account.provider === "supabase") {
+        if (!claim.account.encryptedCredentials) {
+          return context.json(rpcError(parsed.data.id, -32601, "Connection does not expose context tools"), 404);
+        }
+        const credentials = parseSupabaseCredentials(
+          decryptCredentials<Record<string, unknown>>(claim.account.encryptedCredentials),
+        );
+        return await managedServerResponse({
+          dependencies,
+          rawBody,
+          request: context.req.raw,
+          rpc: parsed.data,
+          server: supabaseContextServer({
+            accessMode: credentials.accessMode,
+            accessToken: () => supabaseAccessToken(claim, dependencies),
+            accountId: claim.account.id,
+            fetch: dependencies.providerFetch,
+            mcpUrl: credentials.mcpUrl,
+            now: dependencies.supabase.now,
           }),
         });
       }
