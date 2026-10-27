@@ -1,5 +1,5 @@
 import { CaretDownIcon, CaretRightIcon, CheckIcon, MagnifyingGlassIcon, XIcon } from "@phosphor-icons/react";
-import { type FormEvent, type ReactNode, useEffect, useId, useRef, useState } from "react";
+import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { IconButton, SegmentedControl } from "../design-system";
 import { maxOpenFacets, telemetryRanges, type ExplorerFilter, type FacetCount, type TelemetryRange } from "../telemetry-api";
 import { useTelemetryQuery } from "../use-telemetry-query";
@@ -30,66 +30,6 @@ export function ExplorerTimeControls({
       </button>
       <SegmentedControl aria-label="Time range" onChange={onRangeChange} options={telemetryRanges} value={range} />
     </div>
-  );
-}
-
-export interface FilterChip {
-  id: string;
-  label: string;
-  onRemove: () => void;
-  value: string;
-}
-
-// Active filters as removable chips, and a field for adding more. `onSubmit`
-// returns whether it used the text, which then clears.
-export function ExplorerFilterBar({
-  chips,
-  initialText = "",
-  label,
-  onSubmit,
-  placeholder,
-}: {
-  chips: FilterChip[];
-  initialText?: string;
-  label: string;
-  onSubmit: (text: string) => boolean;
-  placeholder: string;
-}) {
-  const [text, setText] = useState(initialText);
-  const [syncedText, setSyncedText] = useState(initialText);
-  if (initialText !== syncedText) {
-    setSyncedText(initialText);
-    setText(initialText);
-  }
-  function submit(event: FormEvent) {
-    event.preventDefault();
-    if (onSubmit(text.trim())) setText("");
-  }
-  return (
-    <form className="explorerFilterBar" onSubmit={submit} role="search">
-      <MagnifyingGlassIcon aria-hidden="true" size={14} />
-      {chips.map((chip) => (
-        <span className="explorerFilterBar__chip" key={chip.id}>
-          <span>{chip.label}:</span>
-          {chip.value || "(empty)"}
-          <button aria-label={`Remove ${chip.label} ${chip.value}`} onClick={chip.onRemove} type="button">
-            <XIcon size={11} />
-          </button>
-        </span>
-      ))}
-      <input
-        aria-label={label}
-        maxLength={500}
-        onChange={(event) => setText(event.target.value)}
-        onKeyDown={(event) => {
-          // Backspace in an empty field removes the last chip.
-          if (event.key === "Backspace" && !text && chips.length) chips.at(-1)!.onRemove();
-        }}
-        placeholder={placeholder}
-        type="search"
-        value={text}
-      />
-    </form>
   );
 }
 

@@ -18,15 +18,6 @@
 .explorerToolbar .explorerSelect { width: 180px; }
 .explorerToolbar .dsSelect__trigger { height: 32px; padding: 0 10px; border-color: #e3e3e3; border-radius: 6px; background: #fff; font-size: 12px; }
 
-.explorerFilterBar { display: flex; flex: 1 1 auto; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-width: 0; min-height: 32px; padding: 4px 6px 4px 10px; border: 1px solid #e3e3e3; border-radius: 6px; background: #fff; color: #666; }
-.explorerFilterBar:focus-within { border-color: #b9b9b9; }
-.explorerFilterBar input { flex: 1 1 160px; min-width: 120px; border: 0; outline: 0; background: transparent; color: #1a1a1a; font: inherit; font-size: 12px; line-height: 16px; }
-.explorerFilterBar input::placeholder { color: #999; }
-.explorerFilterBar input::-webkit-search-cancel-button { display: none; }
-.explorerFilterBar__chip { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; height: 22px; padding: 0 4px 0 7px; border-radius: 4px; background: #f5f5f5; box-shadow: 0 0 0 .5px #e6e8ec; color: #1a1a1a; font-size: 12px; font-variant-numeric: tabular-nums; line-height: 16px; white-space: nowrap; }
-.explorerFilterBar__chip > span { color: #666; }
-.explorerFilterBar__chip button { display: grid; place-items: center; width: 16px; height: 16px; padding: 0; border: 0; border-radius: 3px; background: none; color: #999; cursor: pointer; }
-.explorerFilterBar__chip button:hover { background: #e9e9e9; color: #444; }
 
 .explorerVolume { display: flex; flex-direction: column; gap: 10px; padding: 0 8px; }
 .explorerVolume__summary { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; font-size: 12px; line-height: 16px; }
