@@ -72,7 +72,7 @@ export function queryWithTokens<T extends SearchQuery>(query: T, tokens: SearchT
 }
 
 export function parseSearchDraft(text: string, fields: SearchField[]): { field: SearchField; op: SearchOperator; value: string } | null {
-  const match = /^([\w.-]+)\s*(!=|>=|=|>|<|<=|:)\s*(.*)$/su.exec(text.trim());
+  const match = /^([\w.-]+)\s*(!=|[<>]=?|=|:)\s*(.*)$/su.exec(text.trim());
   if (!match) return null;
   const known = fields.find(f => [f.key, f.label, ...(f.aliases ?? [])].includes(match[1]));
   // Discovery is sampled. A valid attribute can be absent from its suggestions.
