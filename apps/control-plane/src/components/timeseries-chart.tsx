@@ -1,4 +1,4 @@
-import { type MouseEvent, useEffect, useMemo, useRef, useState } from "react";
+import { type MouseEvent, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { axisTicks, formatWidgetValue, type ChartData, type WidgetUnit } from "../dashboards-api";
 import "./timeseries-chart.css";
 
@@ -75,6 +75,7 @@ export function TimeseriesChart({
   unit?: WidgetUnit;
 }) {
   const { ref, size } = useSize<HTMLDivElement>();
+  const gradientId = useId();
   const [ownHidden, setHidden] = useState<Set<string>>(new Set());
   const hidden = hiddenSeries ?? ownHidden;
   const [hover, setHover] = useState<number | null>(null);
@@ -121,11 +122,21 @@ export function TimeseriesChart({
   const ticks = axisTicks(minimum, maximum);
   const top = ticks[ticks.length - 1]!;
   const bottom = ticks[0]!;
-  const left = showYAxis ? (density === "compact" ? 32 : 52) : 4;
+  const axisLabels = ticks.map((tick) => tick === 0 ? "0" : formatWidgetValue(tick, unit));
+  const axisLabelKey = axisLabels.join("\n");
+  const [axisLabelWidth, setAxisLabelWidth] = useState(0);
+  useLayoutEffect(() => {
+    const labels = ref.current?.querySelectorAll<SVGTextElement>(".timeseriesChart__axis--y");
+    if (!labels?.length) return;
+    setAxisLabelWidth(Math.max(...Array.from(labels, (label) => label.getComputedTextLength())));
+  }, [axisLabelKey, ref, showYAxis, size.width]);
+  // Reserve only the label width and an 8px gap outside the data area.
+  const left = showYAxis ? 4 + axisLabelWidth + 8 : 4;
+  const plotTop = 6;
   const footer = showXAxis ? 20 : 4;
   const width = Math.max(0, size.width - left - 4);
-  const height = Math.max(0, size.height - footer - 6);
-  const y = (value: number) => 6 + height - ((value - bottom) / (top - bottom || 1)) * height;
+  const height = Math.max(0, size.height - footer - plotTop);
+  const y = (value: number) => plotTop + height - ((value - bottom) / (top - bottom || 1)) * height;
   const band = count > 0 ? width / count : width;
   const barWidth = Math.min(density === "compact" ? 6 : Infinity, Math.max(1, band - Math.min(2, band * 0.2)));
   const x = (index: number) => left + (stacked ? index * band + band / 2 : count > 1 ? (index / (count - 1)) * width : width / 2);
@@ -258,20 +269,46 @@ export function TimeseriesChart({
             role="img"
             width={size.width}
           >
+            {/* Opaque surface tints keep overlapping series from mixing into grey. */}
+            {!stacked ? (
+              <>
+                <defs>
+                  {Array.from({ length: seriesColors }, (_, color) => (
+                    <linearGradient
+                      className={`timeseriesChart__color--${color}`}
+                      id={`${gradientId}-${color}`}
+                      key={color}
+                      x1="0" x2="0" y1="0" y2="1"
+                    >
+                      <stop offset="0%" stopColor="color-mix(in srgb, var(--series) 16%, var(--ds-surface-overlay))" />
+                      <stop offset="100%" stopColor="color-mix(in srgb, var(--series) 5%, var(--ds-surface-overlay))" />
+                    </linearGradient>
+                  ))}
+                </defs>
+                {visible.map((series) => {
+                  const first = series.values.findIndex((value) => value !== null);
+                  const last = series.values.findLastIndex((value) => value !== null);
+                  if (first < 0 || first === last) return null;
+                  return (
+                    <path
+                      d={`${linePath(series.values)}L${x(last).toFixed(1)},${(plotTop + height).toFixed(1)}L${x(first).toFixed(1)},${(plotTop + height).toFixed(1)}Z`}
+                      fill={`url(#${gradientId}-${colorOf.get(series.name)})`}
+                      key={series.name}
+                      pointerEvents="none"
+                    />
+                  );
+                })}
+              </>
+            ) : null}
             {spanMs > 0 ? highlights.map((region, index) => {
               const first = chart.buckets[0]!;
               const from = Math.max(0, Math.min(1, (region.start - first) / spanMs));
               const to = Math.max(0, Math.min(1, (region.end - first) / spanMs));
-              return to > from ? <rect key={index} x={left + from * width} y={6} width={(to - from) * width} height={height} fill="#4e58f914"><title>{region.label}</title></rect> : null;
+              return to > from ? <rect key={index} x={left + from * width} y={plotTop} width={(to - from) * width} height={height} fill="#4e58f914"><title>{region.label}</title></rect> : null;
             }) : null}
             {ticks.map((tick) => (
               <g key={tick}>
                 <line className="timeseriesChart__grid" x1={left} x2={left + width} y1={y(tick)} y2={y(tick)} />
-                {showYAxis ? (
-                  <text className="timeseriesChart__axis" textAnchor="end" x={left - 8} y={y(tick) + 4}>
-                    {tick === 0 ? "0" : formatWidgetValue(tick, unit)}
-                  </text>
-                ) : null}
               </g>
             ))}
             {showXAxis
@@ -280,9 +317,9 @@ export function TimeseriesChart({
                     <text
                       className="timeseriesChart__axis"
                       key={time}
-                      textAnchor="middle"
+                      textAnchor={index === 0 ? "start" : index === count - 1 ? "end" : "middle"}
                       x={x(index)}
-                      y={6 + height + 15}
+                      y={plotTop + height + 15}
                     >
                       {timeLabel(time, spanMs, timeZone)}
                     </text>
@@ -291,9 +328,9 @@ export function TimeseriesChart({
               : null}
             {hover !== null ? (
               stacked ? (
-                <rect className="timeseriesChart__hover" height={height} width={band} x={left + hover * band} y={6} />
+                <rect className="timeseriesChart__hover" height={height} width={band} x={left + hover * band} y={plotTop} />
               ) : (
-                <line className="timeseriesChart__cursor" x1={x(hover)} x2={x(hover)} y1={6} y2={6 + height} />
+                <line className="timeseriesChart__cursor" x1={x(hover)} x2={x(hover)} y1={plotTop} y2={plotTop + height} />
               )
             ) : null}
             {stacked
@@ -334,13 +371,18 @@ export function TimeseriesChart({
                 height={height}
                 width={Math.abs(drag.current - drag.start)}
                 x={Math.min(drag.start, drag.current)}
-                y={6}
+                y={plotTop}
               />
             ) : null}
             {/* Drawn last, so bars crossing it do not hide it. */}
             {threshold !== undefined ? (
               <line className="timeseriesChart__threshold" x1={left} x2={left + width} y1={y(threshold)} y2={y(threshold)} />
             ) : null}
+            {showYAxis ? ticks.map((tick, index) => (
+              <text className="timeseriesChart__axis timeseriesChart__axis--y" key={tick} textAnchor="end" x={left - 8} y={y(tick) + 4}>
+                {axisLabels[index]}
+              </text>
+            )) : null}
           </svg>
         ) : null}
         {hover !== null && hoverRows.length > 0 && !drag ? (
