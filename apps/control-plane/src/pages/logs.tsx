@@ -282,7 +282,7 @@ function LogExplorer({ query, refresh, setQuery, timeZone, now }: {
           <button onClick={() => { logs.retry(); histogram.retry(); facets.retry(); }} type="button">Retry</button>
         </div>
       ) : null}
-      <div className="explorerBody explorerBody--logs">
+      <div className="explorerBody explorerBody--search">
         <LogFacets
           dataKey={key}
           filters={query.filters}
@@ -295,7 +295,7 @@ function LogExplorer({ query, refresh, setQuery, timeZone, now }: {
           levels={{ loading: !facets.data, selected: query.severities, onToggle: value => toggle("severities", value), options: (facets.data?.severities ?? []).filter(item => item.group).toSorted((a, b) => levelRank(a.group) - levelRank(b.group)).map(item => ({ count: item.value, label: levelLabel(item.group), value: item.group, color: severityTextTone(item.group) === "danger" ? "#d77878" : severityTextTone(item.group) === "warning" ? "#d8b971" : "#4e58f9" })) }}
         />
         <div className="agentListTable explorerTableWrap" ref={tableWrap}>
-          <div className="logResults" aria-busy={logs.isFetching}>
+          <div className="explorerResults" aria-busy={logs.isFetching}>
           {logs.data === null ? (
             logs.error ? null : (
               <DataTableSkeleton

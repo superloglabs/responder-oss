@@ -290,6 +290,15 @@ export interface TraceExplorerQuery {
   statuses: string[];
 }
 
+// Trace search supports the same custom windows as log search. The overview
+// retains its preset ranges.
+export type TraceSearchQuery = Omit<TraceExplorerQuery, "range"> & { range: DashboardTimeRange };
+type TraceRequestQuery = TraceExplorerQuery | TraceSearchQuery;
+
+export function traceSearchQuery(params: URLSearchParams): TraceSearchQuery {
+  return { ...traceExplorerQuery(params), range: timeRangeFromParams(params) };
+}
+
 const explorerRanges = new Set<string>(["15m", "1h", "6h", "24h", "7d"]);
 
 function explorerRange(params: URLSearchParams): TelemetryRange {
@@ -352,9 +361,10 @@ export function logExplorerParams(query: LogExplorerQuery): URLSearchParams {
   return params;
 }
 
-export function traceExplorerParams(query: TraceExplorerQuery): URLSearchParams {
-  const params = new URLSearchParams();
-  params.set("range", query.range);
+export function traceExplorerParams(query: TraceRequestQuery): URLSearchParams {
+  const params = typeof query.range === "string"
+    ? new URLSearchParams({ range: query.range })
+    : timeRangeParams(query.range, new URLSearchParams());
   appendAll(params, "service", query.services);
   appendAll(params, "operation", query.operations);
   appendAll(params, "status", query.statuses);
@@ -426,25 +436,37 @@ export function fetchLogAttributeFacet(query: LogExplorerQuery, key: string): Pr
 }
 
 // The trace query as the API reads it, without the page's open facets.
-export function traceApiParams(query: TraceExplorerQuery): URLSearchParams {
-  return traceExplorerParams({ ...query, facets: [] });
+export function traceApiParams(query: TraceRequestQuery, now = Date.now()): URLSearchParams {
+  const params = traceExplorerParams({ ...query, facets: [] });
+  if (typeof query.range !== "string") {
+    const { since, until } = resolveTimeRange(query.range, now);
+    for (const name of ["range", "from", "to"]) params.delete(name);
+    params.set("since", new Date(since).toISOString());
+    params.set("until", new Date(until).toISOString());
+  }
+  return params;
 }
 
-export function fetchExplorerTraces(query: TraceExplorerQuery): Promise<TraceSummary[]> {
-  return telemetryJson<{ traces: TraceSummary[] }>(`/api/telemetry/traces?${traceApiParams(query)}`).then(
+export function fetchExplorerTraces(query: TraceRequestQuery, offset?: number): Promise<TraceSummary[]> {
+  const params = traceApiParams(query);
+  if (offset !== undefined) {
+    params.set("offset", String(offset));
+    params.set("limit", "51"); // One extra row tells the search page whether Next is available.
+  }
+  return telemetryJson<{ traces: TraceSummary[] }>(`/api/telemetry/traces?${params}`).then(
     (body) => body.traces,
   );
 }
 
-export function fetchTraceHistogram(query: TraceExplorerQuery): Promise<Histogram> {
+export function fetchTraceHistogram(query: TraceRequestQuery): Promise<Histogram> {
   return telemetryJson<Histogram>(`/api/telemetry/traces/histogram?${traceApiParams(query)}`);
 }
 
-export function fetchTraceFacets(query: TraceExplorerQuery): Promise<TraceFacets> {
+export function fetchTraceFacets(query: TraceRequestQuery): Promise<TraceFacets> {
   return telemetryJson<TraceFacets>(`/api/telemetry/traces/facets?${traceApiParams(query)}`);
 }
 
-export function fetchTraceAttributeFacet(query: TraceExplorerQuery, key: string): Promise<FacetCount[]> {
+export function fetchTraceAttributeFacet(query: TraceRequestQuery, key: string): Promise<FacetCount[]> {
   const params = traceApiParams(query);
   params.set("key", key);
   return telemetryJson<{ values: FacetCount[] }>(`/api/telemetry/traces/facets/attribute?${params}`).then((body) => body.values);
@@ -539,6 +561,18 @@ export function levelLabel(severity: string): string {
 }
 
 // Time of day with milliseconds, and the date for windows over a day.
+// Numeric timestamps keep trace rows easy to compare across dates and timezones.
+export function formatTraceTimestamp(value: string, timeZone: string): string {
+  const date = logTimestamp(value);
+  if (!date) return value;
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone, year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", fractionalSecondDigits: 3, hourCycle: "h23",
+  }).formatToParts(date);
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value ?? "";
+  return `${part("year")}-${part("month")}-${part("day")} ${part("hour")}:${part("minute")}:${part("second")}.${part("fractionalSecond")}`;
+}
+
 export function formatExplorerTime(value: string, withDate: boolean, timeZone?: string): string {
   const date = logTimestamp(value);
   if (!date) return value;

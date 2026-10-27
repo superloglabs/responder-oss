@@ -235,8 +235,8 @@
   .overviewTiles, .overviewColumns { grid-template-columns: minmax(0, 1fr); }
 }
 
-/* Logs: one searchable, independently scrolling facet hierarchy. */
-.explorerBody--logs { grid-template-columns: 272px minmax(0, 1fr); gap: 16px; }
+/* Log and trace search share a searchable, independently scrolling sidebar. */
+.explorerBody--search { grid-template-columns: 272px minmax(0, 1fr); gap: 16px; }
 .logFacets { position: relative; display: flex; flex-direction: column; gap: 8px; min-width: 0; min-height: 0; padding: 0 8px; }
 .logFacets > .explorerKeyFacets__search { flex-shrink: 0; max-width: none; }
 .logFacets__viewport { flex: 1; min-height: 0; overflow: auto; scrollbar-width: thin; scrollbar-color: #d4d4d4 transparent; }
@@ -258,32 +258,42 @@
 .explorerFacet--gauges .explorerFacet__count { grid-column: 3; grid-row: 2; font-size: 11px; color: #666; text-align: right; }
 .explorerFacet__gauge { grid-column: 2; grid-row: 2; display: flex; height: 4px; border-radius: 2px; overflow: hidden; background: #e8e8e8; }
 .explorerFacet__gauge > span { height: 100%; border-radius: inherit; background: #4e58f9; }
-.logResults { min-height: 0; min-width: 0; }
-.explorerBody--logs .dsDataTable { height: 100%; overflow: auto; overscroll-behavior: none; overflow-anchor: none; scrollbar-width: thin; scrollbar-gutter: stable; }
-.explorerBody--logs .dsDataTable thead { position: sticky; top: 0; z-index: 1; background: #fafafa; }
-.logResults > .dsDataTableGroup { height: 100%; min-height: 0; }
-.logResults[aria-busy="true"] { cursor: progress; }
+.explorerResults { min-height: 0; min-width: 0; }
+.explorerBody--search .dsDataTable { height: 100%; overflow: auto; overscroll-behavior: none; overflow-anchor: none; scrollbar-width: thin; scrollbar-gutter: stable; }
+.explorerBody--search .dsDataTable thead { position: sticky; top: 0; z-index: 1; background: #fafafa; }
+.explorerResults > .dsDataTableGroup { height: 100%; min-height: 0; }
+.explorerResults[aria-busy="true"] { cursor: progress; }
 .logFacets__viewport { overscroll-behavior: none; overflow-anchor: none; }
-.explorerBody--logs .logTime { color: #666; }
+.explorerBody--search .logTime { color: #666; }
 .logService { color: #434343; white-space: nowrap; }
 .logPagination { display: flex; align-items: center; gap: 8px; margin-top: 16px; color: #666; font-size: 12px; }
 .logPagination > span:first-child { margin-right: auto; }
 .logPagination button { display: flex; align-items: center; gap: 8px; }
 @media (max-width: 800px) {
-  .explorerBody--logs { grid-template-columns: minmax(0, 1fr); }
+  .explorerBody--search { grid-template-columns: minmax(0, 1fr); }
   .logFacets { height: 336px; margin-bottom: 0; }
 }
 .explorerFacet--gauges .explorerFacet__option input { top: 3px; left: 0; width: 14px; height: 14px; z-index: 1; cursor: pointer; }
 
 @media (min-width: 801px) {
-  .workspaceContent--wide:has(.explorerBody--logs) { height: 100%; box-sizing: border-box; padding-bottom: 0; min-height: 0; }
-  .explorer:has(.explorerBody--logs) { flex: 1; min-height: 0; }
-  .explorer:has(.explorerBody--logs) > :not(.explorerBody--logs) { flex-shrink: 0; }
-  .explorerBody--logs { flex: 1; min-height: 0; grid-template-rows: minmax(0, 1fr); align-items: stretch; }
-  .explorerBody--logs .explorerTableWrap { display: flex; flex-direction: column; min-height: 0; padding-bottom: 12px; }
-  .explorerBody--logs .logResults { flex: 1; }
-  .explorerBody--logs .logPagination { flex-shrink: 0; }
+  .workspaceContent--wide:has(.explorerBody--search) { height: 100%; box-sizing: border-box; padding-bottom: 0; min-height: 0; }
+  .explorer:has(.explorerBody--search) { flex: 1; min-height: 0; }
+  .explorer:has(.explorerBody--search) > :not(.explorerBody--search) { flex-shrink: 0; }
+  .explorerBody--search { flex: 1; min-height: 0; grid-template-rows: minmax(0, 1fr); align-items: stretch; }
+  .explorerBody--search .explorerTableWrap { display: flex; flex-direction: column; min-height: 0; padding-bottom: 12px; }
+  .explorerBody--search .explorerResults { flex: 1; }
+  .explorerBody--search .logPagination { flex-shrink: 0; }
 }
 @media (max-width: 800px) {
-  .logResults { height: 360px; }
+  .explorerResults { height: 360px; }
 }
+
+.explorerResults--traces table { min-width: 800px; }
+.explorerResults--traces .traceRow__root { flex-direction: column; align-items: stretch; gap: 2px; }
+.explorerResults--traces .traceRow__root > span { overflow: hidden; text-overflow: ellipsis; }
+.explorerBody--search .explorerMore { flex-shrink: 0; }
+
+.traceRow__timestamp { color: #777; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.traceRow__status { display: inline-flex; align-items: center; gap: 6px; color: #168255; white-space: nowrap; }
+.traceRow__status--error { color: #b94d4d; }
+.traceRow__status > i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }

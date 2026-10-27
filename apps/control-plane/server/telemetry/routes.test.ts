@@ -276,6 +276,18 @@ describe("telemetry routes", () => {
     });
   });
 
+  it("validates trace offsets and forwards the first and subsequent pages", async () => {
+    const { app, dependencies } = routes();
+    for (const offset of [0, 50]) {
+      expect((await app.request(`/traces?offset=${offset}&limit=51`)).status).toBe(200);
+      expect(dependencies.queryTraces).toHaveBeenLastCalledWith(expect.anything(), organizationId,
+        expect.objectContaining({ limit: 51, offset }));
+    }
+    for (const offset of ["-1", "1.5", "NaN", "1000001"]) {
+      expect((await app.request(`/traces?offset=${offset}`)).status).toBe(400);
+    }
+  });
+
   it("counts matching spans per status, and each trace facet without its own filter", async () => {
     const { app, dependencies } = routes();
 

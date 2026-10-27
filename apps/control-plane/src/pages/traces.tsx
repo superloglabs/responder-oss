@@ -1,39 +1,37 @@
+import { ArrowClockwiseIcon, ArrowLeftIcon, ArrowRightIcon } from "@phosphor-icons/react";
+import { ExplorerFacets } from "../components/explorer-facets";
+import { DashboardTimePicker } from "../components/dashboard-time-picker";
+import { resolveTimeRange, zoomOutTimeRange } from "../dashboard-time-range";
+import { useTimeZonePreference } from "../use-time-zone-preference";
 import { NavigationIcon } from "../components/navigation-icon";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { AppShell } from "../components/app-shell";
 import { DataTableSkeleton, ExplorerSkeleton } from "../components/screen-skeletons";
 import { CountHistogram, HistogramLegend, type HistogramSeries } from "../components/count-histogram";
 import { TelemetryGate } from "../components/telemetry";
 import {
-  AttributeFacets,
-  ExplorerFacet,
   ExplorerFilterBar,
-  ExplorerTimeControls,
   type FilterChip,
 } from "../components/telemetry-explorer";
 import { TraceDrawer } from "../components/trace-drawer";
-import { fetchAttributeKeys, fetchAttributeValues } from "../dashboards-api";
-import { Badge, DataTable, SelectField } from "../design-system";
+import { fetchAttributeKeys } from "../dashboards-api";
+import { DataTable, IconButton } from "../design-system";
 import {
-  environmentFilter,
   explorerFilterText,
   fetchExplorerTraces,
   fetchTraceAttributeFacet,
   fetchTraceFacets,
   fetchTraceHistogram,
   formatDuration,
-  formatExplorerTime,
+  formatTraceTimestamp,
   histogramBars,
   logTimestamp,
   parseExplorerFilter,
-  telemetryRangeWindow,
-  traceApiParams,
   traceExplorerParams,
-  traceExplorerQuery,
-  withEnvironment,
+  traceSearchQuery,
   type ExplorerFilter,
-  type TraceExplorerQuery,
+  type TraceSearchQuery,
   type TraceListState,
   type TraceSummary,
 } from "../telemetry-api";
@@ -75,36 +73,41 @@ function filterChipLabel(filter: ExplorerFilter): string {
   return filter.op === "neq" ? `not ${key}` : key;
 }
 
-function TraceExplorer({
-  live,
-  onOpenTrace,
-  openTrace,
-  query,
-  setQuery,
-}: {
-  live: boolean;
+function TraceExplorer({ now, refresh, timeZone, onOpenTrace, openTrace, query, setQuery }: {
+  now: number;
+  refresh: number;
+  timeZone: string;
   onOpenTrace: (traceId: string | null) => void;
   openTrace: string | null;
-  query: TraceExplorerQuery;
-  setQuery: (update: Partial<TraceExplorerQuery>) => void;
+  query: TraceSearchQuery;
+  setQuery: (update: Partial<TraceSearchQuery>) => void;
 }) {
   // Opening a facet does not reload the rest of the page.
-  const key = traceApiParams(query).toString();
-  const traces = useTelemetryQuery(key, () => fetchExplorerTraces(query), live);
-  const histogram = useTelemetryQuery(key, () => fetchTraceHistogram(query), live);
-  const facets = useTelemetryQuery(key, () => fetchTraceFacets(query), live);
-  const attributeKeys = useTelemetryQuery(query.range, () => fetchAttributeKeys(telemetryRangeWindow(query.range), "traces"));
-  const environments = useTelemetryQuery(query.range, () =>
-    fetchAttributeValues(telemetryRangeWindow(query.range), "traces", "resource.deployment.environment"),
-  );
+  const params = traceExplorerParams({ ...query, facets: [] });
+  const key = `${params}#${refresh}`;
+  const rangeKey = `${["range", "from", "to"].map((name) => params.get(name) ?? "").join("|")}#${refresh}`;
+  const window = resolveTimeRange(query.range, now);
+  const requestQuery: TraceSearchQuery = { ...query, range: { kind: "absolute", from: window.since, to: window.until } };
+  const [pagination, setPagination] = useState({ key, page: 0 });
+  const page = pagination.key === key ? pagination.page : 0;
+  if (pagination.key !== key) setPagination({ key, page: 0 });
+  const traces = useTelemetryQuery(`${key}#${page}`, () => fetchExplorerTraces(requestQuery, page * 50), false, true);
+  const rows = traces.data?.slice(0, 50) ?? [];
+  const hasNext = (traces.data?.length ?? 0) > 50;
+  const histogram = useTelemetryQuery(key, () => fetchTraceHistogram(requestQuery), false, true);
+  const facets = useTelemetryQuery(key, () => fetchTraceFacets(requestQuery), false, true);
+  const attributeKeys = useTelemetryQuery(rangeKey, () => fetchAttributeKeys(window, "traces"));
+  const tableWrap = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const viewport = tableWrap.current?.querySelector(".dsDataTable");
+    if (viewport && !traces.isFetching) viewport.scrollTop = 0;
+  }, [traces.data, traces.isFetching]);
   const bars = useMemo(
     () => (histogram.data ? histogramBars(histogram.data, statusSeriesNames, statusSeries) : null),
     [histogram.data],
   );
   const total = bars?.reduce((sum, bar) => sum + bar.total, 0);
-  const environment = environmentFilter(query.filters);
-  const withDate = query.range === "7d" || query.range === "24h";
-  const longest = Math.max(1, ...(traces.data ?? []).map((trace) => trace.duration_ms));
+  const longest = Math.max(1, ...rows.map((trace) => trace.duration_ms));
   const listState: TraceListState = { traceList: traceExplorerParams(query).toString() };
 
   function toggle(list: "operations" | "services" | "statuses", value: string) {
@@ -142,17 +145,12 @@ function TraceExplorer({
       ? [{ id: "duration", label: "duration", onRemove: () => setQuery({ minDurationMs: 0 }), value: `> ${formatDuration(query.minDurationMs)}` }]
       : []),
     ...query.filters
-      .filter((filter) => filter.value !== environment || filter.key !== "resource.deployment.environment")
       .map((filter) => ({
         id: `filter-${explorerFilterText(filter)}`,
         label: filterChipLabel(filter),
         onRemove: () => setQuery({ filters: query.filters.filter((item) => item !== filter) }),
         value: filter.value,
       })),
-  ];
-  const environmentOptions = [
-    ...(environments.data ?? []),
-    ...(environment && !environments.data?.includes(environment) ? [environment] : []),
   ];
 
   return (
@@ -164,22 +162,13 @@ function TraceExplorer({
           onSubmit={submitText}
           placeholder="Span name, key=value or a trace ID"
         />
-        {environmentOptions.length > 0 ? (
-          <SelectField
-            className="explorerSelect"
-            label="Environment"
-            onChange={(value) => setQuery({ filters: withEnvironment(query.filters, value) })}
-            options={[{ label: "All environments", value: "" }, ...environmentOptions.map((value) => ({ label: value, value }))]}
-            value={environment}
-          />
-        ) : null}
       </div>
-      <section aria-label="Span volume" className="explorerVolume">
+      <section aria-label="Span volume" aria-busy={histogram.isFetching} className="explorerVolume">
         <div className="explorerVolume__summary">
           <strong>{total === undefined ? "…" : `${total.toLocaleString()} ${total === 1 ? "span" : "spans"}`}</strong>
           <HistogramLegend bars={bars} series={statusChart} />
         </div>
-        <CountHistogram bars={bars} label="Matching spans over time, by status" series={statusChart} />
+        <CountHistogram bars={bars} label="Matching spans over time, by status" series={statusChart} timeZone={timeZone} />
       </section>
       {traces.error || histogram.error || facets.error ? (
         <div className="automationRuns__message" role="alert">
@@ -187,61 +176,56 @@ function TraceExplorer({
           <button onClick={() => { traces.retry(); histogram.retry(); facets.retry(); }} type="button">Retry</button>
         </div>
       ) : null}
-      <div className="explorerBody">
-        <div aria-label="Trace filters" className="explorerFacets" role="group">
-          <ExplorerFacet
-            loading={!facets.data}
-            onToggle={(value) => toggle("statuses", value)}
-            options={[...(facets.data?.statuses ?? [])]
-              .sort((a, b) => Object.keys(statusLabels).indexOf(a.group) - Object.keys(statusLabels).indexOf(b.group))
-              .map((item) => ({ count: item.value, label: statusLabels[item.group] ?? item.group, value: item.group }))}
-            selected={query.statuses}
-            title="Status"
-          />
-          <ExplorerFacet
-            loading={!facets.data}
-            onToggle={(value) => toggle("services", value)}
-            options={(facets.data?.services ?? []).filter((item) => item.group).map((item) => ({ count: item.value, label: item.group, value: item.group }))}
-            selected={query.services}
-            title="Service"
-          />
-          <ExplorerFacet
-            loading={!facets.data}
-            onToggle={(value) => toggle("operations", value)}
-            options={(facets.data?.operations ?? []).filter((item) => item.group).map((item) => ({ count: item.value, label: item.group, value: item.group }))}
-            selected={query.operations}
-            title="Span name"
-          />
-          <ExplorerFacet
-            loading={false}
-            onToggle={(value) => setQuery({ minDurationMs: Number(value) === query.minDurationMs ? 0 : Number(value) })}
-            options={durations}
-            selected={query.minDurationMs > 0 ? [String(query.minDurationMs)] : []}
-            title="Trace duration"
-          />
-          <AttributeFacets
-            dataKey={key}
-            filters={query.filters}
-            keys={attributeKeys.data}
-            live={live}
-            load={(facetKey) => fetchTraceAttributeFacet(query, facetKey)}
-            onFiltersChange={(filters) => setQuery({ filters })}
-            onOpenChange={(facets) => setQuery({ facets })}
-            open={query.facets}
-            scopes={[{ label: "Span attributes", prefix: "span." }, { label: "Resource attributes", prefix: "resource." }]}
-          />
-        </div>
-        <div className="agentListTable explorerTableWrap">
+      <div className="explorerBody explorerBody--search">
+        <ExplorerFacets
+          label="Trace filters"
+          dataKey={key}
+          filters={query.filters}
+          keys={attributeKeys.data}
+          load={(facetKey) => fetchTraceAttributeFacet(requestQuery, facetKey)}
+          onFiltersChange={(filters) => setQuery({ filters })}
+          onOpenChange={(facets) => setQuery({ facets })}
+          open={query.facets}
+          scopes={[
+            { title: "Resource attributes", prefix: "resource.", primary: [{
+              title: "Service", loading: !facets.data, selected: query.services,
+              onToggle: (value) => toggle("services", value),
+              options: (facets.data?.services ?? []).filter((item) => item.group).map((item) => ({ count: item.value, label: item.group, value: item.group })),
+            }] },
+            { title: "Span attributes", prefix: "span.", primary: [
+              {
+                title: "Status", loading: !facets.data, selected: query.statuses,
+                onToggle: (value) => toggle("statuses", value),
+                options: [...(facets.data?.statuses ?? [])]
+                  .sort((a, b) => Object.keys(statusLabels).indexOf(a.group) - Object.keys(statusLabels).indexOf(b.group))
+                  .map((item) => ({ count: item.value, label: statusLabels[item.group] ?? item.group, value: item.group, color: item.group === "STATUS_CODE_ERROR" ? "#d77878" : "#4e58f9" })),
+              },
+              {
+                title: "Span name", loading: !facets.data, selected: query.operations,
+                onToggle: (value) => toggle("operations", value),
+                options: (facets.data?.operations ?? []).filter((item) => item.group).map((item) => ({ count: item.value, label: item.group, value: item.group })),
+              },
+              {
+                title: "Trace duration", loading: false,
+                selected: query.minDurationMs > 0 ? [String(query.minDurationMs)] : [],
+                onToggle: (value) => setQuery({ minDurationMs: Number(value) === query.minDurationMs ? 0 : Number(value) }),
+                options: durations,
+              },
+            ] },
+          ]}
+        />
+        <div className="agentListTable explorerTableWrap" ref={tableWrap}>
+          <div className="explorerResults explorerResults--traces" aria-busy={traces.isFetching}>
           {traces.data === null ? (
             traces.error ? null : (
               <DataTableSkeleton
                 className=""
                 columns={[
-                  { header: "Started", key: "time", width: withDate ? "176px" : "124px" },
+                  { header: "Started", key: "time", width: "200px" },
                   { header: "Root span", key: "root" },
-                  { header: "Duration", key: "duration", width: "26%" },
+                  { header: "Duration", key: "duration", width: "180px" },
                   { align: "right", header: "Spans", key: "spans", width: "72px" },
-                  { cell: "badge", header: "Status", key: "status", width: "104px" },
+                  { header: "Status", key: "status", width: "104px" },
                 ]}
                 label="Loading traces…"
                 rows={12}
@@ -255,11 +239,11 @@ function TraceExplorer({
                   header: "Started",
                   key: "time",
                   render: (trace) => (
-                    <time className="explorerCell--muted" dateTime={logTimestamp(trace.start_time)?.toISOString()}>
-                      {formatExplorerTime(trace.start_time, withDate)}
+                    <time className="traceRow__timestamp" dateTime={logTimestamp(trace.start_time)?.toISOString()}>
+                      {formatTraceTimestamp(trace.start_time, timeZone)}
                     </time>
                   ),
-                  width: withDate ? "176px" : "124px",
+                  width: "200px",
                 },
                 {
                   header: "Root span",
@@ -293,7 +277,7 @@ function TraceExplorer({
                       <span className="explorerCell--number">{formatDuration(trace.duration_ms)}</span>
                     </span>
                   ),
-                  width: "26%",
+                  width: "180px",
                 },
                 {
                   align: "right",
@@ -306,20 +290,26 @@ function TraceExplorer({
                   header: "Status",
                   key: "status",
                   render: (trace) => count(trace.error_count) > 0
-                    ? <Badge tone="danger">{count(trace.error_count) === 1 ? "Error" : `${count(trace.error_count)} errors`}</Badge>
-                    : <Badge tone="live">OK</Badge>,
+                    ? <span className="traceRow__status traceRow__status--error"><i aria-hidden="true" />Error</span>
+                    : <span className="traceRow__status"><i aria-hidden="true" />OK</span>,
                   width: "104px",
                 },
               ]}
               emptyMessage="No traces match these filters in this time range."
               getRowKey={(trace) => trace.trace_id}
               onRowClick={(trace) => onOpenTrace(trace.trace_id === openTrace ? null : trace.trace_id)}
-              rows={traces.data}
+              rows={rows}
               selectedRowKey={openTrace}
               variant="workspace"
             />
           )}
-          {(traces.data?.length ?? 0) >= 50 ? <p className="explorerMore">Showing the newest 50 traces. Narrow the filters to see others.</p> : null}
+          </div>
+          <nav className="logPagination" aria-label="Trace pagination">
+            <span>{traces.data && !traces.isFetching ? `${rows.length ? page * 50 + 1 : 0}–${page * 50 + rows.length} traces` : "Loading traces…"}</span>
+            <span>Page {page + 1}</span>
+            <button className="dsButton dsButton--secondary dsButton--small" type="button" disabled={page === 0 || traces.isFetching || traces.data === null} onClick={() => { onOpenTrace(null); setPagination({ key, page: page - 1 }); }}><ArrowLeftIcon size={12} />Previous</button>
+            <button className="dsButton dsButton--secondary dsButton--small" type="button" disabled={!hasNext || traces.isFetching || traces.data === null} onClick={() => { onOpenTrace(null); setPagination({ key, page: page + 1 }); }}>Next<ArrowRightIcon size={12} /></button>
+          </nav>
         </div>
       </div>
       {openTrace ? (
@@ -339,11 +329,23 @@ export function TracesPage() {
   useDocumentTitle("Trace search");
   const telemetry = useTelemetryAvailable();
   const [params, setParams] = useSearchParams();
-  const query = traceExplorerQuery(params);
+  const query = traceSearchQuery(params);
   const openTrace = params.get("trace");
-  const [live, setLive] = useState(false);
+  const { changeTimeZone, timeZone, timeZonePreference } = useTimeZonePreference();
+  const [now, setNow] = useState(() => Date.now());
+  const [refresh, setRefresh] = useState(0);
 
-  function navigate(next: TraceExplorerQuery, trace: string | null) {
+  function setQuery(update: Partial<TraceSearchQuery>) {
+    if (update.range) setNow(Date.now());
+    navigate({ ...query, ...update }, openTrace);
+  }
+
+  function reload() {
+    setNow(Date.now());
+    setRefresh((count) => count + 1);
+  }
+
+  function navigate(next: TraceSearchQuery, trace: string | null) {
     const nextParams = traceExplorerParams(next);
     if (trace) nextParams.set("trace", trace);
     setParams(nextParams, { replace: true });
@@ -356,22 +358,31 @@ export function TracesPage() {
           <h1><NavigationIcon section="traces" />Trace search</h1>
           {telemetry.available ? (
             <div className="workspaceHeading__actions">
-              <ExplorerTimeControls
-                live={live}
-                onLiveChange={setLive}
-                onRangeChange={(range) => navigate({ ...query, range }, openTrace)}
+              <IconButton aria-label="Refresh" onClick={reload} size="small" variant="ghost">
+                <ArrowClockwiseIcon size={14} />
+              </IconButton>
+              <DashboardTimePicker
+                now={now}
+                onChange={(range) => setQuery({ range })}
+                onTimeZoneChange={changeTimeZone}
+                onZoomOut={() => setQuery({ range: zoomOutTimeRange(query.range, Date.now(), null).range })}
                 range={query.range}
+                timeZone={timeZone}
+                timeZonePreference={timeZonePreference}
+                zoomed={false}
               />
             </div>
           ) : null}
         </header>
         <TelemetryGate signal="Traces" skeleton={<ExplorerSkeleton label="Loading traces…" />} state={telemetry}>
           <TraceExplorer
-            live={live}
+            now={now}
+            refresh={refresh}
+            timeZone={timeZone}
             onOpenTrace={(trace) => navigate(query, trace)}
             openTrace={openTrace}
             query={query}
-            setQuery={(update) => navigate({ ...query, ...update }, openTrace)}
+            setQuery={setQuery}
           />
         </TelemetryGate>
       </div>
