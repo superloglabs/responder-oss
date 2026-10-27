@@ -24,6 +24,9 @@
 .dashboardPage .react-grid-item.react-grid-placeholder { border-radius: 14px; background: var(--ds-info); opacity: .15; }
 .dashboardPage .react-grid-item > .react-resizable-handle::after { border-color: var(--ds-text-muted); }
 .dashboardPage .react-grid-item.react-draggable-dragging { z-index: 3; }
+/* Widgets take a new width at once rather than animating it, which would
+   redraw every chart on each frame. Moves still animate. */
+.dashboardPage .react-grid-item.cssTransforms { transition-property: transform; }
 
 /* A gray shell holding the title, around a white card with the content. */
 .dashboardWidget { display: flex; flex-direction: column; height: 100%; min-width: 0; overflow: hidden; border-radius: 14px; background: color-mix(in srgb, var(--ds-text-primary) 5%, var(--ds-surface-raised)); }

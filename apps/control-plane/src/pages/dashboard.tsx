@@ -60,6 +60,7 @@ function minimumWidth(widget: TelemetryDashboardWidget): number {
 type Editing = { widget: TelemetryDashboardWidget | null } | null;
 
 // Measures its own width, so it renders only once there are widgets to place.
+// Widgets first render at the measured width, so charts draw once.
 function DashboardGrid({
   onLayoutChange,
   renderWidget,
@@ -69,7 +70,7 @@ function DashboardGrid({
   renderWidget: (widget: TelemetryDashboardWidget) => ReactNode;
   widgets: TelemetryDashboardWidget[];
 }) {
-  const { containerRef, mounted, width } = useContainerWidth();
+  const { containerRef, mounted, width } = useContainerWidth({ measureBeforeMount: true });
   const stacked = [...widgets].sort((a, b) => a.layout.y - b.layout.y || a.layout.x - b.layout.x);
   return (
     <div className="dashboardPage__grid" ref={containerRef}>
