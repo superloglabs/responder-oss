@@ -55,7 +55,7 @@ export function alertChartSvg(input: {
   <g font-family="Inter" font-weight="500" fill="#202020">
     <text x="16" y="29" font-size="8" font-weight="600">${xml(title.slice(0, 75))}</text>
     <text x="496" y="29" font-size="7" fill="#666666" text-anchor="end">Last ${period(rule.windowMinutes * chartWindows)}</text>
-    ${ticks.map((n) => `<line x1="40" x2="496" y1="${y(n)}" y2="${y(n)}" stroke="#F0F0F0"/><text x="30" y="${y(n) + 4}" text-anchor="end" font-size="7" fill="#666666">${format(n)}</text>`).join("")}
+    ${ticks.map((n) => `<line x1="40" x2="496" y1="${y(n)}" y2="${y(n)}" stroke="#F0F0F0"/><text x="16" y="${y(n) + 2}" text-anchor="start" font-size="7" fill="#666666">${format(n)}</text>`).join("")}
     <line x1="40" x2="496" y1="${y(rule.threshold)}" y2="${y(rule.threshold)}" stroke="#888888" stroke-width="1" stroke-dasharray="3 3"/>
     ${bars}
     <text x="40" y="160" font-size="7" fill="#666666">${timeLabel(since)}</text>
