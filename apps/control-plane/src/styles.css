@@ -11526,3 +11526,21 @@ body:has(.appShell--scans) {
   grid-column: 1 / -1;
   padding: 4px 0 2px;
 }
+
+/* Keep native dropdown arrows inset consistently across filters and forms.
+   Listboxes and controls that already supply an icon keep their own styling. */
+:root select:not([multiple]):not([size]):where(:not(.selectWrap select, .inviteForm select, .automationTrigger__select)) {
+  appearance: none;
+  padding-right: 30px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none' stroke='%2385857f' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 4.5 6 7.5 9 4.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 12px 12px;
+}
+
+@media (forced-colors: active) {
+  :root select:not([multiple]):not([size]):where(:not(.selectWrap select, .inviteForm select, .automationTrigger__select)) {
+    appearance: auto;
+    background-image: none;
+  }
+}
