@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import type { TelemetryClient } from "./client.js";
 import {
   type ErrorCandidate,
+  errorCandidates,
   errorCandidateSettleMs,
   errorCandidateWindow,
   errorCandidateWindowMs,
@@ -198,6 +200,29 @@ describe("error candidate cursor", () => {
     const cursor = { candidateId: "b", discoveredAt: settled };
     const window = errorCandidateWindow(cursor, now);
     expect(nextErrorCandidateCursor(window, [], 2)).toBe(cursor);
+  });
+});
+
+describe("errorCandidates", () => {
+  it("bounds the read by the cursor time so ClickHouse prunes older rows", async () => {
+    const calls: { query: string; query_params?: Record<string, unknown> }[] = [];
+    const client = {
+      query: async (call: { query: string; query_params?: Record<string, unknown> }) => {
+        calls.push(call);
+        return { json: async () => [] };
+      },
+    } as unknown as TelemetryClient;
+    const cursor = { candidateId: "6a0d1c1e-0000-4000-8000-000000000001", discoveredAt: new Date(1_000) };
+
+    await errorCandidates(client, {
+      kind: "log",
+      limit: 100,
+      organizationIds: [organizationId],
+      window: { cursor, until: new Date(2_000) },
+    });
+
+    expect(calls[0]?.query).toContain("discovered_at >= fromUnixTimestamp64Milli({fromMs:Int64}, 'UTC')");
+    expect(calls[0]?.query_params).toMatchObject({ fromId: cursor.candidateId, fromMs: 1_000, untilMs: 2_000 });
   });
 });
 

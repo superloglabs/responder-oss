@@ -154,6 +154,9 @@ export async function errorCandidates(
   },
 ): Promise<ErrorCandidate[]> {
   if (input.organizationIds.length === 0) return [];
+  // ClickHouse does not prune the primary key or partitions by a tuple
+  // comparison, so the plain lower bound keeps a pass to its window instead
+  // of the whole table.
   const result = await client.query({
     format: "JSONEachRow",
     query: `
@@ -167,6 +170,7 @@ export async function errorCandidates(
       FROM otel_issue_candidates
       WHERE kind = {kind:String}
         AND project_id IN {organizationIds:Array(String)}
+        AND discovered_at >= fromUnixTimestamp64Milli({fromMs:Int64}, 'UTC')
         AND (discovered_at, candidate_id) > (fromUnixTimestamp64Milli({fromMs:Int64}, 'UTC'), toUUID({fromId:String}))
         AND discovered_at < fromUnixTimestamp64Milli({untilMs:Int64}, 'UTC')
       ORDER BY discovered_at, candidate_id
