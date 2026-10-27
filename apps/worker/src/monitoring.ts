@@ -77,31 +77,44 @@ function redactString(value: string, secrets: readonly string[]): string {
     );
 }
 
+// Events can hold objects the worker does not own, such as library
+// instances with getter-only or frozen properties, so nothing is written into
+// them. An object or array with a secret inside is replaced by a redacted
+// copy, and one without is returned as it is.
 function redactEventValue(
   value: unknown,
   secrets: readonly string[],
-  seen: WeakSet<object>,
+  seen: WeakMap<object, unknown>,
 ): unknown {
   if (typeof value === "string") {
     return redactString(value, secrets);
   }
-  if (!value || typeof value !== "object" || seen.has(value)) return value;
+  if (!value || typeof value !== "object") return value;
+  if (seen.has(value)) return seen.get(value);
 
-  seen.add(value);
+  seen.set(value, value);
+  let copy: unknown[] | Record<string, unknown> | undefined;
   if (Array.isArray(value)) {
     for (const [index, item] of value.entries()) {
-      value[index] = redactEventValue(item, secrets, seen);
+      const next = redactEventValue(item, secrets, seen);
+      if (Object.is(next, item)) continue;
+      copy ??= [...value];
+      (copy as unknown[])[index] = next;
     }
-    return value;
+  } else {
+    const entries = Object.entries(value);
+    for (const [key, item] of entries) {
+      const next = secretEventKey.test(key)
+        ? "[redacted]"
+        : redactEventValue(item, secrets, seen);
+      if (Object.is(next, item)) continue;
+      copy ??= Object.fromEntries(entries);
+      (copy as Record<string, unknown>)[key] = next;
+    }
   }
-
-  const record = value as Record<string, unknown>;
-  for (const [key, item] of Object.entries(record)) {
-    record[key] = secretEventKey.test(key)
-      ? "[redacted]"
-      : redactEventValue(item, secrets, seen);
-  }
-  return record;
+  if (!copy) return value;
+  seen.set(value, copy);
+  return copy;
 }
 
 // pg-boss emits worker failures as plain objects that copy an error's name,
@@ -186,7 +199,16 @@ function scrubWorkerSentryEvent(
   environment: NodeJS.ProcessEnv,
 ): Event {
   const secrets = eventSecrets(environment);
-  redactEventValue(event, secrets, new WeakSet());
+  const seen = new WeakMap<object, unknown>();
+  const record = event as Record<string, unknown>;
+  for (const [key, value] of Object.entries(record)) {
+    // Sentry's processing metadata holds its own scopes and spans, which
+    // must stay intact, and is not sent.
+    if (key === "sdkProcessingMetadata") continue;
+    record[key] = secretEventKey.test(key)
+      ? "[redacted]"
+      : redactEventValue(value, secrets, seen);
+  }
 
   for (const exception of event.exception?.values ?? []) {
     if (exception.value && exception.value.length > 2_000) {

@@ -163,6 +163,44 @@ describe("worker error monitoring", () => {
     ).toEqual({ message: "request failed for [redacted]" });
   });
 
+  it("redacts values behind getter-only and frozen properties without writing to them", async () => {
+    sentryMocks.isInitialized.mockReturnValue(true);
+    const monitoring = await import("./monitoring.js");
+    monitoring.initializeErrorMonitoring({
+      DAYTONA_API_KEY: "daytona-secret",
+      SENTRY_DSN: "https://public@example.invalid/1",
+    });
+    const processor = sentryMocks.addEventProcessor.mock.calls[0]?.[0] as (
+      event: Record<string, unknown>,
+    ) => Record<string, unknown>;
+    const result = Object.defineProperties({}, {
+      $: { enumerable: true, get: () => ({ rows: 1 }) },
+      detail: { enumerable: true, get: () => "query failed for daytona-secret" },
+    });
+    const frozen = Object.freeze({ note: "daytona-secret", status: "ok" });
+    const unchanged = Object.freeze({ status: "ok" });
+    const internal = { scope: "daytona-secret" };
+
+    const event = processor({
+      extra: { frozen, result, unchanged },
+      message: "request failed for daytona-secret",
+      sdkProcessingMetadata: { internal },
+    });
+
+    expect(event).toEqual({
+      extra: {
+        frozen: { note: "[redacted]", status: "ok" },
+        result: { $: { rows: 1 }, detail: "query failed for [redacted]" },
+        unchanged: { status: "ok" },
+      },
+      message: "request failed for [redacted]",
+      sdkProcessingMetadata: { internal },
+    });
+    expect((event.extra as { unchanged: unknown }).unchanged).toBe(unchanged);
+    expect(frozen.note).toBe("daytona-secret");
+    expect(internal.scope).toBe("daytona-secret");
+  });
+
   it("preserves stack frames while removing error and event secrets", async () => {
     const monitoring = await import("./monitoring.js");
     const environment = {
