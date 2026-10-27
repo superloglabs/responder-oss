@@ -35,8 +35,8 @@ export function alertChartSvg(input: {
   const low = Math.floor(min / tickStep) * tickStep;
   const high = Math.max(low + tickStep, Math.ceil(max / tickStep) * tickStep);
   const ticks = Array.from({ length: Math.round((high - low) / tickStep) + 1 }, (_, i) => low + i * tickStep);
-  const x = (time: number) => 52 + (time - since) / (until - since) * 688;
-  const y = (n: number) => 197 - (n - low) / (high - low) * 116;
+  const x = (time: number) => 40 + (time - since) / (until - since) * 456;
+  const y = (n: number) => Math.round(132 - (n - low) / (high - low) * 72);
   const bars = chart.buckets.flatMap((time, i) => {
     const sample = samples[i];
     if (time < since || time >= until || sample == null || !Number.isFinite(sample) || sample === 0) return [];
@@ -50,20 +50,20 @@ export function alertChartSvg(input: {
     : describeAlertRule({ ...rule, filter: {}, windowMinutes: rule.windowMinutes }).split(" in the last ")[0]!;
   const title = `${measure} per ${period(rule.windowMinutes)}`;
   const date = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone: "UTC" }).format(now);
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="768" height="296" viewBox="0 0 768 296">
-  <rect x="0.5" y="0.5" width="767" height="295" rx="8" fill="#FFFFFF" stroke="#E8E8E8"/>
-  <g font-family="Inter" fill="#202020">
-    <text x="24" y="35" font-size="14" font-weight="600">${xml(title.slice(0, 75))}</text>
-    <text x="744" y="35" font-size="13" fill="#666666" text-anchor="end">Last ${period(rule.windowMinutes * chartWindows)}</text>
-    ${ticks.map((n) => `<line x1="52" x2="740" y1="${y(n)}" y2="${y(n)}" stroke="#F0F0F0"/><text x="36" y="${y(n) + 4}" text-anchor="end" font-size="12" fill="#666666">${format(n)}</text>`).join("")}
-    <line x1="52" x2="740" y1="${y(rule.threshold)}" y2="${y(rule.threshold)}" stroke="#888888" stroke-width="1" stroke-dasharray="3 3"/>
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="208" viewBox="0 0 512 208">
+  <rect width="512" height="208" fill="#FFFFFF"/>
+  <g font-family="Inter" font-weight="500" fill="#202020">
+    <text x="16" y="29" font-size="8" font-weight="600">${xml(title.slice(0, 75))}</text>
+    <text x="496" y="29" font-size="7" fill="#666666" text-anchor="end">Last ${period(rule.windowMinutes * chartWindows)}</text>
+    ${ticks.map((n) => `<line x1="40" x2="496" y1="${y(n)}" y2="${y(n)}" stroke="#F0F0F0"/><text x="30" y="${y(n) + 4}" text-anchor="end" font-size="7" fill="#666666">${format(n)}</text>`).join("")}
+    <line x1="40" x2="496" y1="${y(rule.threshold)}" y2="${y(rule.threshold)}" stroke="#888888" stroke-width="1" stroke-dasharray="3 3"/>
     ${bars}
-    <text x="52" y="229" font-size="12" fill="#666666">${timeLabel(since)}</text>
-    <text x="396" y="229" text-anchor="middle" font-size="12" fill="#666666">${timeLabel((since + until) / 2)}</text>
-    <text x="740" y="229" text-anchor="end" font-size="12" fill="#666666">${timeLabel(until)}</text>
-    <line x1="24" x2="44" y1="266" y2="266" stroke="#888888" stroke-width="1" stroke-dasharray="3 3"/>
-    <text x="52" y="270" font-size="13" fill="#444444">Alert when ${xml(describeAlertCondition(rule.comparator, rule.threshold, unit))}</text>
-    <text x="744" y="270" text-anchor="end" font-size="12" fill="#666666">${date} · UTC</text>
+    <text x="40" y="160" font-size="7" fill="#666666">${timeLabel(since)}</text>
+    <text x="268" y="160" text-anchor="middle" font-size="7" fill="#666666">${timeLabel((since + until) / 2)}</text>
+    <text x="496" y="160" text-anchor="end" font-size="7" fill="#666666">${timeLabel(until)}</text>
+    <line x1="16" x2="25" y1="191.5" y2="191.5" stroke="#888888" stroke-width="1" stroke-dasharray="3 3"/>
+    <text x="29" y="194" font-size="7" fill="#444444">Alert when ${xml(describeAlertCondition(rule.comparator, rule.threshold, unit))}</text>
+    <text x="496" y="194" text-anchor="end" font-size="7" fill="#666666">${date} · UTC</text>
   </g></svg>`;
 }
 
@@ -90,9 +90,9 @@ export async function renderAlertChart(input: {
   });
   const svg = alertChartSvg({ ...input, chart });
   const png = new Resvg(svg, {
-    // Preserve sharp text on high-density Slack displays.
-    fitTo: { mode: "zoom", value: 3 },
-    font: { fontFiles: [fileURLToPath(new URL("../assets/Inter.ttf", import.meta.url))], loadSystemFonts: false, defaultFontFamily: "Inter" },
+    // Match Slack's 1024px preview with a compact layout and readable labels.
+    fitTo: { mode: "zoom", value: 2 },
+    font: { fontFiles: ["Inter.ttf", "Inter-SemiBold.ttf"].map((name) => fileURLToPath(new URL(`../assets/${name}`, import.meta.url))), loadSystemFonts: false, defaultFontFamily: "Inter" },
   }).render().asPng();
   return {
     altText: `${rule.name}: ${input.groupKey || "all matching data"}. Alert when ${describeAlertCondition(rule.comparator, rule.threshold, alertValueUnit(rule))}. Values per ${rule.windowMinutes} minutes.`.slice(0, 2000),

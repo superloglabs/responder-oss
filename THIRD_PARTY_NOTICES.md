@@ -103,4 +103,6 @@ under the Apache License, Version 2.0. Each image includes its license at
 
 The evaluation graph uses Inter by The Inter Project Authors
 (https://github.com/rsms/inter), licensed under the SIL Open Font License 1.1.
+The bundled fonts are static instances at optical size 14: Medium (500)
+and SemiBold (600), generated from the Inter variable font.
 See `apps/worker/assets/Inter-OFL.txt`.
