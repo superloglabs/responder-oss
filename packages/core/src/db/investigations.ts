@@ -16,7 +16,7 @@ import {
   refreshCustomMcpOAuth,
 } from "../integrations/custom-mcp.js";
 import { parseDash0Credentials } from "../integrations/dash0.js";
-import { parsePostHogCredentials } from "../integrations/posthog.js";
+import { parsePostHogCredentials, POSTHOG_MCP_URL } from "../integrations/posthog.js";
 import { parseGrafanaCredentials } from "../integrations/grafana.js";
 import {
   assertCloudflareReadOnlyGrant,
@@ -2180,11 +2180,12 @@ export async function getRuntimePostHogConnections(
                   oauth,
                 }),
               }),
+          // Investigations only read, even on a read-write connection.
           value: {
             accessToken,
             accountId: account.id,
             displayName: account.displayName,
-            mcpUrl: credentials.mcpUrl,
+            mcpUrl: POSTHOG_MCP_URL,
           },
         };
       },

@@ -25,6 +25,7 @@ import {
   honeycombAuthorization,
   parseHoneycombCredentials,
 } from "../../../../packages/core/src/integrations/honeycomb.js";
+import { parsePostHogCredentials } from "../../../../packages/core/src/integrations/posthog.js";
 import { parseSignozCredentials } from "../../../../packages/core/src/integrations/signoz.js";
 import {
   parseCustomMcpCredentials,
@@ -124,6 +125,7 @@ interface ContextBrokerDependencies {
   gcp: Pick<GcpContextDependencies, "authHeaders" | "now">;
   grafana: SelfHostedGrafanaDependencies;
   linear: LinearToolDependencies;
+  posthog: { now: () => number };
   providerFetch: typeof safeCustomMcpFetch;
   railway: RailwayToolDependencies & { now: () => number };
   refreshCustomMcp: typeof refreshCustomMcpOAuth;
@@ -142,6 +144,7 @@ const defaultDependencies: ContextBrokerDependencies = {
   gcp: { authHeaders: gcpAuthHeaders, now: Date.now },
   grafana: defaultSelfHostedGrafanaDependencies,
   linear: defaultLinearToolDependencies,
+  posthog: { now: Date.now },
   providerFetch: safeCustomMcpFetch,
   railway: { ...defaultRailwayToolDependencies, now: Date.now },
   refreshCustomMcp: refreshCustomMcpOAuth,
@@ -447,6 +450,63 @@ async function supabaseAccessToken(
     throw new Error("Reconnect the Supabase OAuth connection");
   }
   return accessToken;
+}
+
+async function postHogAccessToken(
+  claim: AutomationContextBrokerClaim,
+  dependencies: ContextBrokerDependencies,
+): Promise<string> {
+  const credentials = await dependencies.withCredentialLease({
+    allowedStatuses: ["connected"],
+    integrationAccountId: claim.account.id,
+    operation: async (encryptedCredentials) => {
+      const current = parsePostHogCredentials(
+        decryptCredentials<Record<string, unknown>>(encryptedCredentials),
+      );
+      const oauth = await dependencies.refreshCustomMcp({
+        mcpUrl: current.mcpUrl,
+        oauth: current.oauth,
+        redirectUrl: integrationCallbackUrl("posthog"),
+      });
+      if (oauth === current.oauth) return { value: current };
+      const updated = { ...current, oauth };
+      return {
+        encryptedCredentials: encryptCredentials(updated),
+        value: updated,
+      };
+    },
+    organizationId: claim.organizationId,
+    provider: "posthog",
+  });
+  const accessToken = credentials?.oauth.tokens?.access_token;
+  if (typeof accessToken !== "string") {
+    throw new Error("Reconnect the PostHog OAuth connection");
+  }
+  return accessToken;
+}
+
+// A read-only PostHog connection exposes only the tools PostHog marks as
+// read-only, as in investigations. A read-write connection exposes every tool
+// its MCP URL lists.
+function postHogContextServer(
+  claim: AutomationContextBrokerClaim,
+  dependencies: ContextBrokerDependencies,
+): ManagedMcpServer | null {
+  if (!claim.account.encryptedCredentials) return null;
+  const { accessLevel, mcpUrl } = parsePostHogCredentials(
+    decryptCredentials<Record<string, unknown>>(claim.account.encryptedCredentials),
+  );
+  return {
+    cacheKey: `posthog:${claim.account.id}:${accessLevel}`,
+    fetch: dependencies.providerFetch,
+    headers: async () => new Headers({
+      authorization: `Bearer ${await postHogAccessToken(claim, dependencies)}`,
+    }),
+    isAllowed: (tool) => accessLevel === "read_write" || tool.annotations?.readOnlyHint === true,
+    label: "PostHog MCP",
+    now: dependencies.posthog.now,
+    url: mcpUrl,
+  };
 }
 
 // Railway access tokens last an hour, so the broker refreshes one only when
@@ -986,6 +1046,19 @@ export function createAutomationContextBrokerRoutes(
             mcpUrl: credentials.mcpUrl,
             now: dependencies.supabase.now,
           }),
+        });
+      }
+      if (claim.account.provider === "posthog") {
+        const server = postHogContextServer(claim, dependencies);
+        if (!server) {
+          return context.json(rpcError(parsed.data.id, -32601, "Connection does not expose context tools"), 404);
+        }
+        return await managedServerResponse({
+          dependencies,
+          rawBody,
+          request: context.req.raw,
+          rpc: parsed.data,
+          server,
         });
       }
       if (claim.account.provider === "grafana") {

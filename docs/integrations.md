@@ -415,19 +415,37 @@ and closed notifications are acknowledged without starting investigations.
 
 ## PostHog
 
-Connect PostHog from Settings. Responder dynamically registers an OAuth client
-against PostHog's hosted MCP endpoint and refreshes the project-scoped tokens
-outside the investigation sandbox. The OAuth callback is:
+PostHog gives investigations, tag mode, scans, and automations its alerts,
+dashboards, error tracking, events, insights, logs, replay, replay vision, SQL,
+tracing, and web analytics. Connect it from Settings, the agent or tag mode
+settings, or the automation editor. Settings and the automation editor ask for
+an access level:
+
+- **Read only** uses PostHog's read-only tools mode.
+- **Read and write** turns PostHog's read-only mode off and adds annotations,
+  cohorts, experiments, feature flags, notebooks, and surveys. Automations can
+  then change PostHog. Investigations, tag mode, and scans still only read.
+
+Responder dynamically registers an OAuth client against PostHog's hosted MCP
+endpoint and refreshes the project-scoped tokens outside the investigation
+sandbox. The OAuth callback is:
 
 ```text
 <public>/api/integrations/posthog/callback
 ```
 
 No deployment-level PostHog client ID, API key, or static token is required.
-The MCP connection is forced into read-only tools mode and limited to alerts,
-dashboards, error tracking, events, insights, logs, replay, replay vision, SQL,
-tracing, and web analytics. The worker also rejects any tool that is not
-explicitly annotated read-only.
+Each connection has one access level, and a read-write connection is named
+"PostHog · read-write". Investigations always use the read-only MCP URL, and
+the worker also rejects any tool that is not explicitly annotated read-only.
+
+Automations reach PostHog through the run-scoped context broker at
+`/api/automation-context-broker/v1/<connection>`. The broker refreshes the
+OAuth token and lists tools itself. On a read-only connection it serves and
+forwards only tools annotated read-only; on a read-write connection it serves
+every tool the read-write MCP URL lists. PostHog is context only for
+automations. Runs start from another trigger, such as a watched Slack channel
+or a schedule.
 
 Configure the PostHog alerts Responder should investigate with a **Slack**
 notification destination that points to a watched channel. Responder recognizes

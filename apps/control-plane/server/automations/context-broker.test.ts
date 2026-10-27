@@ -1,6 +1,10 @@
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { encryptCredentials } from "../../../../packages/core/src/credentials/encryption.js";
+import {
+  POSTHOG_MCP_URL,
+  POSTHOG_READ_WRITE_MCP_URL,
+} from "../../../../packages/core/src/integrations/posthog.js";
 import { createAutomationContextBrokerRoutes } from "./context-broker.js";
 import { selfHostedGrafanaAnswer } from "./grafana-context.js";
 
@@ -86,6 +90,7 @@ function appFor(activeClaim: ReturnType<typeof claim> | null) {
         { annotations: { readOnlyHint: true }, inputSchema: { type: "object" }, name: "list_users" },
       ]),
     },
+    posthog: { now: () => Date.now() },
     providerFetch: vi.fn(),
     refreshCustomMcp: vi.fn().mockResolvedValue({
       tokens: { access_token: "fresh-oauth-token", refresh_token: "refresh-token" },
@@ -879,6 +884,102 @@ describe("automation context broker", () => {
 
       expect(response.status).toBe(502);
       expect(dependencies.providerFetch).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("PostHog", () => {
+    beforeEach(() => {
+      vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 4).toString("base64"));
+    });
+
+    const postHogTools = [
+      { annotations: { readOnlyHint: true }, inputSchema: { type: "object" }, name: "query-run" },
+      { annotations: { readOnlyHint: false }, inputSchema: { type: "object" }, name: "update-feature-flag" },
+      { inputSchema: { type: "object" }, name: "create-annotation" },
+    ];
+
+    function postHogClaim(accessLevel?: "read_write") {
+      return claim("posthog", {
+        ...(accessLevel ? { accessLevel } : {}),
+        authType: "oauth",
+        mcpUrl: accessLevel ? POSTHOG_READ_WRITE_MCP_URL : POSTHOG_MCP_URL,
+        oauth: {
+          tokens: {
+            access_token: "expired-posthog-token",
+            refresh_token: "posthog-refresh-token",
+          },
+        },
+      });
+    }
+
+    function fakePostHogMcp() {
+      return vi.fn(async (_url: string, init: RequestInit) => {
+        const body = JSON.parse(String(init.body)) as { id?: string; method: string };
+        if (body.method === "notifications/initialized") {
+          return new Response(null, { status: 202 });
+        }
+        const result = body.method === "initialize"
+          ? { capabilities: { tools: {} }, protocolVersion: "2025-06-18" }
+          : body.method === "tools/list"
+            ? { tools: postHogTools }
+            : { content: [{ text: "{\"ok\":true}", type: "text" }] };
+        return Response.json({ id: body.id, jsonrpc: "2.0", result });
+      });
+    }
+
+    async function listedToolNames(app: ReturnType<typeof appFor>["app"]) {
+      const listed = await app.request(
+        `/api/automation-context-broker/v1/${accountId}`,
+        rpcRequest({ id: 1, jsonrpc: "2.0", method: "tools/list" }),
+      );
+      expect(listed.status).toBe(200);
+      const body = await listed.json() as { result: { tools: Array<{ name: string }> } };
+      return body.result.tools.map((tool) => tool.name);
+    }
+
+    function callTool(app: ReturnType<typeof appFor>["app"], name: string) {
+      return app.request(
+        `/api/automation-context-broker/v1/${accountId}`,
+        rpcRequest({ id: 2, jsonrpc: "2.0", method: "tools/call", params: { arguments: {}, name } }),
+      );
+    }
+
+    it("serves only read-only tools on a read-only connection", async () => {
+      const { app, dependencies } = appFor(postHogClaim());
+      dependencies.providerFetch.mockImplementation(fakePostHogMcp());
+      dependencies.refreshCustomMcp.mockResolvedValue({
+        tokens: { access_token: "fresh-posthog-token", refresh_token: "refresh-token" },
+      });
+
+      expect(await listedToolNames(app)).toEqual(["query-run"]);
+      expect((await callTool(app, "update-feature-flag")).status).toBe(400);
+      const forwarded = await callTool(app, "query-run");
+      expect(forwarded.status).toBe(200);
+      const text = await forwarded.text();
+      expect(text).toContain("ok");
+      expect(text).not.toContain("posthog-token");
+
+      const calls = dependencies.providerFetch.mock.calls as Array<[string, RequestInit]>;
+      expect(calls.every(([url]) => url === POSTHOG_MCP_URL)).toBe(true);
+      expect(new Headers(calls.at(-1)![1].headers).get("authorization")).toBe("Bearer fresh-posthog-token");
+      expect(dependencies.refreshCustomMcp).toHaveBeenCalledWith(expect.objectContaining({
+        mcpUrl: POSTHOG_MCP_URL,
+        redirectUrl: expect.stringMatching(/\/api\/integrations\/posthog\/callback$/u),
+      }));
+    });
+
+    it("serves every tool on a read-write connection", async () => {
+      const { app, dependencies } = appFor(postHogClaim("read_write"));
+      dependencies.providerFetch.mockImplementation(fakePostHogMcp());
+
+      expect(await listedToolNames(app)).toEqual([
+        "query-run",
+        "update-feature-flag",
+        "create-annotation",
+      ]);
+      expect((await callTool(app, "update-feature-flag")).status).toBe(200);
+      const calls = dependencies.providerFetch.mock.calls as Array<[string, RequestInit]>;
+      expect(calls.every(([url]) => url === POSTHOG_READ_WRITE_MCP_URL)).toBe(true);
     });
   });
 

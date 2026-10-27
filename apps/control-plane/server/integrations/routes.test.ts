@@ -48,7 +48,10 @@ import {
   verifyCustomMcpConnection,
 } from "../../../../packages/core/src/integrations/custom-mcp.js";
 import { normalizeDash0McpUrl } from "../../../../packages/core/src/integrations/dash0.js";
-import { POSTHOG_MCP_URL } from "../../../../packages/core/src/integrations/posthog.js";
+import {
+  POSTHOG_MCP_URL,
+  POSTHOG_READ_WRITE_MCP_URL,
+} from "../../../../packages/core/src/integrations/posthog.js";
 import { CLOUDFLARE_MCP_URL } from "../../../../packages/core/src/integrations/cloudflare.js";
 import {
   createDevRevTicketWebhook,
@@ -3133,9 +3136,83 @@ describe("integration callback routing", () => {
     });
     expect(encryptCredentials).toHaveBeenLastCalledWith(
       expect.objectContaining({
+        accessLevel: "read_only",
         authType: "oauth",
         mcpUrl: POSTHOG_MCP_URL,
         oauth: { codeVerifier: "pkce-verifier" },
+      }),
+    );
+  });
+
+  it("starts read-write PostHog OAuth against the read-write MCP endpoint", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(encryptCredentials).mockReturnValue("encrypted-credentials");
+    vi.mocked(createIntegrationConnectionState).mockResolvedValue("oauth-state");
+    vi.mocked(beginCustomMcpOAuth).mockResolvedValue({
+      authorizationUrl: "https://us.posthog.com/oauth/authorize",
+      oauth: { codeVerifier: "pkce-verifier" },
+    });
+    vi.mocked(updateIntegrationConnectionStateMetadata).mockResolvedValue(true);
+
+    const response = await app.request(
+      "/api/integrations/posthog/start?returnTo=%2Fautomations%2Fnew&mode=read_write",
+    );
+
+    expect(response.status).toBe(302);
+    expect(beginCustomMcpOAuth).toHaveBeenCalledWith({
+      connectionState: "oauth-state",
+      mcpUrl: POSTHOG_READ_WRITE_MCP_URL,
+      redirectUrl: "https://responder.example/api/integrations/posthog/callback",
+    });
+    expect(encryptCredentials).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        accessLevel: "read_write",
+        mcpUrl: POSTHOG_READ_WRITE_MCP_URL,
+      }),
+    );
+  });
+
+  it("finishes read-write PostHog OAuth as a separate read-write connection", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(consumeIntegrationConnectionState).mockResolvedValue({
+      organizationId: tenant.organizationId,
+      userId: tenant.user.id,
+      returnTo: "/automations/new",
+      codeVerifier: JSON.stringify({
+        externalAccountId: "40000000-0000-4000-8000-000000000000",
+      }),
+      metadata: { encryptedCredentials: "pending-credentials" },
+    });
+    vi.mocked(decryptCredentials).mockReturnValue({
+      accessLevel: "read_write",
+      authType: "oauth",
+      mcpUrl: POSTHOG_READ_WRITE_MCP_URL,
+      oauth: { codeVerifier: "pkce-verifier" },
+    });
+    vi.mocked(finishCustomMcpOAuth).mockResolvedValue({
+      tokens: { access_token: "oauth-access-token", token_type: "bearer" },
+    });
+    vi.mocked(verifyCustomMcpConnection).mockResolvedValue(40);
+    vi.mocked(encryptCredentials).mockReturnValue("connected-credentials");
+    vi.mocked(upsertIntegrationAccount).mockResolvedValue(
+      "30000000-0000-4000-8000-000000000000",
+    );
+
+    const response = await app.request(
+      "/api/integrations/posthog/callback?state=oauth-state&code=oauth-code",
+    );
+
+    expect(response.status).toBe(302);
+    expect(verifyCustomMcpConnection).toHaveBeenCalledWith({
+      accessToken: "oauth-access-token",
+      mcpUrl: POSTHOG_READ_WRITE_MCP_URL,
+    });
+    expect(upsertIntegrationAccount).toHaveBeenCalledWith(
+      expect.objectContaining({
+        displayName: "PostHog · read-write",
+        metadata: expect.objectContaining({ accessLevel: "read_write" }),
+        provider: "posthog",
+        status: "connected",
       }),
     );
   });
