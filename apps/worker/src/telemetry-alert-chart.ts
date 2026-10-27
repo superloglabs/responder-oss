@@ -53,17 +53,17 @@ export function alertChartSvg(input: {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="208" viewBox="0 0 512 208">
   <rect x="0.5" y="0.5" width="511" height="207" rx="8" fill="#FFFFFF" stroke="#E8E8E8"/>
   <g font-family="Inter" fill="#202020">
-    <text x="16" y="29" font-size="16" font-weight="600">${xml(title.slice(0, 75))}</text>
-    <text x="496" y="29" font-size="14" fill="#666666" text-anchor="end">Last ${period(rule.windowMinutes * chartWindows)}</text>
-    ${ticks.map((n) => `<line x1="40" x2="496" y1="${y(n)}" y2="${y(n)}" stroke="#F0F0F0"/><text x="30" y="${y(n) + 4}" text-anchor="end" font-size="14" fill="#666666">${format(n)}</text>`).join("")}
+    <text x="16" y="29" font-size="8" font-weight="600">${xml(title.slice(0, 75))}</text>
+    <text x="496" y="29" font-size="7" fill="#666666" text-anchor="end">Last ${period(rule.windowMinutes * chartWindows)}</text>
+    ${ticks.map((n) => `<line x1="40" x2="496" y1="${y(n)}" y2="${y(n)}" stroke="#F0F0F0"/><text x="30" y="${y(n) + 4}" text-anchor="end" font-size="7" fill="#666666">${format(n)}</text>`).join("")}
     <line x1="40" x2="496" y1="${y(rule.threshold)}" y2="${y(rule.threshold)}" stroke="#888888" stroke-width="1" stroke-dasharray="3 3"/>
     ${bars}
-    <text x="40" y="160" font-size="14" fill="#666666">${timeLabel(since)}</text>
-    <text x="268" y="160" text-anchor="middle" font-size="14" fill="#666666">${timeLabel((since + until) / 2)}</text>
-    <text x="496" y="160" text-anchor="end" font-size="14" fill="#666666">${timeLabel(until)}</text>
-    <line x1="16" x2="34" y1="189" y2="189" stroke="#888888" stroke-width="1" stroke-dasharray="3 3"/>
-    <text x="42" y="194" font-size="14" fill="#444444">Alert when ${xml(describeAlertCondition(rule.comparator, rule.threshold, unit))}</text>
-    <text x="496" y="194" text-anchor="end" font-size="14" fill="#666666">${date} · UTC</text>
+    <text x="40" y="160" font-size="7" fill="#666666">${timeLabel(since)}</text>
+    <text x="268" y="160" text-anchor="middle" font-size="7" fill="#666666">${timeLabel((since + until) / 2)}</text>
+    <text x="496" y="160" text-anchor="end" font-size="7" fill="#666666">${timeLabel(until)}</text>
+    <line x1="16" x2="25" y1="189" y2="189" stroke="#888888" stroke-width="1" stroke-dasharray="3 3"/>
+    <text x="29" y="194" font-size="7" fill="#444444">Alert when ${xml(describeAlertCondition(rule.comparator, rule.threshold, unit))}</text>
+    <text x="496" y="194" text-anchor="end" font-size="7" fill="#666666">${date} · UTC</text>
   </g></svg>`;
 }
 
