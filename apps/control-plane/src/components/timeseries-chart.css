@@ -40,13 +40,14 @@
 .timeseriesChart__swatch { flex-shrink: 0; width: 8px; height: 8px; border-radius: 2px; background: var(--series); }
 
 .timeseriesChart__legend { display: flex; flex-wrap: wrap; gap: 2px 12px; max-height: 44px; margin: 0; padding: 0; overflow: auto; list-style: none; }
+.timeseriesChart--legend-bottom .timeseriesChart__legend { margin-left: 4px; }
 .timeseriesChart--legend-side .timeseriesChart__legend { flex: 0 0 180px; flex-direction: column; flex-wrap: nowrap; max-height: none; }
 .timeseriesChart__legend button { display: flex; align-items: center; gap: 6px; max-width: 100%; padding: 2px 0; border: 0; background: none; color: var(--ds-text-secondary); cursor: pointer; font: inherit; font-size: 11px; text-align: left; }
 .timeseriesChart--legend-side .timeseriesChart__legend button { width: 100%; }
 /* A side legend leaves too little plot in a narrow widget; stack it below. */
 @container (max-width: 480px) {
   .timeseriesChart__layout.timeseriesChart--legend-side { flex-direction: column; }
-  .timeseriesChart--legend-side .timeseriesChart__legend { flex: 0 0 auto; flex-direction: row; flex-wrap: wrap; max-height: 44px; }
+  .timeseriesChart--legend-side .timeseriesChart__legend { flex: 0 0 auto; flex-direction: row; flex-wrap: wrap; max-height: 44px; margin-left: 4px; }
   .timeseriesChart--legend-side .timeseriesChart__legend button { width: auto; }
 }
 .timeseriesChart__legend button[aria-pressed="false"] { opacity: .4; }
