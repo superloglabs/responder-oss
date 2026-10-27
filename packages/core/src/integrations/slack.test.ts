@@ -363,9 +363,11 @@ describe("Slack image uploads", () => {
       .mockResolvedValueOnce(Response.json({ ok: true }));
     vi.stubGlobal("fetch", fetchMock);
     expect(await uploadSlackImage({ accessToken: "token", png: Buffer.from("png"), title: "Evaluation" })).toBe("F123");
-    expect(JSON.parse(fetchMock.mock.calls[0]![1].body)).toEqual({ filename: "evaluation.png", length: 3 });
+    expect(fetchMock.mock.calls[0]![1].headers["content-type"]).toBe("application/x-www-form-urlencoded");
+    expect(Object.fromEntries(new URLSearchParams(fetchMock.mock.calls[0]![1].body))).toEqual({ filename: "evaluation.png", length: "3" });
     expect(fetchMock.mock.calls[1]![1].headers).toEqual({ "content-type": "application/octet-stream" });
-    expect(JSON.parse(fetchMock.mock.calls[2]![1].body)).toEqual({ files: [{ id: "F123", title: "Evaluation" }] });
+    expect(fetchMock.mock.calls[2]![1].headers["content-type"]).toBe("application/x-www-form-urlencoded");
+    expect(JSON.parse(new URLSearchParams(fetchMock.mock.calls[2]![1].body).get("files")!)).toEqual([{ id: "F123", title: "Evaluation" }]);
   });
 
   it("does not finalize a failed byte upload", async () => {
