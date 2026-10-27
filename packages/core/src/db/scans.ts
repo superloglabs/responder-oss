@@ -377,6 +377,7 @@ export async function claimDueScans(now = new Date(), limit = 20) {
         slackChannelResourceId: scanConfigurations.slackChannelResourceId,
       })
       .from(scanConfigurations)
+      .innerJoin(agents, eq(agents.id, scanConfigurations.agentId))
       .innerJoin(
         integrationResources,
         eq(
@@ -391,6 +392,9 @@ export async function claimDueScans(now = new Date(), limit = 20) {
       .where(
         and(
           isNotNull(scanConfigurations.agentId),
+          // A disabled agent cannot start a run, so its schedule never
+          // advances; claiming it would fail on every poll.
+          eq(agents.enabled, true),
           isNotNull(scanConfigurations.frequencyHours),
           isNotNull(scanConfigurations.slackChannelResourceId),
           lte(scanConfigurations.nextRunAt, now),

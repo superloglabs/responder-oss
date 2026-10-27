@@ -3,6 +3,7 @@ import { PgDialect } from "drizzle-orm/pg-core";
 import type { SQL } from "drizzle-orm";
 import { getDatabase } from "./client.js";
 import {
+  claimDueScans,
   createScanInvestigationRequest,
   releaseScanRunLease,
   ScanConfigurationError,
@@ -155,5 +156,35 @@ describe("scan run leases", () => {
     const nextRunAt = set.mock.calls[0]![0].nextRunAt;
     const query = new PgDialect().sqlToQuery(nextRunAt as SQL);
     expect(query.sql).toContain("cast($1 as timestamptz)");
+  });
+});
+
+describe("due scan claims", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("skips scans whose agent is disabled", async () => {
+    const query = {
+      from: vi.fn(),
+      innerJoin: vi.fn(),
+      where: vi.fn(),
+      orderBy: vi.fn(),
+      limit: vi.fn(),
+      for: vi.fn().mockResolvedValue([]),
+    };
+    query.from.mockReturnValue(query);
+    query.innerJoin.mockReturnValue(query);
+    query.where.mockReturnValue(query);
+    query.orderBy.mockReturnValue(query);
+    query.limit.mockReturnValue(query);
+    const tx = { select: vi.fn(() => query) };
+    vi.mocked(getDatabase).mockReturnValue({
+      transaction: vi.fn((run: (transaction: typeof tx) => unknown) => run(tx)),
+    } as never);
+
+    await expect(claimDueScans(new Date("2026-09-14T09:00:00.000Z"))).resolves.toEqual([]);
+
+    const where = new PgDialect().sqlToQuery(query.where.mock.calls[0]![0] as SQL);
+    expect(where.sql).toContain('"agents"."enabled" = $');
+    expect(where.params).toContain(true);
   });
 });
