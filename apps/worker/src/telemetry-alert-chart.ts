@@ -51,8 +51,8 @@ export function alertChartSvg(input: {
   const title = `${measure} per ${period(rule.windowMinutes)}`;
   const date = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone: "UTC" }).format(now);
   return `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="208" viewBox="0 0 512 208">
-  <rect x="0.5" y="0.5" width="511" height="207" rx="8" fill="#FFFFFF" stroke="#E8E8E8"/>
-  <g font-family="Inter" fill="#202020">
+  <rect width="512" height="208" fill="#FFFFFF"/>
+  <g font-family="Inter" font-weight="500" fill="#202020">
     <text x="16" y="29" font-size="8" font-weight="600">${xml(title.slice(0, 75))}</text>
     <text x="496" y="29" font-size="7" fill="#666666" text-anchor="end">Last ${period(rule.windowMinutes * chartWindows)}</text>
     ${ticks.map((n) => `<line x1="40" x2="496" y1="${y(n)}" y2="${y(n)}" stroke="#F0F0F0"/><text x="30" y="${y(n) + 4}" text-anchor="end" font-size="7" fill="#666666">${format(n)}</text>`).join("")}
@@ -92,7 +92,7 @@ export async function renderAlertChart(input: {
   const png = new Resvg(svg, {
     // Match Slack's 1024px preview with a compact layout and readable labels.
     fitTo: { mode: "zoom", value: 2 },
-    font: { fontFiles: [fileURLToPath(new URL("../assets/Inter.ttf", import.meta.url))], loadSystemFonts: false, defaultFontFamily: "Inter" },
+    font: { fontFiles: ["Inter.ttf", "Inter-SemiBold.ttf"].map((name) => fileURLToPath(new URL(`../assets/${name}`, import.meta.url))), loadSystemFonts: false, defaultFontFamily: "Inter" },
   }).render().asPng();
   return {
     altText: `${rule.name}: ${input.groupKey || "all matching data"}. Alert when ${describeAlertCondition(rule.comparator, rule.threshold, alertValueUnit(rule))}. Values per ${rule.windowMinutes} minutes.`.slice(0, 2000),
