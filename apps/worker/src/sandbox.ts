@@ -640,6 +640,15 @@ export async function closeDaytonaSandbox(
       if (delayMs > 0) await dependencies.sleep(delayMs);
       try {
         const sandbox = await client.get(sandboxId);
+        // Closing a session that does not pause asks Daytona to delete the
+        // sandbox without waiting, and a second delete conflicts with it.
+        if (
+          sandbox.state === SandboxState.DESTROYING ||
+          sandbox.state === SandboxState.DESTROYED
+        ) {
+          cleanupError = undefined;
+          break;
+        }
         await client.delete(sandbox, 60, true);
         cleanupError = undefined;
         break;

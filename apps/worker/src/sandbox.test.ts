@@ -816,6 +816,29 @@ describe("Daytona sandbox cleanup", () => {
     expect(harness.dispose).toHaveBeenCalledOnce();
   });
 
+  it("accepts a sandbox session close is still deleting", async () => {
+    const harness = cleanupHarness();
+    const conflict = Object.assign(new Error("Sandbox state change in progress"), {
+      name: "DaytonaConflictError",
+      statusCode: 409,
+    });
+    harness.get
+      .mockResolvedValueOnce({ id: "sandbox-1", state: "started" })
+      .mockResolvedValueOnce({ id: "sandbox-1", state: "destroying" });
+    harness.deleteSandbox.mockRejectedValueOnce(conflict);
+
+    await closeDaytonaSandbox(
+      harness.session,
+      { daytonaApiKey: "daytona-test" },
+      { jobId: "run-1" },
+      harness.dependencies,
+    );
+
+    expect(harness.deleteSandbox).toHaveBeenCalledOnce();
+    expect(harness.reportException).not.toHaveBeenCalled();
+    expect(harness.dispose).toHaveBeenCalledOnce();
+  });
+
   it("falls back to a confirmed provider deletion when session close fails", async () => {
     const harness = cleanupHarness({
       closeError: new Error("session close failed"),
