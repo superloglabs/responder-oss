@@ -25,6 +25,7 @@ import {
   XIcon,
 } from "@phosphor-icons/react";
 import { ColorThemeToggle } from "./color-theme-toggle";
+import { TelemetryCallCard } from "./telemetry-call-card";
 import "./workspace.css";
 
 interface AppShellProps {
@@ -312,6 +313,7 @@ export function AppShell({
         </div>
         <div className="globalHeader__right" ref={menuRef}>
           {!workspace ? <ColorThemeToggle className="globalThemeToggle" /> : null}
+          {workspace && !guest ? <TelemetryCallCard /> : null}
           {guest ?? <div className="accountMenu">
             <button
               aria-expanded={isMenuOpen}
