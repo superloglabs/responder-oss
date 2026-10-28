@@ -185,6 +185,20 @@ async function retryTransientDaytonaOperation<T>(
   throw lastError;
 }
 
+// Looks a sandbox up by listing instead of getting it by name. Most lookups
+// find nothing, and the Daytona SDK records a missing sandbox from get as a
+// span exception even when the caller expects it.
+async function findDaytonaSandboxByName(
+  client: DaytonaCleanupClient,
+  name: string,
+): Promise<Sandbox | undefined> {
+  // The name filter matches a prefix, so it also returns later attempts.
+  for await (const sandbox of client.list({ name })) {
+    if (sandbox.name === name) return sandbox;
+  }
+  return undefined;
+}
+
 async function deleteDaytonaSandboxByReference(
   reference: string,
   config: DaytonaCleanupConfig,
@@ -199,41 +213,45 @@ async function deleteDaytonaSandboxByReference(
     for (const [index, delayMs] of retryDelays.entries()) {
       if (delayMs > 0) await dependencies.sleep(delayMs);
       try {
-        const sandbox = await client.get(reference);
-        await client.delete(sandbox, 60, true);
-        return;
-      } catch (error) {
-        if (isDaytonaNotFound(error)) {
-          if (
-            waitForAppearance &&
-            index < daytonaAppearanceRetryDelaysMs.length - 1
-          ) {
-            continue;
-          }
-          if (waitForAppearance) {
-            const cleanupError = new Error(
-              `Sandbox ${reference} did not appear before cleanup timed out`,
-            );
-            await dependencies.reportException(cleanupError, {
-              operation: "sandbox_cleanup",
-              sandboxId: reference,
-            });
-            missingSandboxErrors.add(cleanupError);
-            console.error(JSON.stringify({
-              event: "daytona_pending_sandbox_not_found",
-              sandboxId: reference,
-            }));
-            throw cleanupError;
-          }
+        const sandbox = await findDaytonaSandboxByName(client, reference);
+        if (sandbox) {
+          await client.delete(sandbox, 60, true);
           return;
         }
-        if (
-          !(isTransientDaytonaError(error) || isDaytonaConflict(error)) ||
-          index === retryDelays.length - 1
-        ) {
-          throw error;
+      } catch (error) {
+        if (!isDaytonaNotFound(error)) {
+          if (
+            !(isTransientDaytonaError(error) || isDaytonaConflict(error)) ||
+            index === retryDelays.length - 1
+          ) {
+            throw error;
+          }
+          continue;
         }
       }
+      // The sandbox does not exist, or was deleted before this call could.
+      if (
+        waitForAppearance &&
+        index < daytonaAppearanceRetryDelaysMs.length - 1
+      ) {
+        continue;
+      }
+      if (waitForAppearance) {
+        const cleanupError = new Error(
+          `Sandbox ${reference} did not appear before cleanup timed out`,
+        );
+        await dependencies.reportException(cleanupError, {
+          operation: "sandbox_cleanup",
+          sandboxId: reference,
+        });
+        missingSandboxErrors.add(cleanupError);
+        console.error(JSON.stringify({
+          event: "daytona_pending_sandbox_not_found",
+          sandboxId: reference,
+        }));
+        throw cleanupError;
+      }
+      return;
     }
   } finally {
     await client[Symbol.asyncDispose]().catch(() => undefined);

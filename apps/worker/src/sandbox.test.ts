@@ -37,6 +37,15 @@ function cleanupHarness(options?: {
         Object.assign(new Error("missing"), { statusCode: 404 }),
       )
     : vi.fn().mockResolvedValue(sandbox);
+  // Cleanup finds a sandbox by listing its name. The harness answers each
+  // listing from get, so get stands for the sandbox Daytona holds.
+  const list = vi.fn(async function* (query?: { name?: string }) {
+    try {
+      yield { name: query?.name, ...(await get(query?.name)) };
+    } catch (error) {
+      if ((error as { statusCode?: number }).statusCode !== 404) throw error;
+    }
+  });
   const deleteSandbox = options?.deleteError
     ? vi.fn().mockRejectedValue(options.deleteError)
     : vi.fn().mockResolvedValue(undefined);
@@ -47,6 +56,7 @@ function cleanupHarness(options?: {
     createClient: vi.fn(() => ({
       delete: deleteSandbox,
       get,
+      list,
       [Symbol.asyncDispose]: dispose,
     })),
     reportException,
@@ -58,6 +68,7 @@ function cleanupHarness(options?: {
     dependencies,
     dispose,
     get,
+    list,
     reportException,
     session,
     sleep,
@@ -134,6 +145,39 @@ describe("Daytona sandbox preparation", () => {
 });
 
 describe("Daytona sandbox cleanup", () => {
+  it("finds an earlier sandbox by listing its exact name", async () => {
+    const harness = cleanupHarness();
+    // A missing sandbox from get is recorded as a span exception.
+    const get = vi.fn();
+    const list = vi.fn(async function* () {
+      yield { id: "sandbox-2", name: "responder-investigation-1-2" };
+    });
+    const dependencies = {
+      ...harness.dependencies,
+      createClient: () => ({
+        delete: harness.deleteSandbox,
+        get,
+        list,
+        [Symbol.asyncDispose]: harness.dispose,
+      }),
+    } as unknown as DaytonaCleanupDependencies;
+    const createdSession = { state: { sandboxId: "sandbox-1" } };
+    const creator = { create: vi.fn().mockResolvedValue(createdSession) };
+
+    await expect(
+      createDaytonaSandboxSession(
+        creator,
+        { daytonaApiKey: "daytona-test" },
+        "responder-investigation-1",
+        dependencies,
+      ),
+    ).resolves.toBe(createdSession);
+
+    expect(list).toHaveBeenCalledWith({ name: "responder-investigation-1" });
+    expect(get).not.toHaveBeenCalled();
+    expect(harness.deleteSandbox).not.toHaveBeenCalled();
+  });
+
   it("removes an existing named sandbox before creating a replacement", async () => {
     const harness = cleanupHarness();
     const createdSession = { state: { sandboxId: "sandbox-2" } };
