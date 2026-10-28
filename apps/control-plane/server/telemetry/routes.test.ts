@@ -274,6 +274,11 @@ describe("telemetry routes", () => {
       spanNames: ["GET /cart"],
       statusCodes: ["STATUS_CODE_OK", "STATUS_CODE_UNSET"],
     });
+
+    // The status labels and stored spellings name the same codes.
+    expect((await app.request("/traces?status=Error&status=error&status=Ok")).status).toBe(200);
+    expect(dependencies.queryTraces).toHaveBeenLastCalledWith(expect.anything(), organizationId,
+      expect.objectContaining({ statusCodes: ["STATUS_CODE_ERROR", "STATUS_CODE_OK"] }));
   });
 
   it("validates trace offsets and forwards the first and subsequent pages", async () => {
@@ -411,7 +416,7 @@ describe("telemetry routes", () => {
     const { app, dependencies } = routes();
 
     expect((await app.request("/traces/not-a-trace")).status).toBe(400);
-    expect((await app.request("/traces?status=ok")).status).toBe(400);
+    expect((await app.request("/traces?status=broken")).status).toBe(400);
     expect((await app.request("/traces?filter=no-operator")).status).toBe(400);
     expect((await app.request("/traces?minDurationMs=-1")).status).toBe(400);
     expect(dependencies.queryTrace).not.toHaveBeenCalled();

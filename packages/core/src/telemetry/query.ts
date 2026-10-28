@@ -192,6 +192,30 @@ function fieldConds(
   return { conds, params };
 }
 
+// The ClickHouse exporter writes span statuses as Error, Ok, and Unset and
+// span kinds as Server, Client, and so on; older exporters wrote the OTLP
+// enum names. Queries filter, group, and return both as the OTLP names.
+function spanStatusExpr(column: string): string {
+  return `multiIf(${column} IN ('Error', 'STATUS_CODE_ERROR'), 'STATUS_CODE_ERROR', ${column} IN ('Ok', 'STATUS_CODE_OK'), 'STATUS_CODE_OK', 'STATUS_CODE_UNSET')`;
+}
+const SPAN_STATUS = spanStatusExpr("StatusCode");
+const SPAN_KIND = "if(startsWith(SpanKind, 'SPAN_KIND_'), SpanKind, concat('SPAN_KIND_', upper(SpanKind)))";
+const ERROR_SPAN_COND = "StatusCode IN ('Error', 'STATUS_CODE_ERROR')";
+
+function spanStatusCode(value: string): string {
+  if (value === "Error" || value === "STATUS_CODE_ERROR") return "STATUS_CODE_ERROR";
+  if (value === "Ok" || value === "STATUS_CODE_OK") return "STATUS_CODE_OK";
+  return "STATUS_CODE_UNSET";
+}
+
+// The trace list reads root statuses from the summary rollup too, which keeps
+// the stored spelling.
+function withSpanStatus(rows: unknown[]): unknown[] {
+  return (rows as Array<Record<string, unknown>>).map((row) =>
+    typeof row.root_status_code === "string" ? { ...row, root_status_code: spanStatusCode(row.root_status_code) } : row,
+  );
+}
+
 // Conditions that each listed column holds one of its values. Empty lists
 // add nothing.
 function anyOfConds(
@@ -220,7 +244,7 @@ function groupExprForAttribute(
     return { expr: "upper(SeverityText)", params: {} };
   }
   if (groupBy === "status" && source === "traces") {
-    return { expr: "StatusCode", params: {} };
+    return { expr: SPAN_STATUS, params: {} };
   }
   if (groupBy === "operation" && source === "traces") {
     return { expr: "SpanName", params: {} };
@@ -378,7 +402,7 @@ export async function queryTraces(
   ];
   if (params.service) conds.push("ServiceName = {service:String}");
   if (params.spanName) conds.push("SpanName = {spanName:String}");
-  if (params.statusCode) conds.push("StatusCode = {statusCode:String}");
+  if (params.statusCode) conds.push(`${SPAN_STATUS} = {statusCode:String}`);
   if (typeof params.minDurationMs === "number") {
     conds.push("Duration >= {minDurationNs:UInt64}");
   }
@@ -391,8 +415,8 @@ export async function queryTraces(
       ParentSpanId AS parent_span_id,
       ServiceName AS service,
       SpanName AS span_name,
-      SpanKind AS span_kind,
-      StatusCode AS status_code,
+      ${SPAN_KIND} AS span_kind,
+      ${SPAN_STATUS} AS status_code,
       StatusMessage AS status_message,
       Duration / 1000000 AS duration_ms,
       SpanAttributes AS span_attrs,
@@ -574,7 +598,7 @@ async function queryTracesAggregatedFromSummary(
       query_params: { organizationId, since: sinceSql, until: untilSql, limit: params.limit, offset: params.offset ?? 0 },
       format: "JSONEachRow",
     });
-    return r.json();
+    return withSpanStatus(await r.json());
   });
 }
 
@@ -616,12 +640,12 @@ export async function queryTracesAggregated(
   const anyOf = anyOfConds([
     { expr: "ServiceName", param: "services", values: params.services },
     { expr: "SpanName", param: "spanNames", values: params.spanNames },
-    { expr: "StatusCode", param: "statusCodes", values: params.statusCodes },
+    { expr: SPAN_STATUS, param: "statusCodes", values: params.statusCodes },
   ]);
   const innerConds: string[] = [...outerConds, ...spanAttr.conds, ...field.conds, ...anyOf.conds];
   if (params.service) innerConds.push("ServiceName = {service:String}");
   if (params.spanName) innerConds.push("SpanName = {spanName:String}");
-  if (params.statusCode) innerConds.push("StatusCode = {statusCode:String}");
+  if (params.statusCode) innerConds.push(`${SPAN_STATUS} = {statusCode:String}`);
   const hasSpanLevelFilter = !!(
     params.service ||
     params.spanName ||
@@ -652,7 +676,7 @@ export async function queryTracesAggregated(
       argMin(ServiceName, Timestamp) AS root_service,
       argMin(StatusCode, Timestamp) AS root_status_code,
       count() AS span_count,
-      countIf(StatusCode = 'STATUS_CODE_ERROR') AS error_count,
+      countIf(${ERROR_SPAN_COND}) AS error_count,
       uniqExact(ServiceName) AS service_count,
       toFloat64(
         max(toUnixTimestamp64Nano(Timestamp) + Duration) -
@@ -685,7 +709,7 @@ export async function queryTracesAggregated(
       },
       format: "JSONEachRow",
     });
-    return r.json();
+    return withSpanStatus(await r.json());
   });
 }
 
@@ -740,8 +764,8 @@ export async function getTraceDetail(ch: ClickHouseClient, organizationId: strin
         ParentSpanId AS parent_span_id,
         ServiceName AS service,
         SpanName AS span_name,
-        SpanKind AS span_kind,
-        StatusCode AS status_code,
+        ${SPAN_KIND} AS span_kind,
+        ${SPAN_STATUS} AS status_code,
         StatusMessage AS status_message,
         toString(Duration) AS duration_ns,
         toFloat64(Duration) / 1000000 AS duration_ms,
@@ -2749,23 +2773,23 @@ async function countSeriesFromRollup(
     // case-insensitive comparison.
     if (filter.severity) conds.push("severity = upper({severity:String})");
   } else if (filter.statusCode) {
-    conds.push("status_code = {statusCode:String}");
+    conds.push(`${spanStatusExpr("status_code")} = {statusCode:String}`);
   }
   const anyOf = anyOfConds([
     { expr: "service", param: "services", values: filter.services },
     ...(source === "logs"
       ? [{ expr: "severity", param: "severities", values: filter.severities?.map((value) => value.toUpperCase()) }]
-      : [{ expr: "status_code", param: "statusCodes", values: filter.statusCodes }]),
+      : [{ expr: spanStatusExpr("status_code"), param: "statusCodes", values: filter.statusCodes }]),
   ]);
   conds.push(...anyOf.conds);
   const groupColumn = groupBy ? rollupGroupColumn(groupBy) : null;
   // The rollup keeps severity for logs and status codes for spans only.
   const groupExpr =
-    groupColumn === "service" ||
-    (groupColumn === "severity" && source === "logs") ||
-    (groupColumn === "status_code" && source === "traces")
-      ? groupColumn
-      : "''";
+    groupColumn === "status_code" && source === "traces"
+      ? spanStatusExpr("status_code")
+      : groupColumn === "service" || (groupColumn === "severity" && source === "logs")
+        ? groupColumn
+        : "''";
 
   const query = `
     SELECT
@@ -2857,7 +2881,7 @@ function countConditions(organizationId: string, source: SeriesSource, filter: S
       : [
           { expr: "ServiceName", param: "services", values: filter.services },
           { expr: "SpanName", param: "spanNames", values: filter.spanNames },
-          { expr: "StatusCode", param: "statusCodes", values: filter.statusCodes },
+          { expr: SPAN_STATUS, param: "statusCodes", values: filter.statusCodes },
         ],
   );
   const conds: string[] = [
@@ -2878,7 +2902,7 @@ function countConditions(organizationId: string, source: SeriesSource, filter: S
     if (filter.search) conds.push("positionCaseInsensitive(Body, {search:String}) > 0");
   } else {
     if (filter.spanName) conds.push("SpanName = {spanName:String}");
-    if (filter.statusCode) conds.push("StatusCode = {statusCode:String}");
+    if (filter.statusCode) conds.push(`${SPAN_STATUS} = {statusCode:String}`);
     if (typeof filter.minDurationMs === "number") {
       conds.push("Duration >= {minDurationNs:UInt64}");
     }
@@ -3260,8 +3284,7 @@ export type TraceOverview = {
 // Requests enter a service through server and consumer spans, or start a
 // trace with a root span.
 const ENTRY_SPAN_COND =
-  "(SpanKind IN ('SPAN_KIND_SERVER', 'SPAN_KIND_CONSUMER') OR ParentSpanId = '')";
-const ERROR_SPAN_COND = "StatusCode = 'STATUS_CODE_ERROR'";
+  "(SpanKind IN ('Server', 'Consumer', 'SPAN_KIND_SERVER', 'SPAN_KIND_CONSUMER') OR ParentSpanId = '')";
 // What a client span calls, from the most specific attribute it carries.
 const DEPENDENCY_NAME_EXPR = `multiIf(
   SpanAttributes['peer.service'] != '', SpanAttributes['peer.service'],
@@ -3330,7 +3353,7 @@ export async function traceOverview(
     read<Record<string, string | number>>(`
       SELECT ${DEPENDENCY_NAME_EXPR} AS name, ${stats}
       FROM otel_traces
-      WHERE ${where} AND SpanKind = 'SPAN_KIND_CLIENT'
+      WHERE ${where} AND SpanKind IN ('Client', 'SPAN_KIND_CLIENT')
       GROUP BY name
       ORDER BY p95_ms DESC
       LIMIT 8

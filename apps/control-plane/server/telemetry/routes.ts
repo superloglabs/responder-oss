@@ -459,14 +459,20 @@ export function parseAttributeFilters(values: string[]): ResourceAttrFilter[] | 
 }
 
 // Repeated parameters that match any of their values, and the filter field
-// each one sets. `status=error` is the trace list's older form of
-// `status=STATUS_CODE_ERROR`.
+// each one sets.
 const valueListParams = {
   logs: { service: "services", severity: "severities" },
   traces: { operation: "spanNames", service: "services", status: "statusCodes" },
 } as const satisfies Record<TelemetrySignal, Record<string, keyof SeriesFilter>>;
 const maxListValues = 50;
-const spanStatusCodes = new Set(["STATUS_CODE_ERROR", "STATUS_CODE_OK", "STATUS_CODE_UNSET"]);
+const spanStatusCodes = ["STATUS_CODE_ERROR", "STATUS_CODE_OK", "STATUS_CODE_UNSET"];
+
+// `status` takes the OTLP name or its short form in any case: `Error` and
+// `error` both mean `STATUS_CODE_ERROR`.
+function spanStatusCode(value: string): string | null {
+  const code = `STATUS_CODE_${value.toUpperCase().replace(/^STATUS_CODE_/u, "")}`;
+  return spanStatusCodes.includes(code) ? code : null;
+}
 
 export function parseValueLists(
   signal: TelemetrySignal,
@@ -474,12 +480,11 @@ export function parseValueLists(
 ): Pick<SeriesFilter, "services" | "severities" | "spanNames" | "statusCodes"> | null {
   const lists: Pick<SeriesFilter, "services" | "severities" | "spanNames" | "statusCodes"> = {};
   for (const [param, field] of Object.entries(valueListParams[signal])) {
-    const values = [...new Set((queries(param) ?? []).map((value) => value.trim()).filter(Boolean))].map((value) =>
-      param === "status" && value === "error" ? "STATUS_CODE_ERROR" : value,
-    );
-    if (values.length > maxListValues || values.some((value) => value.length > 500)) return null;
-    if (param === "status" && values.some((value) => !spanStatusCodes.has(value))) return null;
-    if (values.length) lists[field] = values;
+    const given = [...new Set((queries(param) ?? []).map((value) => value.trim()).filter(Boolean))];
+    if (given.length > maxListValues || given.some((value) => value.length > 500)) return null;
+    const values = param === "status" ? given.map(spanStatusCode) : given;
+    if (values.some((value) => value === null)) return null;
+    if (values.length) lists[field] = [...new Set(values as string[])];
   }
   return lists;
 }

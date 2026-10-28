@@ -111,6 +111,10 @@ describe("explorer queries", () => {
       "range=1h&operation=GET&status=STATUS_CODE_ERROR&minDurationMs=500&facet=span.http.route",
     );
     expect(traceApiParams(query).toString()).toBe("range=1h&operation=GET&status=STATUS_CODE_ERROR");
+    expect(traceExplorerQuery(new URLSearchParams("status=Error&status=STATUS_CODE_ERROR&status=Ok")).statuses).toEqual([
+      "STATUS_CODE_ERROR",
+      "STATUS_CODE_OK",
+    ]);
   });
 
   it("round trips a fixed trace search window and filters without sending open facets", () => {

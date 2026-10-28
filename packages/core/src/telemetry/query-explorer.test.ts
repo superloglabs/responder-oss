@@ -28,7 +28,7 @@ describe("count series groupings", () => {
 
     const [logs, traces] = calls.filter((call) => /\bFROM otel_/u.test(call.query));
     expect(logs!.query).toMatch(/upper\(SeverityText\) AS group_key/u);
-    expect(traces!.query).toMatch(/StatusCode AS group_key/u);
+    expect(traces!.query).toMatch(/multiIf\(StatusCode IN \('Error', 'STATUS_CODE_ERROR'\), 'STATUS_CODE_ERROR'.*\) AS group_key/u);
   });
 
   it("reads level and status groupings from the per-minute rollup", async () => {
@@ -40,7 +40,7 @@ describe("count series groupings", () => {
 
     const [logs, traces] = calls.filter((call) => /\bFROM events_per_minute\b/u.test(call.query));
     expect(logs!.query).toMatch(/severity AS group_key/u);
-    expect(traces!.query).toMatch(/status_code AS group_key/u);
+    expect(traces!.query).toMatch(/multiIf\(status_code IN \('Error', 'STATUS_CODE_ERROR'\), 'STATUS_CODE_ERROR'.*\) AS group_key/u);
   });
 });
 
@@ -118,9 +118,18 @@ describe("explorer value lists", () => {
     await queryTracesAggregated(ch, "project-1", { limit: 50, range, statusCodes: ["STATUS_CODE_ERROR"] });
 
     const query = calls.find((call) => /GROUP BY TraceId/u.test(call.query));
-    expect(query!.query).toMatch(/StatusCode IN \{statusCodes:Array\(String\)\}/u);
+    expect(query!.query).toMatch(/multiIf\(StatusCode IN \('Error', 'STATUS_CODE_ERROR'\).*\) IN \{statusCodes:Array\(String\)\}/u);
     expect(query!.params).toMatchObject({ statusCodes: ["STATUS_CODE_ERROR"] });
     expect(calls.some((call) => /otel_traces_summary/u.test(call.query))).toBe(false);
+  });
+
+  it("returns stored span statuses under their OTLP names", async () => {
+    const rows = (query: string) =>
+      /GROUP BY TraceId/u.test(query) ? [{ root_status_code: "Error" }, { root_status_code: "STATUS_CODE_OK" }] : [];
+
+    const traces = await queryTracesAggregated(client([], { rows }), "project-1", { limit: 50, range });
+
+    expect(traces).toEqual([{ root_status_code: "STATUS_CODE_ERROR" }, { root_status_code: "STATUS_CODE_OK" }]);
   });
 
   it("counts spans per operation", async () => {

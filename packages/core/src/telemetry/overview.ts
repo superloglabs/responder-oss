@@ -101,7 +101,7 @@ const EXCEPTION_LOG =
   "(LogAttributes['exception.type'] != '' OR LogAttributes['exception.message'] != '' OR LogAttributes['exception.stacktrace'] != '')";
 // Requests enter a service through server and consumer spans, or start a
 // trace with a root span.
-const ENTRY_SPAN = "(SpanKind IN ('SPAN_KIND_SERVER', 'SPAN_KIND_CONSUMER') OR ParentSpanId = '')";
+const ENTRY_SPAN = "(SpanKind IN ('Server', 'Consumer', 'SPAN_KIND_SERVER', 'SPAN_KIND_CONSUMER') OR ParentSpanId = '')";
 // A model call, whether or not it reports its token usage.
 const AI_CALL = `(SpanAttributes['gen_ai.operation.name'] IN ('chat', 'text_completion', 'generate_content', 'embeddings') OR ${AI_USAGE_CONDITION})`;
 const AI_COMPLETED = `NOT ${AI_FAILED_CONDITION}`;
