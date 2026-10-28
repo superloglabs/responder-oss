@@ -3,8 +3,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthGate } from "./auth-gate";
 
+const session = vi.hoisted(() => ({ data: null as unknown }));
+
 vi.mock("../auth-client", () => ({
-  authClient: { useSession: () => ({ data: null, isPending: false }) },
+  authClient: { useSession: () => ({ data: session.data, isPending: false }) },
 }));
 vi.mock("../color-theme", () => ({
   useColorTheme: () => ({ theme: "light", toggleTheme: vi.fn() }),
@@ -61,5 +63,44 @@ describe("signed-out authentication", () => {
     expect(html).toContain('href="/privacy"');
     expect(html).toContain("Continue with Google");
     expect(html).toContain("Continue with GitHub");
+  });
+});
+
+describe("workspace invitation", () => {
+  const invitationPath = "/invite/11111111-1111-4111-8111-111111111111";
+
+  function signedInAs(emailVerified: boolean) {
+    session.data = {
+      session: { activeOrganizationId: null },
+      user: { email: "ada@example.com", emailVerified, id: "user-1" },
+    };
+  }
+
+  beforeEach(() => vi.stubGlobal("sessionStorage", { getItem: () => null }));
+  afterEach(() => {
+    session.data = null;
+    vi.unstubAllGlobals();
+  });
+
+  it("asks an unverified account to confirm its email before joining", () => {
+    signedInAs(false);
+    const html = renderSignIn(invitationPath);
+    expect(html).toContain("Confirm your email");
+    expect(html).toContain("confirm that you own ada@example.com");
+    expect(html).toContain("Email me a link");
+    expect(html).not.toContain("Accept invitation");
+  });
+
+  it("explains an expired confirmation link", () => {
+    signedInAs(false);
+    const html = renderSignIn(`${invitationPath}?error=TOKEN_EXPIRED`);
+    expect(html).toContain("That confirmation link is invalid or expired.");
+  });
+
+  it("lets a verified account accept", () => {
+    signedInAs(true);
+    const html = renderSignIn(invitationPath);
+    expect(html).toContain("Accept invitation");
+    expect(html).not.toContain("Confirm your email");
   });
 });

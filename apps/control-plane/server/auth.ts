@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { drizzleAdapter } from "@better-auth/drizzle-adapter";
 import { captureAnalyticsEvent } from "@responder/core/analytics";
 import { syncLoopsSignupContact } from "@responder/core/loops-contacts";
@@ -34,6 +35,7 @@ import { assertWorkspaceCanInvite } from "./billing/invitations.js";
 import { allowsMarketing } from "./consent-policy.js";
 import { sendEmail } from "@responder/core/email";
 import {
+  emailVerificationEmailBody,
   passwordResetEmailBody,
   workspaceInvitationEmailBody,
 } from "./email.js";
@@ -176,6 +178,13 @@ export function createResponderAuth() {
         void sendPasswordResetEmail({ token, url, userId: user.id, email: user.email });
       },
     },
+    // Sent only on request, from the invitation page.
+    emailVerification: {
+      expiresIn: 60 * 60,
+      sendVerificationEmail: async ({ token, url, user }) => {
+        await sendEmailVerificationEmail({ token, url, userId: user.id, email: user.email });
+      },
+    },
     socialProviders: {
       ...(googleClientId && googleClientSecret
         ? {
@@ -282,6 +291,10 @@ export function createResponderAuth() {
       organization({
         allowUserToCreateOrganization: true,
         creatorRole: "admin",
+        // Proves the person owns the invited address, so a forwarded or
+        // leaked invitation link cannot be accepted from a new, unverified
+        // account with that email.
+        requireEmailVerificationOnInvitation: true,
         roles: {
           admin: organizationAdminAc,
           member: organizationMemberAc,
@@ -430,6 +443,41 @@ async function sendPasswordResetEmail(args: {
         userId: args.userId,
       }),
     );
+  }
+}
+
+async function sendEmailVerificationEmail(args: {
+  email: string;
+  token: string;
+  url: string;
+  userId: string;
+}): Promise<void> {
+  try {
+    const sent = await sendEmail({
+      ...emailVerificationEmailBody({ verifyUrl: args.url }),
+      // The token is a JWT, longer than the 256 characters an idempotency
+      // key allows.
+      idempotencyKey: `email-verification/${createHash("sha256").update(args.token).digest("hex")}`,
+      subject: "Confirm your email for Superlog",
+      to: args.email,
+    });
+    if (!sent) return;
+    console.info(
+      JSON.stringify({
+        event: "email_verification_delivery_success",
+        userId: args.userId,
+      }),
+    );
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        errorCode: error instanceof Error ? error.constructor.name : "unknown",
+        errorMessage: authHandlerErrorMessage(error),
+        event: "email_verification_delivery_failed",
+        userId: args.userId,
+      }),
+    );
+    throw error;
   }
 }
 
