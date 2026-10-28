@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { captureAnalyticsEvent } from "@responder/core/analytics";
+import { githubWebhookSecrets } from "@responder/core/integrations/github-apps";
 import { markPullRequestOriginMerged } from "@responder/core/db/pull-request-origins";
 import { markIssuePullRequestMerged } from "@responder/core/db/pull-requests";
 import { markSuggestionPullRequestMerged } from "@responder/core/db/suggestion-pull-requests";
@@ -37,17 +38,19 @@ function safeEqual(left: string, right: string): boolean {
   );
 }
 
+// Accepts a webhook signed by any configured GitHub App.
 export function verifyGitHubSignature(input: {
   rawBody: string;
   signature: string | undefined;
   webhookSecret?: string;
 }): boolean {
-  const webhookSecret = input.webhookSecret ?? process.env.GITHUB_WEBHOOK_SECRET;
-  if (!webhookSecret || !input.signature) return false;
-  const digest = `sha256=${createHmac("sha256", webhookSecret)
-    .update(input.rawBody, "utf8")
-    .digest("hex")}`;
-  return safeEqual(digest, input.signature);
+  const signature = input.signature;
+  if (!signature) return false;
+  const secrets = input.webhookSecret ? [input.webhookSecret] : githubWebhookSecrets();
+  return secrets.some((secret) => safeEqual(
+    `sha256=${createHmac("sha256", secret).update(input.rawBody, "utf8").digest("hex")}`,
+    signature,
+  ));
 }
 
 function parseJson(value: string): unknown {

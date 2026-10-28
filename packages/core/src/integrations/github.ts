@@ -1,5 +1,6 @@
 import { createSign } from "node:crypto";
 import { z } from "zod";
+import { type GitHubApp, githubApps } from "./github-apps.js";
 
 const githubInstallationTokenSchema = z.object({
   token: z.string().min(1),
@@ -8,20 +9,14 @@ const githubInstallationTokenSchema = z.object({
 
 const GITHUB_API_VERSION = "2022-11-28";
 
-interface GitHubAppCredentials {
-  appId: string;
-  privateKey: string;
-}
+type GitHubAppCredentials = Pick<GitHubApp, "appId" | "privateKey">;
 
-function githubAppCredentials(
-  environment: NodeJS.ProcessEnv = process.env,
-): GitHubAppCredentials {
-  const appId = environment.GITHUB_APP_ID;
-  const privateKey = environment.GITHUB_APP_PRIVATE_KEY?.replace(/\\n/g, "\n");
-  if (!appId || !privateKey) {
+function configuredGitHubApps(): GitHubApp[] {
+  const apps = githubApps();
+  if (apps.length === 0) {
     throw new Error("GitHub App credentials are not configured");
   }
-  return { appId, privateKey };
+  return apps;
 }
 
 function encodeJwtPart(value: object): string {
@@ -29,7 +24,7 @@ function encodeJwtPart(value: object): string {
 }
 
 export function createGitHubAppJwt(
-  credentials = githubAppCredentials(),
+  credentials: GitHubAppCredentials = configuredGitHubApps()[0]!,
   now = new Date(),
 ): string {
   const timestamp = Math.floor(now.getTime() / 1_000);
@@ -65,23 +60,37 @@ export class GitHubInstallationNotFoundError extends Error {
   }
 }
 
+// The app that owns each installation seen so far. An installation belongs to
+// one app, and only that app can create its tokens.
+const installationApps = new Map<number, string>();
+
+// Asks each configured app for a token, starting with the one that last owned
+// the installation, so connections to an additional app need no record of it.
 export async function createGitHubInstallationToken(
   installationId: number,
   signal?: AbortSignal,
 ): Promise<string> {
-  const response = await fetch(
-    `https://api.github.com/app/installations/${installationId}/access_tokens`,
-    {
-      method: "POST",
-      headers: githubAppHeaders(createGitHubAppJwt()),
-      signal,
-    },
-  );
-  if (response.status === 404) {
-    throw new GitHubInstallationNotFoundError(installationId);
+  const apps = configuredGitHubApps();
+  const knownAppId = installationApps.get(installationId);
+  const ordered = knownAppId
+    ? [...apps.filter((app) => app.appId === knownAppId), ...apps.filter((app) => app.appId !== knownAppId)]
+    : apps;
+  for (const app of ordered) {
+    const response = await fetch(
+      `https://api.github.com/app/installations/${installationId}/access_tokens`,
+      {
+        method: "POST",
+        headers: githubAppHeaders(createGitHubAppJwt(app)),
+        signal,
+      },
+    );
+    if (response.status === 404) continue;
+    if (!response.ok) {
+      throw new Error("Unable to create GitHub installation token");
+    }
+    installationApps.set(installationId, app.appId);
+    return githubInstallationTokenSchema.parse(await response.json()).token;
   }
-  if (!response.ok) {
-    throw new Error("Unable to create GitHub installation token");
-  }
-  return githubInstallationTokenSchema.parse(await response.json()).token;
+  installationApps.delete(installationId);
+  throw new GitHubInstallationNotFoundError(installationId);
 }

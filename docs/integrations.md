@@ -301,6 +301,14 @@ Configure a public GitHub App with:
   `GITHUB_APP_PRIVATE_KEY`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, and
   `GITHUB_WEBHOOK_SECRET`
 
+New connections install this app. Connections to installations of an earlier
+app keep working when `GITHUB_ADDITIONAL_APPS` lists it as JSON,
+`[{ "appId": "…", "privateKey": "…", "webhookSecret": "…" }]`. Responder
+creates an installation's tokens with whichever configured app owns it, and
+accepts webhooks signed by any of them. An entry in `LEGACY_WEBHOOK_FORWARDS`
+for `/api/webhooks/github` names GitHub Apps by their numeric ID; their events
+go to both products, as for Slack.
+
 The private key never enters the investigation sandbox. Responder creates a
 short-lived installation token and materializes only selected repositories.
 A review on a pull request that a tag mode thread or an automation run opened

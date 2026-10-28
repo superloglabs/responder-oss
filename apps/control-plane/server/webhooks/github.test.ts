@@ -128,6 +128,18 @@ describe("GitHub pull request webhooks", () => {
     ).toBe(false);
   });
 
+  it("accepts webhooks signed by an additional GitHub App", () => {
+    vi.stubEnv("GITHUB_WEBHOOK_SECRET", "webhook-secret");
+    vi.stubEnv("GITHUB_ADDITIONAL_APPS", JSON.stringify([
+      { appId: "3485414", privateKey: "key", webhookSecret: "legacy-secret" },
+    ]));
+    const rawBody = pullRequestEvent();
+
+    expect(verifyGitHubSignature({ rawBody, signature: sign(rawBody, "webhook-secret") })).toBe(true);
+    expect(verifyGitHubSignature({ rawBody, signature: sign(rawBody, "legacy-secret") })).toBe(true);
+    expect(verifyGitHubSignature({ rawBody, signature: sign(rawBody, "wrong-secret") })).toBe(false);
+  });
+
   it("rejects a request with an invalid signature", async () => {
     vi.stubEnv("GITHUB_WEBHOOK_SECRET", "webhook-secret");
     const body = pullRequestEvent();
