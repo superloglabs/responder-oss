@@ -186,6 +186,52 @@ export function formatDay(milliseconds: number, timeZone: string, withWeekday = 
   return `${weekdayNames[new Date(Date.UTC(parts.year, parts.month - 1, parts.day)).getUTCDay()]}, ${day}`;
 }
 
+// Spacings between time axis marks, in minutes.
+const tickMinutes = [1, 2, 5, 10, 15, 30, 60, 120, 180, 360, 720, 1440, 2880, 10_080];
+
+// At most `maximum` marks from `start` to `end` on round wall-clock times in
+// the zone, such as every 6 hours or every midnight, as close together as fit.
+// A mark at midnight reads as the day, others as the time.
+export function timeTicks(
+  start: number,
+  end: number,
+  maximum: number,
+  timeZone: string,
+): Array<{ label: string; time: number }> {
+  if (!(end > start) || maximum < 1) return [];
+  const spanMinutes = (end - start) / minuteMs;
+  const steps = [...tickMinutes, Math.ceil(spanMinutes / maximum / 1440) * 1440];
+  for (const step of steps) {
+    if (spanMinutes / step > maximum + 1) continue;
+    const times = roundTimes(start, end, step, maximum + 1, timeZone);
+    if (times.length > maximum) continue;
+    return times.map((time) => {
+      const parts = zonedParts(time, timeZone);
+      return { label: parts.hour === 0 && parts.minute === 0 ? formatDay(time, timeZone) : formatClock(time, timeZone), time };
+    });
+  }
+  return [];
+}
+
+// Up to `limit` wall-clock times `step` minutes apart, counted from the start
+// of the first day.
+function roundTimes(start: number, end: number, step: number, limit: number, timeZone: string): number[] {
+  const first = zonedParts(start, timeZone);
+  const times: number[] = [];
+  const daily = step >= 1440;
+  let offset = daily ? 0 : Math.ceil((first.hour * 60 + first.minute + first.second / 60) / step) * step;
+  for (; times.length < limit; offset += daily ? step / 1440 : step) {
+    const time = zonedTime(
+      { day: first.day + (daily ? offset : 0), minute: daily ? 0 : offset, month: first.month, year: first.year },
+      timeZone,
+    );
+    if (time > end) break;
+    // A clock change can name one instant twice.
+    if (time >= start && time > (times[times.length - 1] ?? -Infinity)) times.push(time);
+  }
+  return times;
+}
+
 // "2026-10-14 13:52:00", the form the From and To fields show and accept.
 export function formatFieldTime(milliseconds: number, timeZone: string): string {
   const parts = zonedParts(milliseconds, timeZone);

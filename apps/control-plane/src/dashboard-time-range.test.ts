@@ -15,6 +15,7 @@ import {
   startOfDay,
   timeRangeFromParams,
   timeRangeParams,
+  timeTicks,
   triggerText,
   windowText,
   zonedTime,
@@ -54,6 +55,32 @@ describe("time zones", () => {
     expect(rezoneFieldText("2026-10-14 14:52:00", paris, "UTC")).toBe("2026-10-14 12:52:00");
     expect(rezoneFieldText("now", paris, "UTC")).toBe("now");
     expect(rezoneFieldText("not a time", paris, "UTC")).toBe("not a time");
+  });
+});
+
+describe("timeTicks", () => {
+  const labels = (start: string, end: string, maximum: number, timeZone = paris) =>
+    timeTicks(at(start), at(end), maximum, timeZone).map((tick) => tick.label);
+
+  it("marks every midnight up to the end of a week", () => {
+    // Oct 21 10:34 to Oct 28 09:34 in Paris, across the end of summer time.
+    expect(labels("2026-10-21T08:34:00Z", "2026-10-28T08:34:00Z", 7)).toEqual([
+      "Oct 22", "Oct 23", "Oct 24", "Oct 25", "Oct 26", "Oct 27", "Oct 28",
+    ]);
+    expect(timeTicks(at("2026-10-21T08:34:00Z"), at("2026-10-28T08:34:00Z"), 7, paris)[4]!.time).toBe(at("2026-10-25T23:00:00Z"));
+    expect(labels("2026-10-21T08:34:00Z", "2026-10-28T08:34:00Z", 4)).toEqual(["Oct 23", "Oct 25", "Oct 27"]);
+  });
+
+  it("marks round times within a day, naming midnight by its day", () => {
+    expect(labels("2026-10-14T12:52:00Z", "2026-10-14T13:52:00Z", 5)).toEqual(["15:00", "15:15", "15:30", "15:45"]);
+    expect(labels("2026-10-14T12:52:00Z", "2026-10-15T12:52:00Z", 6)).toEqual(["18:00", "Oct 15", "06:00", "12:00"]);
+    // India is 5:30 ahead of UTC, so its hours are not UTC hours.
+    expect(labels("2026-10-14T12:52:00Z", "2026-10-14T15:52:00Z", 4, "Asia/Kolkata")).toEqual(["19:00", "20:00", "21:00"]);
+  });
+
+  it("never gives more marks than asked", () => {
+    expect(timeTicks(at("2026-10-01T00:00:00Z"), at("2026-10-31T00:00:00Z"), 3, "UTC").length).toBeLessThanOrEqual(3);
+    expect(timeTicks(at("2026-10-14T12:00:00Z"), at("2026-10-14T12:00:00Z"), 5, "UTC")).toEqual([]);
   });
 });
 

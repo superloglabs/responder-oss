@@ -1,4 +1,5 @@
 import { type MouseEvent, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { browserTimeZone, timeTicks } from "../dashboard-time-range";
 import { axisTicks, formatWidgetValue, type ChartData, type WidgetUnit } from "../dashboards-api";
 import "./timeseries-chart.css";
 
@@ -19,14 +20,6 @@ function useSize<T extends HTMLElement>() {
     return () => observer.disconnect();
   }, []);
   return { ref, size };
-}
-
-function timeLabel(time: number, spanMs: number, timeZone: string | undefined): string {
-  const date = new Date(time);
-  const zone = timeZone ? { timeZone } : {};
-  return spanMs > 2 * 86_400_000
-    ? date.toLocaleDateString(undefined, { ...zone, day: "numeric", month: "short" })
-    : date.toLocaleTimeString(undefined, { ...zone, hour: "2-digit", hour12: false, minute: "2-digit" });
 }
 
 // A drag shorter than this is a click, not a selection.
@@ -141,7 +134,15 @@ export function TimeseriesChart({
   const barWidth = Math.min(density === "compact" ? 6 : Infinity, Math.max(1, band - Math.min(2, band * 0.2)));
   const x = (index: number) => left + (stacked ? index * band + band / 2 : count > 1 ? (index / (count - 1)) * width : width / 2);
   const spanMs = count > 1 ? chart.buckets[count - 1]! - chart.buckets[0]! : 0;
-  const labelEvery = Math.max(1, Math.ceil(count / Math.max(1, Math.floor(width / 90))));
+  // The time axis covers every bucket, with or without data, and marks round
+  // times by where they fall rather than by bucket.
+  const firstBucket = chart.buckets[0] ?? 0;
+  const axisEnd = stacked ? firstBucket + count * chart.stepMs : firstBucket + spanMs;
+  const xAt = (time: number) => left + ((time - firstBucket) / (axisEnd - firstBucket || 1)) * width;
+  const timeMarks = useMemo(
+    () => timeTicks(firstBucket, axisEnd, Math.max(1, Math.floor(width / 70)), timeZone ?? browserTimeZone()),
+    [axisEnd, firstBucket, timeZone, width],
+  );
 
   function plotOffset(event: MouseEvent<SVGSVGElement>): number {
     const bounds = event.currentTarget.getBoundingClientRect();
@@ -312,19 +313,16 @@ export function TimeseriesChart({
               </g>
             ))}
             {showXAxis
-              ? chart.buckets.map((time, index) =>
-                  index % labelEvery === 0 ? (
-                    <text
-                      className="timeseriesChart__axis"
-                      key={time}
-                      textAnchor={index === 0 ? "start" : index === count - 1 ? "end" : "middle"}
-                      x={x(index)}
-                      y={plotTop + height + 15}
-                    >
-                      {timeLabel(time, spanMs, timeZone)}
+              ? timeMarks.map((mark) => {
+                  // Labels near an edge grow inward, so none is cut off.
+                  const position = xAt(mark.time);
+                  const anchor = position < left + 20 ? "start" : position > left + width - 20 ? "end" : "middle";
+                  return (
+                    <text className="timeseriesChart__axis" key={mark.time} textAnchor={anchor} x={position} y={plotTop + height + 15}>
+                      {mark.label}
                     </text>
-                  ) : null,
-                )
+                  );
+                })
               : null}
             {hover !== null ? (
               stacked ? (
