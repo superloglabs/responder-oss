@@ -34,6 +34,7 @@ function candidate(overrides: Partial<ErrorCandidate> = {}): ErrorCandidate {
     severity: "ERROR",
     span_id: "",
     span_name: "",
+    timestamp: "2026-10-28 12:00:00.000000000",
     trace_id: "",
     ...overrides,
   };

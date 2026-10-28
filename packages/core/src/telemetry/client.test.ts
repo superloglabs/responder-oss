@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { telemetryClickHouseConfig } from "./client.js";
+import { telemetryClickHouseConfig, telemetryWriterClickHouseConfig } from "./client.js";
 
 describe("telemetry ClickHouse config", () => {
   it("is absent when no telemetry store is configured", () => {
@@ -40,5 +40,23 @@ describe("telemetry ClickHouse config", () => {
         "max_open_connections",
       );
     }
+  });
+});
+
+describe("telemetry ClickHouse writer config", () => {
+  it("is absent without a writer user, so reading credentials never write", () => {
+    expect(telemetryWriterClickHouseConfig({ TELEMETRY_CLICKHOUSE_URL: "http://clickhouse:8123", TELEMETRY_CLICKHOUSE_USER: "reader" })).toBeNull();
+    expect(telemetryWriterClickHouseConfig({ TELEMETRY_CLICKHOUSE_WRITER_USER: "events" })).toBeNull();
+  });
+
+  it("writes to the store as the writer user", () => {
+    expect(telemetryWriterClickHouseConfig({
+      TELEMETRY_CLICKHOUSE_DATABASE: "telemetry",
+      TELEMETRY_CLICKHOUSE_PASSWORD: "reader-secret",
+      TELEMETRY_CLICKHOUSE_URL: "http://clickhouse:8123",
+      TELEMETRY_CLICKHOUSE_USER: "reader",
+      TELEMETRY_CLICKHOUSE_WRITER_PASSWORD: "writer-secret",
+      TELEMETRY_CLICKHOUSE_WRITER_USER: "events",
+    })).toMatchObject({ database: "telemetry", password: "writer-secret", url: "http://clickhouse:8123", username: "events" });
   });
 });

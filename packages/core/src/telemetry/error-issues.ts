@@ -41,6 +41,18 @@ export type ErrorIssueSample = {
   traceId: string | null;
 };
 
+// One occurrence of an issue, as written to ClickHouse's error_issue_events,
+// so the issue's logs and spans can be found by their exact row.
+export type ErrorIssueEventRef = {
+  candidateId: string;
+  kind: ErrorIssueKind;
+  service: string;
+  spanId: string;
+  // The log's or span's Timestamp, to the nanosecond.
+  timestamp: string;
+  traceId: string;
+};
+
 // One exception from the otel_issue_candidates projection.
 export type ErrorCandidate = {
   attrs: Record<string, string>;
@@ -59,6 +71,8 @@ export type ErrorCandidate = {
   severity: string;
   span_id: string;
   span_name: string;
+  // Timestamp as ClickHouse writes it, to the nanosecond.
+  timestamp: string;
   trace_id: string;
 };
 
@@ -69,6 +83,8 @@ export type ErrorOccurrences = {
   // Occurrences per UTC hour, as the ISO time the hour starts.
   hourlyCounts: Record<string, number>;
   eventCount: number;
+  // Every occurrence in the batch.
+  events: ErrorIssueEventRef[];
   exceptionType: string;
   fingerprint: string;
   firstSeenAt: Date;
@@ -165,6 +181,7 @@ export async function errorCandidates(
         toUnixTimestamp64Milli(discovered_at) AS discovered_ms,
         candidate_id,
         toUnixTimestamp64Milli(Timestamp) AS seen_ms,
+        toString(Timestamp) AS timestamp,
         kind, project_id, service, span_name, trace_id, span_id,
         exception_type, exception_message, exception_stacktrace,
         attrs, resource_attrs, body, severity
@@ -186,6 +203,30 @@ export async function errorCandidates(
     },
   });
   return result.json<ErrorCandidate>();
+}
+
+// An occurrence and the issue it was grouped into.
+export type ErrorIssueEventRow = ErrorIssueEventRef & { fingerprint: string; issueId: string; organizationId: string };
+
+// Records which issue each occurrence belongs to. A pass that is retried
+// writes its rows again; the table keeps one row per candidate.
+export async function writeErrorIssueEvents(client: TelemetryClient, rows: ErrorIssueEventRow[]): Promise<void> {
+  if (rows.length === 0) return;
+  await client.insert({
+    format: "JSONEachRow",
+    table: "error_issue_events",
+    values: rows.map((row) => ({
+      Timestamp: row.timestamp,
+      candidate_id: row.candidateId,
+      fingerprint: row.fingerprint,
+      issue_id: row.issueId,
+      kind: row.kind,
+      project_id: row.organizationId,
+      service: row.service,
+      span_id: row.spanId,
+      trace_id: row.traceId,
+    })),
+  });
 }
 
 function truncate(value: string | null, length: number): string | null {
@@ -263,6 +304,14 @@ export function groupErrorCandidates(candidates: ErrorCandidate[]): ErrorOccurre
       stacktrace: truncate(stacktrace, maximumStacktraceLength),
       traceId: candidate.trace_id || null,
     };
+    const event: ErrorIssueEventRef = {
+      candidateId: candidate.candidate_id,
+      kind: candidate.kind,
+      service: candidate.service,
+      spanId: candidate.span_id,
+      timestamp: candidate.timestamp,
+      traceId: candidate.trace_id,
+    };
     const day = utcDay(seenAt);
     const hour = utcHour(seenAt);
     const existing = groups.get(key);
@@ -270,6 +319,7 @@ export function groupErrorCandidates(candidates: ErrorCandidate[]): ErrorOccurre
       groups.set(key, {
         dailyCounts: { [day]: 1 },
         eventCount: 1,
+        events: [event],
         exceptionType: fp.exceptionType,
         fingerprint: fp.hash,
         firstSeenAt: seenAt,
@@ -288,6 +338,7 @@ export function groupErrorCandidates(candidates: ErrorCandidate[]): ErrorOccurre
       continue;
     }
     existing.eventCount += 1;
+    existing.events.push(event);
     if (!existing.previousFingerprints.includes(previousFingerprint)) existing.previousFingerprints.push(previousFingerprint);
     existing.dailyCounts[day] = (existing.dailyCounts[day] ?? 0) + 1;
     existing.hourlyCounts[hour] = (existing.hourlyCounts[hour] ?? 0) + 1;

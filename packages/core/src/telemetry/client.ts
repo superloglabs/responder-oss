@@ -42,6 +42,39 @@ export function telemetryClickHouseConfig(
   };
 }
 
+let writerClient: ClickHouseClient | undefined;
+
+// The application writes one telemetry table, error_issue_events, as a user
+// that may only insert into it. Without TELEMETRY_CLICKHOUSE_WRITER_USER the
+// cell does not record error issue events.
+export function telemetryWriterClickHouseConfig(
+  environment: NodeJS.ProcessEnv = process.env,
+): ClickHouseClientConfigOptions | null {
+  const url = environment.TELEMETRY_CLICKHOUSE_URL;
+  const username = environment.TELEMETRY_CLICKHOUSE_WRITER_USER;
+  if (!url || !username) return null;
+  return {
+    url,
+    database: environment.TELEMETRY_CLICKHOUSE_DATABASE || "superlog",
+    username,
+    password: environment.TELEMETRY_CLICKHOUSE_WRITER_PASSWORD ?? "",
+    request_timeout: 20_000,
+    keep_alive: {
+      enabled: true,
+      idle_socket_ttl: 2_500,
+      eagerly_destroy_stale_sockets: true,
+    },
+  };
+}
+
+export function getTelemetryWriterClient(): ClickHouseClient | null {
+  if (writerClient) return writerClient;
+  const config = telemetryWriterClickHouseConfig();
+  if (!config) return null;
+  writerClient = createClient(config);
+  return writerClient;
+}
+
 export function getTelemetryClient(): ClickHouseClient | null {
   if (client) return client;
   const config = telemetryClickHouseConfig();

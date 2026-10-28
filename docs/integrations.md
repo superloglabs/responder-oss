@@ -1068,7 +1068,11 @@ days are deleted every hour.
 
 Every ten seconds the worker reads exceptions from ClickHouse's
 `otel_issue_candidates` table in arrival order, 30 seconds behind the present,
-and adds them to `error_issues` with daily counts. Its cursor is in
+and adds them to `error_issues` with daily counts. With
+`TELEMETRY_CLICKHOUSE_WRITER_USER` set, it also writes each exception's issue,
+fingerprint, time, service, trace and span to ClickHouse's `error_issue_events`
+before it saves the pass, so a failed write retries the pass. That user may
+only insert into that table. Its cursor is in
 `error_issue_cursors`. An issue is open, resolved or silenced. A new
 fingerprint opens an issue; an occurrence from after an issue was resolved
 opens it again; a silenced issue only counts. A cell whose ClickHouse lacks the table skips
@@ -1078,8 +1082,11 @@ The **Errors** page, under Detect, lists a telemetry workspace's issues by
 status, most recently seen first, with occurrences over the last 14 days. It
 filters by service and searches titles, top frames and exception types. An
 issue's page shows its occurrences per day over 30 days, the newest
-occurrence with its stack trace, attributes and trace, and the frames it is
-grouped by, and resolves, silences or reopens it. The API is
+occurrence with its stack trace, attributes and trace, the issue's own traces
+and logs, and the frames it is grouped by, and resolves, silences or reopens
+it. The log and trace explorers take the filter `field.error_issue=<issue ID>`,
+which matches the logs and spans in `error_issue_events`: a log issue's log
+rows, and a span issue's spans and the logs written in them. The API is
 `/api/error-issues`. The management API and MCP server offer
 `list_error_issues`, `get_error_issue` and `update_error_issue`.
 

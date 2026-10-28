@@ -185,6 +185,14 @@ export function sampleAttributes(attributes: Record<string, string>): Array<[str
   return Object.entries(attributes).sort(([left], [right]) => left.localeCompare(right));
 }
 
+// The shortest explorer range that reaches an issue's last occurrence.
+export function errorIssueRange(lastSeenAt: string, now = Date.now()): "24h" | "7d" | "30d" {
+  const age = now - Date.parse(lastSeenAt);
+  if (age < 23 * hourMs) return "24h";
+  if (age < 7 * dayMs - hourMs) return "7d";
+  return "30d";
+}
+
 export function errorActivity(lastSeenAt: string, now = Date.now()): "active" | "inactive" {
   return Date.parse(lastSeenAt) >= now - 15 * 60_000 ? "active" : "inactive";
 }

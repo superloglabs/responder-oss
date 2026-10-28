@@ -2,7 +2,16 @@ import { AttributeTable } from "../components/telemetry-explorer";
 import { DashboardTimePicker } from "../components/dashboard-time-picker";
 import { zoomOutTimeRange } from "../dashboard-time-range";
 import { useTimeZonePreference } from "../use-time-zone-preference";
-import { traceExplorerParams, traceSearchQuery, type TraceSearchQuery } from "../telemetry-api";
+import {
+  logExplorerParams,
+  logExplorerQuery,
+  traceExplorerParams,
+  traceSearchQuery,
+  type ExplorerFilter,
+  type LogExplorerQuery,
+  type TraceSearchQuery,
+} from "../telemetry-api";
+import { LogExplorer } from "./logs";
 import { TraceExplorer } from "./traces";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
@@ -13,6 +22,7 @@ import { TimeseriesChart } from "../components/timeseries-chart";
 import { Badge, Button } from "../design-system";
 import {
   errorIssueDetailChart,
+  errorIssueRange,
   errorIssueStatusLabels,
   fetchErrorIssue,
   formatEventCount,
@@ -31,36 +41,72 @@ export function ErrorIssueStatusBadge({ status }: { status: ErrorIssueStatus }) 
   return <Badge tone={status === "open" ? "danger" : "neutral"}>{errorIssueStatusLabels[status]}</Badge>;
 }
 
-function RelatedTraces({ issue }: { issue: ErrorIssueDetail["issue"] }) {
-  const environmentKey = ["deployment.environment.name", "deployment.environment"].find((key) => issue.lastSample.resourceAttributes[key]);
-  const [query, setQuery] = useState<TraceSearchQuery>(() => ({
-    ...traceSearchQuery(new URLSearchParams("range=30d&status=STATUS_CODE_ERROR")),
-    services: issue.service ? [issue.service] : [],
-    filters: environmentKey ? [{ key: `resource.${environmentKey}`, op: "eq" as const, value: issue.lastSample.resourceAttributes[environmentKey]! }] : [],
-  }));
-  const [openTrace, setOpenTrace] = useState<string | null>(null);
+// The issue's own logs and spans, which the worker recorded as it grouped them.
+function issueFilter(issueId: string): ExplorerFilter {
+  return { key: "field.error_issue", op: "eq", value: issueId };
+}
+
+function useExplorerWindow() {
   const [now, setNow] = useState(() => Date.now());
   const { changeTimeZone, timeZone, timeZonePreference } = useTimeZonePreference();
+  return { changeTimeZone, now, setNow, timeZone, timeZonePreference };
+}
+
+function IssueTraces({ issue }: { issue: ErrorIssueDetail["issue"] }) {
+  const window = useExplorerWindow();
+  const [query, setQuery] = useState<TraceSearchQuery>(() => ({
+    ...traceSearchQuery(new URLSearchParams(`range=${errorIssueRange(issue.lastSeenAt, window.now)}`)),
+    filters: [issueFilter(issue.id)],
+  }));
+  const [openTrace, setOpenTrace] = useState<string | null>(null);
   function updateQuery(update: Partial<TraceSearchQuery>) {
-    if (update.range) setNow(Date.now());
+    if (update.range) window.setNow(Date.now());
     setQuery((current) => ({ ...current, ...update }));
     setOpenTrace(null);
   }
   return (
-    <section aria-label="Related traces" className="errorIssue__traces">
+    <section aria-label="Traces" className="errorIssue__traces">
       <header className="errorIssue__tracesHeading">
-        <h2>Related traces</h2>
+        <h2>Traces</h2>
         <Link to={`/traces/search?${traceExplorerParams(query)}`}>Open in trace search ↗</Link>
         <DashboardTimePicker
-          now={now} onChange={(range) => updateQuery({ range })}
-          onTimeZoneChange={changeTimeZone}
+          now={window.now} onChange={(range) => updateQuery({ range })}
+          onTimeZoneChange={window.changeTimeZone}
           onZoomOut={() => updateQuery({ range: zoomOutTimeRange(query.range, Date.now(), null).range })}
-          range={query.range} timeZone={timeZone} timeZonePreference={timeZonePreference} zoomed={false}
+          range={query.range} timeZone={window.timeZone} timeZonePreference={window.timeZonePreference} zoomed={false}
         />
       </header>
-      <p className="dashboardPage__meta">Explore error traces using the service and environment filters below.</p>
-      <TraceExplorer now={now} refresh={0} timeZone={timeZone} onOpenTrace={setOpenTrace}
+      <p className="dashboardPage__meta">{issue.kind === "span" ? "Traces with a span where this error occurred." : "Traces with a span that logged this error."}</p>
+      <TraceExplorer now={window.now} refresh={0} timeZone={window.timeZone} onOpenTrace={setOpenTrace}
         openTrace={openTrace} query={query} setQuery={updateQuery} showVolume={false} />
+    </section>
+  );
+}
+
+function IssueLogs({ issue }: { issue: ErrorIssueDetail["issue"] }) {
+  const window = useExplorerWindow();
+  const [query, setQuery] = useState<LogExplorerQuery>(() => ({
+    ...logExplorerQuery(new URLSearchParams(`range=${errorIssueRange(issue.lastSeenAt, window.now)}`)),
+    filters: [issueFilter(issue.id)],
+  }));
+  function updateQuery(update: Partial<LogExplorerQuery>) {
+    if (update.range) window.setNow(Date.now());
+    setQuery((current) => ({ ...current, ...update }));
+  }
+  return (
+    <section aria-label="Logs" className="errorIssue__traces">
+      <header className="errorIssue__tracesHeading">
+        <h2>Logs</h2>
+        <Link to={`/logs?${logExplorerParams(query)}`}>Open in logs ↗</Link>
+        <DashboardTimePicker
+          now={window.now} onChange={(range) => updateQuery({ range })}
+          onTimeZoneChange={window.changeTimeZone}
+          onZoomOut={() => updateQuery({ range: zoomOutTimeRange(query.range, Date.now(), null).range })}
+          range={query.range} timeZone={window.timeZone} timeZonePreference={window.timeZonePreference} zoomed={false}
+        />
+      </header>
+      <p className="dashboardPage__meta">{issue.kind === "log" ? "The logs grouped into this error." : "Logs from the spans where this error occurred."}</p>
+      <LogExplorer now={window.now} refresh={0} timeZone={window.timeZone} query={query} setQuery={updateQuery} />
     </section>
   );
 }
@@ -196,7 +242,17 @@ export function ErrorIssuePage() {
           </div>
         </section>
 
-        <RelatedTraces issue={issue} key={issue.id} />
+        {issue.kind === "span" ? (
+          <>
+            <IssueTraces issue={issue} key={`traces:${issue.id}`} />
+            <IssueLogs issue={issue} key={`logs:${issue.id}`} />
+          </>
+        ) : (
+          <>
+            <IssueLogs issue={issue} key={`logs:${issue.id}`} />
+            <IssueTraces issue={issue} key={`traces:${issue.id}`} />
+          </>
+        )}
 
         {issue.frames.length > 0 ? (
           <section aria-label="Grouped by" className="syntheticCheck__section">
