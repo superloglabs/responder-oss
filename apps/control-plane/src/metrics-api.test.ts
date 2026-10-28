@@ -40,7 +40,7 @@ const query: MetricQuery = {
   groupBy: "attr:http.route",
   kind: "histogram",
   name: "http.server.request.duration",
-  range: "6h",
+  range: { kind: "relative", minutes: 360 },
   unit: "s",
 };
 
@@ -186,7 +186,7 @@ describe("explorer URLs", () => {
   });
 
   it("opens a histogram on p95 and keeps defaults out of the URL", () => {
-    const href = metricExplorerHref({ kind: "histogram", name: "rpc.duration", unit: "ms" }, { range: "1h" });
+    const href = metricExplorerHref({ kind: "histogram", name: "rpc.duration", unit: "ms" }, { range: { kind: "relative", minutes: 60 } });
 
     expect(href).toBe("/metrics/explore?kind=histogram&metric=rpc.duration&unit=ms");
     expect(metricQueryFromParams(new URL(href, "https://app.test").searchParams)?.aggregation).toBe("p95");
@@ -194,7 +194,7 @@ describe("explorer URLs", () => {
   });
 
   it("names a metric by its name, kind and unit, including an empty unit", () => {
-    const href = metricExplorerHref({ kind: "sum", name: "jobs", unit: "" }, { range: "1h" });
+    const href = metricExplorerHref({ kind: "sum", name: "jobs", unit: "" }, { range: { kind: "relative", minutes: 60 } });
     const parsed = metricQueryFromParams(new URL(href, "https://app.test").searchParams);
 
     expect(parsed).toMatchObject({ kind: "sum", name: "jobs", unit: "" });
@@ -205,8 +205,19 @@ describe("explorer URLs", () => {
     expect(metricQueryFromParams(new URLSearchParams("kind=counter&metric=a"))).toBeNull();
     expect(metricQueryFromParams(new URLSearchParams("kind=gauge&metric=a&range=90d&aggregation=median"))).toMatchObject({
       aggregation: "",
-      range: "1h",
+      range: { kind: "relative", minutes: 60 },
     });
+  });
+
+  it("keeps a fixed window in the URL", () => {
+    const fixed = { ...query, range: { from: Date.UTC(2026, 9, 28, 9), kind: "absolute" as const, to: Date.UTC(2026, 9, 28, 10) } };
+    const params = metricQueryParams(fixed);
+
+    expect(params.get("from")).toBe("2026-10-28T09:00:00.000Z");
+    expect(params.get("to")).toBe("2026-10-28T10:00:00.000Z");
+    expect(params.has("range")).toBe(false);
+    expect(metricQueryFromParams(params)?.range).toEqual(fixed.range);
+    expect(metricQueryParams({ ...query, range: { kind: "relative", minutes: 60 } }).has("range")).toBe(false);
   });
 });
 

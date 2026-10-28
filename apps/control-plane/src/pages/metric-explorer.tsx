@@ -11,6 +11,7 @@ import {
 import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { AppShell } from "../components/app-shell";
+import { DashboardTimePicker } from "../components/dashboard-time-picker";
 import { ChartSkeleton, ListSkeleton } from "../components/screen-skeletons";
 import { MetricKindIcon } from "../components/metric-kind-icon";
 import { TelemetryGate } from "../components/telemetry";
@@ -23,7 +24,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "../components/ui/dropdown-menu";
-import { Badge, Button, SegmentedControl, SelectField } from "../design-system";
+import { resolveTimeRange, zoomOutTimeRange, type DashboardTimeRange } from "../dashboard-time-range";
+import { Badge, Button, SelectField } from "../design-system";
 import {
   addWidget,
   createDashboard,
@@ -50,6 +52,7 @@ import {
   metricLabel,
   metricQueryFromParams,
   metricQueryParams,
+  metricRangeParams,
   metricWidgetDraft,
   metricWidgetUnit,
   maxMetricFilters,
@@ -60,9 +63,9 @@ import {
   type MetricQuery,
 } from "../metrics-api";
 import { useOrganizationCapabilities } from "../organization-capabilities";
-import { telemetryRanges, type TelemetryRange } from "../telemetry-api";
 import { useDocumentTitle } from "../use-document-title";
 import { useTelemetryAvailable } from "../use-telemetry-available";
+import { useTimeZonePreference } from "../use-time-zone-preference";
 import "../components/automation-run-history.css";
 import "../components/metrics.css";
 import "./automation-create.css";
@@ -102,7 +105,7 @@ function MetricList({
   selected,
 }: {
   catalog: MetricCatalogEntry[] | null;
-  context: { range: TelemetryRange };
+  context: { range: DashboardTimeRange };
   error: string | null;
   selected: { kind: string; name: string; unit: string | null };
 }) {
@@ -435,23 +438,27 @@ export function MetricExplorerPage() {
   const query = metricQueryFromParams(params);
   const available = telemetry.available === true;
   useDocumentTitle(query ? `${metricLabel(query.name)} · Metrics` : "Metrics");
+  const { changeTimeZone, timeZone, timeZonePreference } = useTimeZonePreference();
+  const [now, setNow] = useState(() => Date.now());
+  const window = query ? resolveTimeRange(query.range, now) : null;
+  const windowKey = window ? [window.since, window.until] : null;
   // Series hidden from the graph shown now; a new graph shows all its series.
   const [hiddenState, setHiddenState] = useState<{ key: string | null; names: Set<string> }>({
     key: null,
     names: new Set(),
   });
 
-  const catalog = useLoaded(available && query ? query.range : null, () =>
-    fetchMetricCatalog(query!.range),
+  const catalog = useLoaded(available && query ? JSON.stringify(windowKey) : null, () =>
+    fetchMetricCatalog(window!),
   );
   const dimensions = useLoaded(
-    available && query ? JSON.stringify([query.range, query.kind, query.name, query.unit]) : null,
-    () => fetchMetricDimensions(query!.range, query!),
+    available && query ? JSON.stringify([windowKey, query.kind, query.name, query.unit]) : null,
+    () => fetchMetricDimensions(window!, query!),
   );
   const chartKey = available && query
-    ? JSON.stringify([query.range, query.kind, query.name, query.unit, query.aggregation, query.groupBy, query.filters])
+    ? JSON.stringify([windowKey, query.kind, query.name, query.unit, query.aggregation, query.groupBy, query.filters])
     : null;
-  const chart = useLoaded(chartKey, () => fetchMetricChart(query!));
+  const chart = useLoaded(chartKey, () => fetchMetricChart(query!, window!));
   const hidden = hiddenState.key === chartKey ? hiddenState.names : new Set<string>();
 
   if (!query) return <Navigate replace to="/metrics" />;
@@ -465,9 +472,11 @@ export function MetricExplorerPage() {
   const description = metricDisplay({ description: metric?.description ?? "", name: query.name }).description;
   const chartUnit = metricWidgetUnit({ kind: query.kind, unit }, query.aggregation);
   const context = { range: query.range };
-  const catalogHref = query.range !== "1h" ? `/metrics?${new URLSearchParams({ range: query.range })}` : "/metrics";
+  const catalogParams = metricRangeParams(query.range);
+  const catalogHref = catalogParams.size > 0 ? `/metrics?${catalogParams}` : "/metrics";
 
   function update(change: Partial<MetricQuery>) {
+    if (change.range) setNow(Date.now());
     setParams(metricQueryParams({ ...query!, ...change }), { replace: true });
   }
   function addFilter(filter: DashboardWidgetFilter) {
@@ -504,12 +513,6 @@ export function MetricExplorerPage() {
                   <span aria-current="page">{label}</span>
                 </nav>
                 <span className="automationCreate__spacer" />
-                <SegmentedControl
-                  aria-label="Time range"
-                  onChange={(range) => update({ range })}
-                  options={telemetryRanges}
-                  value={query.range}
-                />
                 {capabilities.includes("alerts") ? (
                   <Button
                     onClick={() => navigate("/alerts/new", { state: { alertDraft: metricAlertDraft(query) } })}
@@ -590,6 +593,16 @@ export function MetricExplorerPage() {
                   </button>
                 ))}
               </div>
+              <DashboardTimePicker
+                now={now}
+                onChange={(range) => update({ range })}
+                onTimeZoneChange={changeTimeZone}
+                onZoomOut={() => update({ range: zoomOutTimeRange(query.range, Date.now(), null).range })}
+                range={query.range}
+                timeZone={timeZone}
+                timeZonePreference={timeZonePreference}
+                zoomed={false}
+              />
             </div>
             <section aria-label="Graph" className="metricChart">
               <header>
@@ -614,6 +627,7 @@ export function MetricExplorerPage() {
                       chartType={query.chartType}
                       hiddenSeries={hidden}
                       label={metricChartTitle(query)}
+                      onZoom={(since, until) => update({ range: { from: since, kind: "absolute", to: until } })}
                       showLegend={false}
                       unit={chartUnit}
                     />

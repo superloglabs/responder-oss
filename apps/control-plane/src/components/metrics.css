@@ -1,5 +1,6 @@
 /* Catalog */
 .metricsCatalog__summary { display: flex; align-items: center; gap: 16px; margin: 0; padding: 0 2px; color: var(--ds-text-muted); font-size: 12px; line-height: 16px; }
+.metricsCatalog__table .dsDataTableGroupBlock__label { margin: 0 2px 8px; color: var(--ds-text-primary); font-size: 14px; font-weight: 600; letter-spacing: 0; line-height: 20px; text-transform: none; }
 .metricsCatalog__summary strong { color: var(--ds-text-primary); font-weight: 500; }
 
 .metricName { display: flex; align-items: center; gap: 10px; min-width: 0; }

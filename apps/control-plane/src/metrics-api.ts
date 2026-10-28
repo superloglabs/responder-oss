@@ -1,8 +1,21 @@
 import { apiErrorMessage } from "./agents-api";
 import type { AlertForm } from "./alerts-api";
 import { cloudWatchMetricName } from "./cloudwatch-metric-names";
-import type { ChartData, DashboardWidgetFilter, WidgetDraft, WidgetUnit } from "./dashboards-api";
-import { telemetryRanges, type TelemetryRange } from "./telemetry-api";
+import {
+  defaultTimeRange,
+  sameTimeRange,
+  timeRangeFromParams,
+  timeRangeParams,
+  type DashboardTimeRange,
+} from "./dashboard-time-range";
+import {
+  windowParams,
+  type ChartData,
+  type DashboardWidgetFilter,
+  type QueryWindow,
+  type WidgetDraft,
+  type WidgetUnit,
+} from "./dashboards-api";
 import type {
   MetricAggregation,
   MetricCatalogEntry,
@@ -21,21 +34,21 @@ async function request<T>(url: string, body?: unknown): Promise<T> {
   return parsed as T;
 }
 
-export async function fetchMetricCatalog(range: TelemetryRange): Promise<MetricCatalogEntry[]> {
-  const params = new URLSearchParams({ range });
+export async function fetchMetricCatalog(window: QueryWindow): Promise<MetricCatalogEntry[]> {
+  const params = new URLSearchParams(windowParams(window));
   return (await request<{ metrics: MetricCatalogEntry[] }>(`/api/telemetry/metric-catalog?${params}`)).metrics;
 }
 
 export async function fetchMetricDimensions(
-  range: TelemetryRange,
+  window: QueryWindow,
   metric: { kind: MetricKind; name: string; unit: string | null },
 ): Promise<MetricDimension[]> {
-  const params = new URLSearchParams({ kind: metric.kind, name: metric.name, range });
+  const params = new URLSearchParams({ kind: metric.kind, name: metric.name, ...windowParams(window) });
   if (metric.unit !== null) params.set("unit", metric.unit);
   return (await request<{ dimensions: MetricDimension[] }>(`/api/telemetry/metric-dimensions?${params}`)).dimensions;
 }
 
-export async function fetchMetricChart(query: MetricQuery): Promise<ChartData> {
+export async function fetchMetricChart(query: MetricQuery, window: QueryWindow): Promise<ChartData> {
   const body = {
     ...(query.aggregation ? { aggregation: query.aggregation } : {}),
     filters: query.filters,
@@ -44,7 +57,7 @@ export async function fetchMetricChart(query: MetricQuery): Promise<ChartData> {
     // chosen one.
     kind: query.kind,
     metricName: query.name,
-    range: query.range,
+    ...windowParams(window),
     ...(query.unit !== null ? { unit: query.unit } : {}),
   };
   return (await request<{ chart: ChartData }>("/api/telemetry/metric-series", body)).chart;
@@ -263,7 +276,7 @@ export interface MetricQuery {
   groupBy: string;
   kind: MetricKind;
   name: string;
-  range: TelemetryRange;
+  range: DashboardTimeRange;
   // With the name and kind, picks one metric. Null reads every unit, for
   // links that predate it.
   unit: string | null;
@@ -272,7 +285,6 @@ export interface MetricQuery {
 // The most filters a graph can carry, as for a dashboard widget.
 export const maxMetricFilters = 50;
 
-const rangeValues = new Set<string>(telemetryRanges.map((range) => range.value));
 const aggregationValues = new Set<string>(Object.keys(aggregationLabels));
 
 // The explorer keeps its query in the URL, so a graph can be shared and the
@@ -281,7 +293,6 @@ export function metricQueryFromParams(params: URLSearchParams): MetricQuery | nu
   const name = params.get("metric") ?? "";
   const kind = params.get("kind") ?? "";
   if (!name || !(metricKinds as string[]).includes(kind)) return null;
-  const range = params.get("range") ?? "";
   const aggregation = params.get("aggregation");
   const chosen = aggregation !== null && aggregationValues.has(aggregation) ? (aggregation as MetricAggregation) : "";
   const offered = metricAggregationOptions(kind as MetricKind).some((option) => option.value === chosen);
@@ -296,15 +307,24 @@ export function metricQueryFromParams(params: URLSearchParams): MetricQuery | nu
     groupBy: params.get("by") ?? "",
     kind: kind as MetricKind,
     name,
-    range: rangeValues.has(range) ? (range as TelemetryRange) : "1h",
+    range: timeRangeFromParams(params),
     unit: params.get("unit"),
   };
 }
 
+// The time range a metrics page keeps in its URL, left out when it is the
+// default last hour.
+export function metricRangeParams(range: DashboardTimeRange, current = new URLSearchParams()): URLSearchParams {
+  if (!sameTimeRange(range, defaultTimeRange)) return timeRangeParams(range, current);
+  const next = new URLSearchParams(current);
+  for (const name of ["range", "from", "to"]) next.delete(name);
+  return next;
+}
+
 export function metricQueryParams(query: MetricQuery): URLSearchParams {
-  const params = new URLSearchParams({ kind: query.kind, metric: query.name });
-  if (query.unit !== null) params.set("unit", query.unit);
-  if (query.range !== "1h") params.set("range", query.range);
+  const base = new URLSearchParams({ kind: query.kind, metric: query.name });
+  if (query.unit !== null) base.set("unit", query.unit);
+  const params = metricRangeParams(query.range, base);
   if (query.aggregation !== initialAggregation(query.kind)) params.set("aggregation", query.aggregation);
   if (query.groupBy) params.set("by", query.groupBy);
   for (const filter of query.filters) params.append("filter", `${filter.key}=${filter.value}`);
@@ -314,7 +334,7 @@ export function metricQueryParams(query: MetricQuery): URLSearchParams {
 
 export function metricExplorerHref(
   metric: { kind: MetricKind; name: string; unit: string },
-  context: { range: TelemetryRange },
+  context: { range: DashboardTimeRange },
 ): string {
   const params = metricQueryParams({
     aggregation: initialAggregation(metric.kind),
