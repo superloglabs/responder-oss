@@ -60,6 +60,52 @@ const customMcpCredentialsSchema = z.discriminatedUnion("authType", [
   }),
 ]);
 
+/**
+ * A connection's OAuth access could not be renewed. When the authorization
+ * server rejects the stored grant, only reconnecting restores access.
+ */
+export class McpOAuthRefreshError extends Error {
+  constructor(
+    readonly reconnectRequired: boolean,
+    cause?: unknown,
+  ) {
+    super(
+      reconnectRequired
+        ? "The OAuth server no longer accepts this connection's grant"
+        : "The OAuth server did not renew this connection's access",
+      { cause },
+    );
+    this.name = "McpOAuthRefreshError";
+  }
+}
+
+const oauthConnectionProviderNames: Record<string, string> = {
+  axiom: "Axiom",
+  cloudflare: "Cloudflare",
+  custom_mcp: "custom MCP",
+  dash0: "Dash0",
+  grafana: "Grafana Cloud",
+  linear: "Linear",
+  posthog: "PostHog",
+  railway: "Railway",
+  supabase: "Supabase",
+};
+
+/** Tells a person which connection lost access and what to do about it. */
+export function oauthConnectionRefreshMessage(
+  connection: { displayName?: string; provider: string },
+  error: McpOAuthRefreshError,
+): string {
+  const providerName =
+    oauthConnectionProviderNames[connection.provider] ?? connection.provider;
+  const label = connection.displayName
+    ? `${providerName} connection "${connection.displayName}"`
+    : `${providerName} connection`;
+  return error.reconnectRequired
+    ? `Reconnect the ${label} in Settings.`
+    : `The ${label} could not renew its access. Try again later, or reconnect it in Settings if this continues.`;
+}
+
 export function parseCustomMcpCredentials(
   input: unknown,
 ): CustomMcpCredentials {
@@ -509,12 +555,19 @@ export async function refreshCustomMcpOAuth(input: {
     redirectUrl: input.redirectUrl,
     stored: input.oauth,
   });
-  const result = await auth(provider, {
-    fetchFn: safeCustomMcpFetch,
-    serverUrl: input.mcpUrl,
-  });
+  let result: Awaited<ReturnType<typeof auth>>;
+  try {
+    result = await auth(provider, {
+      fetchFn: safeCustomMcpFetch,
+      serverUrl: input.mcpUrl,
+    });
+  } catch (error) {
+    throw new McpOAuthRefreshError(false, error);
+  }
+  // The SDK starts a new authorization when the server rejects the refresh
+  // token or the client registration.
   if (result !== "AUTHORIZED" || !provider.snapshot().tokens?.access_token) {
-    throw new Error("Reconnect the custom MCP OAuth connection");
+    throw new McpOAuthRefreshError(true);
   }
   return provider.snapshot();
 }

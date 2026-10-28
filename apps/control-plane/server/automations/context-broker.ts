@@ -28,6 +28,8 @@ import {
 import { parsePostHogCredentials } from "../../../../packages/core/src/integrations/posthog.js";
 import { parseSignozCredentials } from "../../../../packages/core/src/integrations/signoz.js";
 import {
+  McpOAuthRefreshError,
+  oauthConnectionRefreshMessage,
   parseCustomMcpCredentials,
   refreshCustomMcpOAuth,
   safeCustomMcpFetch,
@@ -376,7 +378,7 @@ async function grafanaCloudAccessToken(
   });
   const accessToken = credentials?.oauth.tokens?.access_token;
   if (typeof accessToken !== "string") {
-    throw new Error("Reconnect the Grafana Cloud OAuth connection");
+    throw new McpOAuthRefreshError(true);
   }
   return accessToken;
 }
@@ -412,7 +414,7 @@ async function cloudflareAccessToken(
   });
   const accessToken = credentials?.oauth.tokens?.access_token;
   if (typeof accessToken !== "string") {
-    throw new Error("Reconnect the Cloudflare OAuth connection");
+    throw new McpOAuthRefreshError(true);
   }
   // The API tool can reach any endpoint the grant allows.
   assertCloudflareReadOnlyGrant(credentials?.oauth.tokens);
@@ -447,7 +449,7 @@ async function supabaseAccessToken(
   });
   const accessToken = credentials?.oauth.tokens?.access_token;
   if (typeof accessToken !== "string") {
-    throw new Error("Reconnect the Supabase OAuth connection");
+    throw new McpOAuthRefreshError(true);
   }
   return accessToken;
 }
@@ -480,7 +482,7 @@ async function postHogAccessToken(
   });
   const accessToken = credentials?.oauth.tokens?.access_token;
   if (typeof accessToken !== "string") {
-    throw new Error("Reconnect the PostHog OAuth connection");
+    throw new McpOAuthRefreshError(true);
   }
   return accessToken;
 }
@@ -544,7 +546,7 @@ async function railwayCredentials(
     provider: "railway",
   });
   if (typeof credentials?.oauth.tokens?.access_token !== "string") {
-    throw new Error("Reconnect the Railway OAuth connection");
+    throw new McpOAuthRefreshError(true);
   }
   assertRailwayGrant(credentials.oauth.tokens, credentials.accessLevel);
   return credentials;
@@ -1081,15 +1083,24 @@ export function createAutomationContextBrokerRoutes(
         target,
       });
     } catch (error) {
+      const refreshFailure = error instanceof McpOAuthRefreshError ? error : null;
+      const failure = refreshFailure?.cause ?? error;
       console.error(JSON.stringify({
         accountId: claim.account.id,
-        errorCode: error instanceof Error ? error.name : typeof error,
+        errorCode: failure instanceof Error ? failure.name : typeof failure,
         event: "automation_context_broker_request_failed",
         organizationId: claim.organizationId,
         provider: claim.account.provider,
+        ...(refreshFailure
+          ? { reconnectRequired: refreshFailure.reconnectRequired }
+          : {}),
         runId: claim.runId,
       }));
-      return context.json(rpcError(parsed.data.id, -32603, "Context provider request failed"), 502);
+      // The agent passes this on, so the person learns which connection to fix.
+      const message = refreshFailure
+        ? oauthConnectionRefreshMessage(claim.account, refreshFailure)
+        : "Context provider request failed";
+      return context.json(rpcError(parsed.data.id, -32603, message), 502);
     }
   });
 }

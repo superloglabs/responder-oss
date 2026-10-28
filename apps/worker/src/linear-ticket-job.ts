@@ -1,5 +1,8 @@
 import { Agent, run, setDefaultOpenAIKey, setTracingDisabled } from "@openai/agents";
-import { getRuntimeLinearConnection } from "@responder/core/db/investigations";
+import {
+  getRuntimeLinearConnection,
+  type ContextConnectionUnavailableError,
+} from "@responder/core/db/investigations";
 import {
   failPendingLinearTicketRequest,
   listPendingLinearTicketRequests,
@@ -31,11 +34,15 @@ export async function runLinearTicketJob(
   const request = pending.find((candidate) => candidate.requestId === job.requestId);
   if (!request) return;
   try {
+    let unavailable: ContextConnectionUnavailableError | undefined;
     const connection = await getRuntimeLinearConnection(
       job.config.id,
       request.integrationAccountId,
+      { onUnavailable: (error) => { unavailable = error; } },
     );
-    if (!connection) throw new Error("The Linear connection is unavailable");
+    if (!connection) {
+      throw unavailable ?? new Error("The Linear connection is unavailable");
+    }
     const instruction = linearTicketFollowupInstruction({ requests: [request] });
     if (!instruction) return;
 

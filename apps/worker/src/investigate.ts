@@ -31,7 +31,8 @@ import {
   getRuntimeVercelConnections,
   getSlackInvestigationSessionRuntime,
   SentryConnectionUnavailableError,
-  type RuntimeAxiomConnection,
+  type ContextConnectionLoadOptions,
+  type ContextConnectionUnavailableError,
   type RuntimeSentryConnection,
 } from "@responder/core/db/investigations";
 import { getRuntimeWorkspaceSecrets } from "@responder/core/db/workspace-secrets";
@@ -352,33 +353,6 @@ export async function loadSentryConnectionForInvestigation(input: {
   }
 }
 
-export async function loadAxiomConnectionForInvestigation(input: {
-  getConnection?: (versionId: string) => Promise<RuntimeAxiomConnection | null>;
-  investigationId: string;
-  versionId: string;
-}): Promise<RuntimeAxiomConnection | null> {
-  const getConnection = input.getConnection ?? getRuntimeAxiomConnection;
-  try {
-    return await getConnection(input.versionId);
-  } catch (error) {
-    if (
-      !(error instanceof Error) ||
-      !error.message.startsWith("Reconnect custom MCP ")
-    ) {
-      throw error;
-    }
-    console.error(
-      JSON.stringify({
-        accountId: (error as Error & { accountId?: string }).accountId,
-        event: "axiom_connection_degraded",
-        investigationContinues: true,
-        investigationId: input.investigationId,
-      }),
-    );
-    return null;
-  }
-}
-
 export function sandboxAgentConfig(
   environment: NodeJS.ProcessEnv = process.env,
 ): SandboxAgentConfig {
@@ -438,6 +412,7 @@ export function investigationInstructions(input: {
   runtimePromptParts?: InvestigationPromptParts;
   sentryConnected: boolean;
   sentryUnavailable?: boolean;
+  unavailableConnectionMessages?: string[];
   linearConnected?: boolean;
   langfuseProjectNames?: string[];
   supabaseConnections?: Array<{
@@ -560,6 +535,11 @@ export function investigationInstructions(input: {
       : null,
     input.sentryUnavailable
       ? prompt("sentryUnavailable")
+      : null,
+    input.unavailableConnectionMessages?.length
+      ? prompt("unavailableConnections", {
+          value1: input.unavailableConnectionMessages.join(" "),
+        })
       : null,
     input.upstashConnected
       ? prompt("upstash")
@@ -745,6 +725,12 @@ export async function runInvestigationAgent(
     isSlackAssistantRequest(investigationInput) &&
     await organizationHasCapability(job.config.organizationId, "simplified_navigation");
   let sentryConnectionDegraded = false;
+  // Connections whose access could not be renewed are left out, and the agent
+  // tells the person which ones to fix.
+  const unavailableConnections: ContextConnectionUnavailableError[] = [];
+  const contextLoadOptions: ContextConnectionLoadOptions = {
+    onUnavailable: (error) => unavailableConnections.push(error),
+  };
   const awsAlarmTriggered =
     investigationInput.provider === "slack" &&
     investigationInput.attributes?.slackAlertProvider === "aws";
@@ -811,16 +797,13 @@ export async function runInvestigationAgent(
     getRuntimeProfile(job.runtimeProfileId),
     getRuntimeAwsConnections(job.config.id),
     getRuntimeGcpConnections(job.config.id),
-    loadAxiomConnectionForInvestigation({
-      investigationId: job.investigationId,
-      versionId: job.config.id,
-    }),
+    getRuntimeAxiomConnection(job.config.id, contextLoadOptions),
     getRuntimeDatadogConnection(job.config.id),
-    getRuntimeDash0Connections(job.config.id),
-    getRuntimePostHogConnections(job.config.id),
-    getRuntimeGrafanaConnections(job.config.id),
-    getRuntimeCloudflareConnections(job.config.id),
-    getRuntimeRailwayConnections(job.config.id),
+    getRuntimeDash0Connections(job.config.id, contextLoadOptions),
+    getRuntimePostHogConnections(job.config.id, contextLoadOptions),
+    getRuntimeGrafanaConnections(job.config.id, contextLoadOptions),
+    getRuntimeCloudflareConnections(job.config.id, contextLoadOptions),
+    getRuntimeRailwayConnections(job.config.id, contextLoadOptions),
     loadSentryConnectionForInvestigation({
       investigationId: job.investigationId,
       investigationInput,
@@ -830,14 +813,14 @@ export async function runInvestigationAgent(
       },
       versionId: job.config.id,
     }),
-    getRuntimeCustomMcpConnections(job.config.id),
+    getRuntimeCustomMcpConnections(job.config.id, contextLoadOptions),
     getRuntimeClickStackConnection(job.config.id),
-    getRuntimeLinearConnection(job.config.id),
+    getRuntimeLinearConnection(job.config.id, undefined, contextLoadOptions),
     getRuntimeVercelConnections(job.config.id),
     getRuntimeSlackConnection(job.config.id),
     getRuntimeUpstashConnection(job.config.id),
     getRuntimeLangfuseConnections(job.config.id),
-    getRuntimeSupabaseConnections(job.config.id),
+    getRuntimeSupabaseConnections(job.config.id, contextLoadOptions),
     getRuntimeWorkspaceSecrets(job.config.id),
   ]);
   const awsServers = await Promise.all(
@@ -1224,6 +1207,10 @@ export async function runInvestigationAgent(
       runtimePromptParts: runtimeProfile?.promptParts,
       sentryConnected: sentryServer !== null,
       sentryUnavailable: sentryConnectionDegraded,
+      // Scans do not attach custom MCPs, so they are not missing from one.
+      unavailableConnectionMessages: unavailableConnections
+        .filter((error) => !scanMode || error.provider !== "custom_mcp")
+        .map((error) => error.message),
       linearConnected: linearServer !== null,
       langfuseProjectNames: langfuseConnections.map(
         (connection) => connection.displayName,

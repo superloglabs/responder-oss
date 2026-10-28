@@ -12,16 +12,19 @@ import {
   customMcpTokenReuseEvent,
   customMcpTokenRefreshFailureEvent,
   customMcpTokenRefreshSuccessEvent,
-  customMcpReconnectError,
+  ContextConnectionUnavailableError,
+  contextConnectionUnavailableEvent,
   getInitialTriageContext,
   getInvestigationForSlackAction,
   INITIAL_TRIAGE_HISTORY_LIMIT,
   investigationCanBeRetried,
+  loadContextConnection,
   markInvestigationStarted,
   prepareInvestigationReplay,
   prepareInvestigationRetry,
   replayReportMarkdownUpdate,
 } from "./investigations.js";
+import { McpOAuthRefreshError } from "../integrations/custom-mcp.js";
 
 vi.mock("./client.js", () => ({
   getDatabase: vi.fn(),
@@ -523,16 +526,81 @@ describe("custom MCP runtime logging", () => {
     });
   });
 
-  it("attaches the account ID to a reconnect error", () => {
-    const cause = new Error("Refresh failed");
-    const error = customMcpReconnectError(
-      { id: "account-1", displayName: "Production metrics" },
+  it("names the connection to reconnect", () => {
+    const cause = new McpOAuthRefreshError(true);
+    const error = new ContextConnectionUnavailableError(
+      { displayName: "Production metrics", id: "account-1", provider: "custom_mcp" },
       cause,
     );
 
-    expect(error.message).toBe("Reconnect custom MCP Production metrics");
-    expect(error.accountId).toBe("account-1");
+    expect(error.message).toBe(
+      'Reconnect the custom MCP connection "Production metrics" in Settings.',
+    );
+    expect(error).toMatchObject({ accountId: "account-1", reconnectRequired: true });
     expect(error.cause).toBe(cause);
+  });
+
+  it("treats a refresh failure from another client as needing a reconnect", () => {
+    const error = new ContextConnectionUnavailableError(
+      { displayName: "Acme", id: "account-1", provider: "linear" },
+      new Error("invalid_grant"),
+    );
+
+    expect(error.message).toBe('Reconnect the Linear connection "Acme" in Settings.');
+  });
+
+  it("records why a context connection was skipped", () => {
+    const cause = Object.assign(new Error("try later"), { name: "TemporarilyUnavailableError" });
+    const error = new ContextConnectionUnavailableError(
+      { displayName: "Superlog", id: "account-1", provider: "cloudflare" },
+      new McpOAuthRefreshError(false, cause),
+    );
+
+    expect(contextConnectionUnavailableEvent(error, "version-1")).toEqual({
+      accountId: "account-1",
+      errorType: "TemporarilyUnavailableError",
+      event: "context_connection_unavailable",
+      investigationContinues: true,
+      investigationVersionId: "version-1",
+      provider: "cloudflare",
+      reconnectRequired: false,
+    });
+  });
+
+  it("skips a connection whose OAuth access cannot be renewed", async () => {
+    const onUnavailable = vi.fn();
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(
+      loadContextConnection(
+        { displayName: "swishis.grafana.net", id: "account-1", provider: "grafana" },
+        "version-1",
+        { onUnavailable },
+        () => Promise.reject(new McpOAuthRefreshError(true)),
+      ),
+    ).resolves.toBeNull();
+
+    expect(onUnavailable).toHaveBeenCalledWith(expect.objectContaining({
+      message: 'Reconnect the Grafana Cloud connection "swishis.grafana.net" in Settings.',
+    }));
+    expect(JSON.parse(consoleError.mock.calls[0]![0] as string)).toMatchObject({
+      event: "context_connection_unavailable",
+      provider: "grafana",
+    });
+    consoleError.mockRestore();
+  });
+
+  it("still fails on errors unrelated to OAuth access", async () => {
+    const failure = new Error("database unavailable");
+
+    await expect(
+      loadContextConnection(
+        { displayName: "Axiom", id: "account-1", provider: "axiom" },
+        "version-1",
+        {},
+        () => Promise.reject(failure),
+      ),
+    ).rejects.toBe(failure);
   });
 
   it("records the custom MCP accounts loaded for an investigation", () => {
