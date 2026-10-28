@@ -302,7 +302,9 @@ export function metricQueryFromParams(params: URLSearchParams): MetricQuery | nu
     chartType: params.get("chart") === "bar" ? "bar" : "line",
     filters: params.getAll("filter").flatMap((filter) => {
       const separator = filter.indexOf("=");
-      return separator > 0 ? [{ key: filter.slice(0, separator), value: filter.slice(separator + 1) }] : [];
+      const exclude = separator > 0 && filter[separator - 1] === "!";
+      const key = filter.slice(0, exclude ? separator - 1 : separator);
+      return separator > 0 && key ? [{ key, ...(exclude ? { op: "neq" as const } : {}), value: filter.slice(separator + 1) }] : [];
     }).slice(0, maxMetricFilters),
     groupBy: params.get("by") ?? "",
     kind: kind as MetricKind,
@@ -327,7 +329,7 @@ export function metricQueryParams(query: MetricQuery): URLSearchParams {
   const params = metricRangeParams(query.range, base);
   if (query.aggregation !== initialAggregation(query.kind)) params.set("aggregation", query.aggregation);
   if (query.groupBy) params.set("by", query.groupBy);
-  for (const filter of query.filters) params.append("filter", `${filter.key}=${filter.value}`);
+  for (const filter of query.filters) params.append("filter", `${filter.key}${filter.op === "neq" ? "!=" : "="}${filter.value}`);
   if (query.chartType === "bar") params.set("chart", "bar");
   return params;
 }

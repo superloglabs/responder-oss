@@ -17,114 +17,68 @@
 .metricDimensions span { flex-shrink: 0; color: var(--ds-text-disabled); font-size: 12px; }
 .metricDimensions__none { color: var(--ds-text-disabled); font-size: 12px; }
 
-/* Explorer: metric list, graph, dimensions */
-.metricExplorer { display: grid; grid-template-columns: 248px minmax(0, 1fr) 256px; gap: 24px; align-items: start; min-width: 0; }
-
-.metricList { position: sticky; top: 0; display: flex; flex-direction: column; gap: 12px; max-height: calc(100svh - 96px); overflow: auto; }
-.metricList__search { flex: 0 0 32px; }
-.metricList__group ul { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; }
-.metricList__groupHeader { display: flex; align-items: center; gap: 10px; width: 100%; height: 24px; padding: 0 8px; border: 0; background: none; color: var(--ds-text-secondary); cursor: pointer; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; text-align: left; }
-.metricList__groupHeader svg { flex-shrink: 0; width: 14px; color: var(--ds-text-disabled); }
-.metricList__groupHeader--friendly { font-family: var(--ds-font-sans); font-weight: 500; }
-.metricList__groupName { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.metricList__count { margin-left: auto; color: var(--ds-text-disabled); font-family: var(--ds-font-sans); }
-.metricList__item { display: flex; align-items: center; gap: 10px; height: 28px; padding: 0 8px; border-radius: 4px; color: var(--ds-text-secondary); text-decoration: none; }
-.metricList__item:hover { background: var(--issues-row); }
-.metricList__item[aria-current="page"] { background: var(--issues-row); box-shadow: 0 0 0 .5px var(--issues-line), 0 1px 2px #0000000a; color: var(--ds-text-primary); }
-.metricList__item[aria-current="page"] .metricKindIcon { color: var(--ds-info); }
-.metricList__name { flex: 1; min-width: 0; overflow: hidden; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.metricList__name--friendly { font-family: var(--ds-font-sans); }
-.metricList__unit { flex-shrink: 0; max-width: 64px; overflow: hidden; color: var(--ds-text-disabled); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+/* Explorer: independently scrolling metric browser and full-width graph. */
+.metricExplorer { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 24px; align-items: start; min-width: 0; }
+.metricList { position: sticky; top: 0; display: flex; flex-direction: column; gap: 8px; max-height: calc(100svh - 96px); min-height: 0; padding-right: 16px; }
+.metricList__search { flex: 0 0 28px; min-height: 28px; height: 28px; }
+.metricList__groups { display: flex; flex-direction: column; gap: 8px; overflow: auto; padding-right: 8px; scrollbar-width: thin; }
+.metricList__group ul { display: flex; flex-direction: column; gap: 2px; margin: 4px 0 0; padding: 0; list-style: none; }
+.metricList__groupHeader { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 32px; padding: 6px 8px; border: 0; border-radius: 4px; background: #f5f5f5; color: var(--ds-text-secondary); cursor: pointer; font: 600 13px/20px var(--ds-font-sans); text-align: left; }
+.metricList__groupHeader svg { flex-shrink: 0; width: 12px; color: var(--ds-text-muted); }
+.metricList__groupName { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.metricList__count { flex: 0 0 24px; color: var(--ds-text-muted); font-size: 12px; font-weight: 400; text-align: right; }
+.metricList__item { display: flex; align-items: center; min-height: 30px; padding: 5px 8px; border-radius: 4px; color: var(--ds-text-secondary); text-decoration: none; }
+.metricList__item:hover { background: var(--ds-surface-hover); }
+.metricList__item[aria-current="page"] { background: #f1f1fd; color: #3039bd; font-weight: 500; }
+.metricList__name { min-width: 0; font: inherit; font-size: 13px; line-height: 20px; overflow-wrap: anywhere; }
+.metricList__item:focus-visible, .metricList__groupHeader:focus-visible { outline: 2px solid #4e58f9; outline-offset: -2px; }
 
 .metricExplorer__main { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 .metricExplorer__titleRow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.metricExplorer__titleRow h1 { margin: 0; color: var(--ds-text-primary); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 15px; font-weight: 600; line-height: 23px; overflow-wrap: anywhere; }
-.metricExplorer__topRow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 32px; }
-.metricExplorer__topRow .dsSegmentedControl { padding: 2px; border: 0; border-radius: 8px; background: var(--ds-surface-hover); }
-.metricExplorer__topRow .dsSegmentedControl__option { min-height: 28px; padding: 0 10px; border-radius: 6px; font-size: 12px; }
-.metricExplorer__titleRow h1.metricExplorer__friendly { font-family: var(--ds-font-sans); font-size: 16px; }
-.metricExplorer__meta code { font-size: 11px; }
-.metricExplorer__meta { margin: 0; color: var(--ds-text-muted); font-size: 12px; line-height: 16px; }
+.metricExplorer__titleRow h1 { margin: 0; color: var(--ds-text-primary); font: 600 18px/28px var(--ds-font-sans); overflow-wrap: anywhere; }
+.metricExplorer__topRow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 26px; }
+.metricExplorer__topRow .timePicker { height: 26px; }
+.appShell--workspace .metricExplorer__topRow .dsButton--primary { min-height: 24px; height: 24px; padding: 2px 6px; gap: 4px; box-shadow: inset 0 -3px 4px #64646408, 0 4px 4px #00000005; }
+.metricExplorer__meta { margin: 0; color: var(--ds-text-muted); font-size: 13px; line-height: 20px; overflow-wrap: anywhere; }
 .metricExplorer__meta:empty { display: none; }
-
-.metricQuery { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.metricQuery__bar { display: flex; flex: 1 1 420px; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 32px; padding: 3px 8px 3px 4px; border: 1px solid var(--ds-border-default); border-radius: var(--ds-radius-small); background: var(--ds-surface-base); }
-.metricQuery__word { color: var(--ds-text-disabled); font-size: 12px; }
-.metricQuery__divider { width: 1px; height: 16px; background: var(--issues-line); }
-.metricQuery__select { gap: 0; }
-.metricQuery__select .dsField__label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-.metricQuery__select .dsSelect__trigger { height: 24px; gap: 6px; padding: 0 6px 0 8px; border: 0; border-radius: 4px; background: var(--ds-surface-hover); box-shadow: 0 0 0 .5px var(--issues-line); font-size: 12px; }
-.metricQuery__select .dsSelect__popover { right: auto; min-width: 240px; }
-.metricQuery__aggregation .dsSelect__trigger { background: var(--ds-info-surface); box-shadow: 0 0 0 .5px var(--ds-info-border); color: var(--ds-info); font-weight: 500; }
-.metricQuery__aggregation .dsSelect__trigger svg { color: var(--ds-info); }
-.metricQuery__group .dsSelect__trigger { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-.metricQuery__chip { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 4px 0 8px; border-radius: 4px; background: var(--ds-surface-hover); box-shadow: 0 0 0 .5px var(--issues-line); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
-.metricQuery__chip code { color: var(--ds-text-muted); }
-.metricQuery__chip strong { color: var(--ds-text-primary); font-weight: 400; }
-.metricQuery__chip button, .metricQuery__cancel { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 4px; background: none; color: var(--ds-text-disabled); cursor: pointer; }
-.metricQuery__chip button:hover, .metricQuery__cancel:hover { background: var(--issues-line); color: var(--ds-text-primary); }
-.metricQuery__add { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 6px; border: 0; border-radius: 4px; background: none; color: var(--ds-text-disabled); cursor: pointer; font-size: 12px; }
-.metricQuery__add:hover { background: var(--ds-surface-hover); color: var(--ds-text-secondary); }
-.metricQuery__filterForm { display: inline-flex; align-items: center; gap: 6px; }
-.metricQuery__filterForm .dsButton { min-height: 24px; padding: 2px 8px; font-size: 12px; }
-.metricQuery__value { width: 160px; height: 24px; padding: 0 8px; border: 1px solid var(--ds-border-default); border-radius: 4px; outline: 0; background: var(--ds-surface-base); color: var(--ds-text-primary); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
-.metricQuery__value:focus { border-color: var(--ds-border-strong); }
-.metricQuery__chartType { flex-shrink: 0; padding: 2px; border: 0; border-radius: 8px; background: var(--ds-surface-hover); }
-.metricQuery__chartType .dsSegmentedControl__option { display: inline-flex; align-items: center; gap: 5px; min-height: 28px; padding: 0 10px; border-radius: 6px; font-size: 12px; }
 .metricExplorer__topRow .formError { flex-basis: 100%; margin: 0; }
-.metricQuery__select .dsSelect__trigger:focus-visible, .metricQuery__chip button:focus-visible, .metricQuery__add:focus-visible, .metricQuery__cancel:focus-visible { outline: 2px solid #4e58f9; outline-offset: 2px; }
+.metricExplorer .telemetrySearch { flex: none; font-size: 13px; }
+.metricExplorer .telemetrySearch__bar { min-height: 36px; }
 
-.metricChart { display: flex; flex-direction: column; gap: 12px; padding: 14px 16px 12px; border-radius: 12px; background: var(--ds-surface-base); box-shadow: 0 0 0 .5px #00000014, 0 1px 2px #0000000d, 0 2px 4px #00000005; }
+.metricQuery { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.metricQuery__bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.metricQuery__word { padding-left: 8px; color: var(--ds-text-muted); font-size: 13px; }
+.metricQuery__select { gap: 0; min-width: 0; }
+.metricQuery__select .dsField__label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.metricQuery__select .dsSelect__popover { right: auto; min-width: min(240px, calc(100vw - 64px)); }
+.metricQuery__chartType { flex-shrink: 0; margin-left: auto; }
+
+.metricChart { display: flex; flex-direction: column; gap: 12px; padding: 14px 16px 12px; border: 1px solid #e3e3e3; border-radius: 8px; background: var(--ds-surface-base); }
 .metricChart > header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; }
 .metricChart h2 { margin: 0; color: var(--ds-text-primary); font-size: 12px; font-weight: 600; line-height: 16px; overflow-wrap: anywhere; }
-.metricChart > header span { color: var(--ds-text-disabled); font-size: 12px; }
-.metricChart__plot { height: 300px; }
+.metricChart > header span { color: var(--ds-text-muted); font-size: 12px; }
+.metricChart__plot { height: 376px; }
 p.metricChart__plot { display: flex; align-items: center; justify-content: center; }
 
-.metricSeries { width: 100%; border-collapse: collapse; border-top: .5px solid var(--issues-line); font-size: 12px; font-variant-numeric: tabular-nums; }
+.metricSeries { width: 100%; border-collapse: collapse; border-top: 1px solid var(--issues-line); font-size: 12px; font-variant-numeric: tabular-nums; }
 .metricSeries th, .metricSeries td { height: 28px; padding: 0 8px; text-align: right; white-space: nowrap; }
 .metricSeries thead th { height: 30px; padding-top: 6px; color: var(--ds-text-muted); font-size: 11px; font-weight: 400; }
-.metricSeries thead th:first-child { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; text-align: left; }
+.metricSeries thead th:first-child { text-align: left; }
 .metricSeries td { width: 88px; color: var(--ds-text-secondary); }
 .metricSeries td:last-child { color: var(--ds-text-primary); font-weight: 500; }
 .metricSeries tbody th { max-width: 0; text-align: left; }
 .metricSeries tbody tr:hover { background: var(--issues-header); }
-.metricSeries tbody th button { display: flex; align-items: center; gap: 8px; width: 100%; padding: 0; border: 0; background: none; color: var(--ds-text-primary); cursor: pointer; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; font-weight: 400; text-align: left; }
+.metricSeries tbody th button { display: flex; align-items: center; gap: 8px; width: 100%; padding: 0; border: 0; background: none; color: var(--ds-text-primary); cursor: pointer; font: 400 12px/18px var(--ds-font-sans); text-align: left; }
 .metricSeries tbody th button:focus-visible { outline: 2px solid #4e58f9; outline-offset: 2px; border-radius: 4px; }
 .metricSeries__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .metricSeries__row--hidden { opacity: .4; }
 
-.metricDimensionsRail { position: sticky; top: 0; display: flex; flex-direction: column; gap: 16px; max-height: calc(100svh - 96px); overflow: auto; }
-.metricDimensionsRail > header { display: flex; align-items: center; justify-content: space-between; padding: 0 8px; }
-.metricDimensionsRail h2 { margin: 0; color: var(--issues-muted); font-size: 12px; font-weight: 500; line-height: 16px; }
-.metricDimensionsRail > header span { color: var(--ds-text-disabled); font-size: 12px; }
-.metricDimensionsRail__hint { margin: -12px 0 0; padding: 0 8px; color: var(--ds-text-muted); font-size: 12px; line-height: 16px; }
-.metricDimensionsRail__section { display: flex; flex-direction: column; gap: 2px; }
-.metricDimensionsRail h3 { margin: 0; padding: 0 8px 4px; color: var(--ds-text-disabled); font-size: 11px; font-weight: 500; letter-spacing: .04em; line-height: 14px; text-transform: uppercase; }
-.metricDimension { border-radius: 6px; }
-.metricDimension--open { padding-bottom: 8px; background: var(--issues-row); box-shadow: 0 0 0 .5px var(--issues-line), 0 1px 2px #0000000a; }
-.metricDimension__header { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 28px; padding: 0 8px; border: 0; border-radius: 6px; background: none; cursor: pointer; text-align: left; }
-.metricDimension__header:hover { background: var(--issues-row); }
-.metricDimension__header:focus-visible { outline: 2px solid #4e58f9; outline-offset: 2px; }
-.metricDimension__header code { flex: 1; min-width: 0; overflow: hidden; color: var(--ds-text-primary); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.metricDimension__header .dsBadge { min-height: 18px; padding: 0 6px; font-size: 11px; }
-.metricDimension__count { flex-shrink: 0; min-width: 24px; color: var(--ds-text-disabled); font-size: 12px; text-align: right; }
-.metricDimension__body ul { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
-.metricDimension__body li button { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 8px; width: 100%; padding: 4px 8px; border: 0; background: none; cursor: pointer; text-align: left; }
-.metricDimension__body li button:hover { background: var(--issues-header); }
-.metricDimension__body li button:focus-visible { outline: 2px solid #4e58f9; outline-offset: -2px; }
-.metricDimension__value { overflow: hidden; color: var(--issues-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.metricDimension__share { color: var(--ds-text-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
-.metricDimension__bar { grid-column: 1 / -1; height: 3px; border-radius: 2px; background: var(--ds-border-strong); }
-.metricDimension__actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 8px 0; color: var(--ds-text-muted); font-size: 12px; }
-
 @media (max-width: 1360px) {
-  .metricExplorer { grid-template-columns: 220px minmax(0, 1fr); }
-  .metricDimensionsRail { position: static; grid-column: 2; max-height: none; }
+  .metricExplorer { grid-template-columns: 240px minmax(0, 1fr); gap: 16px; }
 }
-
 @media (max-width: 900px) {
   .metricExplorer { grid-template-columns: minmax(0, 1fr); }
-  .metricList { position: static; max-height: 240px; }
-  .metricDimensionsRail { grid-column: 1; }
+  .metricList { position: static; max-height: 240px; padding-right: 0; }
 }
+
+.appShell--workspace .metricExplorer__titleRow .dsBadge { border: 1px solid #e8e8e8; border-radius: 4px; background: #f5f5f5; color: #666; }
