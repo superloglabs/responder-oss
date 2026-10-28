@@ -38,6 +38,12 @@
   --ds-info-border: #2d4050;
   --ds-info-surface: #10171c;
   --ds-font-sans: "Inter Variable", Inter, ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --ds-control-compact-height: 26px;
+  --ds-control-compact-padding-block: 3px;
+  --ds-control-compact-padding-inline: 8px;
+  --ds-control-compact-gap: 8px;
+  --ds-control-compact-label-gap: 6px;
+  --ds-control-compact-radius: 6px;
   --ds-radius-small: 10px;
   --ds-radius-medium: 16px;
   --ds-radius-large: 32px;
@@ -1361,7 +1367,9 @@
 }
 
 /* Canonical compact toolbar controls: same outline and spacing as workspace buttons. */
-.dsField--compact .dsSelect__trigger { height: 26px; min-height: 26px; gap: 5px; padding: 3px 7px; border: 1px solid #ddd; border-radius: 6px; background: #fff; color: #202020; box-shadow: 0 1px 3px #00000008; font: 400 13px/18px var(--ds-font-sans); }
+.dsField--compact { gap: var(--ds-control-compact-label-gap); }
+.dsField--compact > .dsField__label { color: #666; font: 500 12px/16px var(--ds-font-sans); }
+.dsField--compact .dsSelect__trigger { height: var(--ds-control-compact-height); min-height: var(--ds-control-compact-height); gap: var(--ds-control-compact-gap); padding: var(--ds-control-compact-padding-block) var(--ds-control-compact-padding-inline); border: 1px solid #ddd; border-radius: var(--ds-control-compact-radius); background: #fff; color: #202020; box-shadow: none; font: 400 13px/18px var(--ds-font-sans); }
 .dsField--compact .dsSelect__trigger svg { width: 12px; height: 12px; color: #666; }
 .dsSegmentedControl--compact { gap: 0; padding: 0; border: 1px solid #ddd; border-radius: 6px; background: #fff; box-shadow: 0 1px 3px #00000008; }
 .dsSegmentedControl--compact .dsSegmentedControl__option { display: inline-flex; align-items: center; gap: 5px; min-height: 24px; padding: 3px 7px; border: 0; border-radius: 0; color: #444; font: 400 13px/18px var(--ds-font-sans); }
