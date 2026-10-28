@@ -11,6 +11,7 @@ import {
   updateTelemetryDashboardLayout,
   updateTelemetryDashboardWidget,
   type TelemetryDashboard,
+  type TelemetryDashboardWidgetInput,
 } from "../../../../packages/core/src/db/telemetry-dashboards.js";
 import { getTelemetryClient } from "../../../../packages/core/src/telemetry/client.js";
 import {
@@ -53,6 +54,21 @@ const widgetLayout = dashboardWidgetLayoutSchema.describe(
   "Position on a 12-column grid: `x` 0 to 11, `w` 1 to 12, and `y` and `h` in rows. Charts are usually 6 wide and 4 high, tables 12 by 6, and text 4 by 5.",
 );
 
+const widgetsInput = z
+  .array(
+    z.object({
+      config: widgetConfig,
+      id: widgetId.optional().describe("Keeps the widget with this ID. Leave it out to add a new widget."),
+      layout: widgetLayout.optional().describe(`${widgetLayout.description} Defaults to the standard size for the type, below the others.`),
+      title: widgetTitle,
+      type: widgetType,
+    }),
+  )
+  .max(200)
+  .describe(
+    "Every widget on the dashboard, in order. The list replaces the dashboard's widgets: widgets left out are removed.",
+  );
+
 const widgetSchema = z.object({
   config: z.record(z.string(), z.unknown()).describe("The widget's settings."),
   id: widgetId,
@@ -81,6 +97,8 @@ function withUrl(dashboard: TelemetryDashboard) {
 const dashboardNotFound = () => new ManagementError(404, "Dashboard not found", "dashboard_not_found");
 const widgetNotFound = () => new ManagementError(404, "Widget not found", "widget_not_found");
 
+type WidgetsInput = z.output<typeof widgetsInput>;
+
 async function requireDashboards(context: ManagementContext): Promise<void> {
   const [telemetry, dashboards] = await Promise.all([
     organizationHasCapability(context.organizationId, "telemetry"),
@@ -98,16 +116,37 @@ async function requireDashboard(context: ManagementContext, id: string): Promise
 }
 
 // A chart's settings must be queryable for its type, as the editor checks.
-function checkWidgetConfig(type: DashboardWidgetType, config: DashboardWidgetConfig): void {
+function checkWidgetConfig(
+  type: DashboardWidgetType,
+  config: DashboardWidgetConfig,
+  path: Array<number | string> = [],
+): void {
   const problem = widgetConfigProblem(type, config);
   if (problem) {
     throw new ManagementError(400, "Invalid widget", "invalid_request", [{
       code: "custom",
       input: config,
       message: problem.message,
-      path: ["config", problem.field],
+      path: [...path, "config", problem.field],
     }]);
   }
+}
+
+function widgetInputs(widgets: WidgetsInput): TelemetryDashboardWidgetInput[] {
+  const ids = widgets.flatMap((widget) => (widget.id ? [widget.id] : []));
+  if (new Set(ids).size !== ids.length) {
+    throw new ManagementError(400, "Each widget ID can appear once.", "invalid_request");
+  }
+  return widgets.map((widget, index) => {
+    checkWidgetConfig(widget.type, widget.config, ["widgets", index]);
+    return {
+      config: widget.config,
+      ...(widget.id ? { id: widget.id } : {}),
+      layout: widget.layout ?? defaultWidgetLayout(widget.type),
+      title: widget.title,
+      type: widget.type,
+    };
+  });
 }
 
 export const dashboardOperations = [
@@ -153,43 +192,53 @@ export const dashboardOperations = [
   defineOperation({
     name: "create_dashboard",
     summary: "Create a dashboard",
-    description: "Creates an empty dashboard, optionally with variables. Widgets are added to it afterward.",
+    description:
+      "Creates a dashboard, optionally with variables and widgets. Widgets can also be added to it afterward.",
     method: "POST",
     path: "/dashboards",
     tag: "Dashboards",
     effect: "write",
     successStatus: 201,
-    input: z.object({ name: dashboardName, variables: variables.optional() }),
+    input: z.object({ name: dashboardName, variables: variables.optional(), widgets: widgetsInput.optional() }),
     output: z.object({ dashboard: dashboardSchema }),
     async run(context, input) {
       await requireDashboards(context);
+      const widgets = input.widgets ? widgetInputs(input.widgets) : undefined;
       const dashboard = await createTelemetryDashboard(context.organizationId, {
         createdBy: context.user.id,
         name: input.name,
         ...(input.variables ? { variables: input.variables } : {}),
+        ...(widgets ? { widgets } : {}),
       });
       return { dashboard: withUrl(dashboard) };
     },
   }),
   defineOperation({
     name: "update_dashboard",
-    summary: "Rename a dashboard or change its variables",
+    summary: "Change a dashboard",
     description:
-      "Changes a dashboard's name, its variables, or both. `variables` replaces the whole list, so include every variable to keep.",
+      "Changes a dashboard's name, variables, or widgets. `variables` and `widgets` each replace the whole list, so include everything to keep. Read the dashboard first to get its widget IDs.",
     method: "PATCH",
     path: "/dashboards/{dashboardId}",
     tag: "Dashboards",
     effect: "destructive",
-    input: z.object({ dashboardId, name: dashboardName.optional(), variables: variables.optional() }),
+    input: z.object({
+      dashboardId,
+      name: dashboardName.optional(),
+      variables: variables.optional(),
+      widgets: widgetsInput.optional(),
+    }),
     output: z.object({ dashboard: dashboardSchema }),
     async run(context, input) {
       await requireDashboards(context);
-      if (input.name === undefined && input.variables === undefined) {
-        throw new ManagementError(400, "Send a name or variables to change.", "nothing_to_update");
+      if (input.name === undefined && input.variables === undefined && input.widgets === undefined) {
+        throw new ManagementError(400, "Send a name, variables, or widgets to change.", "nothing_to_update");
       }
+      const widgets = input.widgets ? widgetInputs(input.widgets) : undefined;
       const dashboard = await updateTelemetryDashboard(context.organizationId, input.dashboardId, {
         ...(input.name !== undefined ? { name: input.name } : {}),
         ...(input.variables !== undefined ? { variables: input.variables } : {}),
+        ...(widgets ? { widgets } : {}),
       });
       if (!dashboard) throw dashboardNotFound();
       return { dashboard: withUrl(dashboard) };

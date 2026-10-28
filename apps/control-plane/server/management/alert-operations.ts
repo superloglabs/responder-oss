@@ -261,6 +261,34 @@ export const alertOperations = [
     },
   }),
   defineOperation({
+    name: "list_slack_channels",
+    summary: "List Slack channels for alerts",
+    description:
+      "Lists the Slack channels alerts and synthetic checks can post to: public channels, and private channels the Superlog app is in.",
+    method: "GET",
+    path: "/slack-channels",
+    tag: "Integrations",
+    effect: "read",
+    input: z.object({}),
+    output: z.object({
+      channels: z.array(
+        z.object({
+          accountName: z.string().describe("The Slack workspace's name."),
+          channelId: z.string().describe("The `channelId` to use in an alert's or check's `slack`."),
+          integrationAccountId: z.string().describe("The `integrationAccountId` to use in an alert's or check's `slack`."),
+          name: z.string().describe("The channel name, without `#`."),
+          private: z.boolean(),
+        }),
+      ),
+    }),
+    async run(context) {
+      if (!(await organizationHasCapability(context.organizationId, "alerts"))) {
+        throw new ManagementError(404, "Alerts are not available in this workspace.", "alerts_unavailable");
+      }
+      return { channels: await listTelemetryAlertSlackChannels(context.organizationId) };
+    },
+  }),
+  defineOperation({
     name: "preview_alert",
     summary: "Preview an alert rule",
     description:

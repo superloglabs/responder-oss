@@ -237,6 +237,69 @@ describe("dashboard operations", () => {
     expect(mocks.updateWidget).toHaveBeenCalledWith(organizationId, dashboardId, widgetId, { title: "Slow spans" });
   });
 
+  it("creates a dashboard with its widgets in one request", async () => {
+    mocks.createDashboard.mockResolvedValue(dashboard);
+
+    const response = await api("/dashboards", "POST", {
+      name: "Checkout",
+      widgets: [
+        { config: chart.config, layout: chart.layout, title: chart.title, type: chart.type },
+        { config: { source: "logs" }, title: "Recent logs", type: "log_table" },
+      ],
+    });
+
+    expect(response.status).toBe(201);
+    expect(mocks.createDashboard).toHaveBeenCalledWith(organizationId, {
+      createdBy: userId,
+      name: "Checkout",
+      widgets: [
+        { config: chart.config, layout: chart.layout, title: chart.title, type: chart.type },
+        { config: { filter: {}, source: "logs" }, layout: { h: 6, w: 12, x: 0, y: 100_000 }, title: "Recent logs", type: "log_table" },
+      ],
+    });
+  });
+
+  it("replaces a dashboard's widgets, keeping the ones sent with their IDs", async () => {
+    mocks.updateDashboard.mockResolvedValue(dashboard);
+
+    const result = await callTool("update_dashboard", {
+      dashboardId,
+      widgets: [
+        { config: chart.config, id: widgetId, layout: chart.layout, title: "Errors", type: chart.type },
+        { config: { markdown: "Runbook" }, title: "Notes", type: "markdown" },
+      ],
+    });
+
+    expect(result.isError).toBeUndefined();
+    expect(mocks.updateDashboard).toHaveBeenCalledWith(organizationId, dashboardId, {
+      widgets: [
+        { config: chart.config, id: widgetId, layout: chart.layout, title: "Errors", type: chart.type },
+        { config: { filter: {}, markdown: "Runbook" }, layout: { h: 5, w: 4, x: 0, y: 100_000 }, title: "Notes", type: "markdown" },
+      ],
+    });
+  });
+
+  it("refuses a widget list with an invalid chart or a repeated ID", async () => {
+    const invalid = await callTool("update_dashboard", {
+      dashboardId,
+      widgets: [
+        { config: chart.config, title: "Errors", type: chart.type },
+        { config: { source: "logs" }, title: "Latency", type: "timeseries_metric" },
+      ],
+    });
+    expect(invalid.body.issues).toEqual([{ message: "Choose a metric", path: ["widgets", 1, "config", "metricName"] }]);
+
+    const repeated = await callTool("update_dashboard", {
+      dashboardId,
+      widgets: [
+        { config: chart.config, id: widgetId, title: "Errors", type: chart.type },
+        { config: chart.config, id: widgetId, title: "Errors again", type: chart.type },
+      ],
+    });
+    expect(repeated.body.code).toBe("invalid_request");
+    expect(mocks.updateDashboard).not.toHaveBeenCalled();
+  });
+
   it("asks for a change when an update sends none", async () => {
     expect((await callTool("update_dashboard", { dashboardId })).body.code).toBe("nothing_to_update");
     expect((await callTool("update_dashboard_widget", { dashboardId, widgetId })).body.code).toBe("nothing_to_update");

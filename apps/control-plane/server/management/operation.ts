@@ -36,6 +36,7 @@ export type ManagementTag =
   | "Models"
   | "Runs"
   | "Secrets"
+  | "Synthetics"
   | "Tag mode"
   | "Telemetry"
   | "Workspace";
