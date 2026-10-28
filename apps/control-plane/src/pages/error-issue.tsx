@@ -1,3 +1,9 @@
+import { AttributeTable } from "../components/telemetry-explorer";
+import { DashboardTimePicker } from "../components/dashboard-time-picker";
+import { zoomOutTimeRange } from "../dashboard-time-range";
+import { useTimeZonePreference } from "../use-time-zone-preference";
+import { traceExplorerParams, traceSearchQuery, type TraceSearchQuery } from "../telemetry-api";
+import { TraceExplorer } from "./traces";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { relativeTime } from "../agents-api";
@@ -6,11 +12,10 @@ import { ErrorIssueSkeleton } from "../components/screen-skeletons";
 import { TimeseriesChart } from "../components/timeseries-chart";
 import { Badge, Button } from "../design-system";
 import {
-  errorIssueChart,
+  errorIssueDetailChart,
   errorIssueStatusLabels,
   fetchErrorIssue,
   formatEventCount,
-  sampleAttributes,
   updateErrorIssueStatus,
   type ErrorIssueDetail,
   type ErrorIssueStatus,
@@ -26,20 +31,36 @@ export function ErrorIssueStatusBadge({ status }: { status: ErrorIssueStatus }) 
   return <Badge tone={status === "open" ? "danger" : "neutral"}>{errorIssueStatusLabels[status]}</Badge>;
 }
 
-function Attributes({ attributes, label }: { attributes: Record<string, string>; label: string }) {
-  const entries = sampleAttributes(attributes);
-  if (entries.length === 0) return null;
+function RelatedTraces({ issue }: { issue: ErrorIssueDetail["issue"] }) {
+  const environmentKey = ["deployment.environment.name", "deployment.environment"].find((key) => issue.lastSample.resourceAttributes[key]);
+  const [query, setQuery] = useState<TraceSearchQuery>(() => ({
+    ...traceSearchQuery(new URLSearchParams("range=30d&status=STATUS_CODE_ERROR")),
+    services: issue.service ? [issue.service] : [],
+    filters: environmentKey ? [{ key: `resource.${environmentKey}`, op: "eq" as const, value: issue.lastSample.resourceAttributes[environmentKey]! }] : [],
+  }));
+  const [openTrace, setOpenTrace] = useState<string | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  const { changeTimeZone, timeZone, timeZonePreference } = useTimeZonePreference();
+  function updateQuery(update: Partial<TraceSearchQuery>) {
+    if (update.range) setNow(Date.now());
+    setQuery((current) => ({ ...current, ...update }));
+    setOpenTrace(null);
+  }
   return (
-    <section aria-label={label} className="syntheticCheck__section">
-      <header><h2>{label}</h2></header>
-      <dl className="errorIssue__attributes">
-        {entries.map(([key, value]) => (
-          <div key={key} style={{ display: "contents" }}>
-            <dt>{key}</dt>
-            <dd>{value}</dd>
-          </div>
-        ))}
-      </dl>
+    <section aria-label="Related traces" className="errorIssue__traces">
+      <header className="errorIssue__tracesHeading">
+        <h2>Related traces</h2>
+        <Link to={`/traces/search?${traceExplorerParams(query)}`}>Open in trace search ↗</Link>
+        <DashboardTimePicker
+          now={now} onChange={(range) => updateQuery({ range })}
+          onTimeZoneChange={changeTimeZone}
+          onZoomOut={() => updateQuery({ range: zoomOutTimeRange(query.range, Date.now(), null).range })}
+          range={query.range} timeZone={timeZone} timeZonePreference={timeZonePreference} zoomed={false}
+        />
+      </header>
+      <p className="dashboardPage__meta">Explore error traces using the service and environment filters below.</p>
+      <TraceExplorer now={now} refresh={0} timeZone={timeZone} onOpenTrace={setOpenTrace}
+        openTrace={openTrace} query={query} setQuery={updateQuery} showVolume={false} />
     </section>
   );
 }
@@ -87,7 +108,7 @@ export function ErrorIssuePage() {
 
   if (!detail || detail.issue.id !== issueId) {
     return (
-      <AppShell active="errors" redesigned>
+      <AppShell active="errors" redesigned wide>
         {loadError ? (
           <div className="automationRuns__message" role="alert">
             <p>{loadError}</p>
@@ -102,14 +123,15 @@ export function ErrorIssuePage() {
 
   const { issue } = detail;
   const sample = issue.lastSample;
-  const chart = errorIssueChart(detail.days, detail.since);
+  const chart = errorIssueDetailChart(detail);
+  const hourly = chart.stepMs < 86_400_000;
   const recent = detail.days.reduce((sum, day) => sum + day.eventCount, 0);
   const actions: Array<{ label: string; status: ErrorIssueStatus }> = issue.status === "open"
     ? [{ label: "Ignore", status: "silenced" }, { label: "Resolve", status: "resolved" }]
     : [{ label: "Reopen", status: "open" }];
 
   return (
-    <AppShell active="errors" redesigned>
+    <AppShell active="errors" redesigned wide>
       <div className="errorIssue syntheticCheck">
         <header className="automationCreate__header">
           <nav aria-label="Breadcrumb" className="automationCreate__breadcrumb">
@@ -133,50 +155,48 @@ export function ErrorIssuePage() {
               </Button>
             ))}
           </div>
+          <p className="dashboardPage__meta">{formatEventCount(issue.eventCount)} total events · {issue.kind === "span" ? "Span exception" : "Error log"}{issue.regressedAt ? ` · Reopened ${relativeTime(issue.regressedAt)}` : ""}</p>
         </header>
         {error || loadError ? <p className="formError" role="alert">{error ?? loadError}</p> : null}
         <section className="errorIssue__overview" aria-label="Error overview">
           <div className="errorIssue__summary">
-            <p className="errorIssue__message">{issue.message ?? issue.title}</p>
-            <p className="dashboardPage__meta">{formatEventCount(issue.eventCount)} total events · {issue.kind === "span" ? "Span exception" : "Error log"}{issue.regressedAt ? ` · Reopened ${relativeTime(issue.regressedAt)}` : ""}</p>
+            <section aria-label="Latest occurrence" className="syntheticCheck__section">
+              <header>
+                <h2>Latest event</h2>
+                <time className="errorIssue__eventTime" dateTime={sample.seenAt}>{new Date(sample.seenAt).toLocaleString()}</time>
+                {sample.traceId ? <Link className="dsButton dsButton--secondary dsButton--small" to={`/traces/${sample.traceId}`}>View trace</Link> : null}
+                <span className="dashboardPage__meta">{relativeTime(sample.seenAt)}</span>
+              </header>
+              <pre className="errorIssue__eventMessage">{sample.message ?? issue.message ?? issue.title}</pre>
+              {sample.stacktrace ? <details className="errorIssue__stackPanel"><summary>Stack trace</summary><pre className="errorIssue__stack">{sample.stacktrace}</pre></details> : null}
+            </section>
+            <AttributeTable grouped scopes={[
+              { label: sample.kind === "span" ? "Span" : "Log", prefix: sample.kind === "span" ? "span." : "log.", values: sample.attributes },
+              { label: "Resource", prefix: "resource.", values: Object.fromEntries(Object.entries(sample.resourceAttributes).filter(([key]) => key !== "service.version")) },
+            ]} />
           </div>
           <dl className="errorIssue__properties">
-            <div><dt>Status</dt><dd><ErrorIssueStatusBadge status={issue.status} /></dd></div>
+            <div><dt>Status</dt><dd><span className={`errorIssue__status errorIssue__status--${issue.status}`}><i aria-hidden="true" />{errorIssueStatusLabels[issue.status]}</span></dd></div>
             {[
               ["Service", issue.service ?? "—"],
               ["Environment", sample.resourceAttributes["deployment.environment.name"] ?? sample.resourceAttributes["deployment.environment"] ?? sample.attributes["deployment.environment.name"] ?? sample.attributes["deployment.environment"] ?? "—"],
-              ["Service version", sample.resourceAttributes["service.version"] ?? "—"],
               ["First seen", new Date(issue.firstSeenAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })],
               ["Last seen", relativeTime(issue.lastSeenAt)],
-            ].map(([name, value]) => <div key={name}><dt>{name}</dt><dd className={name === "Service version" ? "errorIssue__version" : undefined} title={value}>{value}</dd></div>)}
+            ].map(([name, value]) => <div key={name}><dt>{name}</dt><dd title={value}>{value}</dd></div>)}
           </dl>
         </section>
 
         <section aria-label="Occurrences" className="syntheticCheck__section">
           <header>
             <h2>Occurrences</h2>
-            <span className="dashboardPage__meta">{formatEventCount(recent)} events · Daily, last 30 days</span>
+            <span className="dashboardPage__meta">{formatEventCount(recent)} events · {hourly ? "Every 3 hours" : "Daily"}, last 30 days</span>
           </header>
           <div className="syntheticCheck__chart">
-            <TimeseriesChart chart={chart} chartType="bar" density="compact" label="Occurrences per day" showLegend={false} />
+            <TimeseriesChart chart={chart} chartType="bar" density="compact" adjacentBars={hourly} label={hourly ? "Occurrences every 3 hours" : "Occurrences per day"} showLegend={false} />
           </div>
         </section>
 
-        <section aria-label="Latest occurrence" className="syntheticCheck__section">
-          <header>
-            <h2>Latest event</h2>
-            {sample.traceId ? <Link className="dsButton dsButton--secondary dsButton--small" to={`/traces/${sample.traceId}`}>View trace</Link> : null}
-            <time className="dashboardPage__meta" dateTime={sample.seenAt} title={new Date(sample.seenAt).toLocaleString()}>
-              {relativeTime(sample.seenAt)}
-            </time>
-          </header>
-          {sample.message ? <p className="errorIssue__message">{sample.message}</p> : null}
-          {sample.stacktrace ? (
-            <div className="errorIssue__stackPanel"><div className="errorIssue__stackHeading">{issue.topFrame ?? issue.exceptionType}</div><pre className="errorIssue__stack">{sample.stacktrace}</pre></div>
-          ) : (
-            <p className="dashboardWidget__status">The occurrence has no stack trace.</p>
-          )}
-        </section>
+        <RelatedTraces issue={issue} key={issue.id} />
 
         {issue.frames.length > 0 ? (
           <section aria-label="Grouped by" className="syntheticCheck__section">
@@ -193,8 +213,6 @@ export function ErrorIssuePage() {
           </section>
         ) : null}
 
-        <Attributes attributes={sample.attributes} label={sample.kind === "span" ? "Span attributes" : "Log attributes"} />
-        <Attributes attributes={sample.resourceAttributes} label="Resource attributes" />
       </div>
     </AppShell>
   );

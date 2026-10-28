@@ -3,6 +3,7 @@ import {
   dailyCounts,
   daysThroughToday,
   errorIssueChart,
+  errorIssueDetailChart,
   errorIssueParams,
   formatEventCount,
   hourlyCounts,
@@ -60,4 +61,23 @@ describe("error issue presentation", () => {
   it("sorts sample attributes by key", () => {
     expect(sampleAttributes({ b: "2", a: "1" })).toEqual([["a", "1"], ["b", "2"]]);
   });
+});
+
+it("aggregates real hours into three-hour buckets, including a partial current bucket", () => {
+  const chart = errorIssueDetailChart({ since: "2026-10-22", days: [{ day: "2026-10-22", eventCount: 10 }], hours: [
+    { hour: "2026-10-22T00:00:00Z", eventCount: 2 },
+    { hour: "2026-10-22T02:00:00Z", eventCount: 3 },
+    { hour: "2026-10-22T06:00:00Z", eventCount: 5 },
+  ] }, Date.parse("2026-10-22T06:30:00Z"));
+  expect(chart.stepMs).toBe(10_800_000);
+  expect(chart.series[0]?.values).toEqual([5, 0, 5]);
+  expect(chart.buckets).toEqual([0, 3, 6].map((hour) => Date.parse("2026-10-22T00:00:00Z") + hour * 3_600_000));
+});
+
+it("keeps daily totals when historic hours are missing, even when overall totals match", () => {
+  const chart = errorIssueDetailChart({ since: "2026-10-21", days: [{ day: "2026-10-21", eventCount: 5 }], hours: [
+    { hour: "2026-10-22T00:00:00Z", eventCount: 5 },
+  ] }, Date.parse("2026-10-22T06:30:00Z"));
+  expect(chart.stepMs).toBe(86_400_000);
+  expect(chart.series[0]?.values).toEqual([5, 0]);
 });

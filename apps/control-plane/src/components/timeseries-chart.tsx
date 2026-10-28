@@ -40,6 +40,7 @@ function seriesTotal(values: Array<number | null>): number {
 // and shows series and a tooltip for the bucket under the pointer.
 export function TimeseriesChart({
   chart,
+  adjacentBars = false,
   chartType = "bar",
   density = "default",
   hiddenSeries,
@@ -55,6 +56,7 @@ export function TimeseriesChart({
   unit = "none",
 }: {
   chart: ChartData;
+  adjacentBars?: boolean;
   chartType?: "bar" | "line";
   density?: "default" | "compact";
   // Series hidden by a legend outside the chart, which replaces the chart's
@@ -138,7 +140,7 @@ export function TimeseriesChart({
   const height = Math.max(0, size.height - footer - plotTop);
   const y = (value: number) => plotTop + height - ((value - bottom) / (top - bottom || 1)) * height;
   const band = count > 0 ? width / count : width;
-  const barWidth = Math.min(density === "compact" ? 6 : Infinity, Math.max(1, band - Math.min(2, band * 0.2)));
+  const barWidth = adjacentBars ? band : Math.min(density === "compact" ? 6 : Infinity, Math.max(1, band - Math.min(2, band * 0.2)));
   const x = (index: number) => left + (stacked ? index * band + band / 2 : count > 1 ? (index / (count - 1)) * width : width / 2);
   const spanMs = count > 1 ? chart.buckets[count - 1]! - chart.buckets[0]! : 0;
   const labelEvery = Math.max(1, Math.ceil(count / Math.max(1, Math.floor(width / 90))));

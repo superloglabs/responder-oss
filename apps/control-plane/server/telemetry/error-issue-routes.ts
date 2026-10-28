@@ -168,8 +168,11 @@ export function createErrorIssueRoutes(dependencies: ErrorIssueRouteDependencies
       const issue = await dependencies.findIssue(tenant.organizationId, issueId.data);
       if (!issue) return context.json({ error: "Error issue not found" }, 404);
       const since = firstDay(dependencies.now(), errorIssueDetailDays);
-      const days = await dependencies.days([issue.id], since);
-      return context.json({ days: days.get(issue.id) ?? [], issue, since });
+      const [days, hours] = await Promise.all([
+        dependencies.days([issue.id], since),
+        dependencies.hours([issue.id], `${since}T00:00:00.000Z`),
+      ]);
+      return context.json({ days: days.get(issue.id) ?? [], hours: hours.get(issue.id) ?? [], issue, since });
     })
     .patch("/:issueId", async (context) => {
       const tenant = await access(context.req.raw.headers);
