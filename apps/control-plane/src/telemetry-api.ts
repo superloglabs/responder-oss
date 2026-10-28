@@ -16,6 +16,8 @@ export type {
 
 export interface LogRecord {
   body: string;
+  // Set on OpenTelemetry events, which usually have no body.
+  event_name: string;
   exception_message: string;
   exception_stacktrace: string;
   exception_type: string;
@@ -561,6 +563,38 @@ export type LevelSeries = "error" | "warn" | "other";
 export function levelSeries(severity: string): LevelSeries {
   const tone = severityTextTone(severity);
   return tone === "danger" ? "error" : tone === "warning" ? "warn" : "other";
+}
+
+// OpenTelemetry events, such as the browser SDK's page views and Web Vitals,
+// keep their data in attributes and have no body. They read as their event
+// name and what happened: the page for a navigation, the score for a vital.
+export function logMessage(log: Pick<LogRecord, "body" | "event_name" | "log_attrs">): string {
+  if (log.body || !log.event_name) return log.body;
+  const attrs = log.log_attrs;
+  if (log.event_name === "browser.navigation" && attrs["url.full"]) {
+    return `${log.event_name} ${urlPath(attrs["url.full"])}`;
+  }
+  const vital = attrs["browser.web_vital.name"];
+  if (log.event_name === "browser.web_vital" && vital) {
+    const value = Number(attrs["browser.web_vital.value"]);
+    const rating = attrs["browser.web_vital.rating"];
+    return [
+      log.event_name,
+      vital,
+      Number.isFinite(value) ? value.toLocaleString("en-US", { maximumFractionDigits: 3, useGrouping: false }) : "",
+      rating ? `(${rating})` : "",
+    ].filter(Boolean).join(" ");
+  }
+  return log.event_name;
+}
+
+function urlPath(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.pathname}${parsed.search}`;
+  } catch {
+    return url;
+  }
 }
 
 // "ERROR" reads as "Error"; a log without a level reads as "Unset".

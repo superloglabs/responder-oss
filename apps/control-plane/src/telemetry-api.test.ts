@@ -8,6 +8,7 @@ import {
   logApiParams,
   logExplorerParams,
   logExplorerQuery,
+  logMessage,
   logTimestamp,
   severityTextTone,
   severityTone,
@@ -199,6 +200,36 @@ describe("severityTextTone", () => {
     expect(severityTextTone("Warning")).toBe("warning");
     expect(severityTextTone("INFO")).toBe("info");
     expect(severityTextTone("")).toBe("neutral");
+  });
+});
+
+describe("logMessage", () => {
+  it("keeps a log's body", () => {
+    expect(logMessage({ body: "request done", event_name: "", log_attrs: {} })).toBe("request done");
+  });
+
+  it("reads a navigation event as its page", () => {
+    expect(logMessage({
+      body: "",
+      event_name: "browser.navigation",
+      log_attrs: { "url.full": "https://superlog.sh/metrics?kind=histogram" },
+    })).toBe("browser.navigation /metrics?kind=histogram");
+  });
+
+  it("reads a Web Vital event as its score", () => {
+    expect(logMessage({
+      body: "",
+      event_name: "browser.web_vital",
+      log_attrs: {
+        "browser.web_vital.name": "cls",
+        "browser.web_vital.rating": "good",
+        "browser.web_vital.value": "0.031973909951240706",
+      },
+    })).toBe("browser.web_vital cls 0.032 (good)");
+  });
+
+  it("reads another event as its name", () => {
+    expect(logMessage({ body: "", event_name: "browser.navigation_timing", log_attrs: {} })).toBe("browser.navigation_timing");
   });
 });
 

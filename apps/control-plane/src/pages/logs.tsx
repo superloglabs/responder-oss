@@ -29,6 +29,7 @@ import {
   levelSeries,
   logExplorerParams,
   logExplorerQuery,
+  logMessage,
   logTimestamp,
   severityTextTone,
   traceHref,
@@ -97,6 +98,7 @@ function LogDrawer({
     () => fetchLogErrorIssueId(log),
   );
   const issueId = isError ? issue.data : null;
+  const message = logMessage(log);
   return (
     <ExplorerDrawer
       fullHeight
@@ -144,9 +146,11 @@ function LogDrawer({
           ) : null}
         </div>
       ) : null}
-      <section className="explorerSection">
-        <pre className="explorerBlock">{log.body}</pre>
-      </section>
+      {message ? (
+        <section className="explorerSection">
+          <pre className="explorerBlock">{message}</pre>
+        </section>
+      ) : null}
       {exception || log.exception_stacktrace ? (
         <section className="explorerSection">
           <header><h3>Exception</h3></header>
@@ -160,6 +164,7 @@ function LogDrawer({
         grouped
         key={logKeyForAttributes(log)}
         leading={[
+          ...(log.event_name ? [{ key: "event_name", value: log.event_name }] : []),
           ...(log.trace_id ? [{ key: "trace_id", value: <Link to={traceHref(log.trace_id)}>{log.trace_id}</Link> }] : []),
           ...(log.span_id ? [{ key: "span_id", value: log.span_id }] : []),
         ]}
@@ -324,10 +329,10 @@ function LogExplorer({ query, refresh, setQuery, timeZone, now }: {
                       aria-expanded={log.key === selected}
                       className="explorerCell--message"
                       onClick={() => setSelected(log.key === selected ? null : log.key)}
-                      title={log.body}
+                      title={logMessage(log)}
                       type="button"
                     >
-                      {log.body}
+                      {logMessage(log)}
                     </button>
                   ),
                 },

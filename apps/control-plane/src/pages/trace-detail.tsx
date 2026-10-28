@@ -10,6 +10,7 @@ import {
   fetchTrace,
   formatDuration,
   formatTelemetryTime,
+  logMessage,
   logTimestamp,
   severityTextTone,
   spanKindLabel,
@@ -54,7 +55,7 @@ function SpanDetail({ logs, onClose, span }: { logs: TraceLog[]; onClose: () => 
             {logs.map((log, index) => (
               <li key={`${log.ts_ns}-${index}`}>
                 <Badge tone={severityTextTone(log.severity)}>{log.severity || "Unset"}</Badge>
-                <span>{log.body}</span>
+                <span>{logMessage(log)}</span>
               </li>
             ))}
           </ul>
@@ -177,10 +178,10 @@ function TraceView({ traceId }: { traceId: string }) {
                   // Opens the span that wrote the log, when the trace has it.
                   render: (log) => log.span_id && trace.spans.some((span) => span.span_id === log.span_id) ? (
                     <button className="telemetryPage__message" onClick={() => openSpan(log.span_id)} type="button">
-                      {log.body}
+                      {logMessage(log)}
                     </button>
                   ) : (
-                    <span className="telemetryPage__message">{log.body}</span>
+                    <span className="telemetryPage__message">{logMessage(log)}</span>
                   ),
                 },
               ]}

@@ -73,6 +73,7 @@ const exception = z
 const logSchema = z.object({
   attributes,
   body: z.string(),
+  eventName: z.string().describe("The OpenTelemetry event name, such as `browser.navigation`. Events usually have no body."),
   exception,
   resourceAttributes: attributes,
   service: z.string(),
@@ -158,6 +159,7 @@ function logOf(row: Row) {
   return {
     attributes: attributeMap(row.log_attrs),
     body: text(row.body),
+    eventName: text(row.event_name),
     exception: exceptionOf(row),
     resourceAttributes: resourceAttributeMap(row.resource_attrs),
     service: text(row.service),
@@ -281,7 +283,7 @@ export const telemetryOperations = [
         .describe("Exact matches on log record attributes, such as `event.name`."),
       limit: limit(50),
       resourceAttributes,
-      search: z.string().max(500).optional().describe("Case-insensitive text in the log body."),
+      search: z.string().max(500).optional().describe("Case-insensitive text in the log body or event name."),
       service,
       severity: z.string().trim().max(40).optional().describe("A level such as `ERROR`, `WARN`, or `INFO`."),
       traceId: z.string().regex(/^[0-9a-fA-F]{32}$/u).optional().describe("Only logs written in this trace."),

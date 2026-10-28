@@ -96,6 +96,24 @@ describe("field filters", () => {
   });
 });
 
+describe("log events", () => {
+  it("returns, filters, and searches the event name", async () => {
+    const queries: RecordedQuery[] = [];
+
+    await queryLogs(recordingClient(queries), "project-1", {
+      limit: 10,
+      resourceAttrs: [{ key: "field.event_name", value: "browser.navigation" }],
+      search: "navigation",
+    });
+
+    const [{ params, query }] = queries;
+    expect(query).toContain("EventName AS event_name");
+    expect(query).toContain("EventName = {fattr_v_0:String}");
+    expect(query).toContain("positionCaseInsensitive(EventName, {search:String}) > 0");
+    expect(params).toMatchObject({ fattr_v_0: "browser.navigation", search: "navigation" });
+  });
+});
+
 describe("metric attribute filters", () => {
   const range = { since: "2026-07-23T00:00:00.000Z", until: "2026-07-23T01:00:00.000Z" };
 
