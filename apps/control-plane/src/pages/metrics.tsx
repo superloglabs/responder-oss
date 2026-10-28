@@ -1,27 +1,33 @@
 import { NavigationIcon } from "../components/navigation-icon";
-import { MagnifyingGlassIcon } from "@phosphor-icons/react";
+import { ArrowClockwiseIcon, MagnifyingGlassIcon } from "@phosphor-icons/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { AppShell } from "../components/app-shell";
+import { DashboardTimePicker } from "../components/dashboard-time-picker";
 import { DataTableSkeleton } from "../components/screen-skeletons";
 import { MetricKindIcon } from "../components/metric-kind-icon";
 import { SendTelemetryLink, TelemetryGate } from "../components/telemetry";
-import { DataTable, SegmentedControl, SelectField } from "../design-system";
+import { resolveTimeRange, timeRangeFromParams, zoomOutTimeRange, type DashboardTimeRange } from "../dashboard-time-range";
+import { DataTable, IconButton, SelectField } from "../design-system";
 import {
   fetchMetricCatalog,
   filterMetricCatalog,
+  groupMetricCatalog,
+  metricCatalogGroup,
+  metricDisplay,
   metricExplorerHref,
   metricKindLabel,
   metricKinds,
+  metricRangeParams,
   type MetricCatalogEntry,
 } from "../metrics-api";
-import { fetchServices, telemetryRanges, type TelemetryRange } from "../telemetry-api";
+import { fetchServices } from "../telemetry-api";
 import { useDocumentTitle } from "../use-document-title";
 import { useTelemetryAvailable } from "../use-telemetry-available";
+import { useTimeZonePreference } from "../use-time-zone-preference";
 import "../components/automation-run-history.css";
 import "../components/metrics.css";
 
-const rangeValues = new Set<string>(telemetryRanges.map((range) => range.value));
 // Dimension chips shown before the rest are counted.
 const shownDimensions = 3;
 
@@ -37,8 +43,10 @@ export function MetricsPage() {
   const telemetry = useTelemetryAvailable();
   const available = telemetry.available === true;
   const [params, setParams] = useSearchParams();
-  const rangeParam = params.get("range") ?? "";
-  const range: TelemetryRange = rangeValues.has(rangeParam) ? (rangeParam as TelemetryRange) : "1h";
+  const range = timeRangeFromParams(params);
+  const { changeTimeZone, timeZone, timeZonePreference } = useTimeZonePreference();
+  const [now, setNow] = useState(() => Date.now());
+  const { since, until } = resolveTimeRange(range, now);
   const kind = params.get("kind") ?? "";
   const service = params.get("service") ?? "";
   const search = params.get("q") ?? "";
@@ -48,6 +56,11 @@ export function MetricsPage() {
   const [allServices, setAllServices] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const request = useRef(0);
+
+  function setRange(next: DashboardTimeRange) {
+    setNow(Date.now());
+    setParams((current) => metricRangeParams(next, current), { replace: true });
+  }
 
   function setFilter(key: string, value: string) {
     setParams((current) => {
@@ -62,11 +75,11 @@ export function MetricsPage() {
     if (!available) return;
     const generation = ++request.current;
     setCatalog(null);
-    void fetchServices(range, "all")
+    void fetchServices({ since, until }, "all")
       .catch(() => [])
       .then((loaded) => { if (request.current === generation) setAllServices(loaded); });
     try {
-      const loaded = await fetchMetricCatalog(range);
+      const loaded = await fetchMetricCatalog({ since, until });
       if (request.current !== generation) return;
       setCatalog(loaded);
       setError(null);
@@ -75,7 +88,7 @@ export function MetricsPage() {
       setCatalog([]);
       setError(cause instanceof Error ? cause.message : "Unable to load metrics");
     }
-  }, [available, range]);
+  }, [available, since, until]);
 
   useEffect(() => {
     void Promise.resolve().then(load);
@@ -93,12 +106,30 @@ export function MetricsPage() {
     () => filterMetricCatalog(catalog ?? [], { kind, search, service }),
     [catalog, kind, search, service],
   );
+  const table = useMemo(() => groupMetricCatalog(shown), [shown]);
   const attributeKeys = new Set(shown.flatMap((metric) => metric.attributes)).size;
 
   return (
     <AppShell active="metrics" redesigned>
       <header className="workspaceHeading">
         <h1><NavigationIcon section="metrics" />Metrics</h1>
+        {available ? (
+          <div className="workspaceHeading__actions">
+            <IconButton aria-label="Refresh" onClick={() => setNow(Date.now())} size="small" variant="ghost">
+              <ArrowClockwiseIcon size={14} />
+            </IconButton>
+            <DashboardTimePicker
+              now={now}
+              onChange={setRange}
+              onTimeZoneChange={changeTimeZone}
+              onZoomOut={() => setRange(zoomOutTimeRange(range, Date.now(), null).range)}
+              range={range}
+              timeZone={timeZone}
+              timeZonePreference={timeZonePreference}
+              zoomed={false}
+            />
+          </div>
+        ) : null}
       </header>
       <TelemetryGate signal="Metrics" state={telemetry}>
         <section aria-label="Metrics" className="telemetryPage">
@@ -132,12 +163,6 @@ export function MetricsPage() {
                 value={search}
               />
             </label>
-            <SegmentedControl
-              aria-label="Time range"
-              onChange={(value) => setFilter("range", value === "1h" ? "" : value)}
-              options={telemetryRanges}
-              value={range}
-            />
           </div>
           {error ? (
             <div className="automationRuns__message" role="alert">
@@ -173,24 +198,32 @@ export function MetricsPage() {
                 </strong>
                 {attributeKeys > 0 ? <span>{attributeKeys} attribute keys</span> : null}
               </p>
-              <div className="agentListTable telemetryPage__table">
+              <div className="agentListTable telemetryPage__table metricsCatalog__table">
                 <DataTable<MetricCatalogEntry>
                   aria-label="Metrics"
                   columns={[
                     {
                       header: "Metric",
                       key: "metric",
-                      render: (metric) => (
-                        <div className="metricName">
-                          <MetricKindIcon kind={metric.kind} />
-                          <span className="metricName__text">
-                            <Link className="metricName__name" to={metricExplorerHref(metric, { range })}>
-                              {metric.name}
-                            </Link>
-                            {metric.description ? <span className="metricName__description">{metric.description}</span> : null}
-                          </span>
-                        </div>
-                      ),
+                      render: (metric) => {
+                        const display = metricDisplay(metric);
+                        const friendly = display.title !== metric.name;
+                        return (
+                          <div className="metricName">
+                            <MetricKindIcon kind={metric.kind} />
+                            <span className="metricName__text">
+                              <Link
+                                className={friendly ? "metricName__name metricName__name--friendly" : "metricName__name"}
+                                title={friendly ? metric.name : undefined}
+                                to={metricExplorerHref(metric, { range })}
+                              >
+                                {display.title}
+                              </Link>
+                              {display.description ? <span className="metricName__description">{display.description}</span> : null}
+                            </span>
+                          </div>
+                        );
+                      },
                     },
                     {
                       header: "Type",
@@ -233,9 +266,10 @@ export function MetricsPage() {
                     },
                   ]}
                   emptyMessage="No metrics match these filters."
+                  getRowGroup={table.grouped ? metricCatalogGroup : undefined}
                   getRowKey={metricKey}
                   onRowClick={(metric) => navigate(metricExplorerHref(metric, { range }))}
-                  rows={shown}
+                  rows={table.rows}
                   variant="workspace"
                 />
               </div>

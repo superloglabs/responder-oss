@@ -58,7 +58,7 @@ export interface QueryWindow {
 
 export type VariableValues = Record<string, DashboardVariableValue>;
 
-function windowParams(window: QueryWindow): Record<string, string> {
+export function windowParams(window: QueryWindow): Record<string, string> {
   return { since: new Date(window.since).toISOString(), until: new Date(window.until).toISOString() };
 }
 
