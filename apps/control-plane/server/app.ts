@@ -374,8 +374,12 @@ export const app = instrumentedApp
       .catch(() => null);
     if (!session) return context.json({ error: "Unauthorized" }, 401);
     // An unverified account may not own its email, so it neither learns
-    // nor changes that address's legacy routing.
-    if (!session.user.emailVerified) return context.json({ redirect: false });
+    // nor changes that address's legacy routing. A superuser impersonating a
+    // marked user stays here, since the legacy product cannot carry the
+    // impersonation and the banner to stop it would be unreachable.
+    if (!session.user.emailVerified || session.session.impersonatedBy) {
+      return context.json({ redirect: false });
+    }
 
     try {
       const redirect = await shouldRedirectLegacyAccount(session.user.email);
@@ -399,7 +403,9 @@ export const app = instrumentedApp
       .getSession({ headers: context.req.raw.headers })
       .catch(() => null);
     if (!session) return context.json({ error: "Unauthorized" }, 401);
-    if (!session.user.emailVerified) return context.json({ redirect: false });
+    if (!session.user.emailVerified || session.session.impersonatedBy) {
+      return context.json({ redirect: false });
+    }
 
     try {
       await clearLegacyAccountRedirect(session.user.email);

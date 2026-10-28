@@ -34,6 +34,7 @@ describe("legacy account redirect routes", () => {
 
   it("returns the fixed legacy target for a marked session", async () => {
     mocks.getSession.mockResolvedValue({
+      session: {},
       user: { email: "legacy@example.com", emailVerified: true },
     });
     mocks.shouldRedirect.mockResolvedValue(true);
@@ -50,6 +51,7 @@ describe("legacy account redirect routes", () => {
 
   it("clears a marker only for the authenticated user's email", async () => {
     mocks.getSession.mockResolvedValue({
+      session: {},
       user: { email: "legacy@example.com", emailVerified: true },
     });
 
@@ -64,7 +66,26 @@ describe("legacy account redirect routes", () => {
 
   it("neither reveals nor clears the routing of an unverified email", async () => {
     mocks.getSession.mockResolvedValue({
+      session: {},
       user: { email: "legacy@example.com", emailVerified: false },
+    });
+    mocks.shouldRedirect.mockResolvedValue(true);
+
+    const lookup = await app.request("/api/legacy-account-redirect");
+    const clear = await app.request("/api/legacy-account-redirect/clear", {
+      method: "POST",
+    });
+
+    await expect(lookup.json()).resolves.toEqual({ redirect: false });
+    await expect(clear.json()).resolves.toEqual({ redirect: false });
+    expect(mocks.shouldRedirect).not.toHaveBeenCalled();
+    expect(mocks.clear).not.toHaveBeenCalled();
+  });
+
+  it("keeps an impersonation session here and leaves the marker alone", async () => {
+    mocks.getSession.mockResolvedValue({
+      session: { impersonatedBy: "superuser-id" },
+      user: { email: "legacy@example.com", emailVerified: true },
     });
     mocks.shouldRedirect.mockResolvedValue(true);
 
