@@ -260,6 +260,7 @@ export function ExplorerDrawer({
   label,
   onClose,
   fullHeight = false,
+  className = "",
   wide = false,
 }: {
   children: ReactNode;
@@ -267,6 +268,7 @@ export function ExplorerDrawer({
   label: string;
   onClose: () => void;
   fullHeight?: boolean;
+  className?: string;
   wide?: boolean;
 }) {
   const panel = useRef<HTMLElement>(null);
@@ -287,7 +289,7 @@ export function ExplorerDrawer({
   return (
     <aside
       aria-label={label}
-      className={`explorerDrawer${wide ? " explorerDrawer--wide" : ""}${fullHeight ? " explorerDrawer--fullHeight" : ""}`}
+      className={`explorerDrawer${wide ? " explorerDrawer--wide" : ""}${fullHeight ? " explorerDrawer--fullHeight" : ""} ${className}`}
       ref={panel}
       tabIndex={-1}
     >
@@ -303,6 +305,9 @@ export function ExplorerDrawer({
 }
 
 export interface AttributeScope {
+  // A display group may share a filter prefix with another group.
+  id?: string;
+  heading?: string;
   label: string;
   // The filter key prefix for this scope, such as "log." or "resource.".
   prefix: string;
@@ -326,13 +331,14 @@ export function AttributeTable({
 }) {
   const tableId = useId();
   const [scope, setScope] = useState("all");
-  const [collapsed, setCollapsed] = useState(() => scopes.filter((item) => item.defaultCollapsed).map((item) => item.prefix));
+  const [collapsed, setCollapsed] = useState(() => scopes.filter((item) => item.defaultCollapsed).map((item) => item.id ?? item.prefix));
   const [search, setSearch] = useState("");
   const [copied, setCopied] = useState<string | null>(null);
   const groups = scopes
     .filter((item) => grouped || scope === "all" || item.prefix === scope)
     .map((item) => ({
       ...item,
+      id: item.id ?? item.prefix,
       rows: Object.entries(item.values)
         .sort(([a], [b]) => a.localeCompare(b))
         .map(([key, value]) => ({ filterKey: `${item.prefix}${key}`, key, value }))
@@ -394,22 +400,22 @@ export function AttributeTable({
               <span className="explorerAttributes__value">{row.value}</span>
             </div>
           ))}
-          {(grouped ? groups.filter((group) => group.rows.length > 0) : [{ prefix: "all", label: "", rows }]).map((group) => (
-            <div className={grouped ? "explorerAttributes__group" : undefined} key={group.prefix}>
+          {(grouped ? groups.filter((group) => group.rows.length > 0) : [{ id: "all", prefix: "all", label: "", heading: undefined, rows }]).map((group) => (
+            <div className={grouped ? "explorerAttributes__group" : undefined} key={group.id}>
               {grouped ? (
                 <button
-                  aria-controls={`${tableId}-${group.prefix}`}
-                  aria-expanded={!collapsed.includes(group.prefix)}
+                  aria-controls={`${tableId}-${group.id}`}
+                  aria-expanded={!collapsed.includes(group.id)}
                   className="explorerAttributes__groupHeading"
-                  onClick={() => setCollapsed((current) => current.includes(group.prefix) ? current.filter((prefix) => prefix !== group.prefix) : [...current, group.prefix])}
+                  onClick={() => setCollapsed((current) => current.includes(group.id) ? current.filter((prefix) => prefix !== group.id) : [...current, group.id])}
                   type="button"
                 >
                   <CaretDownIcon aria-hidden="true" size={12} />
-                  <span>{group.label} attributes</span>
+                  <span>{group.heading ?? `${group.label} attributes`}</span>
                   <span>{group.rows.length}</span>
                 </button>
               ) : null}
-              <div className="explorerAttributes__rows" hidden={grouped && collapsed.includes(group.prefix)} id={`${tableId}-${group.prefix}`}>
+              <div className="explorerAttributes__rows" hidden={grouped && collapsed.includes(group.id)} id={`${tableId}-${group.id}`}>
                 {group.rows.map((row) => (
                   <div className="explorerAttributes__row" key={row.filterKey}>
                     <span className="explorerAttributes__key" title={row.key}>{row.key}</span>

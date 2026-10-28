@@ -1,7 +1,7 @@
-import { WarningCircleIcon } from "@phosphor-icons/react";
+import { CaretUpIcon, CaretDownIcon, CopyIcon, XIcon, WarningCircleIcon } from "@phosphor-icons/react";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Badge, DataTable, Switch } from "../design-system";
+import { Badge, DataTable, IconButton, Switch, Tabs } from "../design-system";
 import {
   fetchTrace,
   formatDuration,
@@ -23,6 +23,8 @@ import {
 import { useTelemetryQuery } from "../use-telemetry-query";
 import { TraceDrawerSkeleton } from "./screen-skeletons";
 import { AttributeTable, ExplorerDrawer } from "./telemetry-explorer";
+import { copyText } from "../copy-to-clipboard";
+import { traceAttributeScopes, traceRequest } from "./trace-view-model";
 import { TraceWaterfall } from "./trace-waterfall";
 
 type TraceLog = TraceDetail["logs"][number];
@@ -40,11 +42,13 @@ function SpanPanel({
   onFilter,
   span,
   traceStart,
+  onClose,
 }: {
   logs: TraceLog[];
   onFilter?: (filter: ExplorerFilter) => void;
   span: Span;
   traceStart: bigint;
+  onClose: () => void;
 }) {
   const failure = [span.exception_type, span.exception_message || span.status_message].filter(Boolean).join(": ");
   const logsHref = `/logs?${logExplorerParams({
@@ -61,13 +65,10 @@ function SpanPanel({
   return (
     <section aria-label="Span details" className="traceDrawer__span">
       <header className="traceDrawer__spanHeader">
-        <strong>Span</strong>
-        <span className="traceDrawer__spanName">{span.span_name}</span>
-        <span className="explorerCell--muted">
-          {spanKindLabel(span.span_kind).toLowerCase()} · {formatDuration(span.duration_ms)} · started +{formatDuration(startOffsetMs(span, traceStart))}
-        </span>
-        <span className="explorerDrawer__spacer" />
-        <span className="explorerCell--muted">span {span.span_id}</span>
+        <div className="traceDrawer__spanHeading"><span>Selected span</span><IconButton aria-label="Close span details" onClick={onClose} size="small" variant="ghost"><XIcon size={14} /></IconButton></div>
+        <h2 className="traceDrawer__spanName">{span.span_name}</h2>
+        <p className="traceDrawer__meta"><span>{span.service || "Unknown service"}</span><span>{spanKindLabel(span.span_kind).toLowerCase()}</span><span>{formatDuration(span.duration_ms)}</span><span>started +{formatDuration(startOffsetMs(span, traceStart))}</span></p>
+        <CopyId label="Span ID" value={span.span_id} />
       </header>
       {span.status_code === errorStatus ? (
         <p className="traceDrawer__error" role="status">
@@ -79,10 +80,8 @@ function SpanPanel({
       <div className="traceDrawer__spanBody">
         <AttributeTable
           onFilter={onFilter ? (key, op, value) => onFilter({ key, op, value }) : undefined}
-          scopes={[
-            { label: "Span", prefix: "span.", values: span.span_attrs },
-            { label: "Resource", prefix: "resource.", values: span.resource_attrs },
-          ]}
+          grouped
+          scopes={traceAttributeScopes(span)}
         />
         <section className="explorerTable traceDrawer__logs">
           <header className="explorerTable__header">
@@ -107,6 +106,11 @@ function SpanPanel({
   );
 }
 
+function CopyId({ label, value }: { label: string; value: string }) {
+  const [feedback, setFeedback] = useState("");
+  return <div className="traceDrawer__id"><span>{label}</span><code>{value}</code><IconButton aria-label={`Copy ${label.toLowerCase()}`} size="small" variant="ghost" onClick={() => { void copyText(value).then(() => setFeedback("Copied"), () => setFeedback("Could not copy")); }}><CopyIcon size={12} /></IconButton><span role="status">{feedback}</span></div>;
+}
+
 // A trace in a drawer over the trace list: its waterfall, the selected span,
 // its logs and the services it crossed.
 export function TraceDrawer({
@@ -114,23 +118,27 @@ export function TraceDrawer({
   onClose,
   onFilter,
   traceId,
+  onPrevious,
+  onNext,
 }: {
   listState: TraceListState;
   onClose: () => void;
   // Adds a filter on a span attribute to the trace list.
   onFilter?: (filter: ExplorerFilter) => void;
   traceId: string;
+  onPrevious?: () => void;
+  onNext?: () => void;
 }) {
   const trace = useTelemetryQuery(traceId, () => fetchTrace(traceId));
   const [tab, setTab] = useState<TraceTab>("waterfall");
   const [errorsOnly, setErrorsOnly] = useState(false);
-  const [chosen, setChosen] = useState<string | null>(null);
+  const [chosen, setChosen] = useState<string | null | undefined>(undefined);
   const waterfall = useMemo(() => spanWaterfall(trace.data?.spans ?? []), [trace.data]);
   const spans = useMemo(() => trace.data?.spans ?? [], [trace.data]);
   const root = waterfall.rows[0]?.span;
   const errors = spans.filter((span) => span.status_code === errorStatus);
   // Open on the first failing span, or the root.
-  const selectedId = chosen ?? waterfall.rows.find((row) => row.span.status_code === errorStatus)?.span.span_id ?? root?.span_id ?? null;
+  const selectedId = chosen === undefined ? (waterfall.rows.find((row) => row.span.status_code === errorStatus)?.span.span_id ?? root?.span_id ?? null) : chosen;
   const selected = spans.find((span) => span.span_id === selectedId) ?? null;
   const traceStart = waterfall.rows.reduce(
     (min, row) => (BigInt(row.span.start_ns) < min ? BigInt(row.span.start_ns) : min),
@@ -147,9 +155,7 @@ export function TraceDrawer({
     }
     return [...byService].map(([name, entry]) => ({ name, ...entry })).sort((a, b) => b.spans - a.spans);
   }, [spans]);
-  const rows = errorsOnly
-    ? waterfall.rows.filter((row) => row.span.status_code === errorStatus)
-    : waterfall.rows;
+  const request = root ? traceRequest(root) : null;
 
   function openSpan(spanId: string) {
     setTab("waterfall");
@@ -159,14 +165,18 @@ export function TraceDrawer({
 
   return (
     <ExplorerDrawer
+      className="traceDrawer"
+      fullHeight
       header={(
         <>
-          {errors.length > 0 ? <Badge tone="danger">{errors.length} {errors.length === 1 ? "error" : "errors"}</Badge> : null}
-          <strong className="traceDrawer__title">{root?.span_name ?? "Trace"}</strong>
+          <strong className="traceDrawer__title">Trace detail</strong>
+          {root ? <time className="traceDrawer__timestamp" dateTime={logTimestamp(root.timestamp)?.toISOString()}>{formatTelemetryTime(root.timestamp)}</time> : null}
           <span className="explorerDrawer__spacer" />
           <Link className="dsButton dsButton--secondary dsButton--small" state={listState} to={traceHref(traceId)}>
             Open full page
           </Link>
+          <IconButton aria-label="Previous trace" disabled={!onPrevious} onClick={onPrevious} size="small" variant="secondary"><CaretUpIcon size={14} /></IconButton>
+          <IconButton aria-label="Next trace" disabled={!onNext} onClick={onNext} size="small" variant="secondary"><CaretDownIcon size={14} /></IconButton>
         </>
       )}
       label="Trace details"
@@ -182,45 +192,34 @@ export function TraceDrawer({
         <TraceDrawerSkeleton />
       ) : (
         <>
-          <p className="traceDrawer__meta">
-            <span>{root.service || "—"}</span>
-            <time dateTime={logTimestamp(root.timestamp)?.toISOString()}>{formatTelemetryTime(root.timestamp)}</time>
-            <span>{formatDuration(waterfall.durationMs)}</span>
-            <span>{spans.length.toLocaleString()} {spans.length === 1 ? "span" : "spans"}</span>
-            <span>{services.length} {services.length === 1 ? "service" : "services"}</span>
-            <code>{traceId}</code>
-          </p>
+          <section className="traceDrawer__summary">
+            <div className="traceDrawer__request">{request?.method && request.name !== request.method ? <Badge>{request.method}</Badge> : null}<h1>{request?.name}</h1>{request?.status ? <Badge tone={request.status >= 400 ? "danger" : "live"}>{request.status}</Badge> : null}</div>
+            <p className="traceDrawer__meta"><span>{root.service || "Unknown service"}</span><span>{formatDuration(waterfall.durationMs)}</span><span>{spans.length.toLocaleString()} spans</span><span>{services.length} services</span><span className={errors.length ? "traceDrawer__errorCount" : undefined}>{errors.length} errors</span></p>
+            <CopyId label="Trace ID" value={traceId} />
+          </section>
           <div className="traceDrawer__tabs">
-            <div aria-label="Trace view" className="explorerPills" role="group">
-              {([
-                ["waterfall", "Waterfall", null],
-                ["logs", "Logs", trace.data.logs.length],
-                ["services", "Services", services.length],
-              ] as const).map(([value, label, count]) => (
-                <button aria-pressed={tab === value} key={value} onClick={() => setTab(value)} type="button">
-                  {label}{count === null ? null : <span>{count}</span>}
-                </button>
-              ))}
-            </div>
+            <Tabs<TraceTab> aria-label="Trace view" onChange={setTab} value={tab} options={[{ value: "waterfall", label: `Waterfall ${spans.length}` }, { value: "logs", label: `Logs ${trace.data.logs.length}` }, { value: "services", label: `Services ${services.length}` }]} />
             {tab === "waterfall" && errors.length > 0 ? (
               <Switch checked={errorsOnly} className="traceDrawer__errorsOnly" label="Show only errors" onCheckedChange={setErrorsOnly} />
             ) : null}
           </div>
           {tab === "waterfall" ? (
-            <>
-              <TraceWaterfall durationMs={waterfall.durationMs} onSelect={setChosen} rows={rows} selected={selectedId} />
+            <div className={`traceDrawer__split${selected ? "" : " traceDrawer__split--closed"}`}>
+              <TraceWaterfall durationMs={waterfall.durationMs} errorsOnly={errorsOnly} onSelect={setChosen} rows={waterfall.rows} selected={selectedId} />
               {selected ? (
                 <SpanPanel
+                  key={selected.span_id}
+                  onClose={() => setChosen(null)}
                   logs={trace.data.logs.filter((log) => log.span_id === selected.span_id)}
                   onFilter={onFilter}
                   span={selected}
                   traceStart={traceStart}
                 />
               ) : null}
-            </>
+            </div>
           ) : null}
           {tab === "logs" ? (
-            <div className="agentListTable explorerTableWrap">
+            <div className="agentListTable explorerTableWrap traceDrawer__tabContent">
               <DataTable<TraceLog & { key: string }>
                 aria-label="Logs in this trace"
                 columns={[
@@ -263,7 +262,7 @@ export function TraceDrawer({
             </div>
           ) : null}
           {tab === "services" ? (
-            <div className="agentListTable explorerTableWrap">
+            <div className="agentListTable explorerTableWrap traceDrawer__tabContent">
               <DataTable<(typeof services)[number]>
                 aria-label="Services in this trace"
                 columns={[
