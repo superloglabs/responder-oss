@@ -26,7 +26,8 @@ function candidate(overrides: Partial<ErrorCandidate> = {}): ErrorCandidate {
     exception_stacktrace: error.stacktrace,
     exception_type: error.type,
     kind: "log",
-    project_id: "0b9f6b9e-2f4a-4c1e-9d2b-3f8a6c1d7e01",
+    // Keep this cache namespace separate from the worker ingestion fixtures.
+    project_id: "0b9f6b9e-2f4a-4c1e-9d2b-3f8a6c1d7e02",
     resource_attrs: {},
     seen_ms: "1793000000000",
     service: "storefront",
