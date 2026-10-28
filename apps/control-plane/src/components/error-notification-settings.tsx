@@ -46,7 +46,7 @@ export function ErrorNotificationSettingsDialog({ onClose }: { onClose: () => vo
     <Button variant="secondary" disabled={saving} onClick={onClose}>Cancel</Button>
     <Button disabled={!settings || saving || (settings.enabled && !target)} onClick={() => void save()}>{saving ? "Saving…" : "Save notifications"}</Button>
   </>}>
-    <p>Notify your team when a new error appears or a resolved error happens again.</p>
+    <p className="errorNotifications__description">Notify your team when a new error appears or a resolved error happens again.</p>
     {error ? <p role="alert">{error}</p> : null}
     {!configuration && !error ? <p role="status">Loading notifications…</p> : null}
     {settings && configuration ? <fieldset className="errorNotifications" disabled={saving}>
