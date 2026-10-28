@@ -15,6 +15,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@base-ui/react": "^1.9.0",
     "@better-auth/drizzle-adapter": "1.6.25",
     "@better-auth/oauth-provider": "1.6.25",
     "@c15t/backend": "2.2.1",
