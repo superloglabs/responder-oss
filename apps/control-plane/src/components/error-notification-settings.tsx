@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
+import { Command } from "cmdk";
+import { CheckIcon, MagnifyingGlassIcon, SlackLogoIcon } from "@phosphor-icons/react";
 import { Link } from "react-router-dom";
 import type { ErrorNotificationSettings } from "../../../../packages/core/src/telemetry/error-notifications";
 import type { TelemetryAlertSlackChannel } from "../../../../packages/core/src/db/telemetry-alerts";
-import { Button, Switch, SelectField } from "../design-system";
+import { Button, Switch } from "../design-system";
 import { DashboardDialog } from "./dashboard-dialog";
 import "./dashboards.css";
+import "./error-notification-settings.css";
 import { apiErrorMessage } from "../agents-api";
 
 type Configuration = {
@@ -42,20 +45,50 @@ export function ErrorNotificationSettingsDialog({ onClose }: { onClose: () => vo
     finally { setSaving(false); }
   }
   const target = settings?.targets[0];
+  const selectedChannel = configuration?.channels.find((channel) => channel.integrationAccountId === target?.integrationAccountId && channel.channelId === target?.channelId);
   return <DashboardDialog title="Error notifications" onClose={() => { if (!saving) onClose(); }} actions={<>
     <Button variant="secondary" disabled={saving} onClick={onClose}>Cancel</Button>
-    <Button disabled={!settings || saving || (settings.enabled && !target)} onClick={() => void save()}>{saving ? "Saving…" : "Save notifications"}</Button>
+    <Button variant="primary" disabled={!settings || saving || (settings.enabled && !target)} onClick={() => void save()}>{saving ? "Saving…" : "Save notifications"}</Button>
   </>}>
     <p className="errorNotifications__description">Notify your team when a new error appears or a resolved error happens again.</p>
     {error ? <p role="alert">{error}</p> : null}
     {!configuration && !error ? <p role="status">Loading notifications…</p> : null}
     {settings && configuration ? <fieldset className="errorNotifications" disabled={saving}>
-      <Switch label="Enable error notifications" checked={settings.enabled} onCheckedChange={(enabled) => setSettings({ ...settings, enabled })} />
-      <SelectField label="Slack channel" value={target ? `${target.integrationAccountId}:${target.channelId}` : ""} options={[{ label: "Choose a channel…", value: "" }, ...configuration.channels.map((channel) => ({ label: `#${channel.name} (${channel.accountName})`, value: `${channel.integrationAccountId}:${channel.channelId}` }))]} onChange={(value) => {
-        const [integrationAccountId, channelId] = value.split(":");
-        setSettings({ ...settings, targets: integrationAccountId && channelId ? [{ kind: "slack", integrationAccountId, channelId }] : [] });
-      }} />
-      {!configuration.channels.length ? <p>Connect Slack in <Link to="/settings">Integrations</Link> to choose a channel.</p> : null}
+      <div className="errorNotifications__toggle">
+        <span className="errorNotifications__provider"><SlackLogoIcon size={22} aria-hidden="true" /></span>
+        <Switch label="Enable error notifications" checked={settings.enabled} onCheckedChange={(enabled) => setSettings({ ...settings, enabled })} />
+      </div>
+      <div className="errorNotifications__destination">
+        <div className="errorNotifications__label">
+          <span>Slack channel</span>
+          <span>{selectedChannel ? `Sending to #${selectedChannel.name}` : "Choose one channel"}</span>
+        </div>
+        {configuration.channels.length ? <Command className="errorChannelPicker" label="Search Slack channels" filter={(_value, search, keywords) => {
+          const query = search.trim().replace(/^#/, "").toLocaleLowerCase();
+          return keywords?.some((keyword) => keyword.toLocaleLowerCase().includes(query)) ? 1 : 0;
+        }}>
+          <div className="errorChannelPicker__search">
+            <MagnifyingGlassIcon size={14} aria-hidden="true" />
+            <Command.Input aria-label="Search Slack channels" placeholder="Search channels or workspaces…" disabled={saving} />
+          </div>
+          <Command.List className="errorChannelPicker__list" label="Slack channels">
+            <Command.Empty className="errorChannelPicker__empty">No channels found. Try another name or workspace.</Command.Empty>
+            {configuration.channels.map((channel) => {
+              const selected = channel.integrationAccountId === target?.integrationAccountId && channel.channelId === target?.channelId;
+              return <Command.Item key={`${channel.integrationAccountId}:${channel.channelId}`} value={`${channel.integrationAccountId}:${channel.channelId}`} keywords={[channel.name, channel.accountName]} disabled={saving} className="errorChannelPicker__option" onSelect={() => {
+                setSettings({ ...settings, targets: [{ kind: "slack", integrationAccountId: channel.integrationAccountId, channelId: channel.channelId }] });
+              }}>
+                <span className="errorChannelPicker__copy"><span>{channel.name}</span><small>{channel.accountName}{channel.private ? " · Private channel" : ""}</small></span>
+                {selected ? <CheckIcon size={18} aria-label="Selected destination" /> : null}
+              </Command.Item>;
+            })}
+          </Command.List>
+        </Command> : <div className="errorChannelPicker__emptyState">
+          <strong>No Slack channels available</strong>
+          <p>Connect a Slack workspace or check channel access in <Link to="/settings">Integrations</Link>.</p>
+        </div>}
+        <p className="errorNotifications__hint">{settings.enabled ? "New and recurring errors will be sent to this channel." : "Notifications are paused. Your channel selection will be saved."}</p>
+      </div>
     </fieldset> : null}
   </DashboardDialog>;
 }

@@ -182,7 +182,7 @@ test("configures Slack notifications from Errors", async ({ page }, testInfo) =>
     } else {
       await route.fulfill({ json: {
         settings: { enabled: false, targets: [] },
-        channels: [{ integrationAccountId, channelId: "C123", name: "errors", accountName: "Acme", private: false }],
+        channels: [{ integrationAccountId, channelId: "C123", name: "errors", accountName: "Acme", private: false }, ...Array.from({ length: 60 }, (_, i) => ({ integrationAccountId, channelId: `C${i}`, name: `team-${String(i).padStart(2, "0")}`, accountName: "Engineering", private: false }))],
       } });
     }
   });
@@ -193,10 +193,44 @@ test("configures Slack notifications from Errors", async ({ page }, testInfo) =>
   await expect(dialog).toBeVisible();
   await dialog.getByText("Enable error notifications", { exact: true }).click();
   await expect(dialog.getByRole("switch", { name: "Enable error notifications" })).toBeChecked();
-  await dialog.getByRole("button", { name: /Slack channel/ }).click();
-  await dialog.getByRole("option", { name: "#errors (Acme)", exact: true }).click();
+  const search = dialog.getByRole("combobox", { name: "Search Slack channels" });
+  const list = dialog.getByRole("listbox", { name: "Slack channels" });
+  const body = dialog.locator(".dashboardDialog__body");
+  const bodyScroll = await body.evaluate((node) => node.scrollTop);
+  await list.hover();
+  await page.mouse.wheel(0, 500);
+  await expect.poll(() => list.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
+  expect(await body.evaluate((node) => node.scrollTop)).toBe(bodyScroll);
+  await list.evaluate((node) => { node.scrollTop = node.scrollHeight; });
+  await page.mouse.wheel(0, 700);
+  expect(await body.evaluate((node) => node.scrollTop)).toBe(bodyScroll);
+  await search.fill("no-such-channel");
+  await expect(dialog.getByText("No channels found. Try another name or workspace.")).toBeVisible();
+  await search.fill("engineering");
+  await expect(dialog.getByRole("option")).toHaveCount(60);
+  await search.fill("#errors");
+  await expect(dialog.getByRole("option")).toHaveCount(1);
+  await search.press("ArrowDown");
+  await search.press("Enter");
+  await expect(dialog.getByText("Sending to #errors")).toBeVisible();
+  await search.fill("");
+  await expect(dialog.getByRole("option")).toHaveCount(61);
+  await list.evaluate((node) => { node.scrollTop = 0; });
   await page.screenshot({ path: testInfo.outputPath("error-notifications.png") });
+  await page.setViewportSize({ width: 390, height: 640 });
+  await expect(dialog.getByRole("button", { name: "Save notifications" })).toBeInViewport();
+  expect(await dialog.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath("error-notifications-mobile.png") });
   await dialog.getByRole("button", { name: "Save notifications" }).click();
   await expect(dialog).not.toBeVisible();
   expect(saved).toEqual({ enabled: true, targets: [ { kind: "slack", integrationAccountId, channelId: "C123" }] });
+  await page.route("**/api/error-notifications", (route) => route.fulfill({ json: { settings: { enabled: false, targets: [] }, channels: [] } }));
+  await page.getByRole("button", { name: "Notifications", exact: true }).click();
+  await expect(dialog.getByText("No Slack channels available")).toBeVisible();
+  await expect(dialog.getByRole("combobox")).toHaveCount(0);
+  await dialog.getByRole("switch").click();
+  await expect(dialog.getByRole("button", { name: "Save notifications" })).toBeDisabled();
+  await page.keyboard.press("Escape");
+  await expect(dialog).not.toBeVisible();
+  await expect(page.getByRole("button", { name: "Notifications", exact: true })).toBeFocused();
 });
