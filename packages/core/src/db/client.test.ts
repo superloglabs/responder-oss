@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { databaseConnectionString } from "./client.js";
+import { databaseConnectionString, databasePoolOptions } from "./client.js";
 
 describe("database connection configuration", () => {
   it("uses DATABASE_URL when it is present", () => {
@@ -28,5 +28,24 @@ describe("database connection configuration", () => {
 
   it("returns null when the split configuration is incomplete", () => {
     expect(databaseConnectionString({ DATABASE_HOST: "database.internal" })).toBeNull();
+  });
+
+  it("bounds connection and query waits and probes idle sockets", () => {
+    expect(databasePoolOptions({})).toEqual({
+      connectionTimeoutMillis: 10_000,
+      keepAlive: true,
+      keepAliveInitialDelayMillis: 10_000,
+      max: 5,
+      query_timeout: 120_000,
+    });
+  });
+
+  it("reads the pool size and query timeout from the environment", () => {
+    expect(
+      databasePoolOptions({ DATABASE_POOL_SIZE: "8", DATABASE_QUERY_TIMEOUT_MS: "30000" }),
+    ).toMatchObject({ max: 8, query_timeout: 30_000 });
+    expect(
+      databasePoolOptions({ DATABASE_POOL_SIZE: "0", DATABASE_QUERY_TIMEOUT_MS: "soon" }),
+    ).toMatchObject({ max: 5, query_timeout: 120_000 });
   });
 });

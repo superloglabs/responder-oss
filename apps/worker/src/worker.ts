@@ -123,8 +123,16 @@ import {
   usageWaiverStart,
   waiveJobUsage,
 } from "@responder/core/billing/usage-waivers";
+import { checkDatabase } from "@responder/core/db/client";
+import {
+  sendWorkerHeartbeat,
+  workerHeartbeatIntervalMs,
+  workerHeartbeatUrl,
+} from "./heartbeat.js";
 
 const boss = createJobBoss();
+// Read at startup so a malformed URL stops the worker before it takes jobs.
+const heartbeatUrl = workerHeartbeatUrl();
 const remediationJobQueue = {
   send: (
     name: string,
@@ -148,6 +156,7 @@ let linearTicketDrain: Promise<void> | undefined;
 let remediationRecoveryDrain: Promise<void> | undefined;
 const pollers: {
   automationSuggestions?: NodeJS.Timeout;
+  heartbeat?: NodeJS.Timeout;
   automationUsageBilling?: NodeJS.Timeout;
   brokerGrantCleanup?: NodeJS.Timeout;
   archivedSandboxCleanup?: NodeJS.Timeout;
@@ -638,6 +647,7 @@ async function shutdown(signal: string): Promise<void> {
   if (pollers.syntheticCheckPurge) clearInterval(pollers.syntheticCheckPurge);
   if (pollers.linearTicket) clearInterval(pollers.linearTicket);
   if (pollers.remediationRecovery) clearInterval(pollers.remediationRecovery);
+  if (pollers.heartbeat) clearInterval(pollers.heartbeat);
   await replayRequestDrain;
   await linearTicketDrain;
   await remediationRecoveryDrain;
@@ -675,6 +685,11 @@ await boss.start();
 await prepareWorkerQueues(boss);
 await boss.work(workerHealthQueue, { localConcurrency: 1 }, tracedJobHandler(workerHealthQueue, async ([job]) => {
   const payload = workerHealthJobSchema.parse(job.data);
+  await sendWorkerHeartbeat({
+    checkDatabase,
+    requestedAt: payload.requestedAt,
+    url: heartbeatUrl,
+  });
   const processedAt = new Date().toISOString();
 
   console.log(
@@ -1242,5 +1257,17 @@ pollers.gcpTelemetry.unref();
 void generateDueAutomationSuggestions();
 pollers.automationSuggestions = setInterval(() => void generateDueAutomationSuggestions(), 10 * 60 * 1_000);
 pollers.automationSuggestions.unref();
+
+// Each heartbeat goes through the job queue, so the external check stops
+// receiving pings when the worker can no longer take or finish jobs.
+pollers.heartbeat = setInterval(() => {
+  boss.send(workerHealthQueue, {
+    marker: "heartbeat",
+    requestedAt: new Date().toISOString(),
+  }).catch((error: unknown) => {
+    void reportWorkerException(error, { operation: "worker" });
+  });
+}, workerHeartbeatIntervalMs);
+pollers.heartbeat.unref();
 
 console.log(JSON.stringify({ event: "worker_ready" }));
