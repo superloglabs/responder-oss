@@ -98,7 +98,7 @@ describe("sending automation notifications", () => {
       blocks: [{
         text: `**Weekly digest** finished.\n\nAll clear.\n\n[View run](https://responder.example/automations/${automationId}/runs/${runId}?organization_id=${organizationId})`,
         type: "markdown",
-      }],
+      }, expect.objectContaining({ type: "actions", elements: [expect.objectContaining({ action_id: "conductor_continue", url: expect.stringContaining("/api/ide/conductor#prompt=") })] })],
       channelId: "C999",
       clientMessageId: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-8[0-9a-f]{3}-[0-9a-f]{12}$/u),
       text: "Weekly digest finished",
@@ -237,5 +237,31 @@ describe("notification images", () => {
     expect(await postAutomationNotification(input, deps)).toEqual([{ notification, timestamp: "123" }]);
     expect(deps.post.mock.calls[1]![0].blocks).toHaveLength(1);
     expect(deps.post.mock.calls[1]![0].clientMessageId).toBe(deps.post.mock.calls[0]![0].clientMessageId);
+  });
+});
+
+describe("handoff delivery", () => {
+  it.each(["plain", "image", "upload-failed", "image-rejected"])("keeps the handoff and existing buttons with %s delivery", async (mode) => {
+    const post = vi.fn().mockResolvedValue("123");
+    if (mode === "image-rejected") post.mockRejectedValueOnce(new SlackApiError("chat.postMessage", "invalid_blocks"));
+    const uploadImage = mode === "upload-failed" ? vi.fn().mockRejectedValue(new Error("Unavailable")) : vi.fn().mockResolvedValue("F123");
+    const buttonsBlock = { type: "actions", elements: [{ type: "button", text: { type: "plain_text", text: "Existing action" } }] };
+    const deliveries = await postAutomationNotification({
+      buttonsBlock,
+      handoff: { kind: "fix", sourceUrl: "https://responder.example/alerts/a" },
+      ...(mode === "plain" ? {} : {
+        image: { altText: "Graph", png: Buffer.from("png") },
+        imageLayout: { before: [{ type: "markdown", text: "Summary" }], after: [buttonsBlock] },
+      }),
+      markdown: "Alert is firing.", text: "Alert", notifications: [notification], organizationId, seed: "alert",
+    }, { getAccount: vi.fn().mockResolvedValue({ encryptedCredentials: "encrypted" }), post, uploadImage });
+    expect(deliveries).toEqual([{ notification, timestamp: "123" }]);
+    expect(post).toHaveBeenCalledTimes(mode === "image-rejected" ? 2 : 1);
+    for (const [message] of post.mock.calls) {
+      expect(message.blocks).toContainEqual(buttonsBlock);
+      expect(message.blocks).toContainEqual(expect.objectContaining({
+        type: "actions", elements: [expect.objectContaining({ text: { type: "plain_text", text: "Fix in Conductor" }, url: expect.stringContaining("/api/ide/conductor#prompt=") })],
+      }));
+    }
   });
 });

@@ -41,7 +41,7 @@ describe("commentAutomationRunOnDevRevTicket", () => {
       provider: "devrev",
     });
     expect(comment).toHaveBeenCalledWith({
-      body: expect.stringMatching(/^\*\*Ticket triage\*\* finished\.\n\nThe payment service is down\.\n\n\[View run\]\(https:\/\/responder\.example\/.+\)$/u),
+      body: expect.stringMatching(/^\*\*Ticket triage\*\* finished\.\n\nThe payment service is down\.\n\n\[View run\]\(https:\/\/responder\.example\/.+\)\n\n\[Continue in Conductor\]\(https:\/\/responder\.example\/api\/ide\/conductor#prompt=.+\)$/u),
       ticketId: ticket.ticketId,
       token: "token",
     });

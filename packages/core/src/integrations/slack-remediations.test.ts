@@ -132,6 +132,12 @@ describe("Slack remediation cards", () => {
       status: "created",
     });
 
+    expect(message.blocks).toContainEqual(expect.objectContaining({
+      type: "actions", elements: [expect.objectContaining({ action_id: "conductor_fix" })],
+    }));
+    for (const block of message.blocks as Array<{ type: string; elements?: Array<{ actions?: unknown[] }> }>) {
+      if (block.type === "carousel") for (const card of block.elements ?? []) expect(card.actions?.length ?? 0).toBeLessThanOrEqual(3);
+    }
     expect(message.text).toContain("Pull request: Open");
     expect(message.text).toContain(
       "Requests fail for &lt;!channel&gt; &amp; plants without a configured color.",

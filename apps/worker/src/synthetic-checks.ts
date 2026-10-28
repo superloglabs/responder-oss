@@ -137,6 +137,7 @@ export async function processSyntheticCheck(
     const content = syntheticFailingMessage({ ...message, failures: failedRuns, location: dependencies.location, reason });
     const [delivery] = await dependencies.post({
       ...content,
+      handoff: { kind: "fix", sourceUrl: message.checkUrl },
       notifications: [target],
       organizationId: check.organizationId,
       seed: `synthetic-check-episode:${episode.id}:failing`,
@@ -175,6 +176,7 @@ export async function processSyntheticCheck(
     });
     const [delivery] = await dependencies.post({
       ...content,
+      handoff: { kind: "fix", sourceUrl: message.checkUrl },
       notifications: [target],
       organizationId: check.organizationId,
       seed: `synthetic-check-episode:${episode.id}:recovered`,

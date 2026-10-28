@@ -120,6 +120,7 @@ describe("processSyntheticCheck", () => {
     expect(deps.post).toHaveBeenCalledWith(
       expect.objectContaining({
         markdown: expect.stringContaining("The last 2 runs failed from eu-west-3"),
+        handoff: { kind: "fix", sourceUrl: "https://superlog.sh/synthetics/check-1" },
         seed: "synthetic-check-episode:episode-1:failing",
         text: "Shop health is failing",
       }),
@@ -153,6 +154,7 @@ describe("processSyntheticCheck", () => {
     expect(deps.post).toHaveBeenCalledWith(
       expect.objectContaining({
         markdown: expect.stringContaining("recovered after 30 minutes. It answered 200 in 120 ms."),
+        handoff: { kind: "fix", sourceUrl: "https://superlog.sh/synthetics/check-1" },
         seed: "synthetic-check-episode:episode-1:recovered",
         threadTimestamp: "1700000000.000100",
       }),

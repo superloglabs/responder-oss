@@ -1,3 +1,4 @@
+import { conductorButton } from "../ide-handoff.js";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { decryptCredentials } from "../credentials/encryption.js";
@@ -245,6 +246,7 @@ export function slackIssueMessage(
         type: "actions",
         block_id: `issue_actions_${issue.id}`,
         elements: [
+          conductorButton({ kind: "fix", context: text, sourceUrl: issueUrl }),
           {
             type: "button",
             action_id: "view_issue",

@@ -197,6 +197,7 @@ describe("Slack live investigation card", () => {
           }),
         ],
       }),
+      expect.objectContaining({ type: "actions", elements: [expect.objectContaining({ action_id: "conductor_continue" })] }),
     ]);
   });
 
@@ -222,6 +223,7 @@ describe("Slack live investigation card", () => {
           expect.objectContaining({ task_id: `${runId}:current` }),
         ],
       }),
+      expect.objectContaining({ type: "actions", elements: [expect.objectContaining({ action_id: "conductor_continue" })] }),
     ]);
   });
 
@@ -247,6 +249,7 @@ describe("Slack live investigation card", () => {
           }),
         ],
       }),
+      expect.objectContaining({ type: "actions", elements: [expect.objectContaining({ action_id: "conductor_continue" })] }),
     ]);
   });
 

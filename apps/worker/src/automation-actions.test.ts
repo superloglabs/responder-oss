@@ -239,6 +239,7 @@ describe("automation notification tool", () => {
 
     expect(resultText(result)).toEqual({ posted: ["#ops"] });
     expect(deps.postNotification).toHaveBeenCalledWith({
+      handoff: { kind: "continue", sourceUrl: "https://responder.example/automations/a/runs/r" },
       markdown: "## Weekly digest\nAll clear.\n\n[View run](https://responder.example/automations/a/runs/r)",
       notifications: [notification],
       organizationId: "15151515-1515-4515-8515-151515151515",
@@ -267,6 +268,7 @@ describe("automation notification tool", () => {
     expect(resultText(result)).toEqual({ posted: ["#ops"] });
     expect(deps.postNotification).toHaveBeenCalledTimes(3);
     expect(deps.postNotification.mock.calls[1]![0]).toEqual({
+      handoff: { kind: "continue", sourceUrl: "https://responder.example/automations/a/runs/r" },
       markdown: "## Root cause\nA null check.",
       notifications: [notification],
       organizationId: "15151515-1515-4515-8515-151515151515",
