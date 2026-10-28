@@ -1,9 +1,10 @@
-import { BracketsCurlyIcon, DotsThreeIcon, PencilSimpleIcon, PlusIcon, TrashIcon } from "@phosphor-icons/react";
+import { BracketsCurlyIcon, CheckIcon, DotsThreeIcon, FileCodeIcon, PencilSimpleIcon, PlusIcon, TrashIcon } from "@phosphor-icons/react";
 import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactGridLayout, { useContainerWidth, type Layout } from "react-grid-layout";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { AppShell } from "../components/app-shell";
 import { DashboardSkeleton } from "../components/screen-skeletons";
+import { copyTerraformLabel, useCopyTerraform } from "../use-copy-terraform";
 import { DashboardDialog } from "../components/dashboard-dialog";
 import { DashboardTimePicker } from "../components/dashboard-time-picker";
 import { DashboardVariableBar, DashboardVariablesEditor } from "../components/dashboard-variables";
@@ -165,6 +166,7 @@ export function DashboardPage() {
   const [editingVariables, setEditingVariables] = useState(false);
   const [removing, setRemoving] = useState<TelemetryDashboardWidget | "dashboard" | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
+  const [terraformState, copyTerraform] = useCopyTerraform({ dashboardIds: [dashboardId] });
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Layout changes not yet saved, by widget.
   const pendingLayouts = useRef(new Map<string, TelemetryDashboardWidget["layout"]>());
@@ -393,6 +395,15 @@ export function DashboardPage() {
                   </DropdownMenuItem>
                   <DropdownMenuItem onSelect={() => setEditingVariables(true)}>
                     <BracketsCurlyIcon />{dashboard.variables.length > 0 ? "Variables" : "Add variable"}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onSelect={(event) => {
+                      // Stays open to show that the copy worked.
+                      event.preventDefault();
+                      copyTerraform();
+                    }}
+                  >
+                    {terraformState === "copied" ? <CheckIcon /> : <FileCodeIcon />}{copyTerraformLabel(terraformState)}
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onSelect={() => setRemoving("dashboard")} variant="destructive">

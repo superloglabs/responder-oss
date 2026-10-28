@@ -64,6 +64,7 @@ import { sharedAutomationTemplateRoutes } from "./automations/shared-templates.j
 import { createAutomationContextBrokerRoutes } from "./automations/context-broker.js";
 import { listEnabledOrganizationCapabilities } from "../../../packages/core/src/db/organization-capabilities.js";
 import { apiKeyRoutes } from "./management/api-key-routes.js";
+import { terraformRoutes } from "./terraform/routes.js";
 import { skillRoutes } from "./skills/routes.js";
 import { managementMcpRoutes } from "./management/mcp.js";
 import { managementApiRoutes } from "./management/routes.js";
@@ -513,6 +514,7 @@ export const app = instrumentedApp
   .route("/api/telemetry/sources", createSourceRoutes())
   .route("/api/telemetry/alerts", createAlertRoutes())
   .route("/api/synthetic-checks", createSyntheticRoutes())
+  .route("/api/terraform", terraformRoutes)
   .route("/api/error-issues", createErrorIssueRoutes())
   .route("/api/telemetry/dashboards", createDashboardRoutes())
   .route("/api/telemetry", createTelemetryRoutes())

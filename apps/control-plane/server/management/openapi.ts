@@ -17,6 +17,7 @@ const tagDescriptions: Record<ManagementTag, string> = {
   Synthetics: "HTTP checks that request a URL on a schedule and post failures to Slack.",
   "Tag mode": "What Superlog can use and change when someone mentions it in Slack.",
   Telemetry: "Read the workspace's logs, traces, and metrics.",
+  Terraform: "Configuration for the superloglabs/superlog Terraform provider.",
   Workspace: "The workspace and its members.",
 };
 

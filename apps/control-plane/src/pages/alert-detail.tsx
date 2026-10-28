@@ -23,6 +23,7 @@ import {
 import { AppShell } from "../components/app-shell";
 import { AlertDetailSkeleton } from "../components/screen-skeletons";
 import { AlertChart } from "../components/alert-chart";
+import { CopyTerraformButton } from "../components/copy-terraform";
 import { useAlertPreview } from "../use-alert-preview";
 import { Button } from "../design-system";
 import { useDocumentTitle } from "../use-document-title";
@@ -310,6 +311,7 @@ function AlertDetail({
   return (
     <div className="alertPage">
       <Header alert={alert}>
+        <CopyTerraformButton selection={{ alertIds: [alert.id] }} />
         <Button size="small" loading={saving} onClick={() => void toggle()}>
           {alert.enabled ? "Pause alert" : "Resume alert"}
         </Button>

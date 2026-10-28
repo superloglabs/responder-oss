@@ -39,6 +39,7 @@ export type ManagementTag =
   | "Synthetics"
   | "Tag mode"
   | "Telemetry"
+  | "Terraform"
   | "Workspace";
 
 // Responses are serialized as JSON before they are checked against the
