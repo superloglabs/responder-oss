@@ -81,7 +81,7 @@ import {
   type CheckedOutRepository,
 } from "./repositories.js";
 import {
-  discoverRepositoryInstructions,
+  discoverRepositoryAgentDocs,
   loadRepositorySkills,
 } from "./repository-skills.js";
 import { createRepositoryInspectionTools } from "./repository-inspection.js";
@@ -1088,10 +1088,10 @@ export async function runInvestigationAgent(
         pullRequestReviewCheckoutError = safeInvestigationError(error, environment);
       }
     }
-    const repositorySkills = await loadRepositorySkills(session, repositories);
-    const repositoryInstructions = await discoverRepositoryInstructions(
-      session,
-      repositories,
+    const agentDocs = await discoverRepositoryAgentDocs(session, repositories);
+    const repositorySkills = await loadRepositorySkills(session, agentDocs.skills);
+    const repositoryInstructions = agentDocs.instructions.map(
+      (instruction) => `${instruction.repository}: ${instruction.path}`,
     );
     if (threadMode && !sessionReady) {
       await session.materializeEntry({

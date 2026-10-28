@@ -98,6 +98,7 @@ function dependencies() {
       toolHandlers.push(input);
       return vi.fn();
     }),
+    discoverAgentDocs: vi.fn<AutomationRunDependencies["discoverAgentDocs"]>().mockResolvedValue({ instructions: [], skills: [] }),
     openPullRequest,
     session: session as DaytonaSandboxSession & { execCommand: ReturnType<typeof vi.fn>; materializeEntry: ReturnType<typeof vi.fn> },
     getCredential: vi.fn().mockResolvedValue({
@@ -211,6 +212,37 @@ describe("automation run processor", () => {
       name: "linear_63636363636343638363636363636363",
       url: `https://responder.example/api/automation-context-broker/v1/${linearId}`,
     }]);
+  });
+
+  it("tells the agent about the repository's instructions and skills", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    const root = "/home/daytona/workspace/repositories/acme/app";
+    deps.discoverAgentDocs.mockResolvedValue({
+      instructions: [
+        { path: `${root}/AGENTS.md`, repository: "acme/app", root: true },
+        { path: `${root}/CLAUDE.md`, repository: "acme/app", root: true },
+      ],
+      skills: [{
+        description: "Use when a bug needs a cause.",
+        directory: `${root}/.claude/skills/diagnosing-bugs`,
+        name: "diagnosing-bugs",
+        path: `${root}/.claude/skills/diagnosing-bugs/SKILL.md`,
+        repository: "acme/app",
+      }],
+    });
+
+    await processAutomationRun("job-1", {
+      kind: "automation_run",
+      queuedAt: "2026-09-22T19:00:00.000Z",
+      runId,
+    }, process.env, deps);
+
+    const prompt = deps.runCodex.mock.calls[0]![1].prompt;
+    expect(deps.discoverAgentDocs).toHaveBeenCalledWith(deps.session, [expect.objectContaining({ repository: "acme/app" })]);
+    expect(prompt).toContain(`Read these repository instructions before you start, and follow them:\n- ${root}/AGENTS.md\n- ${root}/CLAUDE.md`);
+    expect(prompt).toContain(`- diagnosing-bugs (acme/app): Use when a bug needs a cause. Read ${root}/.claude/skills/diagnosing-bugs/SKILL.md.`);
   });
 
   it("writes the automation's skills to the sandbox and gives the run their secrets", async () => {

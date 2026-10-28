@@ -71,6 +71,9 @@ function harnessFailure(output: string): string {
   return reason ? `Claude automation harness failed: ${reason}` : "Claude automation harness failed";
 }
 
+// No setting sources: a repository's .claude/settings.json could set hooks or
+// point the model broker token at another host. The prompt lists the
+// repository's CLAUDE.md files and skills instead.
 const runner = (modulePath: string) => `import { readFile } from "node:fs/promises";
 import { query } from ${JSON.stringify(modulePath)};
 
