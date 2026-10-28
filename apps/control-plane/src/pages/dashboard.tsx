@@ -224,19 +224,24 @@ export function DashboardPage() {
     setParams((current) => variableParams(next, current), { replace: true });
   }
 
-  // Saves layout changes still waiting for the debounce. Resolves once every
-  // layout save started so far has finished.
+  // Saves layout changes still waiting for the debounce. Saves run one after
+  // another, so the latest layout is the one stored; leaving the page sends
+  // at once, since the page may be gone before an earlier save ends. Resolves
+  // once every save started so far has finished.
   const flushLayouts = useCallback((leaving = false): Promise<void> => {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = null;
     if (pendingLayouts.current.size > 0) {
       const widgets = [...pendingLayouts.current].map(([id, layout]) => ({ id, layout }));
       pendingLayouts.current.clear();
-      const save = updateLayout(dashboardId, widgets, { keepalive: leaving }).then(
-        () => undefined,
-        (cause: unknown) => setError(cause instanceof Error ? cause.message : "Unable to save the layout"),
-      );
-      layoutSaves.current = Promise.all([layoutSaves.current, save]).then(() => undefined);
+      const save = () =>
+        updateLayout(dashboardId, widgets, { keepalive: leaving }).then(
+          () => undefined,
+          (cause: unknown) => setError(cause instanceof Error ? cause.message : "Unable to save the layout"),
+        );
+      layoutSaves.current = leaving
+        ? Promise.all([layoutSaves.current, save()]).then(() => undefined)
+        : layoutSaves.current.then(save);
     }
     return layoutSaves.current;
   }, [dashboardId]);

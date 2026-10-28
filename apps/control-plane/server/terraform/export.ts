@@ -70,7 +70,9 @@ export async function buildTerraformExport(
   const input = {
     alerts: selected(alerts, selection.alertIds),
     checks: selected(checks, selection.syntheticCheckIds),
-    dashboards: dashboards.sort((a, b) => a.name.localeCompare(b.name)),
+    // By name, then ID, so resource names stay with the same dashboards from
+    // one export to the next. Alerts and checks are listed in this order.
+    dashboards: dashboards.sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id)),
   };
   const missing = [
     ...(selection.alertIds ?? []).filter((id) => !input.alerts.some((alert) => alert.id === id)),
