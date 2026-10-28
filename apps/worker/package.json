@@ -24,6 +24,8 @@
     "@openai/agents": "0.14.2",
     "@openai/agents-extensions": "0.14.2",
     "@opentelemetry/api": "1.9.1",
+    "@opentelemetry/core": "2.10.0",
+    "@opentelemetry/exporter-trace-otlp-http": "0.221.0",
     "@responder/core": "workspace:*",
     "@resvg/resvg-js": "^2.6.2",
     "@sentry/node": "10.69.0",

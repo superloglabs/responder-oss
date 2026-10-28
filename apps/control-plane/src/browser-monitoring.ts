@@ -1,4 +1,5 @@
 import * as Sentry from "@sentry/react";
+import { setAttributes, setUser } from "@superlog/browser/api";
 import { sentrySampleRate } from "@responder/core/observability/sentry";
 
 export interface BrowserMonitoringConfig {
@@ -40,9 +41,10 @@ type BrowserTelemetryModule = Pick<
   "startBrowserTelemetry"
 >;
 
-// Browser traces go through a relay that accepts only signed-in users, so they
-// start after sign-in. The OpenTelemetry code is a separate chunk that loads
-// only when tracing is on.
+// Browser telemetry goes through a relay that accepts only signed-in users, so
+// it starts after sign-in. @superlog/browser and OpenTelemetry are a separate
+// chunk that loads only when telemetry is on; the identity calls below are
+// part of the main bundle and apply once it starts.
 export function startSignedInBrowserTelemetry(
   config: BrowserMonitoringConfig & { otelTracesSampleRate?: string } = {
     ...defaultConfig,
@@ -53,15 +55,27 @@ export function startSignedInBrowserTelemetry(
   const sampleRate = sentrySampleRate(config.otelTracesSampleRate);
   if (sampleRate <= 0) return Promise.resolve(false);
   return load()
-    .then(({ startBrowserTelemetry }) =>
-      startBrowserTelemetry({
+    .then(({ startBrowserTelemetry }) => {
+      const started = startBrowserTelemetry({
         environment: config.environment?.trim() || undefined,
         origin: window.location.origin,
         release: config.release?.trim() || undefined,
         sampleRate,
-      }),
-    )
+      });
+      if (started) applyTelemetryIdentity();
+      return started;
+    })
     .catch(() => false);
+}
+
+let identity: { organizationId?: string | null; organizationName?: string | null; userId?: string; userName?: string } = {};
+
+function applyTelemetryIdentity() {
+  setUser(identity.userId ? { id: identity.userId, name: identity.userName } : null);
+  setAttributes({
+    "organization.id": identity.organizationId || undefined,
+    "organization.name": identity.organizationId ? identity.organizationName || undefined : undefined,
+  });
 }
 
 export function setBrowserMonitoringIdentity(
@@ -73,4 +87,6 @@ export function setBrowserMonitoringIdentity(
   Sentry.setUser(userId ? { id: userId, username: userName } : null);
   Sentry.setTag("organization_id", organizationId ?? "");
   Sentry.setTag("organization_name", organizationId ? organizationName ?? "" : "");
+  identity = { organizationId, organizationName, userId, userName };
+  applyTelemetryIdentity();
 }

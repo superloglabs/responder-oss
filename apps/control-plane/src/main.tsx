@@ -2,6 +2,7 @@ import "@fontsource-variable/inter";
 import * as Sentry from "@sentry/react";
 import { StrictMode } from "react";
 import { createRoot, hydrateRoot } from "react-dom/client";
+import { reactErrorHandler } from "@superlog/react";
 import { BrowserRouter } from "react-router-dom";
 import { App } from "./app";
 import { initializeBrowserMonitoring } from "./browser-monitoring";
@@ -39,8 +40,15 @@ const application = (
   </StrictMode>
 );
 
+// Errors React recovers from, such as hydration mismatches, and errors the
+// boundary catches go to browser telemetry once it starts.
+const rootOptions = {
+  onCaughtError: reactErrorHandler(),
+  onRecoverableError: reactErrorHandler(),
+};
+
 if (root.hasChildNodes()) {
-  hydrateRoot(root, application);
+  hydrateRoot(root, application, rootOptions);
 } else {
-  createRoot(root).render(application);
+  createRoot(root, rootOptions).render(application);
 }
