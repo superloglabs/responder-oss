@@ -120,14 +120,17 @@ function LogDrawer({
       onClose={onClose}
     >
       <section className="explorerSection">
-        <pre className="explorerBlock">{log.body}</pre>
         {log.trace_id || issueId ? (
+          // The issue loads after the log, so its button goes first and the
+          // trace buttons do not move when it appears.
           <div className="explorerActions">
+            {issueId ? (
+              <Link className="dsButton dsButton--secondary dsButton--small" to={`/errors/${encodeURIComponent(issueId)}`}>
+                <BugIcon aria-hidden="true" />Open error
+              </Link>
+            ) : null}
             {log.trace_id ? (
               <>
-                <Link className="dsButton dsButton--primary dsButton--small" to={traceHref(log.trace_id)}>
-                  <TreeStructureIcon aria-hidden="true" />Open trace
-                </Link>
                 <button
                   className="dsButton dsButton--secondary dsButton--small"
                   onClick={() => onFilter({ key: "field.trace_id", op: "eq", value: log.trace_id })}
@@ -135,15 +138,14 @@ function LogDrawer({
                 >
                   Logs in this trace
                 </button>
+                <Link className="dsButton dsButton--primary dsButton--small" to={traceHref(log.trace_id)}>
+                  <TreeStructureIcon aria-hidden="true" />Open trace
+                </Link>
               </>
-            ) : null}
-            {issueId ? (
-              <Link className="dsButton dsButton--secondary dsButton--small" to={`/errors/${encodeURIComponent(issueId)}`}>
-                <BugIcon aria-hidden="true" />Open error
-              </Link>
             ) : null}
           </div>
         ) : null}
+        <pre className="explorerBlock">{log.body}</pre>
       </section>
       {exception || log.exception_stacktrace ? (
         <section className="explorerSection">
