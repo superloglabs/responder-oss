@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   dimensionLabel,
   filterMetricCatalog,
+  groupMetricCatalog,
   groupMetrics,
   metricAggregationOptions,
   metricAlertDraft,
+  metricChartTitle,
+  metricDisplay,
   metricExplorerHref,
   metricQueryFromParams,
   metricQueryParams,
@@ -80,6 +83,59 @@ describe("the metric catalog", () => {
       ["http", ["http.client.request.duration", "http.server.request.duration"]],
       ["uptime", ["uptime"]],
     ]);
+  });
+
+  it("groups CloudWatch metrics by AWS service after the application's own", () => {
+    const groups = groupMetrics([
+      metric("amazonaws.com/AWS/SQS/NumberOfMessagesSent", { kind: "summary" }),
+      metric("http.server.request.duration"),
+      metric("amazonaws.com/AWS/EC2/NetworkIn", { kind: "summary" }),
+      metric("amazonaws.com/AWS/EC2/CPUUtilization", { kind: "summary" }),
+    ]);
+
+    expect(groups.map((group) => [group.namespace, group.metrics.map((entry) => metricDisplay(entry).title)])).toEqual([
+      ["http", ["http.server.request.duration"]],
+      ["AWS EC2", ["CPU utilization", "Network bytes in"]],
+      ["AWS SQS", ["Messages sent"]],
+    ]);
+  });
+
+  it("groups catalog rows only when CloudWatch metrics are present", () => {
+    const own = [metric("uptime"), metric("http.server.request.duration")];
+    expect(groupMetricCatalog(own)).toEqual({ grouped: false, rows: own });
+
+    const rows = groupMetricCatalog([
+      metric("amazonaws.com/AWS/RDS/FreeStorageSpace"),
+      metric("uptime"),
+      metric("amazonaws.com/AWS/EC2/CPUUtilization"),
+      metric("http.server.request.duration"),
+    ]).rows.map((entry) => entry.name);
+    expect(rows).toEqual([
+      "uptime",
+      "http.server.request.duration",
+      "amazonaws.com/AWS/EC2/CPUUtilization",
+      "amazonaws.com/AWS/RDS/FreeStorageSpace",
+    ]);
+  });
+
+  it("titles CloudWatch metrics and keeps a description that was sent", () => {
+    expect(metricDisplay(metric("amazonaws.com/AWS/SQS/ApproximateAgeOfOldestMessage"))).toEqual({
+      description: "Seconds the oldest message has waited in the queue.",
+      title: "Oldest message age",
+    });
+    expect(metricDisplay(metric("amazonaws.com/AWS/SQS/ApproximateAgeOfOldestMessage", { description: "Sent" })).description)
+      .toBe("Sent");
+    expect(metricDisplay(metric("uptime", { description: "Seconds up" }))).toEqual({ description: "Seconds up", title: "uptime" });
+    expect(metricChartTitle({ ...query, groupBy: "", name: "amazonaws.com/AWS/Lambda/Duration" }))
+      .toBe("95th percentile of Lambda duration");
+  });
+
+  it("finds CloudWatch metrics by their readable title", () => {
+    const metrics = [metric("amazonaws.com/AWS/SQS/ApproximateNumberOfMessagesVisible"), metric("queue.depth")];
+    expect(searchMetrics(metrics, "messages waiting").map((entry) => entry.name))
+      .toEqual(["amazonaws.com/AWS/SQS/ApproximateNumberOfMessagesVisible"]);
+    expect(searchMetrics(metrics, "sqs").map((entry) => entry.name))
+      .toEqual(["amazonaws.com/AWS/SQS/ApproximateNumberOfMessagesVisible"]);
   });
 
   it("searches names, descriptions, units and attribute keys", () => {

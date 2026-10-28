@@ -1,5 +1,6 @@
 import { apiErrorMessage } from "./agents-api";
 import type { AlertForm } from "./alerts-api";
+import { cloudWatchMetricName } from "./cloudwatch-metric-names";
 import type { ChartData, DashboardWidgetFilter, WidgetDraft, WidgetUnit } from "./dashboards-api";
 import { telemetryRanges, type TelemetryRange } from "./telemetry-api";
 import type {
@@ -127,32 +128,82 @@ export function metricWidgetUnit(metric: { kind: MetricKind; unit: string }, agg
   }
 }
 
-// The part of a metric name before its first dot groups related metrics.
+// The part of a metric name before its first dot groups related metrics. A
+// CloudWatch metric groups under its AWS service.
 export function metricNamespace(name: string): string {
+  const cloudWatch = cloudWatchMetricName(name);
+  if (cloudWatch) return cloudWatch.group;
   const dot = name.indexOf(".");
   return dot > 0 ? name.slice(0, dot) : name;
 }
 
+// How a metric reads in a list: a CloudWatch metric by its readable title and
+// description, any other metric by its own name and description.
+export function metricDisplay(metric: { description: string; name: string }): { description: string; title: string } {
+  const cloudWatch = cloudWatchMetricName(metric.name);
+  if (!cloudWatch) return { description: metric.description, title: metric.name };
+  return { description: metric.description || cloudWatch.description, title: cloudWatch.title };
+}
+
+// A metric's name where no group gives its context, such as a chart title.
+export function metricLabel(name: string): string {
+  return cloudWatchMetricName(name)?.standalone ?? name;
+}
+
+function isCloudMetric(metric: MetricCatalogEntry): boolean {
+  return cloudWatchMetricName(metric.name) !== null;
+}
+
+function byTitle(a: MetricCatalogEntry, b: MetricCatalogEntry): number {
+  return metricDisplay(a).title.localeCompare(metricDisplay(b).title) || a.name.localeCompare(b.name);
+}
+
 export interface MetricGroup {
+  // An AWS service's CloudWatch metrics.
+  cloud: boolean;
   metrics: MetricCatalogEntry[];
   namespace: string;
 }
 
+// Application namespaces come first, then AWS services.
 export function groupMetrics(metrics: MetricCatalogEntry[]): MetricGroup[] {
   const groups = new Map<string, MetricCatalogEntry[]>();
-  for (const metric of [...metrics].sort((a, b) => a.name.localeCompare(b.name))) {
+  const sorted = [...metrics].sort((a, b) => Number(isCloudMetric(a)) - Number(isCloudMetric(b)) || byTitle(a, b));
+  for (const metric of sorted) {
     const namespace = metricNamespace(metric.name);
     groups.set(namespace, [...(groups.get(namespace) ?? []), metric]);
   }
-  return [...groups].map(([namespace, grouped]) => ({ metrics: grouped, namespace }));
+  return [...groups]
+    .map(([namespace, grouped]) => ({ cloud: isCloudMetric(grouped[0]!), metrics: grouped, namespace }))
+    .sort((a, b) => Number(a.cloud) - Number(b.cloud) || a.namespace.localeCompare(b.namespace));
 }
 
-// Metrics matching a search across names, descriptions, units and attribute keys.
+// The catalog table's group: one for the application's own metrics and one
+// for each AWS service.
+export function metricCatalogGroup(metric: MetricCatalogEntry): string {
+  return cloudWatchMetricName(metric.name)?.group ?? "Application";
+}
+
+// Catalog rows in group order, or null groups when every metric is the
+// application's own.
+export function groupMetricCatalog(metrics: MetricCatalogEntry[]): { grouped: boolean; rows: MetricCatalogEntry[] } {
+  if (!metrics.some(isCloudMetric)) return { grouped: false, rows: metrics };
+  const order = (metric: MetricCatalogEntry) => (isCloudMetric(metric) ? metricCatalogGroup(metric) : "");
+  return {
+    grouped: true,
+    rows: [...metrics].sort((a, b) =>
+      order(a).localeCompare(order(b)) || (isCloudMetric(a) ? byTitle(a, b) : 0)),
+  };
+}
+
+// Metrics matching a search across names, titles, descriptions, units and
+// attribute keys.
 export function searchMetrics(metrics: MetricCatalogEntry[], search: string): MetricCatalogEntry[] {
   const terms = search.trim().toLocaleLowerCase().split(/\s+/u).filter(Boolean);
   if (terms.length === 0) return metrics;
   return metrics.filter((metric) => {
-    const text = [metric.name, metric.description, metric.unit, ...metric.attributes]
+    const display = metricDisplay(metric);
+    const text = [metric.name, metricLabel(metric.name), display.title, display.description, metric.unit, ...metric.attributes]
       .join(" ")
       .toLocaleLowerCase();
     return terms.every((term) => text.includes(term));
@@ -280,7 +331,7 @@ export function metricExplorerHref(
 
 export function metricChartTitle(query: MetricQuery): string {
   const by = query.groupBy ? ` by ${dimensionLabel(query.groupBy)}` : "";
-  return `${metricAggregationLabel(query.kind, query.aggregation)} of ${query.name}${by}`;
+  return `${metricAggregationLabel(query.kind, query.aggregation)} of ${metricLabel(query.name)}${by}`;
 }
 
 // The graph as a dashboard widget.
@@ -312,7 +363,7 @@ export function metricAlertDraft(query: MetricQuery): Partial<AlertForm> {
     metricKind: query.kind,
     metricName: query.name,
     metricUnit: query.unit,
-    name: query.name,
+    name: metricLabel(query.name),
     perGroup: Boolean(query.groupBy),
     source: "metric",
   };

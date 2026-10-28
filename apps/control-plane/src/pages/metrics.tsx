@@ -10,6 +10,9 @@ import { DataTable, SegmentedControl, SelectField } from "../design-system";
 import {
   fetchMetricCatalog,
   filterMetricCatalog,
+  groupMetricCatalog,
+  metricCatalogGroup,
+  metricDisplay,
   metricExplorerHref,
   metricKindLabel,
   metricKinds,
@@ -93,6 +96,7 @@ export function MetricsPage() {
     () => filterMetricCatalog(catalog ?? [], { kind, search, service }),
     [catalog, kind, search, service],
   );
+  const table = useMemo(() => groupMetricCatalog(shown), [shown]);
   const attributeKeys = new Set(shown.flatMap((metric) => metric.attributes)).size;
 
   return (
@@ -180,17 +184,25 @@ export function MetricsPage() {
                     {
                       header: "Metric",
                       key: "metric",
-                      render: (metric) => (
-                        <div className="metricName">
-                          <MetricKindIcon kind={metric.kind} />
-                          <span className="metricName__text">
-                            <Link className="metricName__name" to={metricExplorerHref(metric, { range })}>
-                              {metric.name}
-                            </Link>
-                            {metric.description ? <span className="metricName__description">{metric.description}</span> : null}
-                          </span>
-                        </div>
-                      ),
+                      render: (metric) => {
+                        const display = metricDisplay(metric);
+                        const friendly = display.title !== metric.name;
+                        return (
+                          <div className="metricName">
+                            <MetricKindIcon kind={metric.kind} />
+                            <span className="metricName__text">
+                              <Link
+                                className={friendly ? "metricName__name metricName__name--friendly" : "metricName__name"}
+                                title={friendly ? metric.name : undefined}
+                                to={metricExplorerHref(metric, { range })}
+                              >
+                                {display.title}
+                              </Link>
+                              {display.description ? <span className="metricName__description">{display.description}</span> : null}
+                            </span>
+                          </div>
+                        );
+                      },
                     },
                     {
                       header: "Type",
@@ -233,9 +245,10 @@ export function MetricsPage() {
                     },
                   ]}
                   emptyMessage="No metrics match these filters."
+                  getRowGroup={table.grouped ? metricCatalogGroup : undefined}
                   getRowKey={metricKey}
                   onRowClick={(metric) => navigate(metricExplorerHref(metric, { range }))}
-                  rows={shown}
+                  rows={table.rows}
                   variant="workspace"
                 />
               </div>

@@ -1,5 +1,5 @@
 import type { MetricName } from "./dashboards-api";
-import { metricKindLabel, type MetricKind } from "./metrics-api";
+import { metricKindLabel, metricLabel, type MetricKind } from "./metrics-api";
 
 // One metric in a picker: its kind, name and unit. A widget or alert that
 // names only a metric keeps an empty kind and a null unit, and reads every
@@ -32,7 +32,7 @@ export function metricPickerOptions(metrics: MetricName[]): Array<{ label: strin
     const unit = metric.unit ? ` (${metric.unit})` : "";
     const shared = (kindsOf.get(JSON.stringify([metric.name, metric.unit])) ?? 0) > 1;
     return {
-      label: `${metric.name}${unit}${shared ? ` · ${metricKindLabel(kind)}` : ""}`,
+      label: `${metricLabel(metric.name)}${unit}${shared ? ` · ${metricKindLabel(kind)}` : ""}`,
       value: metricPickerValue({ kind, name: metric.name, unit: metric.unit }),
     };
   });
@@ -40,5 +40,5 @@ export function metricPickerOptions(metrics: MetricName[]): Array<{ label: strin
 
 // The label of a picked metric that is not among the options.
 export function pickedMetricLabel(metric: PickedMetric): string {
-  return metric.unit ? `${metric.name} (${metric.unit})` : metric.name;
+  return metric.unit ? `${metricLabel(metric.name)} (${metric.unit})` : metricLabel(metric.name);
 }

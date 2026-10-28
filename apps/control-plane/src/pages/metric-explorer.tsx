@@ -44,8 +44,10 @@ import {
   metricAggregationOptions,
   metricAlertDraft,
   metricChartTitle,
+  metricDisplay,
   metricExplorerHref,
   metricKindLabel,
+  metricLabel,
   metricQueryFromParams,
   metricQueryParams,
   metricWidgetDraft,
@@ -129,7 +131,7 @@ function MetricList({
           <section className="metricList__group" key={group.namespace}>
             <button
               aria-expanded={open}
-              className="metricList__groupHeader"
+              className={group.cloud ? "metricList__groupHeader metricList__groupHeader--friendly" : "metricList__groupHeader"}
               onClick={() =>
                 setCollapsed((current) => {
                   const next = new Set(current);
@@ -141,7 +143,7 @@ function MetricList({
               type="button"
             >
               {open ? <CaretDownIcon aria-hidden="true" size={12} /> : <CaretRightIcon aria-hidden="true" size={12} />}
-              <span>{group.namespace}</span>
+              <span className="metricList__groupName">{group.namespace}</span>
               <span className="metricList__count">{group.metrics.length}</span>
             </button>
             {open ? (
@@ -149,7 +151,9 @@ function MetricList({
                 {group.metrics.map((metric) => {
                   const current = metric.name === selected.name && metric.kind === selected.kind &&
                     (selected.unit === null || metric.unit === selected.unit);
-                  const rest = metric.name.slice(group.namespace.length + 1) || metric.name;
+                  const display = metricDisplay(metric);
+                  const friendly = display.title !== metric.name;
+                  const rest = friendly ? display.title : metric.name.slice(group.namespace.length + 1) || metric.name;
                   return (
                     <li key={`${metric.kind}:${metric.name}:${metric.unit}`}>
                       <Link
@@ -159,7 +163,7 @@ function MetricList({
                         to={metricExplorerHref(metric, context)}
                       >
                         <MetricKindIcon kind={metric.kind} />
-                        <span className="metricList__name">{rest}</span>
+                        <span className={friendly ? "metricList__name metricList__name--friendly" : "metricList__name"}>{rest}</span>
                         <span className="metricList__unit">{metric.unit}</span>
                       </Link>
                     </li>
@@ -388,7 +392,7 @@ function AddToDashboard({ query, unit }: { query: MetricQuery; unit: string }) {
   async function add(dashboardId: string | null) {
     setError(null);
     try {
-      const target = dashboardId ?? (await createDashboard({ name: query.name })).id;
+      const target = dashboardId ?? (await createDashboard({ name: metricLabel(query.name) })).id;
       await addWidget(target, metricWidgetDraft(query, unit));
       navigate(`/dashboards/${encodeURIComponent(target)}`);
     } catch (cause) {
@@ -430,7 +434,7 @@ export function MetricExplorerPage() {
   const [params, setParams] = useSearchParams();
   const query = metricQueryFromParams(params);
   const available = telemetry.available === true;
-  useDocumentTitle(query ? `${query.name} · Metrics` : "Metrics");
+  useDocumentTitle(query ? `${metricLabel(query.name)} · Metrics` : "Metrics");
   // Series hidden from the graph shown now; a new graph shows all its series.
   const [hiddenState, setHiddenState] = useState<{ key: string | null; names: Set<string> }>({
     key: null,
@@ -456,6 +460,9 @@ export function MetricExplorerPage() {
     (entry) => entry.name === query.name && entry.kind === query.kind && (query.unit === null || entry.unit === query.unit),
   );
   const unit = query.unit ?? metric?.unit ?? "";
+  const label = metricLabel(query.name);
+  const friendly = label !== query.name;
+  const description = metricDisplay({ description: metric?.description ?? "", name: query.name }).description;
   const chartUnit = metricWidgetUnit({ kind: query.kind, unit }, query.aggregation);
   const context = { range: query.range };
   const catalogHref = query.range !== "1h" ? `/metrics?${new URLSearchParams({ range: query.range })}` : "/metrics";
@@ -494,7 +501,7 @@ export function MetricExplorerPage() {
                 <nav aria-label="Breadcrumb" className="automationCreate__breadcrumb">
                   <Link to={catalogHref}>Metrics</Link>
                   <span aria-hidden="true">›</span>
-                  <span aria-current="page">{query.name}</span>
+                  <span aria-current="page">{label}</span>
                 </nav>
                 <span className="automationCreate__spacer" />
                 <SegmentedControl
@@ -514,13 +521,14 @@ export function MetricExplorerPage() {
                 {capabilities.includes("dashboards") ? <AddToDashboard query={query} unit={unit} /> : null}
               </div>
               <div className="metricExplorer__titleRow">
-                <h1>{query.name}</h1>
+                <h1 className={friendly ? "metricExplorer__friendly" : undefined} title={friendly ? query.name : undefined}>{label}</h1>
                 <Badge tone="info">{metricKindLabel(query.kind)}</Badge>
                 {unit ? <Badge tone="neutral">{unit}</Badge> : null}
               </div>
               <p className="metricExplorer__meta">
+                {friendly ? <><code>{query.name}</code>{" · "}</> : null}
                 {[
-                  metric?.description,
+                  description,
                   metric && metric.services.length > 0
                     ? `Reported by ${metric.services.length === 1 ? metric.services[0] : `${metric.services.length} services`}`
                     : null,
