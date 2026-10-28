@@ -38,6 +38,7 @@ import {
   joinSlackChannel,
   SlackChannelJoinError,
 } from "../integrations/slack.js";
+import { requireUuidParam } from "../uuid-param.js";
 import { listGitHubRepositories } from "../integrations/github.js";
 import { getActiveTenant } from "../tenant.js";
 import { queueInvestigationRetry } from "../investigations/queue.js";
@@ -353,6 +354,7 @@ export const agentRoutes = new Hono()
       return context.json(response.body, response.status);
     }
   })
+  .use("/:agentId/*", requireUuidParam("agentId", "Agent not found"))
   .get("/:agentId", async (context) => {
     const tenant = await getActiveTenant(context.req.raw.headers);
     if (tenant.ok === false) {

@@ -168,6 +168,16 @@ describe("automation control-plane routes", () => {
     );
   });
 
+  it("answers 404 for automation IDs that are not UUIDs", async () => {
+    const read = await app.request("/api/automations/subscriptions");
+    const runs = await app.request("/api/automations/not-a-uuid/runs");
+
+    expect(read.status).toBe(404);
+    expect(runs.status).toBe(404);
+    expect(mocks.getAutomation).not.toHaveBeenCalled();
+    expect(mocks.listAutomationRuns).not.toHaveBeenCalled();
+  });
+
   it("lists the Slack authors of the selected channels in the active organization", async () => {
     const accountId = "41414141-4141-4141-8141-414141414141";
     mocks.listSlackAuthors.mockResolvedValue([{ id: "A123", kind: "app", name: "Devin" }]);
