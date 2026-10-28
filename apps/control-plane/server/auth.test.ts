@@ -5,6 +5,7 @@ import {
   canImpersonateSupportUser,
   configuredAuthTrustedOrigins,
   configuredSuperuserEmails,
+  createResponderAuth,
   grantNewOrganizationCapabilities,
   platformRoleForIdentity,
 } from "./auth.js";
@@ -158,5 +159,20 @@ describe("authSignupMethod", () => {
   it("reports other user creation as unknown", () => {
     expect(authSignupMethod({ path: "/admin/create-user" })).toBe("unknown");
     expect(authSignupMethod(undefined)).toBe("unknown");
+  });
+});
+
+describe("createResponderAuth", () => {
+  it("requires a verified email to accept or reject an invitation", () => {
+    vi.stubEnv("BETTER_AUTH_SECRET", "test-secret-test-secret-test-secret");
+    vi.stubEnv("DATABASE_URL", "postgres://test:test@127.0.0.1:1/test");
+    const auth = createResponderAuth();
+    const organization = auth.options.plugins.find(
+      (plugin) => plugin.id === "organization",
+    ) as { options?: { requireEmailVerificationOnInvitation?: boolean } };
+
+    expect(organization.options?.requireEmailVerificationOnInvitation).toBe(true);
+    expect(auth.options.emailVerification?.sendVerificationEmail).toBeTypeOf("function");
+    vi.unstubAllEnvs();
   });
 });

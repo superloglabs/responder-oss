@@ -673,14 +673,23 @@ function WorkspaceSetup({ onCreating, onReady }: WorkspaceSetupProps) {
 }
 
 function InvitationGate({
+  email,
+  emailVerified,
   invitationId,
   onReady,
 }: {
+  email: string;
+  emailVerified: boolean;
   invitationId: string;
   onReady: () => Promise<void>;
 }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(() =>
+    new URL(window.location.href).searchParams.get("error")
+      ? "That confirmation link is invalid or expired. Send a new one."
+      : null,
+  );
+  const [verificationSent, setVerificationSent] = useState(false);
 
   async function signOut() {
     const result = await authClient.signOut();
@@ -705,6 +714,28 @@ function InvitationGate({
     );
     await resetBrowserAnalytics();
     window.location.assign("/");
+  }
+
+  async function sendVerification() {
+    setError(null);
+    setIsSubmitting(true);
+    const result = await authClient.sendVerificationEmail({
+      callbackURL: `/invite/${encodeURIComponent(invitationId)}`,
+      email,
+    });
+    setIsSubmitting(false);
+    if (result.error) {
+      console.error(
+        JSON.stringify({
+          event: "invitation_verification_email_failed",
+          invitationId,
+          errorCode: authErrorCode(result.error),
+        }),
+      );
+      setError(result.error.message ?? "Could not send the email. Please try again.");
+      return;
+    }
+    setVerificationSent(true);
   }
 
   async function accept() {
@@ -759,6 +790,42 @@ function InvitationGate({
     );
     await onReady();
     window.location.replace("/app");
+  }
+
+  if (!emailVerified) {
+    return (
+      <>
+        <div className="authIntro">
+          <h1>Confirm your email</h1>
+          <p>
+            {verificationSent
+              ? `We sent a link to ${email}. Open it to come back here and join the workspace.`
+              : `To join this workspace, confirm that you own ${email}. We'll email you a link.`}
+          </p>
+        </div>
+        {error ? <p className="authError invitationError">{error}</p> : null}
+        <button
+          className="button button--primary authSubmit"
+          disabled={isSubmitting}
+          onClick={() => void sendVerification()}
+          type="button"
+        >
+          {isSubmitting
+            ? "Sending…"
+            : verificationSent
+              ? "Send another link"
+              : "Email me a link"}
+        </button>
+        <button
+          className="authSwitch"
+          disabled={isSubmitting}
+          onClick={() => void signOut()}
+          type="button"
+        >
+          Sign in with a different account
+        </button>
+      </>
+    );
   }
 
   return (
@@ -969,6 +1036,8 @@ export function AuthGate({ children }: AuthGateProps) {
         <ImpersonationBanner />
         <AuthFrame>
           <InvitationGate
+            email={session.data.user.email}
+            emailVerified={session.data.user.emailVerified}
             invitationId={invitationMatch[1]}
             onReady={session.refetch}
           />

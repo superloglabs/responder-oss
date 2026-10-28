@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  emailVerificationEmailBody,
   passwordResetEmailBody,
   workspaceInvitationEmailBody,
 } from "./email.js";
@@ -61,5 +62,18 @@ describe("passwordResetEmailBody", () => {
 
     expect(body.html).not.toContain("<script>");
     expect(body.html).toContain("&quot;&gt;&lt;script&gt;");
+  });
+});
+
+describe("emailVerificationEmailBody", () => {
+  it("links to the verification URL in both email formats", () => {
+    const verifyUrl =
+      "https://responder.superlog.sh/api/auth/verify-email?token=abc&callbackURL=%2Finvite%2F1";
+    const body = emailVerificationEmailBody({ verifyUrl });
+
+    expect(body.text).toContain(`Confirm email: ${verifyUrl}`);
+    expect(body.html).toContain(
+      'href="https://responder.superlog.sh/api/auth/verify-email?token=abc&amp;callbackURL=%2Finvite%2F1"',
+    );
   });
 });

@@ -364,6 +364,9 @@ export const app = instrumentedApp
       .getSession({ headers: context.req.raw.headers })
       .catch(() => null);
     if (!session) return context.json({ error: "Unauthorized" }, 401);
+    // An unverified account may not own its email, so it neither learns
+    // nor changes that address's legacy routing.
+    if (!session.user.emailVerified) return context.json({ redirect: false });
 
     try {
       const redirect = await shouldRedirectLegacyAccount(session.user.email);
@@ -387,6 +390,7 @@ export const app = instrumentedApp
       .getSession({ headers: context.req.raw.headers })
       .catch(() => null);
     if (!session) return context.json({ error: "Unauthorized" }, 401);
+    if (!session.user.emailVerified) return context.json({ redirect: false });
 
     try {
       await clearLegacyAccountRedirect(session.user.email);
