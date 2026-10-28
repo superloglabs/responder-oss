@@ -98,7 +98,7 @@ describe("sending automation notifications", () => {
       blocks: [{
         text: `**Weekly digest** finished.\n\nAll clear.\n\n[View run](https://responder.example/automations/${automationId}/runs/${runId}?organization_id=${organizationId})`,
         type: "markdown",
-      }, expect.objectContaining({ type: "actions", elements: [expect.objectContaining({ action_id: "conductor_continue", url: expect.stringContaining("/api/ide/conductor#prompt=") })] })],
+      }, expect.objectContaining({ type: "actions", elements: [expect.objectContaining({ action_id: "conductor_continue", url: expect.stringMatching(/^conductor:\/\/prompt=/u) })] })],
       channelId: "C999",
       clientMessageId: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-8[0-9a-f]{3}-[0-9a-f]{12}$/u),
       text: "Weekly digest finished",
@@ -269,7 +269,7 @@ describe("handoff delivery", () => {
     for (const [message] of post.mock.calls) {
       expect(message.blocks).toContainEqual(buttonsBlock);
       expect(message.blocks).toContainEqual(expect.objectContaining({
-        type: "actions", elements: [expect.objectContaining({ text: { type: "plain_text", text: "Fix in Conductor" }, url: expect.stringContaining("/api/ide/conductor#prompt=") })],
+        type: "actions", elements: [expect.objectContaining({ text: { type: "plain_text", text: "Fix in Conductor" }, url: expect.stringMatching(/^conductor:\/\/prompt=/u) })],
       }));
     }
   });

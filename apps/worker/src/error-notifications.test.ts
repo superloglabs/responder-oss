@@ -54,7 +54,7 @@ describe("error notification delivery", () => {
     expect(block).toMatchObject({ type: "actions", elements: [
       { action_id: "error_notification_resolve", value: delivery.id, text: { text: "Resolve" } },
       { action_id: "error_notification_silence", value: delivery.id, text: { text: "Silence" } },
-      { action_id: "conductor_fix", text: { text: "Fix in Conductor" }, url: expect.stringContaining("https://example.com/api/ide/conductor#prompt=") },
+      { action_id: "conductor_fix", text: { text: "Fix in Conductor" }, url: expect.stringMatching(/^conductor:\/\/prompt=/u) },
     ] });
     const handoff = (block as { elements: Array<{ url?: string }> }).elements[2]!.url!;
     expect(decodeURIComponent(handoff)).toContain("https://example.com/errors/issue");
