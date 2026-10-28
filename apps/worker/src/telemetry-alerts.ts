@@ -115,6 +115,7 @@ export async function checkTelemetryAlert(
     });
     const [delivery] = await dependencies.post({
       ...content,
+      handoff: { kind: "fix", sourceUrl: message(episode.groupKey, value).alertUrl },
       image,
       imageLayout: alertImageLayout(message(episode.groupKey, value)),
       unfurlLinks: false,
@@ -164,6 +165,7 @@ export async function checkTelemetryAlert(
     });
     const [delivery] = await dependencies.post({
       ...content,
+      handoff: { kind: "fix", sourceUrl: message(episode.groupKey, value).alertUrl },
       notifications: [target],
       organizationId: alert.organizationId,
       seed: `telemetry-alert-episode:${episode.id}:recovered`,

@@ -1,3 +1,4 @@
+import { ideHandoffRoutes } from "./ide-handoff.js";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import * as Sentry from "@sentry/hono/node";
@@ -498,6 +499,7 @@ export const app = instrumentedApp
   .route("/.well-known", oauthMetadataRoutes)
   .route("/api/v1", managementApiRoutes)
   .route("/api/mcp", managementMcpRoutes)
+  .route("/api/ide", ideHandoffRoutes)
   .route("/api/api-keys", apiKeyRoutes)
   .route("/api/automations", automationRoutes)
   .route("/api/automation-templates", sharedAutomationTemplateRoutes)

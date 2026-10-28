@@ -1,3 +1,4 @@
+import { conductorButton } from "../ide-handoff.js";
 import { z } from "zod";
 import { decryptCredentials } from "../credentials/encryption.js";
 import {
@@ -354,6 +355,10 @@ export function slackIssuePullRequestMessage(
             actions: pullRequestActions,
           },
         ],
+      },
+      {
+        type: "actions",
+        elements: [conductorButton({ kind: "fix", sourceUrl: issueUrl, context: [card.issueTitle, card.issueDescription, card.pullRequestUrl].filter(Boolean).join("\n\n") })],
       },
       ...(card.investigationId
         ? [slackInvestigationFeedbackBlock(card.investigationId)]

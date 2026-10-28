@@ -1,3 +1,4 @@
+import { conductorButton } from "../ide-handoff.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { decryptCredentials } from "../credentials/encryption.js";
@@ -936,6 +937,13 @@ export function slackAutomationRunCard(input: {
     .map((item, index) => automationTraceTask(input.runId, item, index))
     .filter((task) => task !== null)
     .slice(-11);
+  const sourceUrl = responderAutomationRunUrl({
+    automationId: input.automationId,
+    organizationId: input.organizationId,
+    origin: responderAppUrl(),
+    runId: input.runId,
+  });
+  const lastMessage = input.items.findLast((item) => item.kind === "message" && !item.subagentId);
   return {
     text: input.status === "error" && input.detail
       ? `${summary}: ${truncate(input.detail, 300)}`
@@ -958,16 +966,19 @@ export function slackAutomationRunCard(input: {
               {
                 type: "url",
                 text: "View run",
-                url: responderAutomationRunUrl({
-                  automationId: input.automationId,
-                  organizationId: input.organizationId,
-                  origin: responderAppUrl(),
-                  runId: input.runId,
-                }),
+                url: sourceUrl,
               },
             ],
           },
         ],
+      },
+      {
+        type: "actions",
+        elements: [conductorButton({
+          kind: "continue",
+          sourceUrl,
+          context: [summary, input.detail, lastMessage?.kind === "message" ? lastMessage.text : null].filter(Boolean).join("\n\n"),
+        })],
       },
     ],
   };
