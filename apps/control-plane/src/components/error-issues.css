@@ -1,6 +1,5 @@
 /* Errors list and error issue page. */
 .errorIssues { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
-.errorIssues .explorerFilterBar { max-width: 360px; }
 .errorIssues__title { display: block; overflow: hidden; color: var(--ds-text-primary); text-overflow: ellipsis; white-space: nowrap; }
 .errorIssues__meta { display: block; overflow: hidden; color: var(--ds-text-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .errorIssues__number { font-variant-numeric: tabular-nums; }
@@ -31,7 +30,11 @@
 .errorIssues__heading p { margin: 0; padding-left: 8px; color: var(--ds-text-muted); font-size: 13px; line-height: 20px; }
 .errorIssues__filters { display: flex; flex-direction: column; gap: 8px; }
 .errorIssues .explorerToolbar { display: flex; gap: 8px; margin: 0; }
-.errorIssues .explorerFilterBar { flex: 1; min-width: 160px; max-width: none; height: 26px; }
+.errorIssues__search { display: flex; flex: 1; align-items: center; gap: 8px; min-width: 160px; min-height: 26px; padding: 3px 7px; border: 1px solid var(--ds-border-default); border-radius: 6px; background: var(--ds-surface-base); color: var(--ds-text-muted); }
+.errorIssues__search:focus-within { border-color: var(--workspace-accent, #4e58f9); }
+.errorIssues__search > svg { flex-shrink: 0; }
+.errorIssues__search input { flex: 1; width: 100%; min-width: 0; padding: 0; border: 0; outline: 0; background: transparent; color: var(--ds-text-primary); font: inherit; font-size: 13px; line-height: 18px; }
+.errorIssues__search input::placeholder { color: var(--ds-text-muted); }
 .errorIssues__filterRow { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--ds-text-secondary); font-size: 13px; }
 .errorIssues__chips { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .errorFilterChip { display: inline-flex; align-items: center; gap: 7px; min-height: 26px; padding: 3px 7px; border: 1px solid var(--ds-border-default); border-radius: 6px; background: var(--ds-surface-base); color: var(--ds-text-primary); font-size: 12px; }
@@ -77,7 +80,6 @@
 .errorIssues__pagination, .errorIssues__pagination > div { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ds-text-muted); }
 .errorIssues__pagination { justify-content: space-between; }
 .errorSparkline > span { max-width: 4px; }
-.errorIssues .explorerFilterBar { min-height: 26px; padding: 3px 7px; }
 .appShell--workspace .errorIssues .dsSelect__trigger { min-height: 26px; height: 26px; padding: 3px 7px; font-size: 13px; }
 .errorIssues__filterRow .dsSelect__trigger { border: 0; background: transparent; box-shadow: none; }
 .appShell--workspace .errorIssues .dsDataTable--workspace :is(th, td):nth-child(4) { border-right: .5px solid #e6e8ec; }

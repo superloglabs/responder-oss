@@ -186,7 +186,7 @@ export function ErrorsPage() {
         </header>
         <div className="errorIssues__filters">
           <div className="explorerToolbar">
-            <label className="explorerFilterBar"><MagnifyingGlassIcon aria-hidden="true" size={14} />
+            <label className="errorIssues__search"><MagnifyingGlassIcon aria-hidden="true" size={14} />
               <input aria-label="Search errors" onChange={(event) => setSearchText(event.target.value)} placeholder="Search errors by message or ID…" type="search" value={searchText} />
             </label>
             <ErrorFilterMenu filters={filters} services={facets.services} environments={facets.environments} onChange={changeProperty} />
