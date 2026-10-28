@@ -10,13 +10,12 @@ function setup() {
     tenant: vi.fn(async () => ({ ok: true as const, role: "admin", organizationId, user: { id: userId, name: "Ash", email: "ash@example.com" } })),
     hasCapability: vi.fn(async () => true),
     get: vi.fn(async () => defaultErrorNotificationSettings), save: vi.fn(async () => {}),
-    members: vi.fn(async () => [{ id: userId, name: "Ash", email: "ash@example.com" }]),
     channels: vi.fn(async () => [{ integrationAccountId: accountId, channelId: "C123", name: "errors", accountName: "Team", private: false }]),
     refresh: vi.fn(async () => undefined) as never,
   };
   return { deps, app: createErrorNotificationRoutes(deps) };
 }
-const valid = { ...defaultErrorNotificationSettings, enabled: true, targets: [{ kind: "email", userId }, { kind: "slack", integrationAccountId: accountId, channelId: "C123" }] };
+const valid = { ...defaultErrorNotificationSettings, enabled: true, targets: [{ kind: "slack", integrationAccountId: accountId, channelId: "C123" }] };
 function put(app: ReturnType<typeof createErrorNotificationRoutes>, body = valid) {
   return app.request("/", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 }
@@ -25,18 +24,18 @@ describe("error notification settings", () => {
     const { app, deps } = setup();
     expect((await put(app)).status).toBe(200);
     expect(deps.save).toHaveBeenCalledWith(organizationId, valid);
-    expect(deps.members).toHaveBeenCalledWith(organizationId);
     expect(deps.channels).toHaveBeenCalledWith(organizationId);
   });
-  it("rejects recipients and channels outside the workspace", async () => {
+  it("rejects channels outside the workspace", async () => {
     const { app, deps } = setup();
-    vi.mocked(deps.members).mockResolvedValue([]);
-    expect((await put(app)).status).toBe(400);
-    expect(deps.save).not.toHaveBeenCalled();
-    vi.mocked(deps.members).mockResolvedValue([{ id: userId, name: "Ash", email: "ash@example.com" }]);
     vi.mocked(deps.channels).mockResolvedValue([]);
     expect((await put(app)).status).toBe(400);
     expect(deps.save).not.toHaveBeenCalled();
+  });
+  it("can turn off notifications after a channel becomes unavailable", async () => {
+    const { app, deps } = setup();
+    vi.mocked(deps.channels).mockResolvedValue([]);
+    expect((await put(app, { ...valid, enabled: false })).status).toBe(200);
   });
   it("requires administrator access for reads, writes, and refreshes", async () => {
     const { app, deps } = setup();
@@ -57,10 +56,10 @@ describe("error notification settings", () => {
     vi.mocked(deps.tenant).mockResolvedValue({ ok: false, status: 401, error: "Unauthorized" });
     expect((await app.request("/")).status).toBe(401);
   });
-  it("rejects enabled settings without destinations or events", async () => {
+  it("rejects enabled settings without a channel or with multiple channels", async () => {
     const { app, deps } = setup();
     expect((await put(app, { ...valid, targets: [] })).status).toBe(400);
-    expect((await put(app, { ...valid, newErrors: false, regressions: false })).status).toBe(400);
+    expect((await put(app, { ...valid, targets: [...valid.targets, ...valid.targets] })).status).toBe(400);
     expect(deps.save).not.toHaveBeenCalled();
   });
 });

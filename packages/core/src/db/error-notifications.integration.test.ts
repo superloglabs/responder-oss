@@ -13,7 +13,7 @@ import { defaultErrorNotificationSettings } from "../telemetry/error-notificatio
 const testUrl = process.env.TEST_ERROR_NOTIFICATION_DATABASE_URL;
 describe.skipIf(!testUrl)("error notification outbox (PostgreSQL)", () => {
   const organizationId = randomUUID();
-  const settings = { ...defaultErrorNotificationSettings, enabled: true, targets: [{ kind: "email" as const, userId: randomUUID() }] };
+  const settings = { ...defaultErrorNotificationSettings, enabled: true, targets: [{ kind: "slack" as const, integrationAccountId: randomUUID(), channelId: "C123" }] };
   beforeAll(async () => {
     vi.stubEnv("DATABASE_URL", testUrl!);
     vi.stubEnv("DATABASE_POOL_SIZE", "1");

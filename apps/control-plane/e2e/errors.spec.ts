@@ -170,10 +170,9 @@ test("paginates with the active filters and resets when filters change", async (
   expect(queries.at(-1)?.has("before")).toBe(false);
 });
 
-test("configures Slack and email notifications from Errors", async ({ page }, testInfo) => {
+test("configures Slack notifications from Errors", async ({ page }, testInfo) => {
   await setup(page);
   await page.route("**/api/auth/organization/get-active-member**", (route) => route.fulfill({ json: { id: "member", role: "admin", organizationId: organization.id, userId: "22222222-2222-4222-8222-222222222222" } }));
-  const userId = "22222222-2222-4222-8222-222222222222";
   const integrationAccountId = "44444444-4444-4444-8444-444444444444";
   let saved: unknown;
   await page.route("**/api/error-notifications", async (route) => {
@@ -182,8 +181,7 @@ test("configures Slack and email notifications from Errors", async ({ page }, te
       await route.fulfill({ json: { settings: saved } });
     } else {
       await route.fulfill({ json: {
-        settings: { enabled: false, newErrors: true, regressions: true, services: [], targets: [] },
-        members: [{ id: userId, name: "Ada", email: "ada@example.com" }],
+        settings: { enabled: false, targets: [] },
         channels: [{ integrationAccountId, channelId: "C123", name: "errors", accountName: "Acme", private: false }],
       } });
     }
@@ -194,13 +192,11 @@ test("configures Slack and email notifications from Errors", async ({ page }, te
   const dialog = page.getByRole("dialog", { name: "Error notifications" });
   await expect(dialog).toBeVisible();
   await dialog.getByText("Enable error notifications", { exact: true }).click();
-  await expect(dialog.getByRole("checkbox", { name: "Enable error notifications" })).toBeChecked();
-  await dialog.getByText("Ada (ada@example.com)", { exact: true }).click();
-  await dialog.getByRole("button", { name: /Add Slack channel/ }).click();
+  await expect(dialog.getByRole("switch", { name: "Enable error notifications" })).toBeChecked();
+  await dialog.getByRole("button", { name: /Slack channel/ }).click();
   await dialog.getByRole("option", { name: "#errors (Acme)", exact: true }).click();
-  await dialog.getByLabel("Services", { exact: true }).fill("checkout, api");
   await page.screenshot({ path: testInfo.outputPath("error-notifications.png") });
   await dialog.getByRole("button", { name: "Save notifications" }).click();
   await expect(dialog).not.toBeVisible();
-  expect(saved).toEqual({ enabled: true, newErrors: true, regressions: true, services: ["checkout", "api"], targets: [{ kind: "email", userId }, { kind: "slack", integrationAccountId, channelId: "C123" }] });
+  expect(saved).toEqual({ enabled: true, targets: [ { kind: "slack", integrationAccountId, channelId: "C123" }] });
 });

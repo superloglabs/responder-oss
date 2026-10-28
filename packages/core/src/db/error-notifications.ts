@@ -1,5 +1,4 @@
 import { and, eq, inArray, lte, sql } from "drizzle-orm";
-import { member, user } from "./auth-schema.js";
 import { getDatabase } from "./client.js";
 import { errorNotificationDeliveries, errorNotificationSettings, errorIssues, telemetryNotificationPauses } from "./schema.js";
 import {
@@ -26,20 +25,13 @@ export async function saveErrorNotificationSettings(organizationId: string, sett
     ));
   });
 }
-// Only verified workspace members can receive error details by email. Resolve
-// their address again at delivery time, so removed members receive nothing.
-export async function errorNotificationMembers(organizationId: string) {
-  return getDatabase().select({ id: user.id, name: user.name, email: user.email }).from(member)
-    .innerJoin(user, eq(user.id, member.userId))
-    .where(and(eq(member.organizationId, organizationId), eq(user.emailVerified, true)));
-}
 export async function enqueueErrorNotifications(tx: Database | ErrorNotificationTransaction, input: {
   organizationId: string; issueId: string; eventKey: string; snapshot: ErrorNotificationSnapshot;
 }): Promise<void> {
   const [pause] = await tx.select().from(telemetryNotificationPauses).where(eq(telemetryNotificationPauses.organizationId, input.organizationId));
   if (pause) return;
   const [row] = await tx.select().from(errorNotificationSettings).where(eq(errorNotificationSettings.organizationId, input.organizationId));
-  if (!row || !matchesErrorNotification(row.settings, input.snapshot) || row.settings.targets.length === 0) return;
+  if (!row || !matchesErrorNotification(row.settings) || row.settings.targets.length === 0) return;
   await tx.insert(errorNotificationDeliveries).values(row.settings.targets.map((target) => ({
     ...input, target, targetKey: errorNotificationTargetKey(target),
   }))).onConflictDoNothing();
@@ -71,7 +63,7 @@ export async function processPendingErrorNotifications(deliver: (delivery: typeo
       const [issue] = await getDatabase().select({ status: errorIssues.status }).from(errorIssues).where(and(
         eq(errorIssues.id, delivery.issueId), eq(errorIssues.organizationId, delivery.organizationId),
       ));
-      // Keep retries inside the email provider's 24-hour deduplication window.
+      // Stop retrying stale notifications after a bounded delivery window.
       const expired = Date.now() - delivery.createdAt.getTime() >= 23 * 3_600_000 || delivery.attempts > errorNotificationRetryLimit;
       const sent = !expired && issue?.status === "open" && await deliver(delivery);
       await getDatabase().update(errorNotificationDeliveries).set({ status: expired ? "failed" : sent ? "sent" : "cancelled", sentAt: sent ? new Date() : null }).where(claim);
