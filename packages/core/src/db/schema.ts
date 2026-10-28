@@ -3,6 +3,7 @@ import { sql } from "drizzle-orm";
 import {
   bigint,
   boolean,
+  customType,
   check,
   date,
   doublePrecision,
@@ -964,6 +965,37 @@ export const errorIssues = pgTable(
   (table) => [
     uniqueIndex("error_issues_fingerprint_idx").on(table.organizationId, table.fingerprint),
     index("error_issues_status_idx").on(table.organizationId, table.status, table.lastSeenAt),
+  ],
+);
+
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({
+  dataType: () => "bytea",
+});
+
+// Source maps for a workspace's built JavaScript. @superlog/sourcemaps writes
+// one debug ID into each built file and its map, and the browser SDK sends
+// the IDs of the files in an error's stack, so each frame finds the map of
+// the exact file it ran. The map is stored gzipped.
+export const sourceMaps = pgTable(
+  "source_maps",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    debugId: uuid("debug_id").notNull(),
+    // The built file's path in the build output, as uploaded.
+    file: text("file").notNull(),
+    release: text("release"),
+    content: bytea("content").notNull(),
+    // The map's size before compression.
+    size: integer("size").notNull(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("source_maps_debug_id_idx").on(table.organizationId, table.debugId),
+    index("source_maps_created_at_idx").on(table.createdAt),
   ],
 );
 
