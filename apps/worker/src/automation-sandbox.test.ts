@@ -35,7 +35,9 @@ async function creationFailureWithDeletedSandbox(error: Error): Promise<Error> {
   const dependencies = {
     createClient: () => ({
       delete: vi.fn().mockResolvedValue(undefined),
-      get: vi.fn().mockResolvedValue({ id: "sandbox-1" }),
+      list: vi.fn(async function* (query: { name: string }) {
+        yield { id: "sandbox-1", name: query.name };
+      }),
       [Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
     }),
     reportException: vi.fn(),
@@ -254,7 +256,9 @@ describe("fresh automation sandbox", () => {
             throw new Error("delete rejected");
           }
         }),
-        get: vi.fn(async (name: string) => ({ id: name })),
+        list: vi.fn(async function* (query: { name: string }) {
+          yield { id: query.name, name: query.name };
+        }),
         [Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined),
       }),
       reportException: vi.fn(),
