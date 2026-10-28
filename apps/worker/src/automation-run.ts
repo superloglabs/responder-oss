@@ -132,6 +132,11 @@ import {
   automationSkillInstructions,
   materializeAutomationSkills,
 } from "./automation-skills.js";
+import {
+  discoverRepositoryAgentDocs,
+  repositoryAgentDocsInstructions,
+  type RepositoryAgentDocs,
+} from "./repository-skills.js";
 import { workspaceSecretUsageInstructions } from "./secret-safety.js";
 
 type ClaimedAutomationRun = NonNullable<Awaited<ReturnType<typeof claimAutomationRun>>>;
@@ -145,6 +150,7 @@ export interface AutomationRunDependencies {
   commentOnDevRevTicket: typeof commentAutomationRunOnDevRevTicket;
   createGrant: typeof createAutomationModelBrokerGrant;
   createToolHandler: typeof createAutomationToolHandler;
+  discoverAgentDocs: typeof discoverRepositoryAgentDocs;
   getCredential: typeof getOrganizationModelCredential;
   listProviderModels: typeof listProviderModels;
   selectCredential: typeof selectOrganizationModelCredential;
@@ -202,6 +208,7 @@ export const defaultAutomationRunDependencies: AutomationRunDependencies = {
   commentOnDevRevTicket: commentAutomationRunOnDevRevTicket,
   createGrant: createAutomationModelBrokerGrant,
   createToolHandler: createAutomationToolHandler,
+  discoverAgentDocs: discoverRepositoryAgentDocs,
   getCredential: getOrganizationModelCredential,
   listProviderModels,
   selectCredential: selectOrganizationModelCredential,
@@ -545,6 +552,7 @@ function devrevTriggerInstructions(
 function automationPrompt(
   run: ClaimedAutomationRun,
   repositories: Array<{ path: string; repository: string }>,
+  agentDocs: RepositoryAgentDocs,
   conversation: AutomationConversation,
   resumed: boolean,
   // Whether this is the run's first turn, the one that reports.
@@ -568,6 +576,7 @@ function automationPrompt(
     automationActionInstructions(notificationChannels.names, workspace, notificationChannels.inThread),
     ...(issueCatalog ? [issueCatalogInstructions()] : []),
     repositoryInstructions(repositories),
+    ...repositoryAgentDocsInstructions(agentDocs, repositories[0]?.repository),
     ...contextInstructions(connections),
     ...automationSkillInstructions(extensions.skills),
     ...(secretInstructions ? [secretInstructions] : []),
@@ -1027,6 +1036,7 @@ export async function processAutomationRun(
           });
         }
         await materializeAutomationSkills(session, skills);
+        const agentDocs = await dependencies.discoverAgentDocs(session, repositories);
         await recordEvent(dependencies, run.runId, "repositories_checked_out", {
           ...(resumed ? { resumed: true } : {}),
           count: repositories.length,
@@ -1141,6 +1151,7 @@ export async function processAutomationRun(
                 prompt: automationPrompt(
                   run,
                   repositories,
+                  agentDocs,
                   conversation,
                   resumed,
                   firstTurn,
