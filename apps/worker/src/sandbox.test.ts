@@ -576,6 +576,79 @@ describe("Daytona sandbox cleanup", () => {
     expect(harness.deleteSandbox).toHaveBeenCalledTimes(3);
   });
 
+  it("accepts a sandbox Daytona is already deleting", async () => {
+    const harness = cleanupHarness();
+    harness.get.mockResolvedValue({ id: "sandbox-1", state: "destroying" });
+
+    await expect(
+      deleteDaytonaSandboxByName(
+        "responder-automation-run-1",
+        { daytonaApiKey: "daytona-test" },
+        harness.dependencies,
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(harness.deleteSandbox).not.toHaveBeenCalled();
+    expect(harness.reportException).not.toHaveBeenCalled();
+  });
+
+  it("waits for a sandbox being deleted to free its name before creating", async () => {
+    const harness = cleanupHarness();
+    const createdSession = { state: { sandboxId: "sandbox-2" } };
+    const creator = { create: vi.fn().mockResolvedValue(createdSession) };
+    harness.get
+      .mockResolvedValueOnce({ id: "sandbox-1", state: "destroying" })
+      .mockResolvedValueOnce({ id: "sandbox-1", state: "destroying" })
+      .mockRejectedValueOnce(
+        Object.assign(new Error("missing"), { statusCode: 404 }),
+      );
+
+    await expect(
+      createDaytonaSandboxSession(
+        creator,
+        { daytonaApiKey: "daytona-test" },
+        "responder-investigation-1",
+        harness.dependencies,
+      ),
+    ).resolves.toBe(createdSession);
+
+    expect(harness.get).toHaveBeenCalledTimes(3);
+    expect(harness.deleteSandbox).not.toHaveBeenCalled();
+    expect(creator.create).toHaveBeenCalledOnce();
+  });
+
+  it("waits for a busy sandbox to settle before reusing its name", async () => {
+    const harness = cleanupHarness();
+    const createdSession = { state: { sandboxId: "sandbox-2" } };
+    const creator = { create: vi.fn().mockResolvedValue(createdSession) };
+    const conflict = Object.assign(new Error("state change in progress"), {
+      name: "DaytonaConflictError",
+      statusCode: 409,
+    });
+    harness.deleteSandbox
+      .mockRejectedValueOnce(conflict)
+      .mockRejectedValueOnce(conflict)
+      .mockRejectedValueOnce(conflict)
+      .mockRejectedValueOnce(conflict)
+      .mockResolvedValueOnce(undefined);
+
+    await expect(
+      createDaytonaSandboxSession(
+        creator,
+        { daytonaApiKey: "daytona-test" },
+        "responder-investigation-1",
+        harness.dependencies,
+      ),
+    ).resolves.toBe(createdSession);
+
+    expect(harness.deleteSandbox).toHaveBeenCalledTimes(5);
+    expect(harness.sleep).toHaveBeenCalledWith(5_000);
+    expect(creator.create).toHaveBeenCalledOnce();
+    expect(creator.create).toHaveBeenCalledWith({
+      options: { createTimeoutSec: 120, name: "responder-investigation-1" },
+    });
+  });
+
   it("keeps retrying transient deletion failures for the whole wait", async () => {
     const harness = cleanupHarness();
     const unavailable = Object.assign(new Error("unavailable"), {

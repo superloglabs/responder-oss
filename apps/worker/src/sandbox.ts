@@ -192,14 +192,21 @@ async function deleteDaytonaSandboxByReference(
   dependencies: DaytonaCleanupDependencies,
 ): Promise<void> {
   const client = dependencies.createClient(config);
-  const retryDelays = waitForAppearance
-    ? daytonaSettleRetryDelaysMs
-    : daytonaRetryDelaysMs;
+  // Every deletion waits for a starting or stopping sandbox to settle, since
+  // Daytona rejects its deletion until then.
+  const retryDelays = daytonaSettleRetryDelaysMs;
   try {
     for (const [index, delayMs] of retryDelays.entries()) {
       if (delayMs > 0) await dependencies.sleep(delayMs);
       try {
         const sandbox = await client.get(reference);
+        if (sandbox.state === "destroyed") return;
+        if (sandbox.state === "destroying") {
+          // Daytona is already deleting it. A new sandbox that reuses the
+          // name waits until the name is free; other cleanups are done.
+          if (waitForAppearance || index === retryDelays.length - 1) return;
+          continue;
+        }
         await client.delete(sandbox, 60, true);
         return;
       } catch (error) {
