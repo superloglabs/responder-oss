@@ -1,0 +1,84 @@
+{
+  "debugId": "21448dc0-b093-4a8b-b0fa-afbccc3ae3d4",
+  "file": "assets/app-7D4HJW6Y.js",
+  "map": {
+    "version": 3,
+    "sources": [
+      "../../src/cart.js"
+    ],
+    "sourcesContent": [
+      "function renderTotal(cart) {\n  return cart.total.toFixed(2);\n}\n\nfunction loadCart(id) {\n  const carts = { a: { total: 10 } };\n  const total = renderTotal(carts[id]);\n  return total;\n}\n\ndocument.getElementById(\"pay\").addEventListener(\"click\", function onPay() {\n  loadCart(\"missing\");\n});\n\nwindow.reportHandled = function reportHandled() {\n  try {\n    loadCart(\"missing\");\n  } catch (error) {\n    window.Superlog.captureException(error, { attributes: { \"checkout.step\": \"pay\" } });\n  }\n};\n"
+    ],
+    "mappings": "AAAA,SAASA,EAAYC,EAAM,CACzB,OAAOA,EAAK,MAAM,QAAQ,CAAC,CAC7B,CAEA,SAASC,EAASC,EAAI,CAGpB,OADcH,EADA,CAAE,EAAG,CAAE,MAAO,EAAG,CAAE,EACDG,CAAE,CAAC,CAErC,CAEA,SAAS,eAAe,KAAK,EAAE,iBAAiB,QAAS,UAAiB,CACxED,EAAS,SAAS,CACpB,CAAC,EAED,OAAO,cAAgB,UAAyB,CAC9C,GAAI,CACFA,EAAS,SAAS,CACpB,OAASE,EAAO,CACd,OAAO,SAAS,iBAAiBA,EAAO,CAAE,WAAY,CAAE,gBAAiB,KAAM,CAAE,CAAC,CACpF,CACF",
+    "names": [
+      "renderTotal",
+      "cart",
+      "loadCart",
+      "id",
+      "error"
+    ],
+    "debugId": "21448dc0-b093-4a8b-b0fa-afbccc3ae3d4"
+  },
+  "errors": [
+    {
+      "browser": "chromium",
+      "mechanism": "onerror",
+      "type": "TypeError",
+      "message": "Cannot read properties of undefined (reading 'total')",
+      "stacktrace": "TypeError: Cannot read properties of undefined (reading 'total')\n    at o (https://app.test/assets/app-7D4HJW6Y.js:1:24)\n    at e (https://app.test/assets/app-7D4HJW6Y.js:1:62)\n    at HTMLButtonElement.<anonymous> (https://app.test/assets/app-7D4HJW6Y.js:1:150)",
+      "debugIds": {
+        "https://app.test/assets/app-7D4HJW6Y.js": "21448dc0-b093-4a8b-b0fa-afbccc3ae3d4"
+      }
+    },
+    {
+      "browser": "chromium",
+      "mechanism": "manual",
+      "type": "TypeError",
+      "message": "Cannot read properties of undefined (reading 'total')",
+      "stacktrace": "TypeError: Cannot read properties of undefined (reading 'total')\n    at o (https://app.test/assets/app-7D4HJW6Y.js:1:24)\n    at e (https://app.test/assets/app-7D4HJW6Y.js:1:62)\n    at window.reportHandled (https://app.test/assets/app-7D4HJW6Y.js:1:201)\n    at eval (eval at evaluate (:370:30), <anonymous>:1:14)\n    at UtilityScript.evaluate (<anonymous>:372:16)\n    at UtilityScript.<anonymous> (<anonymous>:1:44)",
+      "debugIds": {
+        "https://app.test/assets/app-7D4HJW6Y.js": "21448dc0-b093-4a8b-b0fa-afbccc3ae3d4"
+      }
+    },
+    {
+      "browser": "firefox",
+      "mechanism": "onerror",
+      "type": "TypeError",
+      "message": "can't access property \"total\", t is undefined",
+      "stacktrace": "TypeError: can't access property \"total\", t is undefined\no@https://app.test/assets/app-7D4HJW6Y.js:1:15\ne@https://app.test/assets/app-7D4HJW6Y.js:1:62\n@https://app.test/assets/app-7D4HJW6Y.js:1:151\nEventListener.handleEvent*@https://app.test/assets/app-7D4HJW6Y.js:1:114\n",
+      "debugIds": {
+        "https://app.test/assets/app-7D4HJW6Y.js": "21448dc0-b093-4a8b-b0fa-afbccc3ae3d4"
+      }
+    },
+    {
+      "browser": "firefox",
+      "mechanism": "manual",
+      "type": "TypeError",
+      "message": "can't access property \"total\", t is undefined",
+      "stacktrace": "TypeError: can't access property \"total\", t is undefined\no@https://app.test/assets/app-7D4HJW6Y.js:1:15\ne@https://app.test/assets/app-7D4HJW6Y.js:1:62\nwindow.reportHandled@https://app.test/assets/app-7D4HJW6Y.js:1:202\n@debugger eval code line 370 > eval:1:14\nevaluate@debugger eval code:372:16\n@debugger eval code:1:44\n@debugger eval code:1:62\n",
+      "debugIds": {
+        "https://app.test/assets/app-7D4HJW6Y.js": "21448dc0-b093-4a8b-b0fa-afbccc3ae3d4"
+      }
+    },
+    {
+      "browser": "webkit",
+      "mechanism": "onerror",
+      "type": "TypeError",
+      "message": "undefined is not an object (evaluating 't.total')",
+      "stacktrace": "TypeError: undefined is not an object (evaluating 't.total')\no@https://app.test/assets/app-7D4HJW6Y.js:1:23\n@https://app.test/assets/app-7D4HJW6Y.js:1:151",
+      "debugIds": {
+        "https://app.test/assets/app-7D4HJW6Y.js": "21448dc0-b093-4a8b-b0fa-afbccc3ae3d4"
+      }
+    },
+    {
+      "browser": "webkit",
+      "mechanism": "manual",
+      "type": "TypeError",
+      "message": "undefined is not an object (evaluating 't.total')",
+      "stacktrace": "TypeError: undefined is not an object (evaluating 't.total')\no@https://app.test/assets/app-7D4HJW6Y.js:1:23\n@https://app.test/assets/app-7D4HJW6Y.js:1:202\n@\nevaluate@\n@",
+      "debugIds": {
+        "https://app.test/assets/app-7D4HJW6Y.js": "21448dc0-b093-4a8b-b0fa-afbccc3ae3d4"
+      }
+    }
+  ]
+}

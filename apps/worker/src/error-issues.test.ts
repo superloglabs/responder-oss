@@ -1,3 +1,4 @@
+import browserErrors from "../../../packages/core/src/telemetry/fixtures/browser-errors.json" with { type: "json" };
 import type { ErrorIssueStore } from "@responder/core/db/error-issues";
 import type { TelemetryClient } from "@responder/core/telemetry/client";
 import type { ErrorCandidate, ErrorCandidateCursor, ErrorIssueKind } from "@responder/core/telemetry/error-issues";
@@ -52,6 +53,7 @@ function dependencies(
     candidates: vi.fn(async (_client, input) => candidates(input.kind)),
     client: () => ({}) as TelemetryClient,
     now: () => now,
+    sourceMaps: async () => new Map(),
     withStore: async (pass) => (fake ? pass(fake) : null),
   };
 }
@@ -112,6 +114,58 @@ describe("ingestErrorIssues", () => {
     const deps = dependencies(fake, (kind) => [candidate({ kind })]);
 
     expect(await ingestErrorIssues(deps)).toEqual([]);
+  });
+
+  it("groups browser errors by their original source when the build uploaded maps", async () => {
+    const fake = store();
+    const error = browserErrors.errors.find((e) => e.browser === "chromium" && e.mechanism === "onerror")!;
+    const deps = {
+      ...dependencies(fake, (kind) => (kind === "log"
+        ? [candidate({
+          attrs: { "app.debug_ids": JSON.stringify(error.debugIds) },
+          body: error.message,
+          exception_message: error.message,
+          exception_stacktrace: error.stacktrace,
+          exception_type: error.type,
+          kind,
+          severity: "ERROR",
+        })]
+        : [])),
+      sourceMaps: vi.fn(async () => new Map([[browserErrors.debugId, JSON.stringify(browserErrors.map)]])),
+    };
+
+    await ingestErrorIssues(deps);
+
+    expect(deps.sourceMaps).toHaveBeenCalledWith(organizationId, [browserErrors.debugId]);
+    const [occurrences] = vi.mocked(fake.record).mock.calls[0]!;
+    expect(occurrences.frames).toEqual(["renderTotal@src/cart.js", "loadCart@src/cart.js", "onPay@src/cart.js"]);
+    expect(occurrences.sample.stacktrace).toContain("at renderTotal (src/cart.js:2:15)");
+    expect(occurrences.sample.attributes["exception.stacktrace.minified"]).toBe(error.stacktrace);
+  });
+
+  it("groups browser errors as they arrived when maps cannot be loaded", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const fake = store();
+    const error = browserErrors.errors[0]!;
+    const deps = {
+      ...dependencies(fake, (kind) => (kind === "span"
+        ? [candidate({
+          attrs: { "app.debug_ids": JSON.stringify({ "https://app.test/assets/app-7D4HJW6Y.js": "5c3e1f0a-8b7d-4e6c-a1f2-9d8e7c6b5a40" }) },
+          exception_stacktrace: error.stacktrace,
+          kind,
+        })]
+        : [])),
+      sourceMaps: vi.fn(async () => {
+        throw new Error("connection reset");
+      }),
+    };
+
+    await ingestErrorIssues(deps);
+
+    const [occurrences] = vi.mocked(fake.record).mock.calls[0]!;
+    expect(occurrences.sample.stacktrace).toBe(error.stacktrace);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("error_issue_symbolication_failed"));
+    warn.mockRestore();
   });
 
   it("moves past an issue whose write fails and records the rest", async () => {

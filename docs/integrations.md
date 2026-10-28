@@ -1049,6 +1049,23 @@ normalized body. Fingerprints start with the algorithm version
 `v1:` fingerprint named, so the change of algorithm opens no known error again
 as new.
 
+### Source maps
+
+Browser errors group by their original source once a build uploads its
+source maps. `@superlog/sourcemaps` writes a debug ID into each built
+JavaScript file and its map and uploads the map with
+`PUT /api/v1/source-maps/<debug ID>?file=<path>&release=<version>`, using a
+workspace API key. Maps are stored gzipped in `source_maps`, up to 64 MB each;
+uploading the same ID again replaces the map. The browser SDK sends the debug
+ID of each file in an error's stack as `app.debug_ids`.
+
+Before grouping, the worker rewrites each frame whose file has a map to its
+original file, line, and function. The function is the one around the
+original position in the source the map embeds; without embedded source it is
+the name the caller called. The browser's stack stays on the sample as
+`exception.stacktrace.minified`. Maps that have not matched an error for 30
+days are deleted every hour.
+
 Every ten seconds the worker reads exceptions from ClickHouse's
 `otel_issue_candidates` table in arrival order, 30 seconds behind the present,
 and adds them to `error_issues` with daily counts. Its cursor is in

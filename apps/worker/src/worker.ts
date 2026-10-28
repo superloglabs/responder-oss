@@ -105,6 +105,7 @@ import { BILLING_NOTICE_RETRY_WINDOW_MS } from "@responder/core/billing/notifica
 import { defaultAlertAutomationDependencies, startAlertAutomations } from "./telemetry-alert-automations.js";
 import { checkDueTelemetryAlerts, defaultTelemetryAlertDependencies } from "./telemetry-alerts.js";
 import { ingestErrorIssues } from "./error-issues.js";
+import { purgeSourceMaps } from "@responder/core/db/source-maps";
 import { defaultErrorIssueAutomationDependencies, startErrorIssueAutomations } from "./error-issue-automations.js";
 import {
   automationSuggestionModel,
@@ -166,6 +167,7 @@ const pollers: {
   remediationRecovery?: NodeJS.Timeout;
   replayRequest?: NodeJS.Timeout;
   syntheticCheckPurge?: NodeJS.Timeout;
+  sourceMapPurge?: NodeJS.Timeout;
   syntheticChecks?: NodeJS.Timeout;
   telemetryAlerts?: NodeJS.Timeout;
 } = {};
@@ -199,6 +201,12 @@ const syntheticChecks = createSyntheticCheckScheduler(
 function runSyntheticChecks(): void {
   syntheticChecks.tick().catch((error: unknown) => {
     void reportWorkerException(error, { operation: "synthetic_checks" });
+  });
+}
+
+function purgeUnusedSourceMaps(): void {
+  purgeSourceMaps().catch((error: unknown) => {
+    void reportWorkerException(error, { operation: "error_issues" });
   });
 }
 
@@ -1252,6 +1260,8 @@ pollers.syntheticChecks = setInterval(runSyntheticChecks, 5_000);
 pollers.syntheticChecks.unref();
 pollers.syntheticCheckPurge = setInterval(purgeSyntheticChecks, 10 * 60 * 1_000);
 pollers.syntheticCheckPurge.unref();
+pollers.sourceMapPurge = setInterval(purgeUnusedSourceMaps, 60 * 60 * 1_000);
+pollers.sourceMapPurge.unref();
 pollers.gcpTelemetry = setInterval(() => void pullGcpTelemetry(), 60_000);
 pollers.gcpTelemetry.unref();
 void generateDueAutomationSuggestions();

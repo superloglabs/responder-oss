@@ -69,6 +69,7 @@ import { terraformRoutes } from "./terraform/routes.js";
 import { skillRoutes } from "./skills/routes.js";
 import { managementMcpRoutes } from "./management/mcp.js";
 import { managementApiRoutes } from "./management/routes.js";
+import { sourceMapRoutes } from "./source-maps/routes.js";
 import { oauthMetadataRoutes } from "./oauth-metadata-routes.js";
 import { requestMetrics } from "./request-metrics.js";
 
@@ -83,6 +84,8 @@ export const MAX_WEBHOOK_REQUEST_BODY_BYTES = 25 * 1024 * 1024;
 export const MAX_SKILL_REQUEST_BODY_BYTES = 4 * 1024 * 1024;
 // OTLP batches from applications, which may be uncompressed JSON.
 export const MAX_TELEMETRY_INGEST_BODY_BYTES = 8 * 1024 * 1024;
+// Source maps of large bundles run to tens of megabytes.
+export const MAX_SOURCE_MAP_BODY_BYTES = 64 * 1024 * 1024;
 
 export function sessionCookieFingerprint(cookieHeader: string): string {
   const match =
@@ -298,6 +301,7 @@ const githubWebhookBodyLimit = requestBodyLimit(
 );
 const skillBodyLimit = requestBodyLimit(MAX_SKILL_REQUEST_BODY_BYTES);
 const telemetryIngestBodyLimit = requestBodyLimit(MAX_TELEMETRY_INGEST_BODY_BYTES);
+const sourceMapBodyLimit = requestBodyLimit(MAX_SOURCE_MAP_BODY_BYTES);
 const githubWebhookPaths = new Set([
   "/api/webhooks/github",
   "/api/webhooks/github/",
@@ -309,7 +313,9 @@ instrumentedApp.use("*", (context, next) =>
       ? skillBodyLimit(context, next)
       : context.req.path.startsWith("/api/ingest/")
         ? telemetryIngestBodyLimit(context, next)
-        : apiBodyLimit(context, next),
+        : context.req.path.startsWith("/api/v1/source-maps/")
+          ? sourceMapBodyLimit(context, next)
+          : apiBodyLimit(context, next),
 );
 if (Sentry.isInitialized()) {
   instrumentedApp.use(Sentry.sentry(instrumentedApp));
@@ -497,6 +503,7 @@ export const app = instrumentedApp
     });
   })
   .route("/.well-known", oauthMetadataRoutes)
+  .route("/api/v1/source-maps", sourceMapRoutes)
   .route("/api/v1", managementApiRoutes)
   .route("/api/mcp", managementMcpRoutes)
   .route("/api/ide", ideHandoffRoutes)
