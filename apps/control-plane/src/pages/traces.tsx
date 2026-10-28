@@ -62,7 +62,8 @@ function count(value: number | string): number {
   return Number(value) || 0;
 }
 
-function TraceExplorer({ now, refresh, timeZone, onOpenTrace, openTrace, query, setQuery }: {
+export function TraceExplorer({ now, refresh, timeZone, onOpenTrace, openTrace, query, setQuery, showVolume = true }: {
+  showVolume?: boolean;
   now: number;
   refresh: number;
   timeZone: string;
@@ -83,7 +84,7 @@ function TraceExplorer({ now, refresh, timeZone, onOpenTrace, openTrace, query, 
   const traces = useTelemetryQuery(`${key}#${page}`, () => fetchExplorerTraces(requestQuery, page * 50), false, true);
   const rows = traces.data?.slice(0, 50) ?? [];
   const hasNext = (traces.data?.length ?? 0) > 50;
-  const histogram = useTelemetryQuery(key, () => fetchTraceHistogram(requestQuery), false, true);
+  const histogram = useTelemetryQuery(showVolume ? key : null, () => fetchTraceHistogram(requestQuery), false, true);
   const facets = useTelemetryQuery(key, () => fetchTraceFacets(requestQuery), false, true);
   const attributeKeys = useTelemetryQuery(rangeKey, () => fetchAttributeKeys(window, "traces"));
   const tableWrap = useRef<HTMLDivElement>(null);
@@ -130,13 +131,13 @@ function TraceExplorer({ now, refresh, timeZone, onOpenTrace, openTrace, query, 
           }}
         />
       </div>
-      <section aria-label="Span volume" aria-busy={histogram.isFetching} className="explorerVolume">
+      {showVolume ? <section aria-label="Span volume" aria-busy={histogram.isFetching} className="explorerVolume">
         <div className="explorerVolume__summary">
           <strong>{total === undefined ? "…" : `${total.toLocaleString()} ${total === 1 ? "span" : "spans"}`}</strong>
           <HistogramLegend bars={bars} series={statusChart} />
         </div>
         <CountHistogram bars={bars} label="Matching spans over time, by status" series={statusChart} timeZone={timeZone} />
-      </section>
+      </section> : null}
       {traces.error || histogram.error || facets.error ? (
         <div className="automationRuns__message" role="alert">
           <p>{traces.error ?? histogram.error ?? facets.error}</p>

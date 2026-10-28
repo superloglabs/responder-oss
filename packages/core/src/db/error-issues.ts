@@ -17,8 +17,8 @@ type Database = ReturnType<typeof getDatabase>;
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 type Executor = Database | Transaction;
 
-// How long hourly counts are kept. The list shows the last 24 hours.
-export const errorIssueHourlyRetentionMs = 2 * 86_400_000;
+// Keep the detail chart’s 30 UTC days, including its partial first day.
+export const errorIssueHourlyRetentionMs = 31 * 86_400_000;
 
 export type RecordedErrorOccurrences = {
   issueId: string;

@@ -153,7 +153,8 @@ describe("error issue routes", () => {
     const { app, dependencies } = routes();
     const response = await app.request(`/${issueId}`);
 
-    expect(await response.json()).toEqual({ days: [{ day: "2026-10-22", eventCount: 12 }], issue, since: "2026-09-23" });
+    expect(await response.json()).toEqual({ days: [{ day: "2026-10-22", eventCount: 12 }], hours: [{ eventCount: 12, hour: "2026-10-22T11:00:00.000Z" }], issue, since: "2026-09-23" });
+    expect(dependencies.hours).toHaveBeenCalledWith([issueId], "2026-09-23T00:00:00.000Z");
     expect(dependencies.findIssue).toHaveBeenCalledWith(organizationId, issueId);
   });
 

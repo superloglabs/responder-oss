@@ -106,3 +106,32 @@
 .errorIssues__actions { display: flex; flex-wrap: wrap; gap: 8px; }
 
 .errorNotifications__description { margin: 0; }
+
+/* Investigation detail: shared attribute and trace explorer components. */
+.errorIssue.syntheticCheck { max-width: 1200px; gap: 28px; }
+.errorIssue__overview { grid-template-columns: minmax(0, 1fr) 332px; gap: 32px; }
+.errorIssue__summary { min-width: 0; gap: 20px; }
+.errorIssue__eventTime { color: var(--ds-text-muted); font-size: 12px; }
+.errorIssue .syntheticCheck__section > header .errorIssue__eventTime { margin-left: 0; }
+.errorIssue__eventMessage { margin: 0; padding: 10px 12px; border-radius: 4px; background: var(--ds-surface-hover); color: var(--ds-text-primary); font: 12px/20px ui-monospace, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.errorIssue__stackPanel summary { cursor: pointer; padding: 8px 12px; font-size: 12px; }
+.errorIssue__status { display: inline-flex; align-items: center; gap: 6px; }
+.errorIssue__status i { width: 6px; height: 6px; border-radius: 50%; background: var(--ds-text-muted); }
+.errorIssue__status--open i { background: #cb444c; }
+.errorIssue__status--resolved i { background: #168255; }
+.errorIssue__traces { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.errorIssue__tracesHeading { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.errorIssue__tracesHeading h2 { margin: 0; font-size: 13px; font-weight: 500; }
+.errorIssue__tracesHeading a { margin-right: auto; color: var(--ds-text-muted); font-size: 12px; text-decoration: none; }
+.errorIssue__traces > p { margin: 0; }
+.errorIssue__traces .explorerBody--search { gap: 24px; }
+.errorIssue__traces .explorerResults { min-height: 240px; }
+.errorIssue .explorerAttributes__value { min-width: 0; }
+@media (max-width: 1100px) {
+  .errorIssue__overview { grid-template-columns: minmax(0, 1fr) 242px; gap: 24px; }
+}
+@media (max-width: 760px) {
+  .errorIssue__overview { grid-template-columns: 1fr; }
+  .errorIssue__properties { grid-row: 1; }
+  .errorIssue .syntheticCheck__section > header { flex-wrap: wrap; }
+}

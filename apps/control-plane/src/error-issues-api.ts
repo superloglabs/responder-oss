@@ -25,6 +25,7 @@ export interface ErrorIssueList {
 }
 
 export interface ErrorIssueDetail {
+  hours?: ErrorIssueHour[];
   days: ErrorIssueDay[];
   issue: ErrorIssue;
   since: string;
@@ -169,4 +170,24 @@ export function errorActivity(lastSeenAt: string, now = Date.now()): "active" | 
 export function errorState(issue: ErrorIssueSummary, now = Date.now()): string {
   if (issue.regressedAt) return "Regressed";
   return Date.parse(issue.firstSeenAt) >= now - 86_400_000 ? "New" : "Recurring";
+}
+
+// Old daily totals can outlive hourly retention. Never spread them across
+// invented hours: keep daily resolution until all days have hourly coverage.
+export function errorIssueDetailChart(detail: Pick<ErrorIssueDetail, "days" | "hours" | "since">, now = Date.now()): ChartData {
+  const daily = errorIssueChart(detail.days, detail.since, now);
+  if (!detail.hours) return daily;
+  const start = Date.parse(`${detail.since}T00:00:00Z`);
+  const length = Math.floor((now - start) / hourMs) + 1;
+  const hours = hourlyCounts(detail.hours, new Date(start).toISOString(), length);
+  const complete = daily.series[0]!.values.every((value, index) =>
+    hours.slice(index * 24, (index + 1) * 24).reduce((sum, count) => sum + count, 0) === value);
+  if (!complete) return daily;
+  const values = Array.from({ length: Math.ceil(length / 3) }, (_, index) =>
+    hours.slice(index * 3, index * 3 + 3).reduce((sum, count) => sum + count, 0));
+  return {
+    buckets: values.map((_, index) => start + index * 3 * hourMs),
+    series: [{ name: "Occurrences", other: false, values }],
+    stepMs: 3 * hourMs,
+  };
 }
