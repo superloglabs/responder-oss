@@ -73,7 +73,7 @@ async function mockWorkspace(
 const metricName = "v8js.memory.heap.space.physical_size";
 const metric = (name: string) => ({ name, kind: "gauge", unit: "By", points: 120, attributes: ["space"], description: "Committed size of a heap space.", series: 1, services: ["api", "worker", "ingest"], servicesComplete: true });
 
-async function setup(page: Page) {
+async function setup(page: Page, path = `/metrics?metric=${metricName}&kind=gauge&unit=By`) {
   await mockWorkspace(page, ["telemetry", "simplified_navigation", "alerts", "dashboards"]);
   await page.route("**/api/c15t/**", route => route.abort());
   const requests: Array<{ filters: unknown[]; groupBy?: string; aggregation?: string }> = [];
@@ -94,16 +94,29 @@ async function setup(page: Page) {
     }
     await route.fulfill({ json });
   });
-  await page.goto(`/metrics/explore?metric=${metricName}&kind=gauge&unit=By`);
+  await page.goto(path);
   const consent = page.getByRole("button", { name: "Reject All", exact: true });
   if (await consent.isVisible()) await consent.click();
-  await expect(page.getByRole("heading", { name: metricName, exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "All services", exact: true })).toBeVisible();
   return requests;
 }
 
+async function opened(page: Page, name: string) {
+  await expect(page.getByRole("heading", { name, exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "All services", exact: true })).toBeVisible();
+}
+
+test("opens the first listed metric and keeps old explorer links working", async ({ page }) => {
+  await setup(page, "/metrics?range=24h");
+  await opened(page, "group_0.value");
+  await expect(page).toHaveURL(/\/metrics\?kind=gauge&metric=group_0\.value&unit=By&range=/);
+  await page.goto(`/metrics/explore?metric=${metricName}&kind=gauge&unit=By`);
+  await opened(page, metricName);
+  await expect(page).toHaveURL(/\/metrics\?metric=/);
+});
+
 test("filters and groups metrics with shared search, preserves state, and switches charts by keyboard", async ({ page }, testInfo) => {
   const requests = await setup(page);
+  await opened(page, metricName);
   const browser = page.getByRole("navigation", { name: "Metrics", exact: true });
   await expect(browser.locator('[aria-current="page"]')).toBeInViewport();
   await expect(browser.getByRole("button")).toHaveCount(35);

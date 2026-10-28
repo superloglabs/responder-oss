@@ -191,24 +191,6 @@ export function groupMetrics(metrics: MetricCatalogEntry[]): MetricGroup[] {
     .sort((a, b) => Number(a.cloud) - Number(b.cloud) || a.namespace.localeCompare(b.namespace));
 }
 
-// The catalog table's group: one for the application's own metrics and one
-// for each AWS service.
-export function metricCatalogGroup(metric: MetricCatalogEntry): string {
-  return cloudWatchMetricName(metric.name)?.group ?? "Application";
-}
-
-// Catalog rows in group order, or null groups when every metric is the
-// application's own.
-export function groupMetricCatalog(metrics: MetricCatalogEntry[]): { grouped: boolean; rows: MetricCatalogEntry[] } {
-  if (!metrics.some(isCloudMetric)) return { grouped: false, rows: metrics };
-  const order = (metric: MetricCatalogEntry) => (isCloudMetric(metric) ? metricCatalogGroup(metric) : "");
-  return {
-    grouped: true,
-    rows: [...metrics].sort((a, b) =>
-      order(a).localeCompare(order(b)) || (isCloudMetric(a) ? byTitle(a, b) : 0)),
-  };
-}
-
 // Metrics matching a search across names, titles, descriptions, units and
 // attribute keys.
 export function searchMetrics(metrics: MetricCatalogEntry[], search: string): MetricCatalogEntry[] {
@@ -221,20 +203,6 @@ export function searchMetrics(metrics: MetricCatalogEntry[], search: string): Me
       .toLocaleLowerCase();
     return terms.every((term) => text.includes(term));
   });
-}
-
-// The catalog rows a search, type and service select. Services come from
-// sampled details, so a metric whose details did not read every point stays
-// listed under every service rather than disappearing from it.
-export function filterMetricCatalog(
-  metrics: MetricCatalogEntry[],
-  filters: { kind: string; search: string; service: string },
-): MetricCatalogEntry[] {
-  return searchMetrics(metrics, filters.search).filter(
-    (metric) =>
-      (!filters.kind || metric.kind === filters.kind) &&
-      (!filters.service || !metric.servicesComplete || metric.services.includes(filters.service)),
-  );
 }
 
 // "attr:http.route" and "resource.service.name" read as their attribute key.
@@ -348,7 +316,7 @@ export function metricExplorerHref(
     range: context.range,
     unit: metric.unit,
   });
-  return `/metrics/explore?${params}`;
+  return `/metrics?${params}`;
 }
 
 export function metricChartTitle(query: MetricQuery): string {

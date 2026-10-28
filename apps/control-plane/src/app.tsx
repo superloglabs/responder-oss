@@ -31,7 +31,6 @@ import { IssueDetailPage } from "./pages/issue-detail";
 import { IssuesPage } from "./pages/issues";
 import { LogsPage } from "./pages/logs";
 import { MetricExplorerPage } from "./pages/metric-explorer";
-import { MetricsPage } from "./pages/metrics";
 import { PullRequestDetailPage } from "./pages/pull-request-detail";
 import { PullRequestsPage } from "./pages/pull-requests";
 import { ScanDetailPage } from "./pages/scan-detail";
@@ -92,6 +91,11 @@ function HomeRedirect() {
 function LegacyBillingRedirect() {
   const { search } = useLocation();
   return <Navigate replace to={{ pathname: "/settings/billing", search }} />;
+}
+
+function LegacyMetricExplorerRedirect() {
+  const { search } = useLocation();
+  return <Navigate replace to={{ pathname: "/metrics", search }} />;
 }
 
 export function App() {
@@ -173,8 +177,8 @@ export function App() {
         <Route element={<LogsPage />} path="/logs" />
         <Route element={<TracesOverviewPage />} path="/traces" />
         <Route element={<TracesPage />} path="/traces/search" />
-        <Route element={<MetricsPage />} path="/metrics" />
-        <Route element={<MetricExplorerPage />} path="/metrics/explore" />
+        <Route element={<MetricExplorerPage />} path="/metrics" />
+        <Route element={<LegacyMetricExplorerRedirect />} path="/metrics/explore" />
         <Route element={<AiModelsPage />} path="/ai-models" />
         <Route element={<TelemetryOverviewPage />} path="/telemetry" />
         <Route element={<TelemetrySetupPage />} path="/telemetry/setup" />

@@ -11,9 +11,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { AppShell } from "../components/app-shell";
 import { DashboardTimePicker } from "../components/dashboard-time-picker";
+import { NavigationIcon } from "../components/navigation-icon";
 import { ChartSkeleton, ListSkeleton } from "../components/screen-skeletons";
 import { TelemetrySearch } from "../components/telemetry-search";
-import { TelemetryGate } from "../components/telemetry";
+import { SendTelemetryLink, TelemetryGate } from "../components/telemetry";
 import { seriesColors, TimeseriesChart } from "../components/timeseries-chart";
 import {
   DropdownMenu,
@@ -23,7 +24,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "../components/ui/dropdown-menu";
-import { resolveTimeRange, zoomOutTimeRange, type DashboardTimeRange } from "../dashboard-time-range";
+import { resolveTimeRange, timeRangeFromParams, zoomOutTimeRange, type DashboardTimeRange } from "../dashboard-time-range";
 import { Badge, Button, SelectField } from "../design-system";
 import {
   addWidget,
@@ -95,6 +96,11 @@ function useLoaded<T>(key: string | null, read: () => Promise<T>) {
   return { error: current ? state.error : null, loading: !current, value: current ? state.value : null, retry: () => setAttempt(value => value + 1) };
 }
 
+function isSelected(metric: MetricCatalogEntry, selected: { kind: string; name: string; unit: string | null } | null): boolean {
+  return selected !== null && metric.name === selected.name && metric.kind === selected.kind &&
+    (selected.unit === null || metric.unit === selected.unit);
+}
+
 function MetricList({
   catalog,
   context,
@@ -104,23 +110,23 @@ function MetricList({
   catalog: MetricCatalogEntry[] | null;
   context: { range: DashboardTimeRange };
   error: string | null;
-  selected: { kind: string; name: string; unit: string | null };
+  selected: { kind: string; name: string; unit: string | null } | null;
 }) {
   const [search, setSearch] = useState("");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const selectedLink = useRef<HTMLAnchorElement>(null);
+  const { kind, name, unit } = selected ?? { kind: null, name: null, unit: null };
   const groups = useMemo(() => {
+    const current = kind === null || name === null ? null : { kind, name, unit };
     const grouped = groupMetrics(searchMetrics(catalog ?? [], search));
-    const selectedIndex = grouped.findIndex(group => group.metrics.some(metric =>
-      metric.name === selected.name && metric.kind === selected.kind && (selected.unit === null || metric.unit === selected.unit),
-    ));
+    const selectedIndex = grouped.findIndex(group => group.metrics.some(metric => isSelected(metric, current)));
     // Keep the current metric's namespace visible above the rest of the catalog.
     if (selectedIndex > 0) grouped.unshift(...grouped.splice(selectedIndex, 1));
     return grouped;
-  }, [catalog, search, selected.name, selected.kind, selected.unit]);
+  }, [catalog, search, kind, name, unit]);
   useEffect(() => {
     selectedLink.current?.scrollIntoView({ block: "nearest" });
-  }, [catalog, selected.name, selected.kind, selected.unit]);
+  }, [catalog, kind, name, unit]);
   return (
     <nav aria-label="Metrics" className="metricList">
       <label className="telemetryPage__search metricList__search">
@@ -135,11 +141,11 @@ function MetricList({
       </label>
       {error ? <p className="formError" role="alert">{error}</p> : null}
       {catalog === null && !error ? <ListSkeleton label="Loading metrics…" rows={8} /> : null}
-      {catalog !== null && groups.length === 0 ? <p className="telemetryPage__status">No metrics match.</p> : null}
+      {catalog !== null && catalog.length > 0 && groups.length === 0 ? <p className="telemetryPage__status">No metrics match.</p> : null}
       <div className="metricList__groups">
         {groups.map((group) => {
           // A search shows every match.
-          const selectedGroup = group.metrics.some(metric => metric.name === selected.name && metric.kind === selected.kind && (selected.unit === null || metric.unit === selected.unit));
+          const selectedGroup = group.metrics.some(metric => isSelected(metric, selected));
           const open = Boolean(search.trim()) || (expanded[group.namespace] ?? selectedGroup);
           return (
             <section className="metricList__group" key={group.namespace}>
@@ -156,8 +162,7 @@ function MetricList({
               {open ? (
                 <ul>
                   {group.metrics.map((metric) => {
-                    const current = metric.name === selected.name && metric.kind === selected.kind &&
-                      (selected.unit === null || metric.unit === selected.unit);
+                    const current = isSelected(metric, selected);
                     const display = metricDisplay(metric);
                     const friendly = display.title !== metric.name;
                     const rest = friendly ? display.title : metric.name.slice(group.namespace.length + 1) || metric.name;
@@ -274,6 +279,33 @@ function AddToDashboard({ query, unit }: { query: MetricQuery; unit: string }) {
   );
 }
 
+function MetricTimePicker({
+  now,
+  onChange,
+  range,
+  zone: { changeTimeZone, timeZone, timeZonePreference },
+}: {
+  now: number;
+  onChange: (range: DashboardTimeRange) => void;
+  range: DashboardTimeRange;
+  zone: ReturnType<typeof useTimeZonePreference>;
+}) {
+  return (
+    <DashboardTimePicker
+      now={now}
+      onChange={onChange}
+      onTimeZoneChange={changeTimeZone}
+      onZoomOut={() => onChange(zoomOutTimeRange(range, Date.now(), null).range)}
+      range={range}
+      timeZone={timeZone}
+      timeZonePreference={timeZonePreference}
+      zoomed={false}
+    />
+  );
+}
+
+// Every metric the workspace sends, listed beside the graph of the one chosen.
+// Without a metric in the URL, the page opens the first one listed.
 export function MetricExplorerPage() {
   const telemetry = useTelemetryAvailable();
   const capabilities = useOrganizationCapabilities();
@@ -282,30 +314,71 @@ export function MetricExplorerPage() {
   const query = metricQueryFromParams(params);
   const available = telemetry.available === true;
   useDocumentTitle(query ? `${metricLabel(query.name)} · Metrics` : "Metrics");
-  const { changeTimeZone, timeZone, timeZonePreference } = useTimeZonePreference();
+  const zone = useTimeZonePreference();
+  const { timeZone } = zone;
   const [now, setNow] = useState(() => Date.now());
-  const window = query ? resolveTimeRange(query.range, now) : null;
-  const windowKey = window ? [window.since, window.until] : null;
+  const range = query?.range ?? timeRangeFromParams(params);
+  const window = resolveTimeRange(range, now);
+  const windowKey = [window.since, window.until];
   // Series hidden from the graph shown now; a new graph shows all its series.
   const [hiddenState, setHiddenState] = useState<{ key: string | null; names: Set<string> }>({
     key: null,
     names: new Set(),
   });
 
-  const catalog = useLoaded(available && query ? JSON.stringify(windowKey) : null, () =>
-    fetchMetricCatalog(window!),
-  );
+  const catalog = useLoaded(available ? JSON.stringify(windowKey) : null, () => fetchMetricCatalog(window));
   const dimensions = useLoaded(
     available && query ? JSON.stringify([windowKey, query.kind, query.name, query.unit]) : null,
-    () => fetchMetricDimensions(window!, query!),
+    () => fetchMetricDimensions(window, query!),
   );
   const chartKey = available && query
     ? JSON.stringify([windowKey, query.kind, query.name, query.unit, query.aggregation, query.groupBy, query.filters])
     : null;
-  const chart = useLoaded(chartKey, () => fetchMetricChart(query!, window!));
+  const chart = useLoaded(chartKey, () => fetchMetricChart(query!, window));
   const hidden = hiddenState.key === chartKey ? hiddenState.names : new Set<string>();
 
-  if (!query) return <Navigate replace to="/metrics" />;
+  function changeRange(next: DashboardTimeRange) {
+    setNow(Date.now());
+    if (query) setParams(metricQueryParams({ ...query, range: next }), { replace: true });
+    else setParams(metricRangeParams(next, params), { replace: true });
+  }
+  const timePicker = <MetricTimePicker now={now} onChange={(next) => changeRange(next)} range={range} zone={zone} />;
+  const heading = <span className="metricExplorer__heading"><NavigationIcon section="metrics" />Metrics</span>;
+
+  if (!query) {
+    const first = catalog.value ? groupMetrics(catalog.value)[0]?.metrics[0] : undefined;
+    if (first) return <Navigate replace to={metricExplorerHref(first, { range })} />;
+    return (
+      <AppShell active="metrics" redesigned wide>
+        <TelemetryGate signal="Metrics" state={telemetry}>
+          <div className="metricExplorer">
+            <MetricList catalog={catalog.value} context={{ range }} error={catalog.error} selected={null} />
+            <section aria-label="Metrics" className="metricExplorer__main">
+              <div className="metricExplorer__topRow">
+                {heading}
+                <span className="automationCreate__spacer" />
+                {timePicker}
+              </div>
+              {catalog.error ? (
+                <div className="automationRuns__message" role="alert">
+                  <p>{catalog.error}</p>
+                  <button onClick={catalog.retry} type="button">Retry</button>
+                </div>
+              ) : catalog.value === null ? (
+                <ChartSkeleton className="metricChart__plot" height="100%" label="Loading metrics…" />
+              ) : (
+                <section className="emptyState emptyState--list">
+                  <h2>No metrics in this time range</h2>
+                  <p>Metrics appear here once an application sends them to this workspace.</p>
+                  <SendTelemetryLink variant="primary" />
+                </section>
+              )}
+            </section>
+          </div>
+        </TelemetryGate>
+      </AppShell>
+    );
+  }
 
   const metric = catalog.value?.find(
     (entry) => entry.name === query.name && entry.kind === query.kind && (query.unit === null || entry.unit === query.unit),
@@ -316,8 +389,6 @@ export function MetricExplorerPage() {
   const description = metricDisplay({ description: metric?.description ?? "", name: query.name }).description;
   const chartUnit = metricWidgetUnit({ kind: query.kind, unit }, query.aggregation);
   const context = { range: query.range };
-  const catalogParams = metricRangeParams(query.range);
-  const catalogHref = catalogParams.size > 0 ? `/metrics?${catalogParams}` : "/metrics";
 
   function update(change: Partial<MetricQuery>) {
     if (change.range) setNow(Date.now());
@@ -346,22 +417,9 @@ export function MetricExplorerPage() {
           <section aria-label={query.name} className="metricExplorer__main">
             <header className="automationCreate__header">
               <div className="metricExplorer__topRow">
-                <nav aria-label="Breadcrumb" className="automationCreate__breadcrumb">
-                  <Link to={catalogHref}>Metrics</Link>
-                  <span aria-hidden="true">›</span>
-                  <span aria-current="page">Explorer</span>
-                </nav>
+                {heading}
                 <span className="automationCreate__spacer" />
-                <DashboardTimePicker
-                  now={now}
-                  onChange={(range) => update({ range })}
-                  onTimeZoneChange={changeTimeZone}
-                  onZoomOut={() => update({ range: zoomOutTimeRange(query.range, Date.now(), null).range })}
-                  range={query.range}
-                  timeZone={timeZone}
-                  timeZonePreference={timeZonePreference}
-                  zoomed={false}
-                />
+                {timePicker}
                 {capabilities.includes("alerts") ? (
                   <Button
                     onClick={() => navigate("/alerts/new", { state: { alertDraft: metricAlertDraft(query) } })}
