@@ -16,7 +16,7 @@ import { TelemetryOverviewSkeleton } from "../components/screen-skeletons";
 import { CopyPromptButton } from "../components/copy-prompt-button";
 import { HairlineComputer } from "../components/hairline-computer";
 import { SendTelemetryLink, TelemetryGate } from "../components/telemetry";
-import { SegmentedControl } from "../design-system";
+import { SegmentedControl, SelectField } from "../design-system";
 import {
   fetchTelemetryOverview,
   fetchTelemetryOverviewDetails,
@@ -44,10 +44,10 @@ import {
 import "./telemetry-overview.css";
 
 const ranges: Array<{ label: string; value: TelemetryRange }> = [
-  { label: "1h", value: "1h" },
-  { label: "6h", value: "6h" },
-  { label: "24h", value: "24h" },
-  { label: "7d", value: "7d" },
+  { label: "Last hour", value: "1h" },
+  { label: "Last 6 hours", value: "6h" },
+  { label: "Last 24 hours", value: "24h" },
+  { label: "Last 7 days", value: "7d" },
 ];
 // Healthy services listed before the rest fold away.
 const healthyShown = 3;
@@ -361,6 +361,7 @@ function OverviewBody({ overview, range }: { overview: TelemetryOverview; range:
         </span>
         <SegmentedControl
           aria-label="Services shown"
+          compact
           onChange={setFilter}
           options={[
             { label: `All ${overview.services.length}`, value: "all" },
@@ -410,8 +411,9 @@ export function TelemetryOverviewPage() {
           </div>
           {telemetry.available ? (
             <div className="workspaceHeading__actions explorerTime">
-              <SegmentedControl
-                aria-label="Time range"
+              <SelectField
+                className="dsField--compact telemetryOverview__range"
+                label="Time range"
                 onChange={(value) => setParams(value === "24h" ? {} : { range: value }, { replace: true })}
                 options={ranges}
                 value={range}

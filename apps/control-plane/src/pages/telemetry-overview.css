@@ -1,12 +1,13 @@
 .telemetryOverview { width: 100%; max-width: 1000px; margin: 0 auto; gap: 20px; padding-bottom: 48px; }
 .telemetryOverview__heading { align-items: flex-end; }
 .telemetryOverview__heading p { margin: 6px 0 0; color: #62625d; font-size: 13px; line-height: 20px; }
+.telemetryOverview__range { flex-shrink: 0; gap: 0; }
+.telemetryOverview__range > .dsField__label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 .telOverviewSection { display: flex; align-items: baseline; gap: 10px; padding-top: 12px; }
 .telOverviewSection h2 { margin: 0; color: #171715; font-size: 15px; font-weight: 600; line-height: 22px; }
 .telOverviewSection > span { color: #8a8a85; font-size: 13px; line-height: 20px; }
-.telOverviewSection .dsSegmentedControl { margin-left: auto; align-self: center; gap: 2px; padding: 2px; border: 0; border-radius: 999px; background: #f2f2f0; }
-.telOverviewSection .dsSegmentedControl__option { border-radius: 999px; font-size: 12px; }
+.telOverviewSection .dsSegmentedControl { margin-left: auto; align-self: center; }
 .telOverviewSection__link { margin-left: auto; color: #41413d; font-size: 13px; text-decoration: none; }
 .telOverviewSection__link:hover { color: #171715; text-decoration: underline; }
 .telOverviewNote { margin: 0; color: #8a8a85; font-size: 13px; }
