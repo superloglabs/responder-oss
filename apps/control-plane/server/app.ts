@@ -12,8 +12,16 @@ import {
 } from "../../../packages/core/src/db/webhook-tenants.js";
 import { cellCallbackRouter } from "./cells/callback-router.js";
 import { legacyWebhookForwarder } from "./cells/legacy-webhook-forwarder.js";
+import {
+  supportUserSearchSchema,
+  supportUsers,
+  supportUsersAcrossCells,
+} from "./cells/support-users.js";
 import { cellWebhookRouter } from "./cells/webhook-router.js";
-import { getAuthUserSupportIdentity } from "../../../packages/core/src/db/superusers.js";
+import {
+  getAuthUserSupportIdentity,
+  listSupportUsers,
+} from "../../../packages/core/src/db/superusers.js";
 import { investigationRequestSchema } from "../../../packages/core/src/investigations/input.js";
 import { agentRoutes } from "./agents/routes.js";
 import {
@@ -367,6 +375,25 @@ export const app = instrumentedApp
     }
     return context.json(await webhookTenantState(tenant));
   })
+  // Another cell's user support page lists this cell's users.
+  .post("/api/internal/cells/support-users", async (context) => {
+    if (
+      !verifyBearerToken(
+        context.req.header("authorization") ?? null,
+        process.env.RESPONDER_CELL_TOKEN?.trim() ?? "",
+      )
+    ) {
+      return context.json({ error: "Unauthorized" }, 401);
+    }
+    const parsed = supportUserSearchSchema.safeParse(
+      await context.req.json().catch(() => null),
+    );
+    if (!parsed.success) return context.json({ error: "Invalid search" }, 400);
+    const records = await listSupportUsers(parsed.data.search || undefined);
+    return context.json({
+      users: supportUsers(records, configuredSuperuserEmails()),
+    });
+  })
   // Public: the sign-in page offers the other regional cells, if any.
   .get("/api/cells", (context) =>
     context.json(
@@ -450,36 +477,20 @@ export const app = instrumentedApp
     }
 
     try {
-      const search = context.req.query("search")?.trim();
-      const result = await auth.api.listUsers({
-        headers: context.req.raw.headers,
-        query: {
-          limit: 50,
-          sortBy: "createdAt",
-          sortDirection: "desc",
-          ...(search
-            ? {
-                searchField: "email" as const,
-                searchOperator: "contains" as const,
-                searchValue: search,
-              }
-            : {}),
-        },
-      });
-      return context.json({
-        ...result,
-        users: result.users.map((user) => ({
-          ...user,
-          canImpersonate: canImpersonateSupportUser(
-            {
-              banned: user.banned ?? null,
-              email: user.email,
-              role: user.role ?? null,
-            },
-            superuserEmails,
-          ),
-        })),
-      });
+      const search =
+        context.req.query("search")?.trim().slice(0, 320) || undefined;
+      const local = supportUsers(
+        await listSupportUsers(search),
+        superuserEmails,
+      );
+      return context.json(
+        await supportUsersAcrossCells({
+          directory: cellDirectory(),
+          local,
+          search,
+          token: process.env.RESPONDER_CELL_TOKEN?.trim() || undefined,
+        }),
+      );
     } catch (error) {
       console.error(
         JSON.stringify({

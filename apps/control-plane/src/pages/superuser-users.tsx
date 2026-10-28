@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { authErrorCode } from "../auth-error-code";
 import { authClient } from "../auth-client";
@@ -9,15 +9,33 @@ import { useDocumentTitle } from "../use-document-title";
 import {
   canImpersonateUser,
   isSuperuserRole,
+  otherCellViewUrl,
+  requestedViewUser,
+  type SuperuserListCell,
   type SuperuserListUser,
+  viewAsUserParameter,
 } from "./superuser-users-presentation";
+
+// A link from another cell's user support page names the user to view as.
+function initialParameters() {
+  const parameters = new URL(window.location.href).searchParams;
+  return {
+    search: parameters.get("search")?.trim() ?? "",
+    viewId: parameters.get(viewAsUserParameter),
+  };
+}
 
 export function SuperuserUsersPage() {
   useDocumentTitle("User support");
   const session = authClient.useSession();
+  const [initial] = useState(initialParameters);
   const [users, setUsers] = useState<SuperuserListUser[]>([]);
-  const [query, setQuery] = useState("");
-  const [submittedQuery, setSubmittedQuery] = useState("");
+  const [currentCell, setCurrentCell] = useState<string | null>(null);
+  const [unavailableCells, setUnavailableCells] = useState<SuperuserListCell[]>([]);
+  const [query, setQuery] = useState(initial.search);
+  const [submittedQuery, setSubmittedQuery] = useState(initial.search);
+  const [loaded, setLoaded] = useState(false);
+  const handledViewId = useRef(false);
   const [isLoading, setIsLoading] = useState(true);
   const [impersonatingId, setImpersonatingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -45,9 +63,14 @@ export function SuperuserUsersPage() {
           return;
         }
         const result = (await response.json()) as {
+          currentCell: string | null;
+          unavailableCells: SuperuserListCell[];
           users: SuperuserListUser[];
         };
-        if (active) setUsers(result.users);
+        if (!active) return;
+        setUsers(result.users);
+        setCurrentCell(result.currentCell);
+        setUnavailableCells(result.unavailableCells);
       })
       .catch((cause: unknown) => {
         if (!active) return;
@@ -61,12 +84,27 @@ export function SuperuserUsersPage() {
         setError("Could not load users.");
       })
       .finally(() => {
-        if (active) setIsLoading(false);
+        if (!active) return;
+        setIsLoading(false);
+        setLoaded(true);
       });
     return () => {
       active = false;
     };
   }, [actorUserId, isSuperuser, submittedQuery]);
+
+  // Asks once, after the first load, to view as the user a link named.
+  useEffect(() => {
+    if (!loaded || handledViewId.current || !initial.viewId) return;
+    handledViewId.current = true;
+    const url = new URL(window.location.href);
+    url.searchParams.delete(viewAsUserParameter);
+    window.history.replaceState(window.history.state, "", url);
+    const user = requestedViewUser(users, initial.viewId, currentCell);
+    if (user) void impersonate(user);
+    // impersonate only reads state set before this load finished.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentCell, initial.viewId, loaded, users]);
 
   if (!isSuperuser) {
     return <Navigate replace to="/agents" />;
@@ -83,8 +121,16 @@ export function SuperuserUsersPage() {
 
   async function impersonate(user: SuperuserListUser) {
     if (!canImpersonateUser(user)) return;
+    // That cell asks to confirm, since only it can start the session.
+    const otherCellUrl = otherCellViewUrl(user, currentCell);
+    if (otherCellUrl) {
+      window.location.assign(otherCellUrl);
+      return;
+    }
     const confirmed = window.confirm(
-      `View Responder as ${user.name || user.email}? Actions you take will use their access.`,
+      `View Responder as ${user.name || user.email}${
+        user.cell ? ` in ${user.cell.label}` : ""
+      }? Actions you take will use their access.`,
     );
     if (!confirmed) return;
 
@@ -135,6 +181,12 @@ export function SuperuserUsersPage() {
           {error}
         </p>
       ) : null}
+      {unavailableCells.length > 0 ? (
+        <p className="settingsNotice settingsNotice--error" role="alert">
+          Could not load users from{" "}
+          {unavailableCells.map((cell) => cell.label).join(", ")}.
+        </p>
+      ) : null}
 
       <section className="superuserUsers">
         {isLoading ? (
@@ -142,6 +194,7 @@ export function SuperuserUsersPage() {
             className=""
             columns={[
               { cell: "avatar", header: "User", key: "user" },
+              { header: "Region", key: "region", width: "120px" },
               { header: "Joined", key: "joined", width: "160px" },
               { cell: "empty", header: "", key: "action", width: "180px" },
             ]}
@@ -169,6 +222,16 @@ export function SuperuserUsersPage() {
                   </div>
                 ),
               },
+              ...(currentCell
+                ? [
+                    {
+                      header: "Region",
+                      key: "region",
+                      render: (user: SuperuserListUser) => user.cell?.label ?? "",
+                      width: "120px",
+                    },
+                  ]
+                : []),
               {
                 header: "Joined",
                 key: "joined",
@@ -200,7 +263,7 @@ export function SuperuserUsersPage() {
               },
             ]}
             emptyMessage="No users found"
-            getRowKey={(user) => user.id}
+            getRowKey={(user) => `${user.cell?.id ?? ""}:${user.id}`}
             rows={users}
           />
         )}
