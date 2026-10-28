@@ -85,9 +85,20 @@ export function webhookRoutingKey(
 }
 
 // The provider app a webhook was sent to, where the provider names it: Slack
-// puts `api_app_id` in events and interactions.
-export function webhookAppId(path: string, contentType: string | undefined, body: Uint8Array): string | null {
+// puts `api_app_id` in events and interactions, and GitHub sends the app's ID
+// in a header.
+export function webhookAppId(
+  path: string,
+  contentType: string | undefined,
+  body: Uint8Array,
+  headers?: Headers,
+): string | null {
   const route = path.replace(/\/$/u, "");
+  if (route === "/api/webhooks/github") {
+    return headers?.get("x-github-hook-installation-target-type") === "integration"
+      ? headers.get("x-github-hook-installation-target-id") || null
+      : null;
+  }
   if (route === "/api/webhooks/slack/actions") {
     if (!contentType?.toLowerCase().includes("application/x-www-form-urlencoded")) return null;
     const payload = new URLSearchParams(new TextDecoder().decode(body)).get("payload");

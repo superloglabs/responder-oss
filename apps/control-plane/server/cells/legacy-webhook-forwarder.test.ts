@@ -20,6 +20,7 @@ const legacyApp = "A0LEGACY";
 const routes = [
   { appIds: [legacyApp], path: "/api/webhooks/slack", url: "https://api.superlog.sh/slack/events" },
   { appIds: [legacyApp], path: "/api/webhooks/slack/actions", url: "https://api.superlog.sh/slack/interactivity" },
+  { appIds: ["3485414"], path: "/api/webhooks/github", url: "https://api.superlog.sh/github/webhook" },
 ];
 
 function harness(overrides: Partial<LegacyWebhookForwarderDependencies> = {}) {
@@ -45,6 +46,10 @@ function harness(overrides: Partial<LegacyWebhookForwarderDependencies> = {}) {
     .post("/api/webhooks/slack/actions", async (context) => {
       handled(await context.req.text());
       return context.json({ from: "application" });
+    })
+    .post("/api/webhooks/github", async (context) => {
+      handled(await context.req.text());
+      return context.json({ from: "application" });
     });
   return { app, dependencies, handled };
 }
@@ -68,7 +73,43 @@ const interaction = (appId: string) => ({
   method: "POST",
 });
 
+const githubEvent = (appId: string) => ({
+  body: JSON.stringify({ action: "opened", installation: { id: 134387340 } }),
+  headers: {
+    "content-type": "application/json",
+    "x-github-event": "pull_request",
+    "x-github-hook-installation-target-id": appId,
+    "x-github-hook-installation-target-type": "integration",
+    "x-hub-signature-256": "sha256=abc",
+  },
+  method: "POST",
+});
+
 describe("legacy webhook forwarder", () => {
+  it("sends an old GitHub App's event to both products", async () => {
+    const { app, dependencies, handled } = harness();
+
+    const response = await app.request("/api/webhooks/github", githubEvent("3485414"));
+
+    expect(await response.json()).toEqual({ from: "legacy" });
+    expect(handled).toHaveBeenCalledOnce();
+    const [url, init] = vi.mocked(dependencies.forward).mock.calls[0]!;
+    expect(url).toBe("https://api.superlog.sh/github/webhook");
+    const headers = new Headers(init.headers);
+    expect(headers.get("x-github-event")).toBe("pull_request");
+    expect(headers.get("x-hub-signature-256")).toBe("sha256=abc");
+  });
+
+  it("leaves the application's own GitHub App's events alone", async () => {
+    const { app, dependencies, handled } = harness();
+
+    const response = await app.request("/api/webhooks/github", githubEvent("4465209"));
+
+    expect(await response.json()).toEqual({ from: "application" });
+    expect(handled).toHaveBeenCalledOnce();
+    expect(dependencies.forward).not.toHaveBeenCalled();
+  });
+
   it("leaves requests from the application's own apps alone", async () => {
     const { app, dependencies, handled } = harness();
 

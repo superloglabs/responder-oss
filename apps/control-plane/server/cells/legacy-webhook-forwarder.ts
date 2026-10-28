@@ -13,6 +13,7 @@ import { forwardedHeader } from "./webhook-router.js";
 // product (ADR 0012). LEGACY_WEBHOOK_FORWARDS names, per webhook path, the old
 // apps and the old product's address for it:
 // [{ "path": "/api/webhooks/slack", "appIds": ["A…"], "url": "https://…/slack/events" }]
+// GitHub Apps are named by their numeric ID.
 //
 // - An event goes to both products, and the old product's answer is
 //   returned, so the provider retries when the old product misses it. The
@@ -177,7 +178,7 @@ export function legacyWebhookForwarder(
 
     const body = new Uint8Array(await context.req.raw.clone().arrayBuffer());
     const contentType = context.req.header("content-type");
-    const appId = webhookAppId(path, contentType, body);
+    const appId = webhookAppId(path, contentType, body, context.req.raw.headers);
     const route = appId ? candidates.find((candidate) => candidate.appIds.includes(appId)) : undefined;
     if (!route) return next();
 
