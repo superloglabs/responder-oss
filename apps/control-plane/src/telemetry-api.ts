@@ -83,11 +83,15 @@ export async function fetchTelemetryAvailable(): Promise<boolean> {
 }
 
 export async function fetchServices(
-  range: TelemetryRange,
+  range: TelemetryRange | { since: number; until: number },
   // "all" includes services that only send metrics.
   signal: TelemetrySignal | "all" = "logs",
 ): Promise<string[]> {
-  const params = new URLSearchParams({ range, signal });
+  const params = new URLSearchParams(
+    typeof range === "string"
+      ? { range, signal }
+      : { signal, since: new Date(range.since).toISOString(), until: new Date(range.until).toISOString() },
+  );
   const body = await telemetryJson<{ services: string[] }>(`/api/telemetry/services?${params}`);
   return body.services;
 }

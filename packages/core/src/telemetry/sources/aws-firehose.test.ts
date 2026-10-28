@@ -68,8 +68,34 @@ describe("cloudWatchLogsToOtlp", () => {
       { key: "aws.log.group.names", value: { stringValue: "/aws/lambda/checkout" } },
     ]));
     const [first, second] = resource.scopeLogs[0]!.logRecords;
-    expect(first).toMatchObject({ severityText: "ERROR", timeUnixNano: "1760000000000000000" });
+    expect(first).toMatchObject({ body: { stringValue: "boom" }, severityText: "ERROR", timeUnixNano: "1760000000000000000" });
+    expect(first!.attributes).toEqual(expect.arrayContaining([{ key: "level", value: { stringValue: "error" } }]));
     expect(second).toMatchObject({ body: { stringValue: "INFO started" }, severityText: "INFO" });
+  });
+
+  it("names an ECS container's logs after the container and lifts JSON fields", () => {
+    const request = {
+      records: [
+        cloudWatchRecord({
+          logEvents: [{ id: "1", message: '{"cell":"us","event":"cell_webhook_forwarded","status":202}', timestamp: 1_760_000_000_000 }],
+          logGroup: "ResponderParis-ApiLogs3D05D88B-d72MaarPZDKM",
+          logStream: "api/api/24475fbb3413474eaadac9cb3445ceab",
+          messageType: "DATA_MESSAGE",
+          owner: "123456789012",
+        }),
+      ],
+      requestId: "r",
+    };
+
+    const resource = cloudWatchLogsToOtlp(request, null).payload.resourceLogs[0]!;
+
+    expect(resource.resource.attributes).toEqual(expect.arrayContaining([{ key: "service.name", value: { stringValue: "api" } }]));
+    const [record] = resource.scopeLogs[0]!.logRecords;
+    expect(record).toMatchObject({ body: { stringValue: "cell_webhook_forwarded" }, severityText: "" });
+    expect(record!.attributes).toEqual(expect.arrayContaining([
+      { key: "cell", value: { stringValue: "us" } },
+      { key: "status", value: { intValue: "202" } },
+    ]));
   });
 });
 
@@ -91,8 +117,14 @@ describe("Firehose helpers", () => {
   it("finds levels and service names", () => {
     expect(logSeverity("2026-10-15T10:00:00Z [WARN] slow")?.text).toBe("WARN");
     expect(logSeverity('{"severity":"critical"}')?.text).toBe("FATAL");
+    expect(logSeverity('{"level":50,"msg":"boom"}')?.text).toBe("ERROR");
+    expect(logSeverity('{"msg":"ERROR in message"}')).toBeUndefined();
     expect(logSeverity("START RequestId: 1")).toBeUndefined();
     expect(logGroupService("/ecs/payments-api")).toBe("payments-api");
+    expect(logGroupService("/ecs/payments-api", "ecs/web/0123456789abcdef0123456789abcdef")).toBe("web");
+    expect(logGroupService("/aws/rds/instance/orders-db/postgresql")).toBe("orders-db");
+    expect(logGroupService("/aws/ecs/containerinsights/ResponderParis-ClusterEB0386A7-EatE0wgcbXoE/performance")).toBe("ResponderParis-Cluster");
+    expect(logGroupService("ResponderParis-ApiLogs3D05D88B-d72MaarPZDKM")).toBe("ResponderParis-ApiLogs");
     expect(logGroupService("")).toBe("aws");
   });
 });

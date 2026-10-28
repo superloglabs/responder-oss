@@ -1,10 +1,12 @@
 /* Catalog */
 .metricsCatalog__summary { display: flex; align-items: center; gap: 16px; margin: 0; padding: 0 2px; color: var(--ds-text-muted); font-size: 12px; line-height: 16px; }
+.metricsCatalog__table .dsDataTableGroupBlock__label { margin: 0 2px 8px; color: var(--ds-text-primary); font-size: 14px; font-weight: 600; letter-spacing: 0; line-height: 20px; text-transform: none; }
 .metricsCatalog__summary strong { color: var(--ds-text-primary); font-weight: 500; }
 
 .metricName { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .metricName__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .metricName__name { overflow: hidden; color: var(--ds-text-primary); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 16px; text-decoration: none; text-overflow: ellipsis; white-space: nowrap; }
+.metricName__name--friendly { font-family: var(--ds-font-sans); font-size: 13px; font-weight: 500; }
 .metricName__name:hover { text-decoration: underline; }
 .metricName__description { overflow: hidden; color: var(--ds-text-muted); font-size: 12px; line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }
 .metricKindIcon { display: inline-flex; flex-shrink: 0; color: var(--ds-text-disabled); }
@@ -23,12 +25,15 @@
 .metricList__group ul { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; }
 .metricList__groupHeader { display: flex; align-items: center; gap: 10px; width: 100%; height: 24px; padding: 0 8px; border: 0; background: none; color: var(--ds-text-secondary); cursor: pointer; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; text-align: left; }
 .metricList__groupHeader svg { flex-shrink: 0; width: 14px; color: var(--ds-text-disabled); }
+.metricList__groupHeader--friendly { font-family: var(--ds-font-sans); font-weight: 500; }
+.metricList__groupName { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .metricList__count { margin-left: auto; color: var(--ds-text-disabled); font-family: var(--ds-font-sans); }
 .metricList__item { display: flex; align-items: center; gap: 10px; height: 28px; padding: 0 8px; border-radius: 4px; color: var(--ds-text-secondary); text-decoration: none; }
 .metricList__item:hover { background: var(--issues-row); }
 .metricList__item[aria-current="page"] { background: var(--issues-row); box-shadow: 0 0 0 .5px var(--issues-line), 0 1px 2px #0000000a; color: var(--ds-text-primary); }
 .metricList__item[aria-current="page"] .metricKindIcon { color: var(--ds-info); }
 .metricList__name { flex: 1; min-width: 0; overflow: hidden; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.metricList__name--friendly { font-family: var(--ds-font-sans); }
 .metricList__unit { flex-shrink: 0; max-width: 64px; overflow: hidden; color: var(--ds-text-disabled); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 
 .metricExplorer__main { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
@@ -37,6 +42,8 @@
 .metricExplorer__topRow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 32px; }
 .metricExplorer__topRow .dsSegmentedControl { padding: 2px; border: 0; border-radius: 8px; background: var(--ds-surface-hover); }
 .metricExplorer__topRow .dsSegmentedControl__option { min-height: 28px; padding: 0 10px; border-radius: 6px; font-size: 12px; }
+.metricExplorer__titleRow h1.metricExplorer__friendly { font-family: var(--ds-font-sans); font-size: 16px; }
+.metricExplorer__meta code { font-size: 11px; }
 .metricExplorer__meta { margin: 0; color: var(--ds-text-muted); font-size: 12px; line-height: 16px; }
 .metricExplorer__meta:empty { display: none; }
 

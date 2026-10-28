@@ -1,6 +1,6 @@
 import { PgBoss } from "pg-boss";
 import { z } from "zod";
-import { databaseConnectionString } from "./db/client.js";
+import { databaseConnectionString, databasePoolOptions } from "./db/client.js";
 import { investigationRequestSchema } from "./investigations/input.js";
 import { agentPrModeSchema } from "./agents/config.js";
 import {
@@ -185,9 +185,15 @@ export function createJobBoss(
     throw new Error("Database configuration is required for background jobs");
   }
 
+  // pg-boss passes these to its pg pool; its types list only some of them.
+  const { connectionTimeoutMillis, keepAlive, keepAliveInitialDelayMillis, query_timeout } =
+    databasePoolOptions(environment);
+  const poolOptions = { keepAlive, keepAliveInitialDelayMillis, query_timeout };
   return new PgBoss({
+    ...poolOptions,
     application_name: "responder-worker",
     connectionString,
+    connectionTimeoutMillis,
     max: 4,
     useListenNotify: true,
   });

@@ -1,3 +1,4 @@
+import { conductorHandoffUrl } from "@responder/core/ide-handoff";
 import { decryptCredentials } from "@responder/core/credentials/encryption";
 import { getAutomationNotificationAccount } from "@responder/core/db/automations";
 import {
@@ -62,5 +63,7 @@ export async function commentAutomationRunOnDevRevTicket(input: {
     outcome: input.outcome,
     runUrl: automationRunUrl(input),
   });
-  await dependencies.comment({ body: markdown, ticketId: input.ticket.ticketId, token });
+  const sourceUrl = automationRunUrl(input);
+  const handoff = sourceUrl ? `\n\n[Continue in Conductor](${conductorHandoffUrl({ kind: "continue", sourceUrl, context: markdown })})` : "";
+  await dependencies.comment({ body: markdown + handoff, ticketId: input.ticket.ticketId, token });
 }

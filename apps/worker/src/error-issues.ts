@@ -1,12 +1,15 @@
 import { type ErrorIssueStore, withErrorIssueStore } from "@responder/core/db/error-issues";
+import { loadSourceMaps } from "@responder/core/db/source-maps";
 import { getTelemetryClient, type TelemetryClient } from "@responder/core/telemetry/client";
 import {
+  type ErrorCandidate,
   errorCandidates,
   errorCandidateWindow,
   errorIssueKinds,
   groupErrorCandidates,
   nextErrorCandidateCursor,
 } from "@responder/core/telemetry/error-issues";
+import { type SourceMapLoader, symbolicateCandidates } from "@responder/core/telemetry/symbolicate";
 
 // Exceptions read per kind and pass.
 const candidatesPerPass = 1_000;
@@ -25,6 +28,7 @@ export interface ErrorIssueDependencies {
   candidates: typeof errorCandidates;
   client: () => TelemetryClient | null;
   now: () => Date;
+  sourceMaps: SourceMapLoader;
   withStore: <T>(pass: (store: ErrorIssueStore) => Promise<T>) => Promise<T | null>;
 }
 
@@ -32,6 +36,7 @@ export const defaultErrorIssueDependencies: ErrorIssueDependencies = {
   candidates: errorCandidates,
   client: getTelemetryClient,
   now: () => new Date(),
+  sourceMaps: loadSourceMaps,
   withStore: withErrorIssueStore,
 };
 
@@ -56,6 +61,17 @@ function errorText(error: unknown): string {
   return (error instanceof Error ? error.message : String(error)).slice(0, 500);
 }
 
+// Browser errors group by their original source once their maps are
+// uploaded. A failure to load maps groups the errors as they arrived.
+async function symbolicate(rows: ErrorCandidate[], load: SourceMapLoader): Promise<ErrorCandidate[]> {
+  try {
+    return await symbolicateCandidates(rows, load);
+  } catch (error) {
+    console.warn(JSON.stringify({ error: errorText(error), event: "error_issue_symbolication_failed" }));
+    return rows;
+  }
+}
+
 // Reads the exceptions that arrived since the last pass, groups them by
 // fingerprint, and adds them to their issues. Returns the issues that opened
 // or opened again, once the pass is saved. Does nothing in a cell without a
@@ -77,7 +93,7 @@ export async function ingestErrorIssues(
         organizationIds,
         window,
       });
-      for (const occurrences of groupErrorCandidates(rows)) {
+      for (const occurrences of groupErrorCandidates(await symbolicate(rows, dependencies.sourceMaps))) {
         try {
           const recorded = await store.record(occurrences);
           if (recorded.transition === "new" || recorded.transition === "regressed") {

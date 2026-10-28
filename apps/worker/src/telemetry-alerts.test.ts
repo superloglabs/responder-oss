@@ -82,6 +82,7 @@ describe("checkTelemetryAlert", () => {
       value: 25,
     });
     expect(deps.post).toHaveBeenCalledWith(expect.objectContaining({
+      handoff: { kind: "fix", sourceUrl: "https://us.superlog.sh/alerts/alert-1" },
       markdown: expect.stringContaining("**Checkout errors** is firing"),
       notifications: [{ ...slack, kind: "slack" }],
       organizationId: "org-1",

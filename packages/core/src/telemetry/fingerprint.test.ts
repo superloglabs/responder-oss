@@ -675,3 +675,57 @@ test("fingerprint skips V8 frames without a location", () => {
 
   expect(fp.normalizedFrames).toEqual(["load@apps/api/src/load.ts", "run@apps/api/src/run.ts"]);
 });
+
+test("fingerprint ends Firefox stacks where a callback was registered", () => {
+  const chrome = fingerprint({
+    stacktrace: [
+      "TypeError: Cannot read properties of undefined (reading 'total')",
+      "    at renderTotal (https://app.acme.com/assets/index-B9xK3d2a.js:6:3277)",
+      "    at HTMLButtonElement.<anonymous> (https://app.acme.com/assets/index-B9xK3d2a.js:6:3399)",
+    ].join("\n"),
+    type: "TypeError",
+  });
+  const firefox = fingerprint({
+    stacktrace: [
+      "renderTotal@https://app.acme.com/assets/index-B9xK3d2a.js:6:3268",
+      "@https://app.acme.com/assets/index-B9xK3d2a.js:6:3401",
+      "EventListener.handleEvent*@https://app.acme.com/assets/index-B9xK3d2a.js:6:3369",
+      "setTimeout handler*start@https://app.acme.com/assets/index-B9xK3d2a.js:6:100",
+    ].join("\n"),
+    type: "TypeError",
+  });
+
+  expect(firefox.normalizedFrames).toEqual(["renderTotal@/assets/index-<hash>.js", "/assets/index-<hash>.js"]);
+  expect(firefox.hash).toBe(chrome.hash);
+});
+
+test("fingerprint keeps Firefox's awaiting callers like V8's async frames", () => {
+  const chrome = fingerprint({
+    stacktrace: [
+      "Error: boom",
+      "    at load (https://app.acme.com/assets/index-B9xK3d2a.js:1:2)",
+      "    at async submit (https://app.acme.com/assets/index-B9xK3d2a.js:1:9)",
+    ].join("\n"),
+    type: "Error",
+  });
+  const firefox = fingerprint({
+    stacktrace: [
+      "load@https://app.acme.com/assets/index-B9xK3d2a.js:1:2",
+      "async*submit@https://app.acme.com/assets/index-B9xK3d2a.js:1:9",
+      "@debugger eval code:1:44",
+    ].join("\n"),
+    type: "Error",
+  });
+
+  expect(firefox.normalizedFrames).toEqual(["load@/assets/index-<hash>.js", "submit@/assets/index-<hash>.js"]);
+  expect(firefox.hash).toBe(chrome.hash);
+});
+
+test("fingerprint reads V8 stacks whose message has an asterisk", () => {
+  const fp = fingerprint({
+    stacktrace: "Error: no files match src/**/*.ts\n    at glob (/srv/apps/api/src/glob.ts:3:9)",
+    type: "Error",
+  });
+
+  expect(fp.normalizedFrames).toEqual(["glob@apps/api/src/glob.ts"]);
+});

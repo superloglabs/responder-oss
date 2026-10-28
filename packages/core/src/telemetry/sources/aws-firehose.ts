@@ -3,8 +3,9 @@ import { z } from "zod";
 import {
   attribute,
   attributes,
+  firstString,
   millisToNanos,
-  objectOrEmpty,
+  type OtlpKeyValue,
   type OtlpLogRecord,
   type OtlpLogsRequest,
 } from "./otlp-json.js";
@@ -88,27 +89,65 @@ const severities: Record<string, { number: number; text: string }> = {
   WARNING: { number: 13, text: "WARN" },
 };
 
+// Pino and Bunyan write the level as a number.
+const numericLevels: Record<number, string> = { 10: "TRACE", 20: "DEBUG", 30: "INFO", 40: "WARN", 50: "ERROR", 60: "FATAL" };
+
+// The fields of a log line that is one JSON object.
+function jsonFields(message: string): Record<string, unknown> | undefined {
+  const trimmed = message.trim();
+  if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 // The level of a structured log line, or a level word at its start.
 export function logSeverity(message: string): { number: number; text: string } | undefined {
-  const trimmed = message.trimStart();
-  if (trimmed.startsWith("{")) {
-    try {
-      const fields = objectOrEmpty(JSON.parse(trimmed));
-      const level = fields.level ?? fields.severity ?? fields.levelname ?? fields.log_level;
-      if (typeof level === "string") return severities[level.toUpperCase()];
-    } catch {
-      // Not JSON after all.
-    }
+  return severityOf(message, jsonFields(message));
+}
+
+function severityOf(message: string, fields: Record<string, unknown> | undefined) {
+  if (fields) {
+    const level = fields.level ?? fields.severity ?? fields.levelname ?? fields.log_level;
+    if (typeof level === "number") return severities[numericLevels[level] ?? ""];
+    return typeof level === "string" ? severities[level.toUpperCase()] : undefined;
   }
-  const word = /^(?:\S+\s+){0,3}?\[?(TRACE|DEBUG|INFO|WARN|WARNING|ERROR|FATAL|CRITICAL)\]?\b/u.exec(trimmed)?.[1];
+  const word = /^(?:\S+\s+){0,3}?\[?(TRACE|DEBUG|INFO|WARN|WARNING|ERROR|FATAL|CRITICAL)\]?\b/u.exec(message.trimStart())?.[1];
   return word ? severities[word] : undefined;
 }
 
-// A service name for a log group: the function for Lambda, otherwise its last
-// path segment.
-export function logGroupService(logGroup: string): string {
+// A JSON log line keeps its message as the body and its fields as
+// attributes, as the console logs sent over OTLP do. Other lines stay as
+// written.
+export function logLine(message: string): { attributes: OtlpKeyValue[]; body: string; severity?: { number: number; text: string } } {
+  const fields = jsonFields(message);
+  if (!fields) return { attributes: [], body: message, severity: severityOf(message, fields) };
+  return {
+    attributes: attributes(...Object.entries(fields).map(([key, value]) => attribute(key, value))),
+    body: firstString(fields.msg, fields.message, fields.event) || message,
+    severity: severityOf(message, fields),
+  };
+}
+
+// CloudFormation names a resource {stack}-{logical ID}-{random}, and CDK ends
+// the logical ID with an eight-digit hash. The stack and the construct are the
+// readable part.
+function withoutGeneratedSuffix(name: string): string {
+  return /^(.+-.+?)[0-9A-F]{8}-[A-Za-z0-9]{12}$/u.exec(name)?.[1] ?? name;
+}
+
+// A service name for a log stream: the container of an ECS task
+// (prefix/container/task-id), the database for RDS, the cluster for Container
+// Insights, the function for Lambda, otherwise the group's last path segment.
+export function logGroupService(logGroup: string, logStream = ""): string {
+  const container = /^[^/]+\/([^/]+)\/[0-9a-f]{32}$/u.exec(logStream)?.[1];
+  if (container) return container;
+  const named = /^\/aws\/(?:rds\/(?:instance|cluster)|ecs\/containerinsights)\/([^/]+)\//u.exec(logGroup)?.[1];
   const segments = logGroup.split("/").filter(Boolean);
-  return segments.at(-1) || logGroup || "aws";
+  return withoutGeneratedSuffix(named || segments.at(-1) || logGroup) || "aws";
 }
 
 // CloudWatch Logs subscriptions write each record as gzip-compressed JSON
@@ -134,21 +173,21 @@ export function cloudWatchLogsToOtlp(
     }
     if (parsed.messageType !== "DATA_MESSAGE" || parsed.logEvents.length === 0) continue;
     const logRecords: OtlpLogRecord[] = parsed.logEvents.map((event) => {
-      const severity = logSeverity(event.message);
+      const line = logLine(event.message);
       records += 1;
       return {
-        attributes: attributes(attribute("aws.log.event.id", event.id)),
-        body: { stringValue: event.message },
+        attributes: [...attributes(attribute("aws.log.event.id", event.id)), ...line.attributes],
+        body: { stringValue: line.body },
         observedTimeUnixNano: millisToNanos(now),
-        severityNumber: severity?.number ?? 0,
-        severityText: severity?.text ?? "",
+        severityNumber: line.severity?.number ?? 0,
+        severityText: line.severity?.text ?? "",
         timeUnixNano: millisToNanos(event.timestamp),
       };
     });
     payload.resourceLogs.push({
       resource: {
         attributes: attributes(
-          attribute("service.name", logGroupService(parsed.logGroup)),
+          attribute("service.name", logGroupService(parsed.logGroup, parsed.logStream)),
           attribute("telemetry.source", "aws"),
           attribute("cloud.provider", "aws"),
           attribute("cloud.account.id", parsed.owner || source?.accountId),

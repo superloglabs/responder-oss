@@ -37,10 +37,12 @@
   align-items: stretch;
   z-index: 10;
 }
-.appShell--workspace .globalHeader__left { flex-direction: column; align-items: stretch; gap: 24px; }
+.appShell--workspace .globalHeader__left { flex-direction: column; align-items: stretch; gap: 24px; min-height: 0; }
 .appShell--workspace .brand { height: 16px; width: fit-content; padding-left: 8px; }
 .appShell--workspace .brandPictogram { width: 16px; height: 16px; color: #373636; opacity: .65; }
-.appShell--workspace .primaryNav { flex-direction: column; align-items: stretch; gap: 4px; }
+/* The list scrolls when the window is too short, so the bottom of the sidebar
+   stays visible. The padding keeps focus outlines inside the scroll area. */
+.appShell--workspace .primaryNav { flex-direction: column; align-items: stretch; gap: 4px; min-height: 0; margin: -4px; padding: 4px; overflow-y: auto; scrollbar-width: thin; }
 .appShell--workspace .primaryNav a {
   display: flex; align-items: center; gap: 8px; height: 32px; padding: 8px;
   border-radius: 4px; color: #5d5d5d; font-weight: 500;
@@ -55,7 +57,17 @@
 .appShell--workspace .primaryNav__group { display: flex; flex-direction: column; gap: 4px; padding-top: 12px; }
 .appShell--workspace .primaryNav__group + a { margin-top: 12px; }
 .appShell--workspace .primaryNav__label { padding: 4px 8px; color: #a0a0a0; font-size: 11px; font-weight: 500; line-height: 16px; letter-spacing: .02em; }
-.appShell--workspace .globalHeader__right { margin-top: auto; flex-direction: column; align-items: stretch; gap: 12px; }
+.appShell--workspace .globalHeader__right { margin-top: auto; flex-direction: column; align-items: stretch; flex-shrink: 0; gap: 12px; padding-top: 12px; }
+.telemetryCallCard { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 12px; border: 1px solid #e6e6e6; border-radius: 12px; background: #fff; box-shadow: 0 1px 2px #0000000d; }
+.telemetryCallCard__dismiss { position: absolute; top: 8px; right: 8px; display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: #8a8a8a; cursor: pointer; }
+.telemetryCallCard__dismiss:hover { background: #f2f2f2; color: #202020; }
+.telemetryCallCard__eyebrow { padding: 1px 8px; border: 1px solid #e3e3e3; border-radius: 999px; background: #fafafa; color: #5d5d5d; font-size: 11px; font-weight: 500; line-height: 16px; }
+.telemetryCallCard__title { margin: 2px 0 0; padding-right: 16px; color: #202020; font-size: 13px; font-weight: 600; line-height: 18px; text-wrap: balance; }
+.telemetryCallCard__body { margin: 0; color: #666; font-size: 12px; line-height: 17px; }
+.telemetryCallCard__action { display: flex; align-items: center; justify-content: center; gap: 6px; align-self: stretch; height: 32px; margin-top: 4px; border-radius: 8px; background: #202020; color: #fff; font-size: 12px; font-weight: 500; text-decoration: none; }
+.telemetryCallCard__action:hover { background: #3a3a3a; }
+.telemetryCallCard :is(.telemetryCallCard__dismiss, .telemetryCallCard__action):focus-visible { outline: 2px solid #4e58f9; outline-offset: 2px; }
+@media (max-height: 560px) { .telemetryCallCard { display: none; } }
 .appShell--workspace .accountMenuTrigger { width: 100%; max-width: none; height: 48px; border-radius: 8px; padding: 8px; justify-content: flex-start; }
 .appShell--workspace .accountMenuTrigger { color: #202020; border: 0; gap: 8px; font-size: 14px; line-height: 17.5px; }
 .appShell--workspace .accountMenuTrigger:hover,

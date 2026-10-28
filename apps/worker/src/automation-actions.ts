@@ -252,6 +252,7 @@ export function createAutomationToolHandler(input: {
       }
       const [delivery] = await dependencies.postNotification({
         ...message,
+        handoff: { kind: "continue", sourceUrl: target.runUrl },
         ...(buttons.length > 0 ? { buttonsBlock: automationButtonsBlock(input.runId, buttons) } : {}),
         notifications: [notification],
         organizationId: target.organizationId,
@@ -279,6 +280,7 @@ export function createAutomationToolHandler(input: {
         }
         const [replyDelivery] = await dependencies.postNotification({
           ...agentNotificationMessage(detail, null),
+          handoff: { kind: "continue", sourceUrl: target.runUrl },
           notifications: [notification],
           organizationId: target.organizationId,
           seed: `${attempt.id}:${index + 1}`,

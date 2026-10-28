@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import * as authSchema from "./auth-schema.js";
@@ -38,6 +39,34 @@ export function databaseConnectionString(
   );
 }
 
+function positiveInteger(value: string | undefined, fallback: number): number {
+  const parsed = Number.parseInt(value ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+// Bounds every wait on the database. When the server stops answering without
+// closing its sockets, as during an RDS host recovery, a pooled connection
+// would otherwise wait forever and hold its pool slot. Keepalive probes find
+// those sockets, the query timeout fails a query that gets no answer, and the
+// connection timeout stops callers queueing forever for a free connection.
+export function databasePoolOptions(
+  environment: NodeJS.ProcessEnv = process.env,
+): {
+  connectionTimeoutMillis: number;
+  keepAlive: true;
+  keepAliveInitialDelayMillis: number;
+  max: number;
+  query_timeout: number;
+} {
+  return {
+    connectionTimeoutMillis: 10_000,
+    keepAlive: true,
+    keepAliveInitialDelayMillis: 10_000,
+    max: positiveInteger(environment.DATABASE_POOL_SIZE, 5),
+    query_timeout: positiveInteger(environment.DATABASE_QUERY_TIMEOUT_MS, 120_000),
+  };
+}
+
 export function getDatabase(): NodePgDatabase<typeof schema> {
   if (database) return database;
 
@@ -48,18 +77,14 @@ export function getDatabase(): NodePgDatabase<typeof schema> {
     );
   }
 
-  const configuredPoolSize = Number.parseInt(
-    process.env.DATABASE_POOL_SIZE ?? "5",
-    10,
-  );
-  pool = new Pool({
-    connectionString,
-    max: Number.isFinite(configuredPoolSize) && configuredPoolSize > 0
-      ? configuredPoolSize
-      : 5,
-  });
+  pool = new Pool({ connectionString, ...databasePoolOptions() });
   database = drizzle(pool, { schema });
   return database;
+}
+
+// Runs a trivial query through the application pool.
+export async function checkDatabase(): Promise<void> {
+  await getDatabase().execute(sql`select 1`);
 }
 
 export async function closeDatabase(): Promise<void> {

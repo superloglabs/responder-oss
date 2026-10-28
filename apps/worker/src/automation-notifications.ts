@@ -1,3 +1,4 @@
+import { conductorButton, type HandoffKind } from "@responder/core/ide-handoff";
 import { setTimeout as delay } from "node:timers/promises";
 import { createHash } from "node:crypto";
 import type { AutomationNotification } from "@responder/core/automations/config";
@@ -83,6 +84,7 @@ export type AutomationNotificationDelivery =
 export async function postAutomationNotification(input: {
   // Buttons that continue the run, under the message.
   buttonsBlock?: unknown;
+  handoff?: { kind: HandoffKind; sourceUrl: string | null };
   image?: { altText: string; png: Buffer };
   imageLayout?: { before: unknown[]; after: unknown[] };
   unfurlLinks?: boolean;
@@ -94,6 +96,10 @@ export async function postAutomationNotification(input: {
   // Posts a reply in this thread instead of a new message.
   threadTimestamp?: string;
 }, dependencies: AutomationNotificationDependencies = defaultDependencies): Promise<AutomationNotificationDelivery[]> {
+  const handoffBlocks = input.handoff?.sourceUrl ? [{
+    type: "actions",
+    elements: [conductorButton({ ...input.handoff, sourceUrl: input.handoff.sourceUrl, context: input.markdown })],
+  }] : [];
   const deliveries: AutomationNotificationDelivery[] = [];
   for (const notification of input.notifications) {
     try {
@@ -119,6 +125,7 @@ export async function postAutomationNotification(input: {
         blocks: [
           { type: "markdown", text: input.markdown },
           ...(input.buttonsBlock ? [input.buttonsBlock] : []),
+          ...handoffBlocks,
         ],
         channelId: notification.channelId,
         clientMessageId: notificationMessageId(input.seed, notification.channelId),
@@ -127,7 +134,7 @@ export async function postAutomationNotification(input: {
         ...(input.threadTimestamp ? { threadTimestamp: input.threadTimestamp } : {}),
       };
       const imageMessage = { ...message, blocks: imageBlock && input.imageLayout
-        ? [...input.imageLayout.before, imageBlock, ...input.imageLayout.after]
+        ? [...input.imageLayout.before, imageBlock, ...input.imageLayout.after, ...handoffBlocks]
         : [...message.blocks, ...(imageBlock ? [imageBlock] : [])] };
       let timestamp: string | null;
       for (let attempt = 0; ; attempt++) {
@@ -189,6 +196,7 @@ export async function sendAutomationRunNotifications(input: {
   });
   const deliveries = await postAutomationNotification({
     ...message,
+    handoff: { kind: "continue", sourceUrl: automationRunUrl(input) },
     notifications: input.notifications,
     organizationId: input.organizationId,
     seed: input.thread ? `${input.runId}:${input.thread.eventId}` : input.runId,

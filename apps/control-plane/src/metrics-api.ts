@@ -1,7 +1,21 @@
 import { apiErrorMessage } from "./agents-api";
 import type { AlertForm } from "./alerts-api";
-import type { ChartData, DashboardWidgetFilter, WidgetDraft, WidgetUnit } from "./dashboards-api";
-import { telemetryRanges, type TelemetryRange } from "./telemetry-api";
+import { cloudWatchMetricName } from "./cloudwatch-metric-names";
+import {
+  defaultTimeRange,
+  sameTimeRange,
+  timeRangeFromParams,
+  timeRangeParams,
+  type DashboardTimeRange,
+} from "./dashboard-time-range";
+import {
+  windowParams,
+  type ChartData,
+  type DashboardWidgetFilter,
+  type QueryWindow,
+  type WidgetDraft,
+  type WidgetUnit,
+} from "./dashboards-api";
 import type {
   MetricAggregation,
   MetricCatalogEntry,
@@ -20,21 +34,21 @@ async function request<T>(url: string, body?: unknown): Promise<T> {
   return parsed as T;
 }
 
-export async function fetchMetricCatalog(range: TelemetryRange): Promise<MetricCatalogEntry[]> {
-  const params = new URLSearchParams({ range });
+export async function fetchMetricCatalog(window: QueryWindow): Promise<MetricCatalogEntry[]> {
+  const params = new URLSearchParams(windowParams(window));
   return (await request<{ metrics: MetricCatalogEntry[] }>(`/api/telemetry/metric-catalog?${params}`)).metrics;
 }
 
 export async function fetchMetricDimensions(
-  range: TelemetryRange,
+  window: QueryWindow,
   metric: { kind: MetricKind; name: string; unit: string | null },
 ): Promise<MetricDimension[]> {
-  const params = new URLSearchParams({ kind: metric.kind, name: metric.name, range });
+  const params = new URLSearchParams({ kind: metric.kind, name: metric.name, ...windowParams(window) });
   if (metric.unit !== null) params.set("unit", metric.unit);
   return (await request<{ dimensions: MetricDimension[] }>(`/api/telemetry/metric-dimensions?${params}`)).dimensions;
 }
 
-export async function fetchMetricChart(query: MetricQuery): Promise<ChartData> {
+export async function fetchMetricChart(query: MetricQuery, window: QueryWindow): Promise<ChartData> {
   const body = {
     ...(query.aggregation ? { aggregation: query.aggregation } : {}),
     filters: query.filters,
@@ -43,7 +57,7 @@ export async function fetchMetricChart(query: MetricQuery): Promise<ChartData> {
     // chosen one.
     kind: query.kind,
     metricName: query.name,
-    range: query.range,
+    ...windowParams(window),
     ...(query.unit !== null ? { unit: query.unit } : {}),
   };
   return (await request<{ chart: ChartData }>("/api/telemetry/metric-series", body)).chart;
@@ -127,32 +141,82 @@ export function metricWidgetUnit(metric: { kind: MetricKind; unit: string }, agg
   }
 }
 
-// The part of a metric name before its first dot groups related metrics.
+// The part of a metric name before its first dot groups related metrics. A
+// CloudWatch metric groups under its AWS service.
 export function metricNamespace(name: string): string {
+  const cloudWatch = cloudWatchMetricName(name);
+  if (cloudWatch) return cloudWatch.group;
   const dot = name.indexOf(".");
   return dot > 0 ? name.slice(0, dot) : name;
 }
 
+// How a metric reads in a list: a CloudWatch metric by its readable title and
+// description, any other metric by its own name and description.
+export function metricDisplay(metric: { description: string; name: string }): { description: string; title: string } {
+  const cloudWatch = cloudWatchMetricName(metric.name);
+  if (!cloudWatch) return { description: metric.description, title: metric.name };
+  return { description: metric.description || cloudWatch.description, title: cloudWatch.title };
+}
+
+// A metric's name where no group gives its context, such as a chart title.
+export function metricLabel(name: string): string {
+  return cloudWatchMetricName(name)?.standalone ?? name;
+}
+
+function isCloudMetric(metric: MetricCatalogEntry): boolean {
+  return cloudWatchMetricName(metric.name) !== null;
+}
+
+function byTitle(a: MetricCatalogEntry, b: MetricCatalogEntry): number {
+  return metricDisplay(a).title.localeCompare(metricDisplay(b).title) || a.name.localeCompare(b.name);
+}
+
 export interface MetricGroup {
+  // An AWS service's CloudWatch metrics.
+  cloud: boolean;
   metrics: MetricCatalogEntry[];
   namespace: string;
 }
 
+// Application namespaces come first, then AWS services.
 export function groupMetrics(metrics: MetricCatalogEntry[]): MetricGroup[] {
   const groups = new Map<string, MetricCatalogEntry[]>();
-  for (const metric of [...metrics].sort((a, b) => a.name.localeCompare(b.name))) {
+  const sorted = [...metrics].sort((a, b) => Number(isCloudMetric(a)) - Number(isCloudMetric(b)) || byTitle(a, b));
+  for (const metric of sorted) {
     const namespace = metricNamespace(metric.name);
     groups.set(namespace, [...(groups.get(namespace) ?? []), metric]);
   }
-  return [...groups].map(([namespace, grouped]) => ({ metrics: grouped, namespace }));
+  return [...groups]
+    .map(([namespace, grouped]) => ({ cloud: isCloudMetric(grouped[0]!), metrics: grouped, namespace }))
+    .sort((a, b) => Number(a.cloud) - Number(b.cloud) || a.namespace.localeCompare(b.namespace));
 }
 
-// Metrics matching a search across names, descriptions, units and attribute keys.
+// The catalog table's group: one for the application's own metrics and one
+// for each AWS service.
+export function metricCatalogGroup(metric: MetricCatalogEntry): string {
+  return cloudWatchMetricName(metric.name)?.group ?? "Application";
+}
+
+// Catalog rows in group order, or null groups when every metric is the
+// application's own.
+export function groupMetricCatalog(metrics: MetricCatalogEntry[]): { grouped: boolean; rows: MetricCatalogEntry[] } {
+  if (!metrics.some(isCloudMetric)) return { grouped: false, rows: metrics };
+  const order = (metric: MetricCatalogEntry) => (isCloudMetric(metric) ? metricCatalogGroup(metric) : "");
+  return {
+    grouped: true,
+    rows: [...metrics].sort((a, b) =>
+      order(a).localeCompare(order(b)) || (isCloudMetric(a) ? byTitle(a, b) : 0)),
+  };
+}
+
+// Metrics matching a search across names, titles, descriptions, units and
+// attribute keys.
 export function searchMetrics(metrics: MetricCatalogEntry[], search: string): MetricCatalogEntry[] {
   const terms = search.trim().toLocaleLowerCase().split(/\s+/u).filter(Boolean);
   if (terms.length === 0) return metrics;
   return metrics.filter((metric) => {
-    const text = [metric.name, metric.description, metric.unit, ...metric.attributes]
+    const display = metricDisplay(metric);
+    const text = [metric.name, metricLabel(metric.name), display.title, display.description, metric.unit, ...metric.attributes]
       .join(" ")
       .toLocaleLowerCase();
     return terms.every((term) => text.includes(term));
@@ -212,7 +276,7 @@ export interface MetricQuery {
   groupBy: string;
   kind: MetricKind;
   name: string;
-  range: TelemetryRange;
+  range: DashboardTimeRange;
   // With the name and kind, picks one metric. Null reads every unit, for
   // links that predate it.
   unit: string | null;
@@ -221,7 +285,6 @@ export interface MetricQuery {
 // The most filters a graph can carry, as for a dashboard widget.
 export const maxMetricFilters = 50;
 
-const rangeValues = new Set<string>(telemetryRanges.map((range) => range.value));
 const aggregationValues = new Set<string>(Object.keys(aggregationLabels));
 
 // The explorer keeps its query in the URL, so a graph can be shared and the
@@ -230,7 +293,6 @@ export function metricQueryFromParams(params: URLSearchParams): MetricQuery | nu
   const name = params.get("metric") ?? "";
   const kind = params.get("kind") ?? "";
   if (!name || !(metricKinds as string[]).includes(kind)) return null;
-  const range = params.get("range") ?? "";
   const aggregation = params.get("aggregation");
   const chosen = aggregation !== null && aggregationValues.has(aggregation) ? (aggregation as MetricAggregation) : "";
   const offered = metricAggregationOptions(kind as MetricKind).some((option) => option.value === chosen);
@@ -245,15 +307,24 @@ export function metricQueryFromParams(params: URLSearchParams): MetricQuery | nu
     groupBy: params.get("by") ?? "",
     kind: kind as MetricKind,
     name,
-    range: rangeValues.has(range) ? (range as TelemetryRange) : "1h",
+    range: timeRangeFromParams(params),
     unit: params.get("unit"),
   };
 }
 
+// The time range a metrics page keeps in its URL, left out when it is the
+// default last hour.
+export function metricRangeParams(range: DashboardTimeRange, current = new URLSearchParams()): URLSearchParams {
+  if (!sameTimeRange(range, defaultTimeRange)) return timeRangeParams(range, current);
+  const next = new URLSearchParams(current);
+  for (const name of ["range", "from", "to"]) next.delete(name);
+  return next;
+}
+
 export function metricQueryParams(query: MetricQuery): URLSearchParams {
-  const params = new URLSearchParams({ kind: query.kind, metric: query.name });
-  if (query.unit !== null) params.set("unit", query.unit);
-  if (query.range !== "1h") params.set("range", query.range);
+  const base = new URLSearchParams({ kind: query.kind, metric: query.name });
+  if (query.unit !== null) base.set("unit", query.unit);
+  const params = metricRangeParams(query.range, base);
   if (query.aggregation !== initialAggregation(query.kind)) params.set("aggregation", query.aggregation);
   if (query.groupBy) params.set("by", query.groupBy);
   for (const filter of query.filters) params.append("filter", `${filter.key}=${filter.value}`);
@@ -263,7 +334,7 @@ export function metricQueryParams(query: MetricQuery): URLSearchParams {
 
 export function metricExplorerHref(
   metric: { kind: MetricKind; name: string; unit: string },
-  context: { range: TelemetryRange },
+  context: { range: DashboardTimeRange },
 ): string {
   const params = metricQueryParams({
     aggregation: initialAggregation(metric.kind),
@@ -280,7 +351,7 @@ export function metricExplorerHref(
 
 export function metricChartTitle(query: MetricQuery): string {
   const by = query.groupBy ? ` by ${dimensionLabel(query.groupBy)}` : "";
-  return `${metricAggregationLabel(query.kind, query.aggregation)} of ${query.name}${by}`;
+  return `${metricAggregationLabel(query.kind, query.aggregation)} of ${metricLabel(query.name)}${by}`;
 }
 
 // The graph as a dashboard widget.
@@ -312,7 +383,7 @@ export function metricAlertDraft(query: MetricQuery): Partial<AlertForm> {
     metricKind: query.kind,
     metricName: query.name,
     metricUnit: query.unit,
-    name: query.name,
+    name: metricLabel(query.name),
     perGroup: Boolean(query.groupBy),
     source: "metric",
   };
