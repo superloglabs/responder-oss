@@ -1083,6 +1083,23 @@ grouped by, and resolves, silences or reopens it. The API is
 `/api/error-issues`. The management API and MCP server offer
 `list_error_issues`, `get_error_issue` and `update_error_issue`.
 
+Workspace owners and admins can open **Errors → Notifications** to enable
+Slack notifications and choose one channel. Notifications are off by default.
+When enabled, they always notify on new errors and resolved errors that happen again.
+Repeated occurrences of an open or silenced issue do not notify. This does
+not require an investigation automation.
+
+The worker persists each destination with the error transition, retries failed
+sends independently up to ten attempts with backoff, and recovers interrupted
+deliveries. The worker needs `RESPONDER_APP_URL` (or `BETTER_AUTH_URL`) for issue links.
+Delivery rechecks workspace access, notification settings, and issue status.
+Unavailable channels, paused workspaces, and resolved or silenced issues receive
+nothing. Saving settings cancels queued deliveries; a send already in progress
+may finish. Existing errors are not backfilled when notifications are enabled.
+Delivery failures are logged as `error_notification_delivery_failed`; terminal
+delivery records are retained for 30 days. The settings API is
+`/api/error-notifications` and requires a workspace owner or admin session.
+
 An automation can start on error issues with the **Errors** trigger, offered
 in workspaces with telemetry. It runs on new issues, regressions (a resolved
 issue that occurs again), or both, and can be limited to some services. The
@@ -1101,7 +1118,8 @@ An operator can pause a workspace's telemetry notifications, for example while
 it runs beside the system it replaces. The pause is a row in
 `telemetry_notification_pauses`, which the hosted control room sets. Alerts
 are still checked and error issues still grouped, but alerts post nothing to
-Slack and start no automations, and the Errors trigger starts no runs. An
+Slack and start no automations, direct error notifications send no Slack
+messages, and the Errors trigger starts no runs. An
 activation that opens while paused is never announced, even if it is still
 firing when the pause ends, and its page shows the notification as Paused. An
 activation announced before the pause gets its recovery reply after the pause

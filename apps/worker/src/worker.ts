@@ -104,6 +104,7 @@ import { settleUnbilledUsage } from "@responder/core/billing/usage-billing";
 import { BILLING_NOTICE_RETRY_WINDOW_MS } from "@responder/core/billing/notifications";
 import { defaultAlertAutomationDependencies, startAlertAutomations } from "./telemetry-alert-automations.js";
 import { checkDueTelemetryAlerts, defaultTelemetryAlertDependencies } from "./telemetry-alerts.js";
+import { processErrorNotifications } from "./error-notifications.js";
 import { ingestErrorIssues } from "./error-issues.js";
 import { purgeSourceMaps } from "@responder/core/db/source-maps";
 import { defaultErrorIssueAutomationDependencies, startErrorIssueAutomations } from "./error-issue-automations.js";
@@ -244,9 +245,13 @@ const errorIssueAutomationDependencies = {
 // Runs at most one error issue pass at a time. Issues that opened or opened
 // again start the automations with an error trigger once the pass is saved.
 function groupErrorIssues(): Promise<void> {
-  errorIssuePass ??= ingestErrorIssues()
-    .then((changes) => startErrorIssueAutomations(changes, errorIssueAutomationDependencies))
-    .then(() => undefined)
+  errorIssuePass ??= Promise.allSettled([
+    ingestErrorIssues().then((changes) => startErrorIssueAutomations(changes, errorIssueAutomationDependencies)),
+    processErrorNotifications(),
+  ])
+    .then((results) => {
+      for (const result of results) if (result.status === "rejected") throw result.reason;
+    })
     .catch((error: unknown) => {
       void reportWorkerException(error, { operation: "error_issues" });
     })

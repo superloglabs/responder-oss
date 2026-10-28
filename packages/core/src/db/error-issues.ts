@@ -8,6 +8,7 @@ import {
   type ErrorOccurrences,
   occurrenceTransition,
 } from "../telemetry/error-issues.js";
+import { enqueueErrorNotifications } from "./error-notifications.js";
 import { getDatabase } from "./client.js";
 import { pausedTelemetryNotificationOrganizations } from "./telemetry-notification-pauses.js";
 import { errorIssueCursors, errorIssueDailyCounts, errorIssueHourlyCounts, errorIssues, organizationCapabilities } from "./schema.js";
@@ -179,6 +180,15 @@ export async function recordErrorOccurrences(
   await executor
     .delete(errorIssueHourlyCounts)
     .where(and(eq(errorIssueHourlyCounts.issueId, issueId), lt(errorIssueHourlyCounts.hour, oldest)));
+  if (transition === "new" || transition === "regressed") {
+    await enqueueErrorNotifications(executor, {
+      organizationId: occurrences.organizationId,
+      issueId,
+      eventKey: transition === "new" ? "new" : `regressed:${now.toISOString()}`,
+      snapshot: { title: occurrences.title, service: occurrences.service, exceptionType: occurrences.exceptionType,
+        seenAt: occurrences.lastSeenAt.toISOString(), transition },
+    });
+  }
   return { issueId, transition };
 }
 

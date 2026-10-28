@@ -101,3 +101,8 @@
 .errorIssue .syntheticCheck__chart { height: 142px; --chart-0: #4e58f9; }
 .errorIssue .timeseriesChart__bar { opacity: .62; }
 .errorIssue .timeseriesChart__grid { stroke: #e8e8e8; stroke-width: .5; stroke-dasharray: none; }
+
+.errorNotifications { border: 0; padding: 0; margin: 0; display: grid; gap: 24px; min-width: 0; }
+.errorIssues__actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.errorNotifications__description { margin: 0; }

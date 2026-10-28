@@ -715,6 +715,13 @@
       "when": 1793197220489,
       "tag": "0101_source_maps",
       "breakpoints": true
+    },
+    {
+      "idx": 102,
+      "version": "7",
+      "when": 1793200564505,
+      "tag": "0102_error_notifications",
+      "breakpoints": true
     }
   ]
 }
