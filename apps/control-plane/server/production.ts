@@ -22,6 +22,8 @@ const { startAutomationScheduler, stopAutomationScheduler } = await import(
   "./automations/scheduler.js"
 );
 startAutomationScheduler();
+const { startQueueHealthMetrics } = await import("./queue-health-metrics.js");
+startQueueHealthMetrics();
 
 const port = Number(
   process.env.PORT ?? process.env.CONTROL_PLANE_API_PORT ?? 3000,
