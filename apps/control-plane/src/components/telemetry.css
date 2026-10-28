@@ -91,6 +91,10 @@ a.telemetryPage__message:hover { text-decoration: underline; }
 .telemetrySetup__created p { margin: 0; color: var(--ds-text-muted); font-size: 12px; }
 .telemetrySetup__form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; }
 .telemetrySetup__form > .dsField { flex: 1 1 240px; }
+.telemetrySetup--aws > .telemetrySetup__section { margin-top: 18px; }
+.telemetrySetup--aws .telemetrySetup__form { gap: 8px; }
+.telemetrySetup--aws .telemetrySetup__form > .dsField { flex: 0 1 240px; min-width: 0; max-width: 100%; }
+.appShell--workspace .telemetrySetup--aws .telemetrySetup__form > .dsButton { flex-shrink: 0; height: var(--ds-control-compact-height); padding-inline: var(--ds-control-compact-padding-inline); gap: 4px; }
 .telemetrySetup h2 { margin: 0; font-size: 13px; font-weight: 600; }
 .telemetrySetup__section { display: flex; flex-direction: column; gap: 10px; }
 .telemetrySetup__section > p { margin: 0; color: var(--ds-text-secondary); font-size: 13px; line-height: 20px; }

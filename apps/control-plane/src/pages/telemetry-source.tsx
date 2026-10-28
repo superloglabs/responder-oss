@@ -56,7 +56,7 @@ export function TelemetrySourcePage() {
           {option.title}
         </h1>
       </header>
-      <div className="telemetrySetup">
+      <div className={`telemetrySetup${option.id === "aws" ? " telemetrySetup--aws" : ""}`}>
         <Link className="telemetrySetup__back" to="/telemetry/setup">← Add telemetry</Link>
         {option.id === "opentelemetry" ? <OpenTelemetrySetup /> : <CloudSourceSetup provider={option.id} />}
       </div>
@@ -370,6 +370,7 @@ function AwsSetup({ list, onCreated }: { list: ReactNode; onCreated: () => Promi
         <h2 id="aws-stack-title">Deploy the stack</h2>
         <form className="telemetrySetup__form" onSubmit={(event) => void create(event)}>
           <SelectField
+            className="dsField--compact"
             label="Region"
             onChange={setRegion}
             options={awsRegions.map((value) => ({ label: value, value }))}
