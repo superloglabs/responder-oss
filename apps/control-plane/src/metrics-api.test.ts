@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   dimensionLabel,
-  filterMetricCatalog,
-  groupMetricCatalog,
   groupMetrics,
   metricAggregationOptions,
   metricAlertDraft,
@@ -100,24 +98,6 @@ describe("the metric catalog", () => {
     ]);
   });
 
-  it("groups catalog rows only when CloudWatch metrics are present", () => {
-    const own = [metric("uptime"), metric("http.server.request.duration")];
-    expect(groupMetricCatalog(own)).toEqual({ grouped: false, rows: own });
-
-    const rows = groupMetricCatalog([
-      metric("amazonaws.com/AWS/RDS/FreeStorageSpace"),
-      metric("uptime"),
-      metric("amazonaws.com/AWS/EC2/CPUUtilization"),
-      metric("http.server.request.duration"),
-    ]).rows.map((entry) => entry.name);
-    expect(rows).toEqual([
-      "uptime",
-      "http.server.request.duration",
-      "amazonaws.com/AWS/EC2/CPUUtilization",
-      "amazonaws.com/AWS/RDS/FreeStorageSpace",
-    ]);
-  });
-
   it("titles CloudWatch metrics and keeps a description that was sent", () => {
     expect(metricDisplay(metric("amazonaws.com/AWS/SQS/ApproximateAgeOfOldestMessage"))).toEqual({
       description: "Seconds the oldest message has waited in the queue.",
@@ -149,21 +129,6 @@ describe("the metric catalog", () => {
     expect(searchMetrics(metrics, "  ")).toHaveLength(2);
   });
 
-  it("keeps metrics with sampled services under a service filter", () => {
-    const metrics = [
-      metric("checkout.orders", { services: ["checkout-api"] }),
-      metric("inventory.stock", { services: ["inventory"] }),
-      metric("queue.depth", { kind: "sum", services: ["worker"], servicesComplete: false }),
-    ];
-
-    expect(filterMetricCatalog(metrics, { kind: "", search: "", service: "checkout-api" }).map((entry) => entry.name))
-      .toEqual(["checkout.orders", "queue.depth"]);
-    expect(filterMetricCatalog(metrics, { kind: "gauge", search: "", service: "" }).map((entry) => entry.name))
-      .toEqual(["checkout.orders", "inventory.stock"]);
-    expect(filterMetricCatalog(metrics, { kind: "", search: "stock", service: "" }).map((entry) => entry.name))
-      .toEqual(["inventory.stock"]);
-  });
-
   it("names dimensions by their attribute key", () => {
     expect(dimensionLabel("attr:http.route")).toBe("http.route");
     expect(dimensionLabel("resource.service.name")).toBe("service.name");
@@ -188,7 +153,7 @@ describe("explorer URLs", () => {
   it("opens a histogram on p95 and keeps defaults out of the URL", () => {
     const href = metricExplorerHref({ kind: "histogram", name: "rpc.duration", unit: "ms" }, { range: { kind: "relative", minutes: 60 } });
 
-    expect(href).toBe("/metrics/explore?kind=histogram&metric=rpc.duration&unit=ms");
+    expect(href).toBe("/metrics?kind=histogram&metric=rpc.duration&unit=ms");
     expect(metricQueryFromParams(new URL(href, "https://app.test").searchParams)?.aggregation).toBe("p95");
     expect(metricQueryFromParams(new URLSearchParams("kind=histogram&metric=a&aggregation="))?.aggregation).toBe("");
   });

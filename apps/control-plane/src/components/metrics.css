@@ -1,22 +1,3 @@
-/* Catalog */
-.metricsCatalog__summary { display: flex; align-items: center; gap: 16px; margin: 0; padding: 0 2px; color: var(--ds-text-muted); font-size: 12px; line-height: 16px; }
-.metricsCatalog__table .dsDataTableGroupBlock__label { margin: 0 2px 8px; color: var(--ds-text-primary); font-size: 14px; font-weight: 600; letter-spacing: 0; line-height: 20px; text-transform: none; }
-.metricsCatalog__summary strong { color: var(--ds-text-primary); font-weight: 500; }
-
-.metricName { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.metricName__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.metricName__name { overflow: hidden; color: var(--ds-text-primary); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; line-height: 16px; text-decoration: none; text-overflow: ellipsis; white-space: nowrap; }
-.metricName__name--friendly { font-family: var(--ds-font-sans); font-size: 13px; font-weight: 500; }
-.metricName__name:hover { text-decoration: underline; }
-.metricName__description { overflow: hidden; color: var(--ds-text-muted); font-size: 12px; line-height: 16px; text-overflow: ellipsis; white-space: nowrap; }
-.metricKindIcon { display: inline-flex; flex-shrink: 0; color: var(--ds-text-disabled); }
-.metricUnit { color: var(--ds-text-secondary); font-size: 12px; white-space: nowrap; }
-
-.metricDimensions { display: flex; align-items: center; gap: 4px; min-width: 0; overflow: hidden; }
-.metricDimensions code { min-width: 0; overflow: hidden; text-overflow: ellipsis; padding: 2px 6px; border-radius: 4px; background: var(--ds-surface-hover); box-shadow: 0 0 0 .5px var(--issues-line); color: var(--ds-text-secondary); font-size: 11px; line-height: 16px; white-space: nowrap; }
-.metricDimensions span { flex-shrink: 0; color: var(--ds-text-disabled); font-size: 12px; }
-.metricDimensions__none { color: var(--ds-text-disabled); font-size: 12px; }
-
 /* Explorer: independently scrolling metric browser and full-width graph. */
 .metricExplorer { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 24px; align-items: start; min-width: 0; }
 .metricList { position: sticky; top: 0; display: flex; flex-direction: column; gap: 8px; max-height: calc(100svh - 96px); min-height: 0; padding-right: 16px; }
@@ -38,6 +19,7 @@
 .metricExplorer__titleRow h1 { margin: 0; color: var(--ds-text-primary); font: 600 18px/28px var(--ds-font-sans); overflow-wrap: anywhere; }
 .metricExplorer__topRow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 26px; }
 .metricExplorer__topRow .timePicker { height: 26px; }
+.metricExplorer__heading { display: flex; align-items: center; gap: 8px; color: #434343; font-size: 13px; font-weight: 500; line-height: 20px; }
 .appShell--workspace .metricExplorer__topRow .dsButton--primary { min-height: 24px; height: 24px; padding: 2px 6px; gap: 4px; box-shadow: inset 0 -3px 4px #64646408, 0 4px 4px #00000005; }
 .metricExplorer__meta { margin: 0; color: var(--ds-text-muted); font-size: 13px; line-height: 20px; overflow-wrap: anywhere; }
 .metricExplorer__meta:empty { display: none; }
