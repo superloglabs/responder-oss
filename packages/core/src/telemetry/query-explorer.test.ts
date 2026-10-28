@@ -81,6 +81,50 @@ describe("explorer value lists", () => {
     expect(call.params).toMatchObject({ limit: 51, offset: 500 });
   });
 
+  it("names a filtered trace after its parentless span before its earliest span", async () => {
+    const calls: Call[] = [];
+    await queryTracesAggregated(client(calls), "project-1", { limit: 50, range, service: "api" });
+
+    const query = calls.find((call) => /GROUP BY TraceId/u.test(call.query))!.query;
+    expect(query).toContain("argMin(SpanName, (ParentSpanId != '', Timestamp)) AS root_span_name");
+    expect(query).toContain("argMin(ServiceName, (ParentSpanId != '', Timestamp)) AS root_service");
+    expect(query).toContain("argMin(StatusCode, (ParentSpanId != '', Timestamp)) AS root_status_code");
+  });
+
+  it("names summary traces after their parentless spans", async () => {
+    const calls: Call[] = [];
+    const ch = client(calls, {
+      tables: ["otel_traces_recent", "otel_traces_summary"],
+      rows: (query) => {
+        if (query.includes("SELECT count() AS c")) return [{ c: 1 }];
+        if (query.includes("FROM otel_traces_summary")) {
+          return [
+            { trace_id: "a", start_time: "2026-10-14 14:50:00.000000000", root_span_name: "<anonymous>", root_service: "api", root_status_code: "STATUS_CODE_UNSET" },
+            { trace_id: "b", start_time: "2026-10-14 14:40:00.000000000", root_span_name: "child", root_service: "worker", root_status_code: "STATUS_CODE_UNSET" },
+          ];
+        }
+        if (query.includes("ParentSpanId = ''")) {
+          return [{ trace_id: "a", root_span_name: "POST /api/webhooks/github", root_service: "api", root_status_code: "STATUS_CODE_OK" }];
+        }
+        return [];
+      },
+    });
+
+    const traces = await queryTracesAggregated(ch, "project-1", { limit: 50, range });
+
+    const lookup = calls.at(-1)!;
+    expect(lookup.query).toContain("FROM otel_traces\n");
+    expect(lookup.params).toMatchObject({
+      firstStart: "2026-10-14 14:40:00.000000000",
+      lastStart: "2026-10-14 14:50:00.000000000",
+      traceIds: ["a", "b"],
+    });
+    expect(traces).toMatchObject([
+      { trace_id: "a", root_span_name: "POST /api/webhooks/github", root_status_code: "STATUS_CODE_OK" },
+      { trace_id: "b", root_span_name: "child" },
+    ]);
+  });
+
   it("matches any listed service or level in logs and their counts", async () => {
     const calls: Call[] = [];
     const ch = client(calls);

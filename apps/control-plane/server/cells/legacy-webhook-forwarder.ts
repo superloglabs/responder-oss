@@ -170,7 +170,7 @@ async function forwardToLegacy(
 export function legacyWebhookForwarder(
   dependencies: LegacyWebhookForwarderDependencies = defaultDependencies,
 ): MiddlewareHandler {
-  return async (context, next) => {
+  return async function legacyWebhookForwarder(context, next) {
     if (context.req.method !== "POST" || context.req.header(forwardedHeader)) return next();
     const path = context.req.path.replace(/\/$/u, "");
     const candidates = dependencies.routes().filter((route) => route.path === path);

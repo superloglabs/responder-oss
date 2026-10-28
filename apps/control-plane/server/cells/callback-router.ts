@@ -37,7 +37,7 @@ export function cellCallbackRedirect(
 export function cellCallbackRouter(
   directory: () => CellDirectory | null = () => cellDirectory(),
 ): MiddlewareHandler {
-  return async (context, next) => {
+  return async function cellCallbackRouter(context, next) {
     if (context.req.method !== "GET") return next();
     const target = cellCallbackRedirect(new URL(context.req.url), directory());
     if (!target) return next();

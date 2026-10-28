@@ -27,7 +27,7 @@ export function requestMetrics(
 ): MiddlewareHandler {
   const histogram = options.histogram ?? requestDuration;
   const now = options.now ?? (() => performance.now());
-  return async (context, next) => {
+  return async function requestMetrics(context, next) {
     const started = now();
     let failed = false;
     try {

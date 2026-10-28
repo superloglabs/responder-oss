@@ -307,8 +307,10 @@ const githubWebhookPaths = new Set([
   "/api/webhooks/github",
   "/api/webhooks/github/",
 ]);
-instrumentedApp.use("*", (context, next) =>
-  githubWebhookPaths.has(context.req.path)
+// Sentry names each middleware span after its function, so middleware here
+// and in mounted routers are named functions rather than arrows.
+instrumentedApp.use("*", function bodyLimitByPath(context, next) {
+  return githubWebhookPaths.has(context.req.path)
     ? githubWebhookBodyLimit(context, next)
     : context.req.path === "/api/skills" || context.req.path.startsWith("/api/skills/")
       ? skillBodyLimit(context, next)
@@ -316,11 +318,14 @@ instrumentedApp.use("*", (context, next) =>
         ? telemetryIngestBodyLimit(context, next)
         : context.req.path.startsWith("/api/v1/source-maps/")
           ? sourceMapBodyLimit(context, next)
-          : apiBodyLimit(context, next),
-);
+          : apiBodyLimit(context, next);
+});
 if (Sentry.isInitialized()) {
-  instrumentedApp.use(Sentry.sentry(instrumentedApp));
-  instrumentedApp.use(async (_context, next) => {
+  const sentryMiddleware = Sentry.sentry(instrumentedApp);
+  instrumentedApp.use(function sentryRequest(context, next) {
+    return sentryMiddleware(context, next);
+  });
+  instrumentedApp.use(async function sentryServiceTag(_context, next) {
     Sentry.setTag("service", "responder-control-plane");
     await next();
   });
