@@ -337,6 +337,11 @@ export function logExplorerQuery(params: URLSearchParams): LogExplorerQuery {
   };
 }
 
+function spanStatusParam(value: string): string {
+  const code = `STATUS_CODE_${value.toUpperCase().replace(/^STATUS_CODE_/u, "")}`;
+  return ["STATUS_CODE_ERROR", "STATUS_CODE_OK", "STATUS_CODE_UNSET"].includes(code) ? code : value;
+}
+
 export function traceExplorerQuery(params: URLSearchParams): TraceExplorerQuery {
   const minDurationMs = Number(params.get("minDurationMs"));
   return {
@@ -346,8 +351,8 @@ export function traceExplorerQuery(params: URLSearchParams): TraceExplorerQuery 
     operations: uniqueValues(params, "operation"),
     range: explorerRange(params),
     services: uniqueValues(params, "service"),
-    // The trace list's older links say `status=error`.
-    statuses: uniqueValues(params, "status").map((value) => (value === "error" ? "STATUS_CODE_ERROR" : value)),
+    // Links may say `status=error` or `status=Error` for `STATUS_CODE_ERROR`.
+    statuses: [...new Set(uniqueValues(params, "status").map(spanStatusParam))],
   };
 }
 
