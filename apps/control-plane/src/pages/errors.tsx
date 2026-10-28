@@ -1,3 +1,5 @@
+import { authClient } from "../auth-client";
+import { ErrorNotificationSettingsDialog } from "../components/error-notification-settings";
 import { NavigationIcon } from "../components/navigation-icon";
 import { PlusIcon, MagnifyingGlassIcon } from "@phosphor-icons/react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -42,6 +44,9 @@ export function ErrorSparkline({ counts, label }: { counts: number[]; label: str
 }
 
 export function ErrorsPage() {
+  const activeMember = authClient.useActiveMember();
+  const canManageNotifications = activeMember.data?.role.split(",").some((role) => ["admin", "owner"].includes(role.trim())) ?? false;
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
   useDocumentTitle("Errors");
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
@@ -179,9 +184,11 @@ export function ErrorsPage() {
   return (
     <AppShell active="errors" redesigned>
       <div className="errorIssues">
+        {notificationsOpen ? <ErrorNotificationSettingsDialog onClose={() => setNotificationsOpen(false)} /> : null}
         <header className="errorIssues__heading">
           <div className="workspaceHeading"><h1><NavigationIcon section="errors" />Errors</h1>
-          <Link className="dsButton dsButton--primary dsButton--small" to="/alerts/new"><PlusIcon size={14} />Create alert</Link></div>
+          <div className="errorIssues__actions">{canManageNotifications ? <button className="dsButton dsButton--secondary dsButton--small" onClick={() => setNotificationsOpen(true)} type="button">Notifications</button> : null}
+          <Link className="dsButton dsButton--primary dsButton--small" to="/alerts/new"><PlusIcon size={14} />Create alert</Link></div></div>
           <p>Find recurring failures and decide what to investigate next.</p>
         </header>
         <div className="errorIssues__filters">

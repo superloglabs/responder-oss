@@ -708,6 +708,13 @@
       "when": 1793183820002,
       "tag": "0100_unavailable_connections_prompt",
       "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "7",
+      "when": 1793191762454,
+      "tag": "0101_error_notifications",
+      "breakpoints": true
     }
   ]
 }

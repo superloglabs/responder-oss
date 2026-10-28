@@ -2657,3 +2657,28 @@ export const smsConsents = pgTable(
   },
   (table) => [index("sms_consents_phone_idx").on(table.phoneE164)],
 );
+
+// Notification preferences are opt-in. Deliveries are inserted with the error
+// transition so advancing the ingestion cursor cannot lose an alert.
+export const errorNotificationSettings = pgTable("error_notification_settings", {
+  organizationId: uuid("organization_id").primaryKey().references(() => organization.id, { onDelete: "cascade" }),
+  settings: jsonb("settings").$type<import("../telemetry/error-notifications.js").ErrorNotificationSettings>().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+export const errorNotificationDeliveries = pgTable("error_notification_deliveries", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  organizationId: uuid("organization_id").notNull().references(() => organization.id, { onDelete: "cascade" }),
+  issueId: uuid("issue_id").notNull().references(() => errorIssues.id, { onDelete: "cascade" }),
+  eventKey: text("event_key").notNull(),
+  targetKey: text("target_key").notNull(),
+  target: jsonb("target").$type<import("../telemetry/error-notifications.js").ErrorNotificationTarget>().notNull(),
+  snapshot: jsonb("snapshot").$type<import("../telemetry/error-notifications.js").ErrorNotificationSnapshot>().notNull(),
+  status: text("status").$type<"pending" | "sending" | "sent" | "failed" | "cancelled">().default("pending").notNull(),
+  attempts: integer("attempts").default(0).notNull(),
+  nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).defaultNow().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  sentAt: timestamp("sent_at", { withTimezone: true }),
+}, (table) => [
+  unique("error_notification_event_target_key").on(table.issueId, table.eventKey, table.targetKey),
+  index("error_notification_pending_idx").on(table.status, table.nextAttemptAt),
+]);
