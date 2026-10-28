@@ -314,6 +314,7 @@ export interface SegmentOption<Value extends string> {
 
 export interface SegmentedControlProps<Value extends string> {
   "aria-label": string;
+  compact?: boolean;
   onChange: (value: Value) => void;
   options: Array<SegmentOption<Value>>;
   value: Value;
@@ -321,12 +322,13 @@ export interface SegmentedControlProps<Value extends string> {
 
 export function SegmentedControl<Value extends string>({
   "aria-label": ariaLabel,
+  compact = false,
   onChange,
   options,
   value,
 }: SegmentedControlProps<Value>) {
   return (
-    <div aria-label={ariaLabel} className="dsSegmentedControl" role="radiogroup">
+    <div aria-label={ariaLabel} className={`dsSegmentedControl${compact ? " dsSegmentedControl--compact" : ""}`} role="radiogroup">
       {options.map((option) => (
         <button
           aria-checked={option.value === value}
