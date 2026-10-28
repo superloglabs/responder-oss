@@ -347,6 +347,12 @@ test("log drawer opens the error issue an error log belongs to", async ({ page }
     severityNumber: 17,
   });
   const lookupCount = lookups.length;
+  // The actions sit as far above the message as the next section sits below it.
+  const gaps = await drawer.locator(".explorerDrawer__body").evaluate((body) => {
+    const [actions, message, next] = [...body.children].map((child) => child.getBoundingClientRect());
+    return [message!.top - actions!.bottom, next!.top - message!.bottom];
+  });
+  expect(gaps[0]).toBe(gaps[1]);
   await page.screenshot({ path: testInfo.outputPath("log-drawer-error-issue.png") });
   await drawer.getByRole("button", { name: "Next log" }).click();
   await expect(drawer.getByText("retrying payment", { exact: true })).toBeVisible();
