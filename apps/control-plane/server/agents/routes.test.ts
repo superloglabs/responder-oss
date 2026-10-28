@@ -4,6 +4,7 @@ import { decryptCredentials } from "../../../../packages/core/src/credentials/en
 import {
   createAgent,
   disableAgentsWithUnavailableRepositories,
+  getAgent,
   listAgentOptions,
   setAgentEnabled,
   updateAgent,
@@ -254,6 +255,26 @@ describe("agent creation modes", () => {
       userId: tenant.user.id,
       configuration,
     });
+  });
+
+  it("answers 404 for agent IDs that are not UUIDs", async () => {
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+
+    const read = await app.request("/api/agents/secrets");
+    const update = await app.request("/api/agents/secrets", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(agentConfiguration),
+    });
+    const investigation = await app.request(
+      "/api/agents/not-a-uuid/investigations/40000000-0000-4000-8000-000000000000",
+    );
+
+    expect(read.status).toBe(404);
+    expect(update.status).toBe(404);
+    expect(investigation.status).toBe(404);
+    expect(getAgent).not.toHaveBeenCalled();
+    expect(updateAgent).not.toHaveBeenCalled();
   });
 });
 

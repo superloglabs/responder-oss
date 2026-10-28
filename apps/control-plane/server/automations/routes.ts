@@ -55,6 +55,7 @@ import {
 } from "../../../../packages/core/src/db/usage-history.js";
 import { captureAnalyticsEvent } from "../../../../packages/core/src/analytics.js";
 import { getActiveTenant } from "../tenant.js";
+import { requireUuidParam } from "../uuid-param.js";
 import { queueAutomationRun, queueAutomationRunFollowUp, queueAutomationSuggestionRefill } from "./queue.js";
 import { listSentryEnvironments } from "../integrations/sentry.js";
 import {
@@ -581,6 +582,7 @@ export const automationRoutes = new Hono()
         : "Turn the automation on to continue this run.",
     }, 409);
   })
+  .use("/:automationId/*", requireUuidParam("automationId", "Automation not found"))
   .get("/:automationId", async (context) => {
     const access = await getAutomationTenant(context.req.raw.headers);
     if (!access.ok) return context.json({ error: access.error }, access.status);
@@ -639,9 +641,6 @@ export const automationRoutes = new Hono()
     const access = await getAutomationTenant(context.req.raw.headers);
     if (!access.ok) return context.json({ error: access.error }, access.status);
     const automationId = context.req.param("automationId");
-    if (!z.uuid().safeParse(automationId).success) {
-      return context.json({ error: "Automation not found" }, 404);
-    }
     return context.json({
       share: await getAutomationShare(access.tenant.organizationId, automationId),
     });
@@ -650,9 +649,6 @@ export const automationRoutes = new Hono()
     const access = await getAutomationTenant(context.req.raw.headers);
     if (!access.ok) return context.json({ error: access.error }, access.status);
     const automationId = context.req.param("automationId");
-    if (!z.uuid().safeParse(automationId).success) {
-      return context.json({ error: "Automation not found" }, 404);
-    }
     const result = await shareAutomation({
       automationId,
       organizationId: access.tenant.organizationId,
@@ -675,9 +671,6 @@ export const automationRoutes = new Hono()
     const access = await getAutomationTenant(context.req.raw.headers);
     if (!access.ok) return context.json({ error: access.error }, access.status);
     const automationId = context.req.param("automationId");
-    if (!z.uuid().safeParse(automationId).success) {
-      return context.json({ error: "Automation not found" }, 404);
-    }
     const deleted = await unshareAutomation(access.tenant.organizationId, automationId);
     return deleted
       ? context.json({ shared: false })
@@ -689,9 +682,6 @@ export const automationRoutes = new Hono()
     const access = await getAutomationTenant(context.req.raw.headers);
     if (!access.ok) return context.json({ error: access.error }, access.status);
     const automationId = context.req.param("automationId");
-    if (!z.uuid().safeParse(automationId).success) {
-      return context.json({ error: "Automation not found" }, 404);
-    }
     const automation = await getAutomation(access.tenant.organizationId, automationId);
     if (!automation) return context.json({ error: "Automation not found" }, 404);
     return context.json({
@@ -714,9 +704,6 @@ export const automationRoutes = new Hono()
     const access = await getAutomationTenant(context.req.raw.headers);
     if (!access.ok) return context.json({ error: access.error }, access.status);
     const automationId = context.req.param("automationId");
-    if (!z.uuid().safeParse(automationId).success) {
-      return context.json({ error: "Automation not found" }, 404);
-    }
     const page = runPageSchema.parse(context.req.query("page"));
     const { issues, total } = await listAutomationIssues({
       automationId,
@@ -739,9 +726,6 @@ export const automationRoutes = new Hono()
     const access = await getAutomationTenant(context.req.raw.headers);
     if (!access.ok) return context.json({ error: access.error }, access.status);
     const automationId = context.req.param("automationId");
-    if (!z.uuid().safeParse(automationId).success) {
-      return context.json({ error: "Automation not found" }, 404);
-    }
     return context.json(await getUsageHistory({
       automationId,
       days: parseUsageHistoryDays(context.req.query("days")),
