@@ -14,8 +14,10 @@ const tagDescriptions: Record<ManagementTag, string> = {
   Models: "Model API keys, subscriptions, and available models.",
   Runs: "Start, follow, and cancel automation runs.",
   Secrets: "Credentials agents can use without seeing them.",
+  Synthetics: "HTTP checks that request a URL on a schedule and post failures to Slack.",
   "Tag mode": "What Superlog can use and change when someone mentions it in Slack.",
   Telemetry: "Read the workspace's logs, traces, and metrics.",
+  Terraform: "Configuration for the superloglabs/superlog Terraform provider.",
   Workspace: "The workspace and its members.",
 };
 
@@ -164,7 +166,7 @@ export function buildOpenApiDocument(
     },
     info: {
       description:
-        "Manage a Superlog workspace's automations, runs, tag mode, model access, and secrets, read its telemetry, and build dashboards and alerts over it. Every request acts as the member who created the API key.",
+        "Manage a Superlog workspace's automations, runs, tag mode, model access, and secrets, read its telemetry, build dashboards and alerts over it, run synthetic checks, and export them to Terraform. Every request acts as the member who created the API key.",
       title: "Superlog management API",
       version: "1.0.0",
     },

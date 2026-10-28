@@ -36,8 +36,10 @@ export type ManagementTag =
   | "Models"
   | "Runs"
   | "Secrets"
+  | "Synthetics"
   | "Tag mode"
   | "Telemetry"
+  | "Terraform"
   | "Workspace";
 
 // Responses are serialized as JSON before they are checked against the

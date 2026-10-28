@@ -83,37 +83,89 @@ export async function findTelemetryDashboard(
   return { ...dashboard, widgets };
 }
 
+// A widget in a whole-dashboard write. A widget with the ID of one already on
+// the dashboard replaces it; the others are added.
+export type TelemetryDashboardWidgetInput = {
+  config: DashboardWidgetConfig;
+  id?: string;
+  layout: DashboardWidgetLayout;
+  title: string;
+  type: DashboardWidgetType;
+};
+
+type Transaction = Parameters<Parameters<ReturnType<typeof getDatabase>["transaction"]>[0]>[0];
+
+// Makes the dashboard's widgets exactly `widgets`, in that order. Widgets
+// left out are removed.
+async function replaceWidgets(
+  transaction: Transaction,
+  dashboardId: string,
+  widgets: readonly TelemetryDashboardWidgetInput[],
+): Promise<void> {
+  const existing = await transaction
+    .select({ id: telemetryDashboardWidgets.id })
+    .from(telemetryDashboardWidgets)
+    .where(eq(telemetryDashboardWidgets.dashboardId, dashboardId));
+  const existingIds = new Set(existing.map((widget) => widget.id));
+  const keep = new Set(widgets.flatMap((widget) => (widget.id && existingIds.has(widget.id) ? [widget.id] : [])));
+  const removed = [...existingIds].filter((id) => !keep.has(id));
+  if (removed.length > 0) {
+    await transaction
+      .delete(telemetryDashboardWidgets)
+      .where(and(eq(telemetryDashboardWidgets.dashboardId, dashboardId), inArray(telemetryDashboardWidgets.id, removed)));
+  }
+  const now = new Date();
+  for (const [position, { id, ...widget }] of widgets.entries()) {
+    if (id && keep.has(id)) {
+      await transaction
+        .update(telemetryDashboardWidgets)
+        .set({ ...widget, position, updatedAt: now })
+        .where(and(eq(telemetryDashboardWidgets.dashboardId, dashboardId), eq(telemetryDashboardWidgets.id, id)));
+    } else {
+      await transaction.insert(telemetryDashboardWidgets).values({ ...widget, dashboardId, position });
+    }
+  }
+}
+
 export async function createTelemetryDashboard(
   organizationId: string,
-  input: { createdBy: string; name: string; variables?: DashboardVariable[] },
+  input: {
+    createdBy: string;
+    name: string;
+    variables?: DashboardVariable[];
+    widgets?: readonly TelemetryDashboardWidgetInput[];
+  },
 ): Promise<TelemetryDashboard> {
-  const [row] = await getDatabase()
-    .insert(telemetryDashboards)
-    .values({
-      createdBy: input.createdBy,
-      name: input.name,
-      organizationId,
-      variables: input.variables ?? [],
-    })
-    .returning({
-      id: telemetryDashboards.id,
-      name: telemetryDashboards.name,
-      updatedAt: telemetryDashboards.updatedAt,
-      variables: telemetryDashboards.variables,
-    });
-  return { ...row!, updatedAt: row!.updatedAt.toISOString(), widgets: [] };
+  const dashboardId = await getDatabase().transaction(async (transaction) => {
+    const [row] = await transaction
+      .insert(telemetryDashboards)
+      .values({
+        createdBy: input.createdBy,
+        name: input.name,
+        organizationId,
+        variables: input.variables ?? [],
+      })
+      .returning({ id: telemetryDashboards.id });
+    if (input.widgets?.length) await replaceWidgets(transaction, row!.id, input.widgets);
+    return row!.id;
+  });
+  return (await findTelemetryDashboard(organizationId, dashboardId))!;
 }
 
 export async function updateTelemetryDashboard(
   organizationId: string,
   dashboardId: string,
-  update: { name?: string; variables?: DashboardVariable[] },
+  update: { name?: string; variables?: DashboardVariable[]; widgets?: readonly TelemetryDashboardWidgetInput[] },
 ): Promise<TelemetryDashboard | null> {
   if (!(await findDashboardRow(organizationId, dashboardId))) return null;
-  await getDatabase()
-    .update(telemetryDashboards)
-    .set({ ...update, updatedAt: new Date() })
-    .where(and(eq(telemetryDashboards.organizationId, organizationId), eq(telemetryDashboards.id, dashboardId)));
+  const { widgets, ...fields } = update;
+  await getDatabase().transaction(async (transaction) => {
+    await transaction
+      .update(telemetryDashboards)
+      .set({ ...fields, updatedAt: new Date() })
+      .where(and(eq(telemetryDashboards.organizationId, organizationId), eq(telemetryDashboards.id, dashboardId)));
+    if (widgets) await replaceWidgets(transaction, dashboardId, widgets);
+  });
   return findTelemetryDashboard(organizationId, dashboardId);
 }
 

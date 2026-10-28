@@ -2,6 +2,8 @@ import { integrationConnectionOperations } from "./integration-connections.js";
 import { alertOperations } from "./alert-operations.js";
 import { dashboardOperations } from "./dashboard-operations.js";
 import { errorIssueOperations } from "./error-issue-operations.js";
+import { syntheticOperations } from "./synthetic-operations.js";
+import { terraformOperations } from "./terraform-operations.js";
 import { telemetryOperations } from "./telemetry-operations.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -1059,4 +1061,6 @@ export const managementOperations: ManagementOperation[] = [
   ...errorIssueOperations,
   ...dashboardOperations,
   ...alertOperations,
+  ...syntheticOperations,
+  ...terraformOperations,
 ];

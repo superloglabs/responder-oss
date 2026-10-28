@@ -1,9 +1,10 @@
-import { BracketsCurlyIcon, DotsThreeIcon, PencilSimpleIcon, PlusIcon, TrashIcon } from "@phosphor-icons/react";
+import { BracketsCurlyIcon, CheckIcon, DotsThreeIcon, FileCodeIcon, PencilSimpleIcon, PlusIcon, TrashIcon } from "@phosphor-icons/react";
 import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactGridLayout, { useContainerWidth, type Layout } from "react-grid-layout";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { AppShell } from "../components/app-shell";
 import { DashboardSkeleton } from "../components/screen-skeletons";
+import { copyTerraformLabel, useCopyTerraform } from "../use-copy-terraform";
 import { DashboardDialog } from "../components/dashboard-dialog";
 import { DashboardTimePicker } from "../components/dashboard-time-picker";
 import { DashboardVariableBar, DashboardVariablesEditor } from "../components/dashboard-variables";
@@ -168,6 +169,7 @@ export function DashboardPage() {
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Layout changes not yet saved, by widget.
   const pendingLayouts = useRef(new Map<string, TelemetryDashboardWidget["layout"]>());
+  const layoutSaves = useRef<Promise<void>>(Promise.resolve());
   useDocumentTitle(dashboard ? `${dashboard.name} · Dashboards` : "Dashboards");
 
   const load = useCallback(async () => {
@@ -222,21 +224,33 @@ export function DashboardPage() {
     setParams((current) => variableParams(next, current), { replace: true });
   }
 
-  // Saves layout changes still waiting for the debounce.
-  const flushLayouts = useCallback((leaving = false) => {
+  // Saves layout changes still waiting for the debounce. Saves run one after
+  // another, so the latest layout is the one stored; leaving the page sends
+  // at once, since the page may be gone before an earlier save ends. Resolves
+  // once every save started so far has finished.
+  const flushLayouts = useCallback((leaving = false): Promise<void> => {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = null;
-    if (pendingLayouts.current.size === 0) return;
-    const widgets = [...pendingLayouts.current].map(([id, layout]) => ({ id, layout }));
-    pendingLayouts.current.clear();
-    updateLayout(dashboardId, widgets, { keepalive: leaving }).catch((cause: unknown) =>
-      setError(cause instanceof Error ? cause.message : "Unable to save the layout"),
-    );
+    if (pendingLayouts.current.size > 0) {
+      const widgets = [...pendingLayouts.current].map(([id, layout]) => ({ id, layout }));
+      pendingLayouts.current.clear();
+      const save = () =>
+        updateLayout(dashboardId, widgets, { keepalive: leaving }).then(
+          () => undefined,
+          (cause: unknown) => setError(cause instanceof Error ? cause.message : "Unable to save the layout"),
+        );
+      layoutSaves.current = leaving
+        ? Promise.all([layoutSaves.current, save()]).then(() => undefined)
+        : layoutSaves.current.then(save);
+    }
+    return layoutSaves.current;
   }, [dashboardId]);
+  // Exports the layout on screen, including a move still being saved.
+  const [terraformState, copyTerraform] = useCopyTerraform({ dashboardIds: [dashboardId] }, flushLayouts);
 
   // Leaving the page or closing the tab saves a move made just before.
   useEffect(() => {
-    const leave = () => flushLayouts(true);
+    const leave = () => void flushLayouts(true);
     window.addEventListener("pagehide", leave);
     return () => {
       window.removeEventListener("pagehide", leave);
@@ -257,7 +271,7 @@ export function DashboardPage() {
     });
     for (const change of changes) pendingLayouts.current.set(change.id, change.layout);
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => flushLayouts(), 400);
+    saveTimer.current = setTimeout(() => void flushLayouts(), 400);
   }
 
   async function saveWidget(draft: WidgetDraft) {
@@ -393,6 +407,15 @@ export function DashboardPage() {
                   </DropdownMenuItem>
                   <DropdownMenuItem onSelect={() => setEditingVariables(true)}>
                     <BracketsCurlyIcon />{dashboard.variables.length > 0 ? "Variables" : "Add variable"}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onSelect={(event) => {
+                      // Stays open to show that the copy worked.
+                      event.preventDefault();
+                      copyTerraform();
+                    }}
+                  >
+                    {terraformState === "copied" ? <CheckIcon /> : <FileCodeIcon />}{copyTerraformLabel(terraformState)}
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onSelect={() => setRemoving("dashboard")} variant="destructive">

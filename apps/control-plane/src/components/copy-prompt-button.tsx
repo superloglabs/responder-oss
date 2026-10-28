@@ -1,18 +1,6 @@
 import { CheckIcon, CopySimpleIcon } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
-
-// Copies a prompt for a coding agent. A prompt that must be loaded first is
-// handed to the clipboard as a pending item, so the copy still counts as part
-// of the click once it arrives.
-async function copyText(text: string | Promise<string>) {
-  if (typeof text !== "string" && typeof ClipboardItem !== "undefined" && navigator.clipboard.write) {
-    await navigator.clipboard.write([
-      new ClipboardItem({ "text/plain": text.then((value) => new Blob([value], { type: "text/plain" })) }),
-    ]);
-    return;
-  }
-  await navigator.clipboard.writeText(await text);
-}
+import { copyText } from "../copy-to-clipboard";
 
 export function CopyPromptButton({
   className,

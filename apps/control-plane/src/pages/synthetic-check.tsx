@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { relativeTime } from "../agents-api";
 import { AppShell } from "../components/app-shell";
 import { ListSkeleton, SyntheticCheckSkeleton } from "../components/screen-skeletons";
+import { CopyTerraformButton } from "../components/copy-terraform";
 import { DashboardDialog } from "../components/dashboard-dialog";
 import { SyntheticRunDetails, SyntheticStatusBadge, UptimeStrip } from "../components/synthetics";
 import { TimeseriesChart } from "../components/timeseries-chart";
@@ -182,6 +183,7 @@ export function SyntheticCheckPage() {
             {!check.enabled ? <Badge>Off</Badge> : check.lastStatus ? <SyntheticStatusBadge status={check.lastStatus} /> : <Badge>Not run yet</Badge>}
             <span className="automationCreate__spacer" />
             <SegmentedControl aria-label="Time range" onChange={setRange} options={rangeOptions} value={range} />
+            <CopyTerraformButton selection={{ syntheticCheckIds: [check.id] }} />
             <Button onClick={() => setDeleting(true)} size="small" variant="ghost">Delete</Button>
             <Link className="dsButton dsButton--secondary dsButton--small" to={`/synthetics/${check.id}/edit`}>
               <PencilSimpleIcon size={12} />Edit
