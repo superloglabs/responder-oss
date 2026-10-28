@@ -87,11 +87,29 @@ export async function recordErrorOccurrences(
   executor: Executor,
   occurrences: ErrorOccurrences,
 ): Promise<RecordedErrorOccurrences> {
-  const [existing] = await executor
-    .select({ id: errorIssues.id, status: errorIssues.status, statusChangedAt: errorIssues.statusChangedAt })
+  const issueColumns = { id: errorIssues.id, status: errorIssues.status, statusChangedAt: errorIssues.statusChangedAt };
+  let [existing] = await executor
+    .select(issueColumns)
     .from(errorIssues)
     .where(and(eq(errorIssues.organizationId, occurrences.organizationId), eq(errorIssues.fingerprint, occurrences.fingerprint)))
     .for("update");
+  // An issue keyed by the previous algorithm moves to the current
+  // fingerprint, so a known error is not opened again as new. When several
+  // previous issues now share a fingerprint, the most recently seen moves.
+  let previousFingerprint = false;
+  if (!existing && occurrences.previousFingerprints.length > 0) {
+    [existing] = await executor
+      .select(issueColumns)
+      .from(errorIssues)
+      .where(and(
+        eq(errorIssues.organizationId, occurrences.organizationId),
+        inArray(errorIssues.fingerprint, occurrences.previousFingerprints),
+      ))
+      .orderBy(desc(errorIssues.lastSeenAt))
+      .limit(1)
+      .for("update");
+    previousFingerprint = Boolean(existing);
+  }
   const transition = occurrenceTransition(existing ?? null, occurrences.lastSeenAt);
   const now = new Date();
   let issueId: string;
@@ -123,6 +141,7 @@ export async function recordErrorOccurrences(
       .update(errorIssues)
       .set({
         eventCount: sql`${errorIssues.eventCount} + ${occurrences.eventCount}`,
+        ...(previousFingerprint ? { fingerprint: occurrences.fingerprint } : {}),
         firstSeenAt: sql`least(${errorIssues.firstSeenAt}, ${occurrences.firstSeenAt.toISOString()}::timestamptz)`,
         frames: sql`case when ${newer} then ${JSON.stringify(occurrences.frames)}::jsonb else ${errorIssues.frames} end`,
         lastSample: sql`case when ${newer} then ${JSON.stringify(occurrences.sample)}::jsonb else ${errorIssues.lastSample} end`,

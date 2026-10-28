@@ -6,6 +6,7 @@ import {
   pythonTracebackException,
   stripNullBytes,
 } from "./fingerprint.js";
+import { fingerprintLogV1, fingerprintV1 } from "./fingerprint-v1.js";
 
 // Error issues group a workspace's exceptions by fingerprint. Exceptions are
 // span events named "exception" and logs at ERROR severity or above. The
@@ -76,6 +77,9 @@ export type ErrorOccurrences = {
   lastSeenAt: Date;
   message: string | null;
   organizationId: string;
+  // The occurrences' fingerprints from the previous algorithm. An issue
+  // still keyed by one of them moves to the current fingerprint.
+  previousFingerprints: string[];
   sample: ErrorIssueSample;
   service: string | null;
   title: string;
@@ -228,20 +232,17 @@ export function groupErrorCandidates(candidates: ErrorCandidate[]): ErrorOccurre
     const stacktrace = stripNullBytes(bodyTraceback ? candidate.body : candidate.exception_stacktrace) || null;
     const service = stripNullBytes(candidate.service) || null;
     const severity = stripNullBytes(candidate.severity) || null;
-    const fp = candidate.kind === "span"
-      ? fingerprint({
-        message: candidate.exception_message,
-        stacktrace,
-        type: candidate.exception_type,
-      })
-      : fingerprintLog({
-        body: candidate.body,
-        exceptionType: candidate.exception_type || null,
-        message: candidate.exception_message || null,
-        service: candidate.service,
-        severity: candidate.severity,
-        stacktrace: bodyTraceback ? null : stacktrace,
-      });
+    const spanInput = { message: candidate.exception_message, stacktrace, type: candidate.exception_type };
+    const logInput = {
+      body: candidate.body,
+      exceptionType: candidate.exception_type || null,
+      message: candidate.exception_message || null,
+      service: candidate.service,
+      severity: candidate.severity,
+      stacktrace: bodyTraceback ? null : stacktrace,
+    };
+    const fp = candidate.kind === "span" ? fingerprint(spanInput) : fingerprintLog(logInput);
+    const previousFingerprint = candidate.kind === "span" ? fingerprintV1(spanInput) : fingerprintLogV1(logInput);
     const message = stripNullBytes(
       candidate.kind === "span"
         ? candidate.exception_message
@@ -278,6 +279,7 @@ export function groupErrorCandidates(candidates: ErrorCandidate[]): ErrorOccurre
         lastSeenAt: seenAt,
         message: sample.message,
         organizationId: candidate.project_id,
+        previousFingerprints: [previousFingerprint],
         sample,
         service,
         title: errorIssueTitle(fp, message),
@@ -286,6 +288,7 @@ export function groupErrorCandidates(candidates: ErrorCandidate[]): ErrorOccurre
       continue;
     }
     existing.eventCount += 1;
+    if (!existing.previousFingerprints.includes(previousFingerprint)) existing.previousFingerprints.push(previousFingerprint);
     existing.dailyCounts[day] = (existing.dailyCounts[day] ?? 0) + 1;
     existing.hourlyCounts[hour] = (existing.hourlyCounts[hour] ?? 0) + 1;
     if (seenAt < existing.firstSeenAt) existing.firstSeenAt = seenAt;

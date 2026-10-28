@@ -1,13 +1,17 @@
 import { createHash } from "node:crypto";
 
 // Groups error occurrences into issues. Equal fingerprints are the same
-// problem: the exception type, the message with per-occurrence values
-// replaced, and the top frames of the application's own code. Ported from
-// Superlog's fingerprint package; its hashes are not compatible with these.
+// problem: the exception type and the top frames of the application's own
+// code. The message, with per-occurrence values replaced, takes the frames'
+// place when the stack has none of the application's code. A frame is its
+// function and file: no line numbers, URL origins or bundle hashes, so the
+// same code groups across browsers, builds, and hosts.
 //
 // Every fingerprint starts with the algorithm version. A change that alters
-// any hash must bump it, so existing issues are not split without notice.
-export const fingerprintVersion = "v1";
+// any hash must bump it and keep the previous algorithm, as fingerprint-v1.ts
+// keeps v1, so existing issues move to the new fingerprint instead of opening
+// again as new.
+export const fingerprintVersion = "v2";
 
 export type Fingerprint = {
   hash: string;
@@ -36,11 +40,22 @@ const IGNORE_PATH = [
   /^node:internal\//,
   /^node:async_hooks/,
   /async_hooks\.js/,
-  /^webpack:\/\/\//,
+  /^webpack:\/\/\/(?:webpack\/|\(webpack\)\/)/,
   /(?:site|dist)-packages\//,
   /\/lib\/python\d+(?:\.\d+)*\//,
   /^<frozen /,
+  // Browser extensions inject scripts into the page; their errors are not
+  // the application's.
+  /^(?:chrome|moz|safari|safari-web|ms-browser)-extension:\/\//,
+  // Libraries served from public CDNs, and Vite's development client.
+  /^https?:\/\/(?:unpkg\.com|cdnjs\.cloudflare\.com|cdn\.jsdelivr\.net|esm\.run|esm\.sh)\//,
+  /\/@vite\/client/,
+  /\/@react-refresh/,
 ];
+
+// Frames that carry no location: native code, eval, and anonymous scripts.
+const LOW_QUALITY_PATHS = new Set(["<anonymous>", "[native code]", "native", "native code", "eval code", "unknown"]);
+const ANONYMOUS_FUNCTIONS = new Set(["?", "<anonymous>", "<anonymous function>", "anonymous", "Anonymous function"]);
 
 const NUL_BYTE = String.fromCharCode(0);
 
@@ -64,8 +79,11 @@ export function fingerprint(input: {
 
   const picked = userFrames.length > 0 ? userFrames : frames.slice(0, TOP_N_FRAMES);
   const normalized = picked.map(formatFrame);
-  const messageBucket = messageBucketFor(input.message);
-  const canonical = `${type}::${messageBucket}::${normalized.join("|")}`;
+  // The application's frames say where an error comes from; its message
+  // often carries per-occurrence values that no rule catches.
+  const messageBucket = userFrames.length > 0 ? "" : messageBucketFor(input.message);
+  const builtin = builtinGroup(type, input.message);
+  const canonical = builtin ?? `${type}::${messageBucket}::${normalized.join("|")}`;
   const hash = hashCanonical(canonical);
 
   // The hash is hex (always safe); the human-readable fields below are persisted
@@ -127,6 +145,32 @@ function hashCanonical(canonical: string): string {
   return `${fingerprintVersion}:${createHash("sha256").update(canonical).digest("hex").slice(0, HASH_LEN)}`;
 }
 
+// Browser errors that one cause produces from many places, grouped whatever
+// their stack. A failed chunk load follows a deploy or a network drop; a
+// hydration mismatch is one server and client difference.
+const CHUNK_LOAD_MESSAGES = [
+  /^ChunkLoadError/,
+  /^Loading (?:CSS )?chunk [\w-]+ failed/,
+  /^Failed to fetch dynamically imported module/,
+  /^error loading dynamically imported module/,
+  /^Importing a module script failed/,
+  /^Unable to preload CSS/,
+];
+const HYDRATION_MESSAGES = [
+  /^Hydration failed because/,
+  /^Text content does not match server-rendered HTML/,
+  /^There was an error while hydrating/,
+  /^The server could not finish this Suspense boundary/,
+  /^Minified React error #(?:418|419|422|423|425)[;. ]/,
+];
+
+function builtinGroup(type: string, message: string | null | undefined): string | null {
+  const text = (message ?? "").trim();
+  if (type === "ChunkLoadError" || CHUNK_LOAD_MESSAGES.some((re) => re.test(text))) return "builtin::chunk-load";
+  if (HYDRATION_MESSAGES.some((re) => re.test(text))) return "builtin::hydration";
+  return null;
+}
+
 // Bucket key for grouping by error message. Lighter than `normalizeMessage`:
 // preserves alphabetic content (so `model is not supported` doesn't collapse
 // onto `extra inputs are not permitted`) but strips identifiers that vary per
@@ -144,9 +188,53 @@ export function messageBucketFor(message: string | null | undefined): string {
   s = s.replace(/\b(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?\b/g, "<ip>");
   s = s.replace(/\b0x[0-9a-f]+\b/gi, "<hex>");
   s = s.replace(/\b[A-Za-z0-9_]{20,}\b/g, "<id>");
+  s = redactGeneratedIds(s);
+  s = s.replace(/\b\d+(?:\.\d+)?(?:ns|us|ms|s|m|h)\b/g, "<duration>");
   s = s.replace(/\b\d+\b/g, "<n>");
   s = s.replace(/\s+/g, " ").trim().toLowerCase();
   return s.length > MESSAGE_BUCKET_MAX ? s.slice(0, MESSAGE_BUCKET_MAX) : s;
+}
+
+// Replaces short generated values: hex strings and git SHAs, mixed letter
+// and digit IDs, and dash-joined codes such as `CIR726-MA`. A value must
+// switch between letters and digits often enough that words like `sha256`,
+// `es2015`, and `gpt-4o` stay.
+function redactGeneratedIds(s: string): string {
+  return s.replace(/(?<![A-Za-z0-9])[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*(?![A-Za-z0-9])/g, (token) => {
+    if (token.includes("-")) {
+      const joined = token.split("-").join("");
+      if (isRandomId(joined) || isUppercaseCode(joined)) return "<id>";
+      return token.split("-").map(redactGeneratedId).join("-");
+    }
+    return redactGeneratedId(token);
+  });
+}
+
+function redactGeneratedId(token: string): string {
+  if (isHexValue(token)) return "<hex>";
+  return isRandomId(token) ? "<id>" : token;
+}
+
+function letterDigitRuns(token: string): number {
+  return token.match(/\d+|[A-Za-z]+/g)?.length ?? 0;
+}
+
+function isHexValue(token: string): boolean {
+  if (/^(?:[0-9a-f]{8,128}|[0-9A-F]{8,128})$/.test(token)) return true;
+  const mixed = /\d/.test(token) && /[A-Fa-f]/.test(token);
+  if (token.length === 7) return mixed && /^[0-9a-f]+$/.test(token);
+  return token.length >= 4 && token.length <= 6 && mixed && /^(?:[0-9a-f]+|[0-9A-F]+)$/.test(token);
+}
+
+// Letters and digits that switch back and forth at least three times.
+function isRandomId(token: string): boolean {
+  if (token.length < 4 || letterDigitRuns(token) < 4) return false;
+  return token.length >= 6 || (/[a-z]/.test(token) && /[A-Z]/.test(token));
+}
+
+// Uppercase codes such as order or customer numbers.
+function isUppercaseCode(token: string): boolean {
+  return token.length >= 6 && /^[A-Z0-9]+$/.test(token) && letterDigitRuns(token) >= 3;
 }
 
 // Collapse leading-slash request paths to a single `<path>` token. A route
@@ -223,7 +311,7 @@ const POSTGRES_IDENTIFIER_CONTEXTS = new Set([
   "index",
 ]);
 
-function extractPsycopgHeadline(body: string): { type: string; message: string } | null {
+export function extractPsycopgHeadline(body: string): { type: string; message: string } | null {
   let marker = -1;
   let prefix = "";
   for (const candidate of PSYCOPG_ERROR_PREFIXES) {
@@ -474,13 +562,19 @@ function isThreeDigits(value: string): boolean {
   return true;
 }
 
-// Reads JavaScript (V8) and Python stack traces, innermost frame first.
+// Reads JavaScript (V8, Firefox, and Safari) and Python stack traces,
+// innermost frame first, without frames that carry no location. A frame
+// repeated by recursion counts once.
 function parseFrames(stacktrace: string): Frame[] {
-  return /^\s*File "/m.test(stacktrace) ? parsePythonFrames(stacktrace) : parseJavaScriptFrames(stacktrace);
+  const frames = /^\s*File "/m.test(stacktrace) ? parsePythonFrames(stacktrace) : parseJavaScriptFrames(stacktrace);
+  return frames.filter((frame, index) => {
+    const previous = frames[index - 1];
+    return !previous || previous.fn !== frame.fn || previous.path !== frame.path;
+  });
 }
 
 // Python prints the innermost frame last.
-function parsePythonFrames(stacktrace: string): Frame[] {
+export function parsePythonFrames(stacktrace: string): Frame[] {
   const out: Frame[] = [];
   for (const raw of stacktrace.split("\n")) {
     const match = raw.trim().match(/^File "(.+?)", line \d+(?:, in (.+))?$/);
@@ -492,22 +586,43 @@ function parsePythonFrames(stacktrace: string): Frame[] {
 function parseJavaScriptFrames(stacktrace: string): Frame[] {
   const out: Frame[] = [];
   for (const raw of stacktrace.split("\n")) {
-    const line = raw.trim();
-    if (!line.startsWith("at ")) continue;
-    const body = line.slice(3);
-
-    const withFn = body.match(/^(.+?)\s+\((.+?):\d+:\d+\)$/);
-    if (withFn) {
-      out.push({ fn: withFn[1] ?? null, path: withFn[2] ?? "" });
-      continue;
-    }
-
-    const bare = body.match(/^(.+?):\d+:\d+$/);
-    if (bare) {
-      out.push({ fn: null, path: bare[1] ?? "" });
-    }
+    const frame = parseJavaScriptFrame(raw.trim());
+    if (!frame || LOW_QUALITY_PATHS.has(frame.path) || frame.fn === "eval") continue;
+    out.push(frame);
   }
   return out;
+}
+
+// V8 writes `at fn (path:line:col)` or `at path:line:col`. Firefox and Safari
+// write `fn@path:line:col`, with an empty name for anonymous code.
+function parseJavaScriptFrame(line: string): Frame | null {
+  if (line.startsWith("at ")) {
+    const body = line.slice(3);
+    // Code run by eval has no file of its own.
+    if (body.includes("(eval at ")) return null;
+    const withFn = body.match(/^(.+?)\s+\((?:address at )?(.+?)(?::\d+){1,2}\)$/);
+    if (withFn) return { fn: javaScriptFunction(withFn[1]), path: withFn[2] ?? "" };
+    const bare = body.match(/^(?:address at )?(.+?):\d+:\d+$/);
+    return bare ? { fn: null, path: bare[1] ?? "" } : null;
+  }
+  const gecko = line.match(/^([^@\s(]*(?:\s[^@\s(]+)*)@(.+?)(?::\d+){1,2}$/) ?? line.match(/^([^@\s(]*)@(\[native code\])$/);
+  if (!gecko) return null;
+  const path = gecko[2] ?? "";
+  // Firefox marks eval and Function code as `path line N > eval`.
+  if (/ line \d+ > /.test(path)) return null;
+  return { fn: javaScriptFunction(gecko[1]), path };
+}
+
+// The function's own name, which browsers agree on: `Object.load`,
+// `async Loader.load`, and `new Loader` become `load` and `Loader`.
+// Anonymous functions have no name.
+function javaScriptFunction(raw: string | undefined): string | null {
+  let fn = (raw ?? "").trim().replace(/\s+\[as [^\]]+\]$/, "");
+  fn = fn.replace(/^(?:async|new)\s+/, "");
+  // Safari names top-level code `global code` or `module code`.
+  if (!fn || ANONYMOUS_FUNCTIONS.has(fn) || fn.endsWith("/<") || / code$/.test(fn)) return null;
+  const name = fn.split(".").at(-1) ?? fn;
+  return name && !ANONYMOUS_FUNCTIONS.has(name) ? name : null;
 }
 
 function isUserFrame(f: Frame): boolean {
@@ -521,7 +636,11 @@ function formatFrame(f: Frame): string {
 
 function normalizePath(p: string): string {
   let out = p
+    // A script's host and query change with the deployment, preview, or
+    // CDN that served it, not with the code.
+    .replace(/^https?:\/\/[^/]+(\/[^?#]*)(?:[?#].*)?$/i, "$1")
     .replace(/^webpack-internal:\/\/\/?/, "")
+    .replace(/^webpack:\/\/[^/]*\//, "")
     .replace(/^\([^)]*\)\//, "")
     .replace(/^\.\//, "")
     .replace(/^file:\/\//, "")
@@ -551,6 +670,28 @@ function normalizePath(p: string): string {
     /(\/(?:\.next|_next)\/(?:server|static)\/(?:[^/]+\/)*[^/]*?)[0-9a-f]{8,}((?:\._)?\.js)$/gi,
     "$1<hash>$2",
   );
+  out = removeBundleHash(out);
   out = out.replace(/^.*?\/((?:apps|packages|src|app|lib|pages)\/.*)$/, "$1");
   return out;
+}
+
+// Bundlers put a content hash in each generated file's name, so the same code
+// gets a new path every build: Vite and Rollup `index-B9xK3d2a.js`, webpack
+// `main.4f3a2b1c.chunk.js`, esbuild `chunk-ABCD2345.js`, and Turbopack
+// `apps_1cfrrbb._.js`.
+function removeBundleHash(path: string): string {
+  const slash = path.lastIndexOf("/");
+  const directory = path.slice(0, slash + 1);
+  const file = path.slice(slash + 1);
+  const turbopack = file.replace(/(^|_)[0-9a-z-]{7}(\._\.js)$/, "$1<hash>$2");
+  if (turbopack !== file) return directory + turbopack;
+  const extension = "((?:\\.chunk)?\\.(?:m?js|cjs|css))$";
+  const hex = file.match(new RegExp(`^(.+)([-.])(?=[a-f]*\\d)[0-9a-f]{7,}${extension}`, "i"));
+  if (hex) return `${directory}${hex[1]}${hex[2]}<hash>${hex[3]}`;
+  const short = file.match(new RegExp(`^(.+)-([A-Za-z0-9_-]{8})${extension}`));
+  if (!short) return path;
+  const [, name, token, suffix] = short;
+  // An eight-letter word such as `polyfill` or `Settings` is a name, not a hash.
+  const looksGenerated = /\d/.test(token!) || (/[a-z]/.test(token!) && /[A-Z]/.test(token!) && !/^[A-Z][a-z]+$/.test(token!));
+  return looksGenerated ? `${directory}${name}-<hash>${suffix}` : path;
 }

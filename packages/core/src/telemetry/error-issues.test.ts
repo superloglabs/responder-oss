@@ -10,6 +10,7 @@ import {
   occurrenceTransition,
   zeroCandidateId,
 } from "./error-issues.js";
+import { fingerprintV1 } from "./fingerprint-v1.js";
 
 const organizationId = "0b9f6b9e-2f4a-4c1e-9d2b-3f8a6c1d7e01";
 const stack = [
@@ -59,7 +60,25 @@ describe("groupErrorCandidates", () => {
       topFrame: "loadInvoice@apps/api/src/invoices.ts",
     });
     expect(issue?.sample.traceId).toBe("newest");
-    expect(issue?.fingerprint).toMatch(/^v1:/);
+    expect(issue?.fingerprint).toMatch(/^v2:/);
+  });
+
+  it("carries each occurrence's previous fingerprint once", () => {
+    const [issue] = groupErrorCandidates([
+      candidate(),
+      candidate({ exception_stacktrace: stack.replace("at handler", "at async handler") }),
+      candidate(),
+    ]);
+
+    expect(issue?.eventCount).toBe(3);
+    expect(issue?.previousFingerprints).toEqual([
+      fingerprintV1({ message: candidate().exception_message, stacktrace: stack, type: "TypeError" }),
+      fingerprintV1({
+        message: candidate().exception_message,
+        stacktrace: stack.replace("at handler", "at async handler"),
+        type: "TypeError",
+      }),
+    ]);
   });
 
   it("keeps workspaces apart even for the same fingerprint", () => {

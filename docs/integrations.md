@@ -1033,13 +1033,21 @@ drains; an AWS stack stays until the customer deletes it.
 
 The worker groups a telemetry workspace's exceptions into error issues by
 fingerprint. An exception is a span event named `exception` or a log at ERROR
-severity or above. The fingerprint is the exception type, the message with
-URLs, paths, IDs, numbers and timestamps replaced, and the top five frames of
-the application's own code without line numbers. Frames from `node_modules`,
-Node internals and Python packages are skipped. JavaScript and Python stacks
-are read; other languages group by type and message. A log without a stack
-groups by its service, severity and normalized body. Fingerprints start with
-the algorithm version (`v1:`).
+severity or above. The fingerprint is the exception type and the top five
+frames of the application's own code. When the stack has none of the
+application's code, the message takes the frames' place, with URLs, paths,
+IDs, generated codes, numbers and timestamps replaced. A frame is its function
+and file: no line numbers, URL origins, query strings or bundle content
+hashes; function names without `async`, `new` or their receiver; a recursive
+frame once; and no frames from native code, eval, browser extensions, public
+CDNs, `node_modules`, Node internals or Python packages. V8, Firefox, Safari
+and Python stacks are read; other languages group by type and message. Chunk
+load errors and React hydration errors each group into one issue whatever
+their stack. A log without a stack groups by its service, severity and
+normalized body. Fingerprints start with the algorithm version
+(`v2:`). An occurrence whose fingerprint has no issue takes over the issue its
+`v1:` fingerprint named, so the change of algorithm opens no known error again
+as new.
 
 Every ten seconds the worker reads exceptions from ClickHouse's
 `otel_issue_candidates` table in arrival order, 30 seconds behind the present,

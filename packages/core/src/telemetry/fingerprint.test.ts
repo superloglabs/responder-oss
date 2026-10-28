@@ -447,8 +447,8 @@ test("fingerprintLog strips NUL bytes from exception type", () => {
 });
 
 test("fingerprints carry the algorithm version", () => {
-  expect(fingerprint({ type: "Error", stacktrace: null, message: "boom" }).hash).toMatch(/^v1:[0-9a-f]{16}$/);
-  expect(fingerprintLog({ service: "api", severity: "ERROR", body: "boom" }).hash).toMatch(/^v1:[0-9a-f]{16}$/);
+  expect(fingerprint({ type: "Error", stacktrace: null, message: "boom" }).hash).toMatch(/^v2:[0-9a-f]{16}$/);
+  expect(fingerprintLog({ service: "api", severity: "ERROR", body: "boom" }).hash).toMatch(/^v2:[0-9a-f]{16}$/);
 });
 
 function pythonTraceback(input: { line: number; libraryVersion: string }): string {
@@ -515,7 +515,7 @@ test("fingerprintLog groups Python tracebacks logged as the body by their frames
   expect(first).toMatchObject({ exceptionType: "KeyError", topFrame: "compute_total@app/billing/totals.py" });
 });
 
-test("fingerprintLog separates errors with a stack that differ by message", () => {
+test("fingerprint groups errors from the same application frames whatever their message", () => {
   const fingerprintFor = (message: string) =>
     fingerprintLog({
       service: "api",
@@ -526,6 +526,152 @@ test("fingerprintLog separates errors with a stack that differ by message", () =
       stacktrace: "    at validate (/var/task/apps/api/src/validate.ts:10:5)",
     }).hash;
 
-  expect(fingerprintFor("email is required")).not.toBe(fingerprintFor("plan is not available"));
-  expect(fingerprintFor("order 41 is closed")).toBe(fingerprintFor("order 42 is closed"));
+  expect(fingerprintFor("CustomerCode CIR726-MA is already in use")).toBe(fingerprintFor("plan is not available"));
+});
+
+test("fingerprint separates library-only stacks by message", () => {
+  const fingerprintFor = (message: string) => fingerprint({
+    message,
+    stacktrace: "    at settle (/srv/node_modules/axios/lib/core/settle.js:19:12)",
+    type: "AxiosError",
+  }).hash;
+
+  expect(fingerprintFor("Network Error")).not.toBe(fingerprintFor("timeout of 5000ms exceeded"));
+  expect(fingerprintFor("timeout of 5000ms exceeded")).toBe(fingerprintFor("timeout of 3000ms exceeded"));
+});
+
+const browserStacks = {
+  chrome: [
+    "TypeError: Cannot read properties of undefined (reading 'total')",
+    "    at Object.renderTotal (https://app.acme.com/assets/index-B9xK3d2a.js:1:200)",
+    "    at async loadCart (https://app.acme.com/assets/index-B9xK3d2a.js:1:900)",
+    "    at https://app.acme.com/assets/index-B9xK3d2a.js:1:20",
+  ].join("\n"),
+  firefox: [
+    "renderTotal@https://app.acme.com/assets/index-B9xK3d2a.js:1:180",
+    "loadCart@https://app.acme.com/assets/index-B9xK3d2a.js:1:870",
+    "@https://app.acme.com/assets/index-B9xK3d2a.js:1:20",
+  ].join("\n"),
+  safari: [
+    "renderTotal@https://app.acme.com/assets/index-B9xK3d2a.js:1:181",
+    "loadCart@https://app.acme.com/assets/index-B9xK3d2a.js:1:871",
+    "global code@https://app.acme.com/assets/index-B9xK3d2a.js:1:20",
+  ].join("\n"),
+};
+
+test("fingerprint groups one browser error across Chrome, Firefox, and Safari", () => {
+  const hashes = Object.values(browserStacks).map((stacktrace) =>
+    fingerprint({ message: "e is undefined", stacktrace, type: "TypeError" }));
+
+  expect(hashes[1]?.normalizedFrames).toEqual([
+    "renderTotal@/assets/index-<hash>.js",
+    "loadCart@/assets/index-<hash>.js",
+    "/assets/index-<hash>.js",
+  ]);
+  expect(new Set(hashes.map((fp) => fp.hash)).size).toBe(1);
+});
+
+test("fingerprint groups browser stacks across hosts, query strings, and bundle hashes", () => {
+  const stackFor = (url: string) => fingerprint({
+    message: "boom",
+    stacktrace: `Error: boom\n    at submit (${url}:1:2)`,
+    type: "Error",
+  }).hash;
+
+  const production = stackFor("https://app.acme.com/assets/checkout-B9xK3d2a.js");
+  expect(stackFor("https://pr-41.preview.acme.com/assets/checkout-Cq-7_xP1.js?v=3")).toBe(production);
+  expect(stackFor("https://cdn.acme.com/static/js/main.4f3a2b1c.chunk.js")).toBe(stackFor("https://cdn.acme.com/static/js/main.9d8e7c6b.chunk.js"));
+  expect(stackFor("https://app.acme.com/assets/chunk-ABCD2345.js")).toBe(stackFor("https://app.acme.com/assets/chunk-QRST6789.js"));
+  expect(stackFor("https://app.acme.com/assets/index-polyfill.js")).not.toBe(stackFor("https://app.acme.com/assets/index-B9xK3d2a.js"));
+});
+
+test("fingerprint groups Turbopack server chunks whose generated names differ", () => {
+  const stackFor = (chunk: string) => fingerprint({
+    message: "Portal session expired",
+    stacktrace: `Error: Portal session expired\n    at requireSession (/app/apps/web/.next/server/chunks/ssr/${chunk}:1:2)`,
+    type: "Error",
+  }).hash;
+
+  expect(stackFor("apps_1cfrrbb._.js")).toBe(stackFor("apps_0kqpund._.js"));
+  expect(stackFor("_0r0mgvw._.js")).toBe(stackFor("_1k0-fjn._.js"));
+});
+
+test("fingerprint trims async, constructor, and receiver prefixes from function names", () => {
+  const frameFor = (line: string) => fingerprint({ stacktrace: `Error\n    at ${line}`, type: "Error" }).topFrame;
+
+  expect(frameFor("async Loader.load (/srv/apps/api/src/loader.ts:1:2)")).toBe("load@apps/api/src/loader.ts");
+  expect(frameFor("Object.load (/srv/apps/api/src/loader.ts:9:9)")).toBe("load@apps/api/src/loader.ts");
+  expect(frameFor("new Loader (/srv/apps/api/src/loader.ts:1:2)")).toBe("Loader@apps/api/src/loader.ts");
+  expect(frameFor("Object.<anonymous> (/srv/apps/api/src/loader.ts:1:2)")).toBe("apps/api/src/loader.ts");
+  expect(frameFor("Router.handle [as handle_request] (/srv/apps/api/src/router.ts:1:2)")).toBe("handle@apps/api/src/router.ts");
+});
+
+test("fingerprint skips native, eval, and browser extension frames", () => {
+  const fp = fingerprint({
+    stacktrace: [
+      "Error: boom",
+      "    at Array.forEach (<anonymous>)",
+      "    at eval (eval at run (https://app.acme.com/assets/index-B9xK3d2a.js:1:1), <anonymous>:1:1)",
+      "    at inject (chrome-extension://abcdefghijklmnop/content.js:1:2)",
+      "    at submit (https://app.acme.com/assets/index-B9xK3d2a.js:1:2)",
+    ].join("\n"),
+    type: "Error",
+  });
+  const safari = fingerprint({
+    stacktrace: ["forEach@[native code]", "submit@https://app.acme.com/assets/index-B9xK3d2a.js:1:2"].join("\n"),
+    type: "Error",
+  });
+
+  expect(fp.normalizedFrames).toEqual(["submit@/assets/index-<hash>.js"]);
+  expect(safari.hash).toBe(fp.hash);
+});
+
+test("fingerprint counts a recursive frame once", () => {
+  const stackFor = (depth: number) => fingerprint({
+    stacktrace: ["RangeError: Maximum call stack size exceeded", ...Array.from({ length: depth }, () => "    at walk (/srv/apps/api/src/tree.ts:4:10)")].join("\n"),
+    type: "RangeError",
+  });
+
+  expect(stackFor(3).normalizedFrames).toEqual(["walk@apps/api/src/tree.ts"]);
+  expect(stackFor(3).hash).toBe(stackFor(40).hash);
+});
+
+test("fingerprint groups chunk load and hydration errors whatever their stack", () => {
+  const hashFor = (type: string, message: string, file: string) => fingerprint({
+    message,
+    stacktrace: `${type}: ${message}\n    at ${file} (https://app.acme.com/assets/${file}.js:1:2)`,
+    type,
+  }).hash;
+
+  expect(hashFor("ChunkLoadError", "Loading chunk 412 failed.", "a")).toBe(hashFor("ChunkLoadError", "Loading chunk 97 failed.", "b"));
+  expect(hashFor("TypeError", "Failed to fetch dynamically imported module: https://app.acme.com/assets/a.js", "a"))
+    .toBe(hashFor("TypeError", "Importing a module script failed.", "b"));
+  expect(hashFor("Error", "Minified React error #418; visit https://react.dev/errors/418", "a"))
+    .toBe(hashFor("Error", "Hydration failed because the server rendered HTML didn't match the client.", "b"));
+  expect(hashFor("ChunkLoadError", "Loading chunk 412 failed.", "a")).not.toBe(hashFor("Error", "Hydration failed because x", "a"));
+});
+
+test("messageBucketFor replaces generated codes and keeps ordinary words", () => {
+  expect(messageBucketFor("CustomerCode 5AC318-MA is already in use."))
+    .toBe(messageBucketFor("CustomerCode CIR726-MA is already in use."));
+  expect(messageBucketFor("CustomerCode N9R901-KY is already in use."))
+    .toBe(messageBucketFor("CustomerCode 5XJV38-MA is already in use."));
+  expect(messageBucketFor("commit 3f9a2c1 not found")).toBe(messageBucketFor("commit a81b0e7 not found"));
+  expect(messageBucketFor("session aKj8XLr2 expired")).toBe(messageBucketFor("session Zq7Wm2Np expired"));
+  expect(messageBucketFor("sha256 digest mismatch for es2015 target")).toBe("sha256 digest mismatch for es2015 target");
+  expect(messageBucketFor("model gpt-4o-mini is not supported")).not.toBe(messageBucketFor("model gpt-4o is not supported"));
+});
+
+test("fingerprint skips V8 frames without a location", () => {
+  const fp = fingerprint({
+    stacktrace: [
+      "Error: boom",
+      "    at load (/srv/apps/api/src/load.ts:1:2)",
+      "    at async Promise.all (index 0)",
+      "    at async run (/srv/apps/api/src/run.ts:3:4)",
+    ].join("\n"),
+    type: "Error",
+  });
+
+  expect(fp.normalizedFrames).toEqual(["load@apps/api/src/load.ts", "run@apps/api/src/run.ts"]);
 });
