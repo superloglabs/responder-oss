@@ -164,6 +164,30 @@ function splitAttrs(
   return out;
 }
 
+// `field.error_issue` matches the exact logs and spans the worker grouped into
+// an error issue, through error_issue_events: a log by its service, time, trace
+// and span, a span by its trace and span. Logs also match the spans of a span
+// issue, so they show what each failing span logged. The events' time is the
+// log's or span's own, so the query's window bounds them too; logs of a span
+// can start up to an hour after it.
+function errorIssueCond(
+  filter: ResourceAttrFilter,
+  source: FieldFilterSource,
+  param: string,
+  window?: { sinceExpr: string; untilExpr: string },
+): string | null {
+  if (filter.op === "not_contains") return null;
+  const issue = filter.values ? `issue_id IN {${param}:Array(String)}` : `issue_id = {${param}:String}`;
+  const time = window ? ` AND Timestamp >= (${window.sinceExpr}) - INTERVAL 1 HOUR AND Timestamp <= ${window.untilExpr}` : "";
+  const events = (columns: string, kind: string) =>
+    `SELECT ${columns} FROM error_issue_events WHERE project_id = {organizationId:String} AND ${issue}${kind}${time}`;
+  const match = source === "logs"
+    ? `((ServiceName, Timestamp, TraceId, SpanId) IN (${events("service, Timestamp, trace_id, span_id", " AND kind = 'log'")})
+        OR (TraceId, SpanId) IN (${events("trace_id, span_id", " AND kind = 'span' AND span_id != ''")}))`
+    : `(TraceId, SpanId) IN (${events("trace_id, span_id", " AND span_id != ''")})`;
+  return filter.op === "neq" ? `NOT ${match}` : match;
+}
+
 // Build conditions for `field.*` filters against top-level columns. Only keys
 // on the fieldColumnExpr allowlist for this source produce a condition;
 // everything else is silently dropped.
@@ -171,10 +195,19 @@ function fieldConds(
   attrs: ResourceAttrFilter[],
   source: FieldFilterSource,
   paramPrefix = "fattr",
+  window?: { sinceExpr: string; untilExpr: string },
 ): { conds: string[]; params: Record<string, string | string[]> } {
   const conds: string[] = [];
   const params: Record<string, string | string[]> = {};
   attrs.forEach((a, i) => {
+    if (a.key === "error_issue") {
+      const cond = errorIssueCond(a, source, `${paramPrefix}_v_${i}`, window);
+      if (cond) {
+        conds.push(cond);
+        params[`${paramPrefix}_v_${i}`] = a.values ?? a.value;
+      }
+      return;
+    }
     const expr = fieldColumnExpr(a.key, source);
     if (!expr) return;
     const vName = `${paramPrefix}_v_${i}`;
@@ -303,7 +336,7 @@ export async function queryLogs(
   const split = splitAttrs(params.resourceAttrs);
   const attr = attrConds(split.resource);
   const logAttr = attrConds([...split.log, ...(params.logAttrs ?? [])], "LogAttributes", "lattr");
-  const field = fieldConds(split.field, "logs");
+  const field = fieldConds(split.field, "logs", "fattr", { sinceExpr, untilExpr });
   const anyOf = anyOfConds([
     { expr: "ServiceName", param: "services", values: params.services },
     { expr: "upper(SeverityText)", param: "severities", values: params.severities?.map((value) => value.toUpperCase()) },
@@ -398,7 +431,7 @@ export async function queryTraces(
     "SpanAttributes",
     "sattr",
   );
-  const field = fieldConds(split.field, "traces");
+  const field = fieldConds(split.field, "traces", "fattr", { sinceExpr, untilExpr });
   const conds: string[] = [
     "SuperlogProjectId = {organizationId:String}",
     `Timestamp >= ${sinceExpr}`,
@@ -689,7 +722,7 @@ export async function queryTracesAggregated(
   const split = splitAttrs(params.resourceAttrs);
   const attr = attrConds(split.resource);
   const spanAttr = attrConds(split.span, "SpanAttributes", "sattr");
-  const field = fieldConds(split.field, "traces");
+  const field = fieldConds(split.field, "traces", "fattr", { sinceExpr, untilExpr });
   // Outer scope: trace-level. We aggregate over every span of every matching
   // trace in the window so span_count / duration_ms / error_count describe the
   // whole trace rather than only the spans matching span-level filters.
@@ -1143,8 +1176,8 @@ export async function listAttributeValues(
   const resourceFilter = attrConds(split.resource, "ResourceAttributes", "fattr_r");
   const logFilter = attrConds(split.log, "LogAttributes", "fattr_l");
   const spanFilter = attrConds(split.span, "SpanAttributes", "fattr_s");
-  const logFields = fieldConds(split.field, "logs", "fattr_f");
-  const traceFields = fieldConds(split.field, "traces", "fattr_f");
+  const logFields = fieldConds(split.field, "logs", "fattr_f", { sinceExpr, untilExpr });
+  const traceFields = fieldConds(split.field, "traces", "fattr_f", { sinceExpr, untilExpr });
   const searchLogs = split.span.length === 0;
   const searchTraces = split.log.length === 0;
   // Capped like listAttributeKeys: grouping the values of a map column across
@@ -2935,7 +2968,7 @@ function countConditions(organizationId: string, source: SeriesSource, filter: S
     source === "logs"
       ? attrConds(split.log, "LogAttributes", "event_attr")
       : attrConds(split.span, "SpanAttributes", "event_attr");
-  const field = fieldConds(split.field, source === "logs" ? "logs" : "traces");
+  const field = fieldConds(split.field, source === "logs" ? "logs" : "traces", "fattr", { sinceExpr, untilExpr });
   const table = source === "logs" ? "otel_logs" : "otel_traces";
   const anyOf = anyOfConds(
     source === "logs"

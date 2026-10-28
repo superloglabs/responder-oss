@@ -60,16 +60,27 @@ const issueId = "33333333-3333-4333-8333-333333333333";
 const now = Date.now();
 const issue = { id: issueId, title: "TypeError: Cannot read payment method", exceptionType: "TypeError", service: "checkout", kind: "span", status: "open", eventCount: 1284, firstSeenAt: new Date(now - 86400000).toISOString(), lastSeenAt: new Date(now - 60000).toISOString(), regressedAt: null, statusChangedAt: null, topFrame: "payment.ts:84", fingerprint: "v1:test", frames: ["payment.ts:84"], message: "Cannot read payment method", lastSample: { seenAt: new Date(now - 60000).toISOString(), kind: "span", message: "Cannot read payment method", stacktrace: "TypeError: Cannot read payment method\n    at processPayment (payment.ts:84:29)", traceId: "abc123", attributes: { "http.request.method": "POST" }, resourceAttributes: { "deployment.environment.name": "production", "service.version": "0123456789abcdef0123456789abcdef01234567-abcdef0123456789abcdef0123456789abcdef01" } } };
 
+const logQueries: URLSearchParams[] = [];
+const traceQueries: URLSearchParams[] = [];
+
 async function setup(page: Page, pageSize = 1) {
   await mockWorkspace(page, ["telemetry", "alerts", "simplified_navigation"]);
   await page.route("**/api/c15t/**", (route) => route.abort());
   await page.route("**/api/cells", (route) => route.fulfill({ json: { cells: [] } }));
   await page.route("**/api/telemetry/traces**", (route) => {
     const url = new URL(route.request().url());
+    traceQueries.push(url.searchParams);
     const path = url.pathname;
     return route.fulfill({ json: path.endsWith("/facets") ? { services: [{ group: "checkout", value: 3 }], statuses: [{ group: "STATUS_CODE_ERROR", value: 3 }], operations: [] } : { traces: Array.from({ length: url.searchParams.get("offset") === "50" ? 1 : 51 }, (_, index) => ({
       trace_id: `trace-${url.searchParams.get("offset") ?? "0"}-${index}`, start_time: new Date(now - 60_000).toISOString(), root_span_name: "POST /checkout", root_service: "checkout", service_count: 2, span_count: 8, duration_ms: 450, error_count: 1,
     })) } });
+  });
+  await page.route("**/api/telemetry/logs**", (route) => {
+    const url = new URL(route.request().url());
+    logQueries.push(url.searchParams);
+    if (url.pathname.endsWith("/histogram")) return route.fulfill({ json: { buckets: [], since: new Date(now - 86_400_000).toISOString(), stepMs: 3_600_000, until: new Date(now).toISOString() } });
+    if (url.pathname.endsWith("/facets")) return route.fulfill({ json: { services: [{ group: "checkout", value: 1 }], severities: [{ group: "INFO", value: 1 }] } });
+    return route.fulfill({ json: { logs: [{ timestamp: new Date(now - 60_000).toISOString().replace("T", " ").replace("Z", ""), severity: "INFO", severity_number: 9, service: "checkout", body: "charging card", event_name: "", trace_id: "trace-0-0", span_id: "span-1", log_attrs: {}, resource_attrs: {}, exception_message: "", exception_stacktrace: "", exception_type: "" }] } });
   });
   await page.route("**/api/telemetry/attribute-keys**", (route) => route.fulfill({ json: { keys: [] } }));
   const queries: URLSearchParams[] = [];
@@ -136,19 +147,24 @@ test("opens the detail and resolves an error", async ({ page }, testInfo) => {
   await expect(page.locator(".explorerAttributes").getByText("deployment.environment.name", { exact: true })).toHaveCount(0);
   await page.getByRole("searchbox", { name: "Filter attribute keys" }).clear();
   await expect(page.getByText("production", { exact: true }).first()).toBeVisible();
-  const related = page.getByRole("region", { name: "Related traces" });
-  await expect(related.getByRole("columnheader")).toHaveText(["Started", "Root span", "Duration", "Spans", "Status"]);
-  const href = await related.getByRole("link", { name: "Open in trace search" }).getAttribute("href");
+  const traces = page.getByRole("region", { name: "Traces", exact: true });
+  await expect(traces.getByRole("columnheader")).toHaveText(["Started", "Root span", "Duration", "Spans", "Status"]);
+  const href = await traces.getByRole("link", { name: "Open in trace search" }).getAttribute("href");
   const params = new URL(href!, "http://localhost").searchParams;
-  expect(params.get("service")).toBe("checkout");
-  expect(params.get("status")).toBe("STATUS_CODE_ERROR");
-  expect(params.get("filter")).toBe("resource.deployment.environment.name=production");
+  expect(params.getAll("filter")).toEqual([`field.error_issue=${issueId}`]);
+  expect(params.get("service")).toBeNull();
+  expect(params.get("status")).toBeNull();
+  expect(traceQueries.at(-1)?.getAll("filter")).toEqual([`field.error_issue=${issueId}`]);
   await expect(page.getByText("32 events · Every 3 hours, last 30 days")).toBeVisible();
-  await related.getByRole("button", { name: "Next", exact: true }).click();
-  await expect(related.getByText("51–51 traces", { exact: true })).toBeVisible();
-  await expect(related.getByRole("button", { name: "Next", exact: true })).toBeDisabled();
-  await related.getByRole("button", { name: "Previous", exact: true }).click();
-  await expect(related.getByText("1–50 traces", { exact: true })).toBeVisible();
+  await traces.getByRole("button", { name: "Next", exact: true }).click();
+  await expect(traces.getByText("51–51 traces", { exact: true })).toBeVisible();
+  await traces.getByRole("button", { name: "Previous", exact: true }).click();
+  await expect(traces.getByText("1–50 traces", { exact: true })).toBeVisible();
+  const logs = page.getByRole("region", { name: "Logs", exact: true });
+  await expect(logs.getByText("charging card", { exact: true })).toBeVisible();
+  await expect(logs.getByText("Logs from the spans where this error occurred.")).toBeVisible();
+  expect(new URL((await logs.getByRole("link", { name: "Open in logs" }).getAttribute("href"))!, "http://localhost").searchParams.getAll("filter")).toEqual([`field.error_issue=${issueId}`]);
+  expect(logQueries.at(-1)?.getAll("filter")).toEqual([`field.error_issue=${issueId}`]);
   await page.getByRole("button", { name: "Resolve", exact: true }).click();
   await expect(page.getByRole("button", { name: "Reopen", exact: true })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("error-detail.png"), fullPage: true });

@@ -207,6 +207,7 @@ export function createErrorIssueRoutes(dependencies: ErrorIssueRouteDependencies
         severity: log.data.severity,
         span_id: "",
         span_name: "",
+        timestamp: "",
         trace_id: "",
       };
       // Like the worker, a failure to load maps groups the log as it arrived.

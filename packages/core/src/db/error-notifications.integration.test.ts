@@ -28,7 +28,7 @@ describe.skipIf(!testUrl)("error notification outbox (PostgreSQL)", () => {
     return groupErrorCandidates([{
       attrs: {}, resource_attrs: {}, body: "", candidate_id: randomUUID(), discovered_ms: String(Date.now()),
       exception_message: message, exception_stacktrace: "", exception_type: `TestError_${message}`, kind: "log", project_id: organizationId,
-      seen_ms: String(Date.now() + 1000), service: "api", severity: "ERROR", span_id: "", span_name: "", trace_id: "",
+      seen_ms: String(Date.now() + 1000), service: "api", severity: "ERROR", span_id: "", span_name: "", timestamp: "2026-10-28 12:00:00.000000000", trace_id: "",
     }])[0]!;
   }
   async function deliveries(issueId: string) {

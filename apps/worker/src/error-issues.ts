@@ -1,13 +1,15 @@
 import { type ErrorIssueStore, withErrorIssueStore } from "@responder/core/db/error-issues";
 import { loadSourceMaps } from "@responder/core/db/source-maps";
-import { getTelemetryClient, type TelemetryClient } from "@responder/core/telemetry/client";
+import { getTelemetryClient, getTelemetryWriterClient, type TelemetryClient } from "@responder/core/telemetry/client";
 import {
   type ErrorCandidate,
   errorCandidates,
+  type ErrorIssueEventRow,
   errorCandidateWindow,
   errorIssueKinds,
   groupErrorCandidates,
   nextErrorCandidateCursor,
+  writeErrorIssueEvents,
 } from "@responder/core/telemetry/error-issues";
 import { type SourceMapLoader, symbolicateCandidates } from "@responder/core/telemetry/symbolicate";
 
@@ -30,6 +32,9 @@ export interface ErrorIssueDependencies {
   now: () => Date;
   sourceMaps: SourceMapLoader;
   withStore: <T>(pass: (store: ErrorIssueStore) => Promise<T>) => Promise<T | null>;
+  writeEvents: typeof writeErrorIssueEvents;
+  // Null when the cell does not record error issue events.
+  writer: () => TelemetryClient | null;
 }
 
 export const defaultErrorIssueDependencies: ErrorIssueDependencies = {
@@ -38,6 +43,8 @@ export const defaultErrorIssueDependencies: ErrorIssueDependencies = {
   now: () => new Date(),
   sourceMaps: loadSourceMaps,
   withStore: withErrorIssueStore,
+  writeEvents: writeErrorIssueEvents,
+  writer: getTelemetryWriterClient,
 };
 
 // A cell whose ClickHouse does not have the exception projection yet.
@@ -81,6 +88,7 @@ export async function ingestErrorIssues(
 ): Promise<ErrorIssueChange[]> {
   const client = dependencies.client();
   if (!client) return [];
+  const writer = dependencies.writer();
   const changes = await dependencies.withStore(async (store) => {
     const organizationIds = await store.organizationIds();
     const paused = await store.pausedOrganizationIds();
@@ -93,9 +101,13 @@ export async function ingestErrorIssues(
         organizationIds,
         window,
       });
+      const events: ErrorIssueEventRow[] = [];
       for (const occurrences of groupErrorCandidates(await symbolicate(rows, dependencies.sourceMaps))) {
         try {
           const recorded = await store.record(occurrences);
+          for (const event of occurrences.events) {
+            events.push({ ...event, fingerprint: occurrences.fingerprint, issueId: recorded.issueId, organizationId: occurrences.organizationId });
+          }
           if (recorded.transition === "new" || recorded.transition === "regressed") {
             opened.push({
               issueId: recorded.issueId,
@@ -115,6 +127,13 @@ export async function ingestErrorIssues(
             organizationId: occurrences.organizationId,
           }));
         }
+      }
+      // Written before the pass commits, so a failed write retries the pass
+      // and no occurrence is counted without its event.
+      if (writer) {
+        await dependencies.writeEvents(writer, events).catch((error: unknown) => {
+          throw new Error(`Could not write error issue events: ${errorText(error)}`, { cause: error });
+        });
       }
       await store.saveCursor(kind, nextErrorCandidateCursor(window, rows, candidatesPerPass));
     }

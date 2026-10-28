@@ -183,7 +183,7 @@ function logKeyForAttributes(log: LogRecord): string {
   return log.service;
 }
 
-function LogExplorer({ query, refresh, setQuery, timeZone, now }: {
+export function LogExplorer({ query, refresh, setQuery, timeZone, now }: {
   query: LogExplorerQuery;
   now: number;
   // Changes when someone asks to reload.

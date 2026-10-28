@@ -36,6 +36,7 @@ function candidate(overrides: Partial<ErrorCandidate> = {}): ErrorCandidate {
     severity: "",
     span_id: "b7ad6b7169203331",
     span_name: "GET /invoices/:id",
+    timestamp: "2026-10-28 12:00:00.000000000",
     trace_id: "0af7651916cd43dd8448eb211c80319c",
     ...overrides,
   };
@@ -61,6 +62,18 @@ describe("groupErrorCandidates", () => {
     });
     expect(issue?.sample.traceId).toBe("newest");
     expect(issue?.fingerprint).toMatch(/^v2:/);
+  });
+
+  it("keeps a reference to every occurrence's exact log or span", () => {
+    const [issue] = groupErrorCandidates([
+      candidate({ candidate_id: "6a0d1c1e-0000-4000-8000-000000000001", span_id: "s1", timestamp: "2026-10-28 12:00:00.000000001", trace_id: "t1" }),
+      candidate({ candidate_id: "6a0d1c1e-0000-4000-8000-000000000002", span_id: "s2", timestamp: "2026-10-28 12:00:01.000000002", trace_id: "t2" }),
+    ]);
+
+    expect(issue?.events).toEqual([
+      { candidateId: "6a0d1c1e-0000-4000-8000-000000000001", kind: "span", service: "api", spanId: "s1", timestamp: "2026-10-28 12:00:00.000000001", traceId: "t1" },
+      { candidateId: "6a0d1c1e-0000-4000-8000-000000000002", kind: "span", service: "api", spanId: "s2", timestamp: "2026-10-28 12:00:01.000000002", traceId: "t2" },
+    ]);
   });
 
   it("carries each occurrence's previous fingerprint once", () => {

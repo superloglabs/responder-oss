@@ -25,6 +25,7 @@ function candidate(overrides: Partial<ErrorCandidate>): ErrorCandidate {
     severity: "",
     span_id: "",
     span_name: "",
+    timestamp: "2026-10-28 12:00:00.000000000",
     trace_id: "",
     ...overrides,
   };
@@ -55,6 +56,8 @@ function dependencies(
     now: () => now,
     sourceMaps: async () => new Map(),
     withStore: async (pass) => (fake ? pass(fake) : null),
+    writeEvents: vi.fn(async () => {}),
+    writer: () => null,
   };
 }
 
@@ -229,5 +232,78 @@ describe("ingestErrorIssues when a write fails for another reason", () => {
 
     await expect(ingestErrorIssues(deps)).rejects.toThrow("lock timeout");
     expect(fake.saveCursor).not.toHaveBeenCalled();
+  });
+});
+
+describe("ingestErrorIssues error issue events", () => {
+  const writer = {} as TelemetryClient;
+
+  it("writes each occurrence with its issue before saving the cursor", async () => {
+    const order: string[] = [];
+    const fake = store({
+      record: vi.fn<ErrorIssueStore["record"]>(async (occurrences) => ({ issueId: `issue-${occurrences.kind}`, transition: "seen" })),
+      saveCursor: vi.fn(async (kind: ErrorIssueKind) => { order.push(`cursor:${kind}`); }),
+    });
+    const writeEvents = vi.fn<ErrorIssueDependencies["writeEvents"]>(async (_client, rows) => { order.push(`events:${rows[0]?.kind}`); });
+    const deps = {
+      ...dependencies(fake, (kind) => kind === "span"
+        ? [
+          candidate({ candidate_id: "6a0d1c1e-0000-4000-8000-000000000001", span_id: "s1", timestamp: "2026-10-28 12:00:00.000000001", trace_id: "t1" }),
+          candidate({ candidate_id: "6a0d1c1e-0000-4000-8000-000000000002", span_id: "s2", timestamp: "2026-10-28 12:00:01.000000002", trace_id: "t2" }),
+        ]
+        : [candidate({ body: "boom", candidate_id: "6a0d1c1e-0000-4000-8000-000000000003", kind: "log", severity: "ERROR", timestamp: "2026-10-28 12:00:02.000000003" })]),
+      writeEvents,
+      writer: () => writer,
+    };
+
+    await ingestErrorIssues(deps);
+
+    expect(order).toEqual(["events:span", "cursor:span", "events:log", "cursor:log"]);
+    const spanRows = writeEvents.mock.calls[0]![1];
+    expect(spanRows).toEqual([
+      { candidateId: "6a0d1c1e-0000-4000-8000-000000000001", fingerprint: expect.stringMatching(/^v2:/), issueId: "issue-span", kind: "span", organizationId, service: "api", spanId: "s1", timestamp: "2026-10-28 12:00:00.000000001", traceId: "t1" },
+      { candidateId: "6a0d1c1e-0000-4000-8000-000000000002", fingerprint: spanRows[0]!.fingerprint, issueId: "issue-span", kind: "span", organizationId, service: "api", spanId: "s2", timestamp: "2026-10-28 12:00:01.000000002", traceId: "t2" },
+    ]);
+    expect(writeEvents.mock.calls[1]![1]).toMatchObject([{ issueId: "issue-log", kind: "log", timestamp: "2026-10-28 12:00:02.000000003" }]);
+  });
+
+  it("leaves out the occurrences of an issue whose write was skipped", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const fake = store({
+      record: vi.fn<ErrorIssueStore["record"]>(async (occurrences) => {
+        if (occurrences.message === "bad") throw Object.assign(new Error("invalid byte sequence"), { code: "22021" });
+        return { issueId: "good", transition: "seen" };
+      }),
+    });
+    const writeEvents = vi.fn<ErrorIssueDependencies["writeEvents"]>(async () => {});
+    await ingestErrorIssues({
+      ...dependencies(fake, (kind) => kind === "span"
+        ? [candidate({ exception_message: "bad", trace_id: "bad" }), candidate({ exception_message: "good", trace_id: "good" })]
+        : []),
+      writeEvents,
+      writer: () => writer,
+    });
+
+    expect(writeEvents.mock.calls[0]![1].map((row) => row.traceId)).toEqual(["good"]);
+    warn.mockRestore();
+  });
+
+  it("fails the pass without moving the cursor when the events cannot be written", async () => {
+    const fake = store();
+    const missing = Object.assign(new Error("Unknown table expression identifier 'error_issue_events'"), { type: "UNKNOWN_TABLE" });
+    const deps = {
+      ...dependencies(fake, (kind) => (kind === "span" ? [candidate({})] : [])),
+      writeEvents: vi.fn(async () => { throw missing; }),
+      writer: () => writer,
+    };
+
+    await expect(ingestErrorIssues(deps)).rejects.toThrow("Could not write error issue events");
+    expect(fake.saveCursor).not.toHaveBeenCalled();
+  });
+
+  it("does not write events in a cell without a writer", async () => {
+    const deps = dependencies(store(), (kind) => (kind === "span" ? [candidate({})] : []));
+    await ingestErrorIssues(deps);
+    expect(deps.writeEvents).not.toHaveBeenCalled();
   });
 });
