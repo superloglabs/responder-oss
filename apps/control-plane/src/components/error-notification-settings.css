@@ -1,0 +1,29 @@
+.errorNotifications__description { margin: 0; color: var(--ds-text-secondary); line-height: 1.6; }
+.errorNotifications { display: grid; gap: 20px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.errorNotifications__toggle { display: flex; align-items: center; gap: 12px; padding: 14px; border: 1px solid var(--ds-border-subtle); border-radius: 10px; }
+.errorNotifications__toggle .dsSwitch { flex: 1; min-width: 0; }
+.errorNotifications__provider { display: flex; color: var(--ds-text-secondary); }
+.errorNotifications__destination { display: grid; gap: 10px; min-width: 0; }
+.errorNotifications__label { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; font-weight: 500; }
+.errorNotifications__label > :last-child { overflow-wrap: anywhere; color: var(--ds-text-muted); font-weight: 400; font-size: 12px; }
+.errorChannelPicker { display: grid; gap: 8px; min-width: 0; }
+.errorChannelPicker__search { display: flex; align-items: center; gap: var(--spacing-8, 8px); min-height: 34px; padding: var(--spacing-4, 4px) var(--spacing-10, 10px); border: 1px solid var(--color-border-card, #e3e3e3); border-radius: var(--radius-6, 6px); background: var(--ds-surface-overlay); color: var(--ds-text-muted); }
+.errorChannelPicker__search > svg { flex-shrink: 0; }
+.errorChannelPicker__search input { width: 100%; min-width: 0; height: 24px; padding: 0; border: 0; background: transparent; color: var(--ds-text-primary); font-family: var(--ds-font-sans); font-size: var(--text-12, 12px); line-height: var(--leading-22, 22px); }
+.errorChannelPicker__search:focus-within { border-color: var(--color-search-focus, #a5a9ed); box-shadow: 0 0 0 2px #4e58f90a; }
+.dashboardDialog .errorChannelPicker__search input:focus-visible { outline: none; }
+.errorChannelPicker__list { height: 224px; max-height: 35svh; overflow-y: auto; overscroll-behavior-y: contain; scrollbar-gutter: stable; scroll-padding-block: 4px; padding: 4px; border: 1px solid var(--color-border-card, #e3e3e3); border-radius: var(--radius-8, 8px); }
+.errorChannelPicker__option { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 8px 10px; border-radius: 6px; cursor: pointer; color: var(--ds-text-secondary); }
+.errorChannelPicker__option[data-selected="true"] { background: var(--ds-surface-hover); color: var(--ds-text-primary); }
+.errorChannelPicker__option[data-disabled="true"] { opacity: .5; cursor: default; }
+.errorChannelPicker__option > svg { flex-shrink: 0; }
+.errorChannelPicker__copy { display: grid; flex: 1; gap: 2px; min-width: 0; }
+.errorChannelPicker__copy > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ds-text-primary); font-weight: 500; }
+.errorChannelPicker__copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--ds-text-muted); }
+.errorChannelPicker__empty { padding: 28px 20px; text-align: center; line-height: 1.6; color: var(--ds-text-muted); }
+.errorChannelPicker__emptyState { padding: 24px; border: 1px dashed var(--ds-border-strong); border-radius: 10px; text-align: center; }
+.errorChannelPicker__emptyState p { margin: 8px 0 0; color: var(--ds-text-secondary); line-height: 1.6; }
+.errorNotifications__hint { margin: 0; font-size: 12px; line-height: 1.5; color: var(--ds-text-muted); }
+.dashboardDialog:has(.errorNotifications) .dashboardDialog__body { overscroll-behavior-y: contain; }
+.dashboardDialog:has(.errorNotifications) .dashboardDialog__header,
+.dashboardDialog:has(.errorNotifications) .dashboardDialog__footer { flex-shrink: 0; }
