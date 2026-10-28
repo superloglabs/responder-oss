@@ -12,6 +12,8 @@ import {
   type DatadogSiteId,
 } from "../integrations/datadog.js";
 import {
+  McpOAuthRefreshError,
+  oauthConnectionRefreshMessage,
   parseCustomMcpCredentials,
   refreshCustomMcpOAuth,
 } from "../integrations/custom-mcp.js";
@@ -1626,14 +1628,84 @@ export function customMcpTokenReuseEvent(input: {
   };
 }
 
-export function customMcpReconnectError(
-  account: { displayName: string; id: string },
-  cause?: unknown,
+/**
+ * A selected context connection whose access could not be loaded. The
+ * investigation continues without it, and its message tells the person which
+ * connection to fix.
+ */
+export class ContextConnectionUnavailableError extends Error {
+  readonly accountId: string;
+  readonly displayName: string;
+  readonly provider: string;
+  readonly reconnectRequired: boolean;
+
+  constructor(
+    account: { displayName: string; id: string; provider: string },
+    cause?: unknown,
+  ) {
+    const refreshFailure = cause instanceof McpOAuthRefreshError
+      ? cause
+      : new McpOAuthRefreshError(true, cause);
+    super(oauthConnectionRefreshMessage(account, refreshFailure), { cause });
+    this.name = "ContextConnectionUnavailableError";
+    this.accountId = account.id;
+    this.displayName = account.displayName;
+    this.provider = account.provider;
+    this.reconnectRequired = refreshFailure.reconnectRequired;
+  }
+}
+
+export interface ContextConnectionLoadOptions {
+  onUnavailable?: (error: ContextConnectionUnavailableError) => void;
+}
+
+export function contextConnectionUnavailableEvent(
+  error: ContextConnectionUnavailableError,
+  investigationVersionId: string,
 ) {
-  return Object.assign(
-    new Error(`Reconnect custom MCP ${account.displayName}`, { cause }),
-    { accountId: account.id },
+  const refreshFailure =
+    error.cause instanceof McpOAuthRefreshError ? error.cause : null;
+  const failure = refreshFailure ? refreshFailure.cause : error.cause;
+  return {
+    accountId: error.accountId,
+    errorType: failure instanceof Error ? failure.name : "GrantRejected",
+    event: "context_connection_unavailable",
+    investigationContinues: true,
+    investigationVersionId,
+    provider: error.provider,
+    reconnectRequired: error.reconnectRequired,
+  };
+}
+
+function skipUnavailableContextConnection(
+  error: ContextConnectionUnavailableError,
+  investigationVersionId: string,
+  options: ContextConnectionLoadOptions,
+): void {
+  console.error(
+    JSON.stringify(contextConnectionUnavailableEvent(error, investigationVersionId)),
   );
+  options.onUnavailable?.(error);
+}
+
+/** Loads one context connection, or skips it when its OAuth access cannot be renewed. */
+export async function loadContextConnection<T>(
+  account: { displayName: string; id: string; provider: string },
+  investigationVersionId: string,
+  options: ContextConnectionLoadOptions,
+  load: () => Promise<T | null>,
+): Promise<T | null> {
+  try {
+    return await load();
+  } catch (error) {
+    if (!(error instanceof McpOAuthRefreshError)) throw error;
+    skipUnavailableContextConnection(
+      new ContextConnectionUnavailableError(account, error),
+      investigationVersionId,
+      options,
+    );
+    return null;
+  }
 }
 
 export function customMcpConnectionsLoadedEvent(input: {
@@ -1785,7 +1857,7 @@ function mcpOAuthRedirectUrl(
 async function getRuntimeMcpConnections(
   versionId: string,
   provider: "axiom" | "custom_mcp" | "linear",
-  selectedAccountId?: string,
+  options: ContextConnectionLoadOptions & { selectedAccountId?: string } = {},
 ): Promise<RuntimeCustomMcpConnection[]> {
   const configRows = await getDatabase()
     .select({
@@ -1817,9 +1889,15 @@ async function getRuntimeMcpConnections(
   const accountsById = new Map(accountRows.map((account) => [account.id, account]));
   const connections: RuntimeCustomMcpConnection[] = [];
 
-  const providerAccountIds = selectedAccountId
-    ? [selectedAccountId]
+  const providerAccountIds = options.selectedAccountId
+    ? [options.selectedAccountId]
     : accountRows.map((account) => account.id);
+  const skip = (account: { displayName: string; id: string }, cause?: unknown) =>
+    skipUnavailableContextConnection(
+      new ContextConnectionUnavailableError({ ...account, provider }, cause),
+      versionId,
+      options,
+    );
   for (const accountId of providerAccountIds) {
     const account = accountsById.get(accountId);
     if (!account?.encryptedCredentials) {
@@ -1852,7 +1930,8 @@ async function getRuntimeMcpConnections(
             }),
           ),
         );
-        throw customMcpReconnectError(account, error);
+        skip(account, error);
+        continue;
       }
 
       if (linearAccessTokenNeedsRefresh(credentials)) {
@@ -1868,7 +1947,8 @@ async function getRuntimeMcpConnections(
               }),
             ),
           );
-          throw customMcpReconnectError(account, error);
+          skip(account, error);
+          continue;
         }
         const updated = await getDatabase()
           .update(integrationAccounts)
@@ -1924,12 +2004,14 @@ async function getRuntimeMcpConnections(
         redirectUrl: mcpOAuthRedirectUrl(provider),
       });
     } catch (error) {
-      const code = (error as { code?: unknown } | null)?.code;
+      const failure =
+        error instanceof McpOAuthRefreshError ? error.cause ?? error : error;
+      const code = (failure as { code?: unknown } | null)?.code;
       const errorType =
-        error instanceof Error
+        failure instanceof Error
           ? typeof code === "string" && /^[A-Z0-9_]{1,40}$/.test(code)
-            ? `${error.name} (${code})`
-            : error.name
+            ? `${failure.name} (${code})`
+            : failure.name
           : "UnknownError";
       console.error(
         JSON.stringify(
@@ -1940,7 +2022,8 @@ async function getRuntimeMcpConnections(
           }),
         ),
       );
-      throw customMcpReconnectError(account, error);
+      skip(account, error);
+      continue;
     }
     const accessToken = oauth.tokens?.access_token;
     if (!accessToken) {
@@ -1953,7 +2036,8 @@ async function getRuntimeMcpConnections(
           }),
         ),
       );
-      throw customMcpReconnectError(account);
+      skip(account);
+      continue;
     }
     if (oauth === credentials.oauth) {
       console.info(
@@ -2026,12 +2110,14 @@ async function getRuntimeMcpConnections(
 
 export function getRuntimeCustomMcpConnections(
   versionId: string,
+  options: ContextConnectionLoadOptions = {},
 ): Promise<RuntimeCustomMcpConnection[]> {
-  return getRuntimeMcpConnections(versionId, "custom_mcp");
+  return getRuntimeMcpConnections(versionId, "custom_mcp", options);
 }
 
 export async function getRuntimeDash0Connections(
   versionId: string,
+  options: ContextConnectionLoadOptions = {},
 ): Promise<RuntimeDash0Connection[]> {
   const configRows = await getDatabase()
     .select({
@@ -2078,40 +2164,45 @@ export async function getRuntimeDash0Connections(
   for (const accountId of accountIds) {
     const account = accountsById.get(accountId);
     if (!account) continue;
-    const connection = await withIntegrationAccountCredentialLease({
-      allowedStatuses: ["connected"],
-      integrationAccountId: account.id,
-      operation: async (encryptedCredentials) => {
-        const credentials = parseDash0Credentials(
-          decryptCredentials<Record<string, unknown>>(encryptedCredentials),
-        );
-        const oauth = await refreshCustomMcpOAuth({
-          mcpUrl: credentials.mcpUrl,
-          oauth: credentials.oauth,
-          redirectUrl: mcpOAuthRedirectUrl("dash0"),
-        });
-        const accessToken = oauth.tokens?.access_token;
-        if (!accessToken) throw new Error("Reconnect the Dash0 OAuth connection");
-        return {
-          ...(oauth === credentials.oauth
-            ? {}
-            : {
-                encryptedCredentials: encryptCredentials({
-                  ...credentials,
-                  oauth,
-                }),
-              }),
-          value: {
-            accessToken,
-            accountId: account.id,
-            displayName: account.displayName,
+    const connection = await loadContextConnection(
+      { ...account, provider: "dash0" },
+      versionId,
+      options,
+      () => withIntegrationAccountCredentialLease({
+        allowedStatuses: ["connected"],
+        integrationAccountId: account.id,
+        operation: async (encryptedCredentials) => {
+          const credentials = parseDash0Credentials(
+            decryptCredentials<Record<string, unknown>>(encryptedCredentials),
+          );
+          const oauth = await refreshCustomMcpOAuth({
             mcpUrl: credentials.mcpUrl,
-          },
-        };
-      },
-      organizationId: config.organizationId,
-      provider: "dash0",
-    });
+            oauth: credentials.oauth,
+            redirectUrl: mcpOAuthRedirectUrl("dash0"),
+          });
+          const accessToken = oauth.tokens?.access_token;
+          if (!accessToken) throw new McpOAuthRefreshError(true);
+          return {
+            ...(oauth === credentials.oauth
+              ? {}
+              : {
+                  encryptedCredentials: encryptCredentials({
+                    ...credentials,
+                    oauth,
+                  }),
+                }),
+            value: {
+              accessToken,
+              accountId: account.id,
+              displayName: account.displayName,
+              mcpUrl: credentials.mcpUrl,
+            },
+          };
+        },
+        organizationId: config.organizationId,
+        provider: "dash0",
+      }),
+    );
     if (connection) connections.push(connection);
   }
 
@@ -2120,6 +2211,7 @@ export async function getRuntimeDash0Connections(
 
 export async function getRuntimePostHogConnections(
   versionId: string,
+  options: ContextConnectionLoadOptions = {},
 ): Promise<RuntimePostHogConnection[]> {
   const configRows = await getDatabase()
     .select({
@@ -2157,41 +2249,46 @@ export async function getRuntimePostHogConnections(
   for (const accountId of accountIds) {
     const account = accountsById.get(accountId);
     if (!account) continue;
-    const connection = await withIntegrationAccountCredentialLease({
-      allowedStatuses: ["connected"],
-      integrationAccountId: account.id,
-      operation: async (encryptedCredentials) => {
-        const credentials = parsePostHogCredentials(
-          decryptCredentials<Record<string, unknown>>(encryptedCredentials),
-        );
-        const oauth = await refreshCustomMcpOAuth({
-          mcpUrl: credentials.mcpUrl,
-          oauth: credentials.oauth,
-          redirectUrl: mcpOAuthRedirectUrl("posthog"),
-        });
-        const accessToken = oauth.tokens?.access_token;
-        if (!accessToken) throw new Error("Reconnect the PostHog OAuth connection");
-        return {
-          ...(oauth === credentials.oauth
-            ? {}
-            : {
-                encryptedCredentials: encryptCredentials({
-                  ...credentials,
-                  oauth,
+    const connection = await loadContextConnection(
+      { ...account, provider: "posthog" },
+      versionId,
+      options,
+      () => withIntegrationAccountCredentialLease({
+        allowedStatuses: ["connected"],
+        integrationAccountId: account.id,
+        operation: async (encryptedCredentials) => {
+          const credentials = parsePostHogCredentials(
+            decryptCredentials<Record<string, unknown>>(encryptedCredentials),
+          );
+          const oauth = await refreshCustomMcpOAuth({
+            mcpUrl: credentials.mcpUrl,
+            oauth: credentials.oauth,
+            redirectUrl: mcpOAuthRedirectUrl("posthog"),
+          });
+          const accessToken = oauth.tokens?.access_token;
+          if (!accessToken) throw new McpOAuthRefreshError(true);
+          return {
+            ...(oauth === credentials.oauth
+              ? {}
+              : {
+                  encryptedCredentials: encryptCredentials({
+                    ...credentials,
+                    oauth,
+                  }),
                 }),
-              }),
-          // Investigations only read, even on a read-write connection.
-          value: {
-            accessToken,
-            accountId: account.id,
-            displayName: account.displayName,
-            mcpUrl: POSTHOG_MCP_URL,
-          },
-        };
-      },
-      organizationId: config.organizationId,
-      provider: "posthog",
-    });
+            // Investigations only read, even on a read-write connection.
+            value: {
+              accessToken,
+              accountId: account.id,
+              displayName: account.displayName,
+              mcpUrl: POSTHOG_MCP_URL,
+            },
+          };
+        },
+        organizationId: config.organizationId,
+        provider: "posthog",
+      }),
+    );
     if (connection) connections.push(connection);
   }
 
@@ -2200,6 +2297,7 @@ export async function getRuntimePostHogConnections(
 
 export async function getRuntimeCloudflareConnections(
   versionId: string,
+  options: ContextConnectionLoadOptions = {},
 ): Promise<RuntimeCloudflareConnection[]> {
   const configRows = await getDatabase()
     .select({
@@ -2239,45 +2337,50 @@ export async function getRuntimeCloudflareConnections(
     const cloudflareAccounts = cloudflareAccountsSchema.safeParse(
       (account.metadata as Record<string, unknown> | null)?.accounts,
     );
-    const connection = await withIntegrationAccountCredentialLease({
-      allowedStatuses: ["connected"],
-      integrationAccountId: account.id,
-      operation: async (encryptedCredentials) => {
-        const credentials = parseCloudflareCredentials(
-          decryptCredentials<Record<string, unknown>>(encryptedCredentials),
-        );
-        const oauth = withCloudflareGrantScope(
-          credentials.oauth,
-          await refreshCustomMcpOAuth({
-            mcpUrl: credentials.mcpUrl,
-            oauth: credentials.oauth,
-            redirectUrl: mcpOAuthRedirectUrl("cloudflare"),
-          }),
-        );
-        const accessToken = oauth.tokens?.access_token;
-        if (!accessToken) throw new Error("Reconnect the Cloudflare OAuth connection");
-        assertCloudflareReadOnlyGrant(oauth.tokens);
-        return {
-          ...(oauth === credentials.oauth
-            ? {}
-            : {
-                encryptedCredentials: encryptCredentials({
-                  ...credentials,
-                  oauth,
+    const connection = await loadContextConnection(
+      { ...account, provider: "cloudflare" },
+      versionId,
+      options,
+      () => withIntegrationAccountCredentialLease({
+        allowedStatuses: ["connected"],
+        integrationAccountId: account.id,
+        operation: async (encryptedCredentials) => {
+          const credentials = parseCloudflareCredentials(
+            decryptCredentials<Record<string, unknown>>(encryptedCredentials),
+          );
+          const oauth = withCloudflareGrantScope(
+            credentials.oauth,
+            await refreshCustomMcpOAuth({
+              mcpUrl: credentials.mcpUrl,
+              oauth: credentials.oauth,
+              redirectUrl: mcpOAuthRedirectUrl("cloudflare"),
+            }),
+          );
+          const accessToken = oauth.tokens?.access_token;
+          if (!accessToken) throw new McpOAuthRefreshError(true);
+          assertCloudflareReadOnlyGrant(oauth.tokens);
+          return {
+            ...(oauth === credentials.oauth
+              ? {}
+              : {
+                  encryptedCredentials: encryptCredentials({
+                    ...credentials,
+                    oauth,
+                  }),
                 }),
-              }),
-          value: {
-            accessToken,
-            accountId: account.id,
-            accounts: cloudflareAccounts.success ? cloudflareAccounts.data : [],
-            displayName: account.displayName,
-            mcpUrl: credentials.mcpUrl,
-          },
-        };
-      },
-      organizationId: config.organizationId,
-      provider: "cloudflare",
-    });
+            value: {
+              accessToken,
+              accountId: account.id,
+              accounts: cloudflareAccounts.success ? cloudflareAccounts.data : [],
+              displayName: account.displayName,
+              mcpUrl: credentials.mcpUrl,
+            },
+          };
+        },
+        organizationId: config.organizationId,
+        provider: "cloudflare",
+      }),
+    );
     if (connection) connections.push(connection);
   }
 
@@ -2286,6 +2389,7 @@ export async function getRuntimeCloudflareConnections(
 
 export async function getRuntimeRailwayConnections(
   versionId: string,
+  options: ContextConnectionLoadOptions = {},
 ): Promise<RuntimeRailwayConnection[]> {
   const configRows = await getDatabase()
     .select({
@@ -2325,46 +2429,51 @@ export async function getRuntimeRailwayConnections(
     const workspaces = railwayWorkspacesSchema.safeParse(
       (account.metadata as Record<string, unknown> | null)?.workspaces,
     );
-    const connection = await withIntegrationAccountCredentialLease({
-      allowedStatuses: ["connected"],
-      integrationAccountId: account.id,
-      operation: async (encryptedCredentials) => {
-        const credentials = parseRailwayCredentials(
-          decryptCredentials<Record<string, unknown>>(encryptedCredentials),
-        );
-        const oauth = withRailwayGrantScope(
-          credentials.oauth,
-          await refreshCustomMcpOAuth({
-            mcpUrl: RAILWAY_API_ORIGIN,
-            oauth: credentials.oauth,
-            redirectUrl: mcpOAuthRedirectUrl("railway"),
-          }),
-        );
-        const accessToken = oauth.tokens?.access_token;
-        if (!accessToken) throw new Error("Reconnect the Railway OAuth connection");
-        assertRailwayGrant(oauth.tokens, credentials.accessLevel);
-        return {
-          ...(oauth === credentials.oauth
-            ? {}
-            : {
-                encryptedCredentials: encryptCredentials({
-                  ...credentials,
-                  oauth,
-                  tokenIssuedAt: Date.now(),
+    const connection = await loadContextConnection(
+      { ...account, provider: "railway" },
+      versionId,
+      options,
+      () => withIntegrationAccountCredentialLease({
+        allowedStatuses: ["connected"],
+        integrationAccountId: account.id,
+        operation: async (encryptedCredentials) => {
+          const credentials = parseRailwayCredentials(
+            decryptCredentials<Record<string, unknown>>(encryptedCredentials),
+          );
+          const oauth = withRailwayGrantScope(
+            credentials.oauth,
+            await refreshCustomMcpOAuth({
+              mcpUrl: RAILWAY_API_ORIGIN,
+              oauth: credentials.oauth,
+              redirectUrl: mcpOAuthRedirectUrl("railway"),
+            }),
+          );
+          const accessToken = oauth.tokens?.access_token;
+          if (!accessToken) throw new McpOAuthRefreshError(true);
+          assertRailwayGrant(oauth.tokens, credentials.accessLevel);
+          return {
+            ...(oauth === credentials.oauth
+              ? {}
+              : {
+                  encryptedCredentials: encryptCredentials({
+                    ...credentials,
+                    oauth,
+                    tokenIssuedAt: Date.now(),
+                  }),
                 }),
-              }),
-          value: {
-            accessLevel: credentials.accessLevel,
-            accessToken,
-            accountId: account.id,
-            displayName: account.displayName,
-            workspaces: workspaces.success ? workspaces.data : [],
-          },
-        };
-      },
-      organizationId: config.organizationId,
-      provider: "railway",
-    });
+            value: {
+              accessLevel: credentials.accessLevel,
+              accessToken,
+              accountId: account.id,
+              displayName: account.displayName,
+              workspaces: workspaces.success ? workspaces.data : [],
+            },
+          };
+        },
+        organizationId: config.organizationId,
+        provider: "railway",
+      }),
+    );
     if (connection) connections.push(connection);
   }
 
@@ -2374,8 +2483,14 @@ export async function getRuntimeRailwayConnections(
 export async function getRuntimeLinearConnection(
   versionId: string,
   accountId?: string,
+  options: ContextConnectionLoadOptions = {},
 ): Promise<RuntimeCustomMcpConnection | null> {
-  return (await getRuntimeMcpConnections(versionId, "linear", accountId))[0] ?? null;
+  return (
+    await getRuntimeMcpConnections(versionId, "linear", {
+      ...options,
+      selectedAccountId: accountId,
+    })
+  )[0] ?? null;
 }
 export type RuntimeClickStackConnection = {
   authType: "access_key";
@@ -2867,8 +2982,9 @@ export async function getRuntimeDatadogConnection(
 
 export async function getRuntimeAxiomConnection(
   versionId: string,
+  options: ContextConnectionLoadOptions = {},
 ): Promise<RuntimeAxiomConnection | null> {
-  const [connection] = await getRuntimeMcpConnections(versionId, "axiom");
+  const [connection] = await getRuntimeMcpConnections(versionId, "axiom", options);
   return connection
     ? { accessToken: connection.accessToken, mcpUrl: connection.mcpUrl }
     : null;
@@ -2921,6 +3037,7 @@ export async function getRuntimeUpstashConnection(
 
 export async function getRuntimeGrafanaConnections(
   versionId: string,
+  options: ContextConnectionLoadOptions = {},
 ): Promise<RuntimeGrafanaConnection[]> {
   const configRows = await getDatabase()
     .select({
@@ -2953,52 +3070,57 @@ export async function getRuntimeGrafanaConnections(
   for (const accountId of new Set(config.contextAccountIds)) {
     const account = accountsById.get(accountId);
     if (!account) continue;
-    const connection = await withIntegrationAccountCredentialLease<RuntimeGrafanaConnection>({
-      allowedStatuses: ["connected"],
-      integrationAccountId: account.id,
-      operation: async (encryptedCredentials) => {
-        const credentials = parseGrafanaCredentials(
-          decryptCredentials<Record<string, unknown>>(encryptedCredentials),
-        );
-        if (credentials.authType === "service_account") {
+    const connection = await loadContextConnection(
+      { ...account, provider: "grafana" },
+      versionId,
+      options,
+      () => withIntegrationAccountCredentialLease<RuntimeGrafanaConnection>({
+        allowedStatuses: ["connected"],
+        integrationAccountId: account.id,
+        operation: async (encryptedCredentials) => {
+          const credentials = parseGrafanaCredentials(
+            decryptCredentials<Record<string, unknown>>(encryptedCredentials),
+          );
+          if (credentials.authType === "service_account") {
+            return {
+              value: {
+                accountId: account.id,
+                authType: "service_account" as const,
+                displayName: account.displayName,
+                grafanaUrl: credentials.grafanaUrl,
+                serviceAccountToken: credentials.serviceAccountToken,
+              },
+            };
+          }
+          const oauth = await refreshCustomMcpOAuth({
+            mcpUrl: credentials.mcpUrl,
+            oauth: credentials.oauth,
+            redirectUrl: mcpOAuthRedirectUrl("grafana"),
+          });
+          const accessToken = oauth.tokens?.access_token;
+          if (!accessToken) throw new McpOAuthRefreshError(true);
           return {
+            ...(oauth === credentials.oauth
+              ? {}
+              : {
+                  encryptedCredentials: encryptCredentials({
+                    ...credentials,
+                    oauth,
+                  }),
+                }),
             value: {
+              accessToken,
               accountId: account.id,
-              authType: "service_account" as const,
+              authType: "oauth" as const,
               displayName: account.displayName,
-              grafanaUrl: credentials.grafanaUrl,
-              serviceAccountToken: credentials.serviceAccountToken,
+              mcpUrl: credentials.mcpUrl,
             },
           };
-        }
-        const oauth = await refreshCustomMcpOAuth({
-          mcpUrl: credentials.mcpUrl,
-          oauth: credentials.oauth,
-          redirectUrl: mcpOAuthRedirectUrl("grafana"),
-        });
-        const accessToken = oauth.tokens?.access_token;
-        if (!accessToken) throw new Error("Reconnect the Grafana Cloud OAuth connection");
-        return {
-          ...(oauth === credentials.oauth
-            ? {}
-            : {
-                encryptedCredentials: encryptCredentials({
-                  ...credentials,
-                  oauth,
-                }),
-              }),
-          value: {
-            accessToken,
-            accountId: account.id,
-            authType: "oauth" as const,
-            displayName: account.displayName,
-            mcpUrl: credentials.mcpUrl,
-          },
-        };
-      },
-      organizationId: config.organizationId,
-      provider: "grafana",
-    });
+        },
+        organizationId: config.organizationId,
+        provider: "grafana",
+      }),
+    );
     if (connection) connections.push(connection);
   }
   return connections;
@@ -3056,6 +3178,7 @@ export async function getRuntimeLangfuseConnections(
 
 export async function getRuntimeSupabaseConnections(
   versionId: string,
+  options: ContextConnectionLoadOptions = {},
 ): Promise<RuntimeSupabaseConnection[]> {
   const configRows = await getDatabase()
     .select({
@@ -3088,42 +3211,47 @@ export async function getRuntimeSupabaseConnections(
   for (const accountId of config.contextAccountIds) {
     const account = accountsById.get(accountId);
     if (!account) continue;
-    const connection = await withIntegrationAccountCredentialLease({
-      allowedStatuses: ["connected"],
-      integrationAccountId: account.id,
-      operation: async (encryptedCredentials) => {
-        const credentials = parseSupabaseCredentials(
-          decryptCredentials<Record<string, unknown>>(encryptedCredentials),
-        );
-        const oauth = await refreshCustomMcpOAuth({
-          mcpUrl: credentials.mcpUrl,
-          oauth: credentials.oauth,
-          redirectUrl: mcpOAuthRedirectUrl("supabase"),
-        });
-        const accessToken = oauth.tokens?.access_token;
-        if (!accessToken) throw new Error("Reconnect the Supabase OAuth connection");
-        return {
-          ...(oauth === credentials.oauth
-            ? {}
-            : {
-                encryptedCredentials: encryptCredentials({
-                  ...credentials,
-                  oauth,
-                }),
-              }),
-          value: {
-            accessMode: credentials.accessMode,
-            accessToken,
-            accountId: account.id,
-            displayName: account.displayName,
+    const connection = await loadContextConnection(
+      { ...account, provider: "supabase" },
+      versionId,
+      options,
+      () => withIntegrationAccountCredentialLease({
+        allowedStatuses: ["connected"],
+        integrationAccountId: account.id,
+        operation: async (encryptedCredentials) => {
+          const credentials = parseSupabaseCredentials(
+            decryptCredentials<Record<string, unknown>>(encryptedCredentials),
+          );
+          const oauth = await refreshCustomMcpOAuth({
             mcpUrl: credentials.mcpUrl,
-            projectRef: credentials.projectRef,
-          },
-        };
-      },
-      organizationId: config.organizationId,
-      provider: "supabase",
-    });
+            oauth: credentials.oauth,
+            redirectUrl: mcpOAuthRedirectUrl("supabase"),
+          });
+          const accessToken = oauth.tokens?.access_token;
+          if (!accessToken) throw new McpOAuthRefreshError(true);
+          return {
+            ...(oauth === credentials.oauth
+              ? {}
+              : {
+                  encryptedCredentials: encryptCredentials({
+                    ...credentials,
+                    oauth,
+                  }),
+                }),
+            value: {
+              accessMode: credentials.accessMode,
+              accessToken,
+              accountId: account.id,
+              displayName: account.displayName,
+              mcpUrl: credentials.mcpUrl,
+              projectRef: credentials.projectRef,
+            },
+          };
+        },
+        organizationId: config.organizationId,
+        provider: "supabase",
+      }),
+    );
     if (connection) connections.push(connection);
   }
   return connections;

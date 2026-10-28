@@ -701,6 +701,13 @@
       "when": 1793026246969,
       "tag": "0099_automation_issue_severity",
       "breakpoints": true
+    },
+    {
+      "idx": 100,
+      "version": "7",
+      "when": 1793183820002,
+      "tag": "0100_unavailable_connections_prompt",
+      "breakpoints": true
     }
   ]
 }

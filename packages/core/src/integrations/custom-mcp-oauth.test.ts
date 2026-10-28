@@ -19,7 +19,12 @@ vi.mock("@modelcontextprotocol/sdk/client/auth.js", async (importOriginal) => ({
   auth: mocks.auth,
 }));
 
-import { beginCustomMcpOAuth } from "./custom-mcp.js";
+import {
+  beginCustomMcpOAuth,
+  McpOAuthRefreshError,
+  oauthConnectionRefreshMessage,
+  refreshCustomMcpOAuth,
+} from "./custom-mcp.js";
 
 describe("custom MCP OAuth discovery", () => {
   beforeEach(() => {
@@ -66,6 +71,55 @@ describe("custom MCP OAuth discovery", () => {
         ),
         scope: "openid offline_access",
       }),
+    );
+  });
+});
+
+describe("custom MCP OAuth refresh", () => {
+  const input = {
+    mcpUrl: "https://mcp.example.test/mcp",
+    oauth: { tokens: { access_token: "old", refresh_token: "refresh", token_type: "Bearer" } },
+    redirectUrl: "https://responder.example/api/integrations/grafana/callback",
+  };
+
+  beforeEach(() => {
+    mocks.auth.mockReset();
+  });
+
+  it("requires a reconnect when the server rejects the refresh token", async () => {
+    // The SDK starts a new authorization after an invalid_grant response.
+    mocks.auth.mockResolvedValue("REDIRECT");
+
+    const error = await refreshCustomMcpOAuth(input).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(McpOAuthRefreshError);
+    expect(error).toMatchObject({ reconnectRequired: true });
+  });
+
+  it("keeps the cause of a refresh the server could not complete", async () => {
+    const cause = Object.assign(new Error("try later"), { name: "TemporarilyUnavailableError" });
+    mocks.auth.mockRejectedValue(cause);
+
+    const error = await refreshCustomMcpOAuth(input).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(McpOAuthRefreshError);
+    expect(error).toMatchObject({ cause, reconnectRequired: false });
+  });
+
+  it("names the provider and connection in the message", () => {
+    expect(
+      oauthConnectionRefreshMessage(
+        { displayName: "swishis.grafana.net", provider: "grafana" },
+        new McpOAuthRefreshError(true),
+      ),
+    ).toBe('Reconnect the Grafana Cloud connection "swishis.grafana.net" in Settings.');
+    expect(
+      oauthConnectionRefreshMessage(
+        { provider: "cloudflare" },
+        new McpOAuthRefreshError(false),
+      ),
+    ).toBe(
+      "The Cloudflare connection could not renew its access. Try again later, or reconnect it in Settings if this continues.",
     );
   });
 });

@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { encryptCredentials } from "../../../../packages/core/src/credentials/encryption.js";
+import { McpOAuthRefreshError } from "../../../../packages/core/src/integrations/custom-mcp.js";
 import {
   POSTHOG_MCP_URL,
   POSTHOG_READ_WRITE_MCP_URL,
@@ -1395,6 +1396,38 @@ describe("automation context broker", () => {
     expect(new Headers(request.headers).get("authorization")).toBe(
       "Bearer fresh-oauth-token",
     );
+  });
+
+  it("names the connection to reconnect when its OAuth grant is rejected", async () => {
+    vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 4).toString("base64"));
+    const { app, dependencies } = appFor(claim("custom_mcp", {
+      authType: "oauth",
+      mcpUrl: "https://mcp.example.test/api",
+      oauth: {
+        tokens: {
+          access_token: "expired-token",
+          refresh_token: "revoked-refresh-token",
+        },
+      },
+    }));
+    dependencies.refreshCustomMcp.mockRejectedValue(new McpOAuthRefreshError(true));
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const response = await app.request(
+      `/api/automation-context-broker/v1/${accountId}`,
+      rpcRequest({ id: 1, jsonrpc: "2.0", method: "tools/list" }),
+    );
+
+    expect(response.status).toBe(502);
+    expect(await response.json()).toMatchObject({
+      error: { message: "Reconnect the custom MCP connection in Settings." },
+    });
+    expect(dependencies.providerFetch).not.toHaveBeenCalled();
+    expect(JSON.parse(consoleError.mock.calls[0]![0] as string)).toMatchObject({
+      event: "automation_context_broker_request_failed",
+      reconnectRequired: true,
+    });
+    consoleError.mockRestore();
   });
 
   describe("Axiom", () => {
