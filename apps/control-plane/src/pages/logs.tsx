@@ -1,7 +1,7 @@
 import { TelemetrySearch } from "../components/telemetry-search";
 import { LogFacets } from "../components/log-facets";
 import { NavigationIcon } from "../components/navigation-icon";
-import { ArrowClockwiseIcon, ArrowLeftIcon, ArrowRightIcon, CaretDownIcon, CaretUpIcon, TreeStructureIcon } from "@phosphor-icons/react";
+import { ArrowClockwiseIcon, ArrowLeftIcon, ArrowRightIcon, BugIcon, CaretDownIcon, CaretUpIcon, TreeStructureIcon } from "@phosphor-icons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { AppShell } from "../components/app-shell";
@@ -14,6 +14,7 @@ import {
   ExplorerDrawer,
 } from "../components/telemetry-explorer";
 import { resolveTimeRange, zoomOutTimeRange } from "../dashboard-time-range";
+import { errorLogSeverityNumber, fetchLogErrorIssueId } from "../error-issues-api";
 import { fetchAttributeKeys } from "../dashboards-api";
 import { DataTable, IconButton } from "../design-system";
 import {
@@ -89,6 +90,13 @@ function LogDrawer({
   const exception = [log.exception_type, log.exception_message].filter(Boolean).join(": ");
   // The exception has its own section.
   const logAttrs = Object.fromEntries(Object.entries(log.log_attrs).filter(([key]) => !key.startsWith("exception.")));
+  // Logs below ERROR have no issue.
+  const isError = log.severity_number >= errorLogSeverityNumber;
+  const issue = useTelemetryQuery(
+    isError ? `${log.timestamp}-${log.span_id}-${log.service}-${log.body}` : null,
+    () => fetchLogErrorIssueId(log),
+  );
+  const issueId = isError ? issue.data : null;
   return (
     <ExplorerDrawer
       fullHeight
@@ -112,21 +120,32 @@ function LogDrawer({
       onClose={onClose}
     >
       <section className="explorerSection">
-        <pre className="explorerBlock">{log.body}</pre>
-        {log.trace_id ? (
+        {log.trace_id || issueId ? (
+          // The issue loads after the log, so its button goes first and the
+          // trace buttons do not move when it appears.
           <div className="explorerActions">
-            <Link className="dsButton dsButton--primary dsButton--small" to={traceHref(log.trace_id)}>
-              <TreeStructureIcon aria-hidden="true" />Open trace
-            </Link>
-            <button
-              className="dsButton dsButton--secondary dsButton--small"
-              onClick={() => onFilter({ key: "field.trace_id", op: "eq", value: log.trace_id })}
-              type="button"
-            >
-              Logs in this trace
-            </button>
+            {issueId ? (
+              <Link className="dsButton dsButton--secondary dsButton--small" to={`/errors/${encodeURIComponent(issueId)}`}>
+                <BugIcon aria-hidden="true" />Open error
+              </Link>
+            ) : null}
+            {log.trace_id ? (
+              <>
+                <button
+                  className="dsButton dsButton--secondary dsButton--small"
+                  onClick={() => onFilter({ key: "field.trace_id", op: "eq", value: log.trace_id })}
+                  type="button"
+                >
+                  Logs in this trace
+                </button>
+                <Link className="dsButton dsButton--primary dsButton--small" to={traceHref(log.trace_id)}>
+                  <TreeStructureIcon aria-hidden="true" />Open trace
+                </Link>
+              </>
+            ) : null}
           </div>
         ) : null}
+        <pre className="explorerBlock">{log.body}</pre>
       </section>
       {exception || log.exception_stacktrace ? (
         <section className="explorerSection">

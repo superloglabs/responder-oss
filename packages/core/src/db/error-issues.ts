@@ -354,6 +354,25 @@ export async function findErrorIssue(organizationId: string, issueId: string): P
   return { ...toSummary(summary), fingerprint, frames, lastSample, message };
 }
 
+// The issue with a fingerprint. An issue that has not moved to the current
+// algorithm yet matches one of its previous fingerprints.
+export async function findErrorIssueIdByFingerprint(
+  organizationId: string,
+  fingerprint: string,
+  previousFingerprints: string[],
+): Promise<string | null> {
+  const [row] = await getDatabase()
+    .select({ id: errorIssues.id })
+    .from(errorIssues)
+    .where(and(
+      eq(errorIssues.organizationId, organizationId),
+      inArray(errorIssues.fingerprint, [fingerprint, ...previousFingerprints]),
+    ))
+    .orderBy(desc(sql`${errorIssues.fingerprint} = ${fingerprint}`), desc(errorIssues.lastSeenAt))
+    .limit(1);
+  return row?.id ?? null;
+}
+
 // Occurrences per UTC day since a day, for each issue. Days without
 // occurrences are left out.
 export async function errorIssueDays(issueIds: string[], since: string): Promise<Map<string, ErrorIssueDay[]>> {

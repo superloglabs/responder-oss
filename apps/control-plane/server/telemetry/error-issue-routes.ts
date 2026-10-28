@@ -7,11 +7,19 @@ import {
   errorIssueServices,
   errorIssueStatusCounts,
   findErrorIssue,
+  findErrorIssueIdByFingerprint,
   listErrorIssues,
   setErrorIssueStatus,
 } from "../../../../packages/core/src/db/error-issues.js";
 import { organizationHasCapability } from "../../../../packages/core/src/db/organization-capabilities.js";
-import { errorIssueStatuses } from "../../../../packages/core/src/telemetry/error-issues.js";
+import { loadSourceMaps } from "../../../../packages/core/src/db/source-maps.js";
+import {
+  type ErrorCandidate,
+  errorIssueStatuses,
+  groupErrorCandidates,
+  zeroCandidateId,
+} from "../../../../packages/core/src/telemetry/error-issues.js";
+import { type SourceMapLoader, symbolicateCandidates } from "../../../../packages/core/src/telemetry/symbolicate.js";
 import { getActiveTenant } from "../tenant.js";
 
 // Error issues: the workspace's telemetry exceptions grouped by fingerprint.
@@ -20,12 +28,14 @@ export type ErrorIssueRouteDependencies = {
   days: typeof errorIssueDays;
   environments: typeof errorIssueEnvironments;
   findIssue: typeof findErrorIssue;
+  findIssueIdByFingerprint: typeof findErrorIssueIdByFingerprint;
   hasCapability: (organizationId: string, capability: "telemetry") => Promise<boolean>;
   hours: typeof errorIssueHours;
   listIssues: typeof listErrorIssues;
   now: () => Date;
   services: typeof errorIssueServices;
   setStatus: typeof setErrorIssueStatus;
+  sourceMaps: SourceMapLoader;
   statusCounts: typeof errorIssueStatusCounts;
   tenant: (
     headers: Headers,
@@ -39,12 +49,14 @@ const defaultDependencies: ErrorIssueRouteDependencies = {
   days: errorIssueDays,
   environments: errorIssueEnvironments,
   findIssue: findErrorIssue,
+  findIssueIdByFingerprint: findErrorIssueIdByFingerprint,
   hasCapability: organizationHasCapability,
   hours: errorIssueHours,
   listIssues: listErrorIssues,
   now: () => new Date(),
   services: errorIssueServices,
   setStatus: setErrorIssueStatus,
+  sourceMaps: loadSourceMaps,
   statusCounts: errorIssueStatusCounts,
   tenant: getActiveTenant,
 };
@@ -71,6 +83,18 @@ const listQuerySchema = z.object({
   status: z.enum([...errorIssueStatuses, "all"]).default("open"),
 });
 const statusSchema = z.object({ status: z.enum(errorIssueStatuses) });
+// A log as the log explorer shows it. Only logs at ERROR or above become
+// issues.
+const logSchema = z.object({
+  attributes: z.record(z.string(), z.string()),
+  body: z.string(),
+  exceptionMessage: z.string(),
+  exceptionStacktrace: z.string(),
+  exceptionType: z.string(),
+  service: z.string(),
+  severity: z.string(),
+  severityNumber: z.number().int().min(17).max(255),
+});
 
 // The start of the first of 24 UTC hours that end with the current hour.
 export function firstHour(now: Date): string {
@@ -159,6 +183,42 @@ export function createErrorIssueRoutes(dependencies: ErrorIssueRouteDependencies
       const tenant = await access(context.req.raw.headers);
       if (!tenant.ok) return context.json({ error: tenant.error }, tenant.status);
       return context.json({ services: await dependencies.services(tenant.organizationId) });
+    })
+    // The issue a log belongs to, found by fingerprinting the log as the
+    // worker does.
+    .post("/for-log", async (context) => {
+      const tenant = await access(context.req.raw.headers);
+      if (!tenant.ok) return context.json({ error: tenant.error }, tenant.status);
+      const log = logSchema.safeParse(await context.req.json().catch(() => null));
+      if (!log.success) return context.json({ error: "Invalid log" }, 400);
+      const candidate: ErrorCandidate = {
+        attrs: log.data.attributes,
+        body: log.data.body,
+        candidate_id: zeroCandidateId,
+        discovered_ms: 0,
+        exception_message: log.data.exceptionMessage,
+        exception_stacktrace: log.data.exceptionStacktrace,
+        exception_type: log.data.exceptionType,
+        kind: "log",
+        project_id: tenant.organizationId,
+        resource_attrs: {},
+        seen_ms: 0,
+        service: log.data.service,
+        severity: log.data.severity,
+        span_id: "",
+        span_name: "",
+        trace_id: "",
+      };
+      // Like the worker, a failure to load maps groups the log as it arrived.
+      const candidates = await symbolicateCandidates([candidate], dependencies.sourceMaps).catch(() => [candidate]);
+      const [occurrences] = groupErrorCandidates(candidates);
+      if (!occurrences) return context.json({ issueId: null });
+      const issueId = await dependencies.findIssueIdByFingerprint(
+        tenant.organizationId,
+        occurrences.fingerprint,
+        occurrences.previousFingerprints,
+      );
+      return context.json({ issueId });
     })
     .get("/:issueId", async (context) => {
       const tenant = await access(context.req.raw.headers);

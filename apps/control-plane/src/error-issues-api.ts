@@ -7,6 +7,7 @@ import type {
 } from "../../../packages/core/src/db/error-issues";
 import type { ErrorIssueStatus } from "../../../packages/core/src/telemetry/error-issues";
 import type { ChartData } from "./dashboards-api";
+import type { LogRecord } from "./telemetry-api";
 
 export type { ErrorIssue, ErrorIssueDay, ErrorIssueHour, ErrorIssueStatus, ErrorIssueSummary };
 
@@ -93,6 +94,27 @@ export async function fetchErrorIssueServices(): Promise<string[]> {
 
 export function fetchErrorIssue(issueId: string): Promise<ErrorIssueDetail> {
   return request(`${base}/${encodeURIComponent(issueId)}`);
+}
+
+// Logs at ERROR or above become error issues.
+export const errorLogSeverityNumber = 17;
+
+// The ID of the issue a log belongs to; null when it has none.
+export async function fetchLogErrorIssueId(log: LogRecord): Promise<string | null> {
+  const body = await request<{ issueId: string | null }>(`${base}/for-log`, {
+    body: {
+      attributes: log.log_attrs,
+      body: log.body,
+      exceptionMessage: log.exception_message,
+      exceptionStacktrace: log.exception_stacktrace,
+      exceptionType: log.exception_type,
+      service: log.service,
+      severity: log.severity,
+      severityNumber: log.severity_number,
+    },
+    method: "POST",
+  });
+  return body.issueId;
 }
 
 export async function updateErrorIssueStatus(issueId: string, status: ErrorIssueStatus): Promise<ErrorIssue> {

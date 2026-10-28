@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ErrorIssue, ErrorIssueSummary } from "../../../../packages/core/src/db/error-issues.js";
+import { fingerprintLog } from "../../../../packages/core/src/telemetry/fingerprint.js";
+import { fingerprintLogV1 } from "../../../../packages/core/src/telemetry/fingerprint-v1.js";
 import { createErrorIssueRoutes, type ErrorIssueRouteDependencies, firstDay, firstHour } from "./error-issue-routes.js";
 
 const organizationId = "00000000-0000-4000-8000-000000000001";
@@ -46,12 +48,14 @@ function routes(overrides: Partial<ErrorIssueRouteDependencies> = {}) {
     environments: vi.fn(async () => ["production"]),
     days: vi.fn(async () => new Map([[issueId, [{ day: "2026-10-22", eventCount: 12 }]]])),
     findIssue: vi.fn(async () => issue),
+    findIssueIdByFingerprint: vi.fn(async () => issueId),
     hasCapability: vi.fn(async () => true),
     hours: vi.fn(async () => new Map([[issueId, [{ eventCount: 12, hour: "2026-10-22T11:00:00.000Z" }]]])),
     listIssues: vi.fn(async () => [summary]),
     now: () => now,
     services: vi.fn(async () => ["api"]),
     setStatus: vi.fn(async (_organizationId, _issueId, status) => ({ ...issue, status })),
+    sourceMaps: vi.fn(async () => new Map()),
     statusCounts: vi.fn(async () => ({ open: 1, resolved: 2, silenced: 0 })),
     tenant: vi.fn(async () => ({ ok: true as const, organizationId, user: { id: "user" } })),
     ...overrides,
@@ -187,6 +191,77 @@ describe("error issue routes", () => {
 
     expect(response.status).toBe(400);
     expect(dependencies.setStatus).not.toHaveBeenCalled();
+  });
+});
+
+describe("error issue for a log", () => {
+  const log = {
+    attributes: {},
+    body: "payment failed for order 4821",
+    exceptionMessage: "",
+    exceptionStacktrace: "",
+    exceptionType: "",
+    service: "api",
+    severity: "ERROR",
+    severityNumber: 17,
+  };
+
+  function lookup(app: ReturnType<typeof routes>["app"], body: unknown) {
+    return app.request("/for-log", {
+      body: JSON.stringify(body),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+  }
+
+  it("finds the issue by the log's fingerprint, as the worker computes it", async () => {
+    const { app, dependencies } = routes();
+    const response = await lookup(app, log);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ issueId });
+    const input = { body: log.body, exceptionType: null, message: null, service: "api", severity: "ERROR", stacktrace: null };
+    expect(dependencies.findIssueIdByFingerprint).toHaveBeenCalledWith(
+      organizationId,
+      fingerprintLog(input).hash,
+      [fingerprintLogV1(input)],
+    );
+  });
+
+  it("answers null when no issue has the fingerprint", async () => {
+    const { app } = routes({ findIssueIdByFingerprint: vi.fn(async () => null) });
+    expect(await (await lookup(app, log)).json()).toEqual({ issueId: null });
+  });
+
+  it("groups the stack as it arrived when source maps fail to load", async () => {
+    const stacktrace = "TypeError: x is undefined\n    at render (https://app.example.com/assets/index-abc.js:1:200)";
+    const { app, dependencies } = routes({ sourceMaps: vi.fn(async () => { throw new Error("database down"); }) });
+    const response = await lookup(app, {
+      ...log,
+      attributes: { "app.debug_ids": JSON.stringify({ "https://app.example.com/assets/index-abc.js": "11111111-2222-4333-8444-555555555555" }) },
+      exceptionStacktrace: stacktrace,
+      exceptionType: "TypeError",
+    });
+
+    expect(await response.json()).toEqual({ issueId });
+    expect(dependencies.sourceMaps).toHaveBeenCalled();
+    expect(dependencies.findIssueIdByFingerprint).toHaveBeenCalledWith(
+      organizationId,
+      fingerprintLog({ body: log.body, exceptionType: "TypeError", message: null, service: "api", severity: "ERROR", stacktrace }).hash,
+      expect.any(Array),
+    );
+  });
+
+  it("rejects logs below ERROR", async () => {
+    const { app, dependencies } = routes();
+    expect((await lookup(app, { ...log, severity: "WARN", severityNumber: 13 })).status).toBe(400);
+    expect(dependencies.findIssueIdByFingerprint).not.toHaveBeenCalled();
+  });
+
+  it("is not available without telemetry", async () => {
+    const { app, dependencies } = routes({ hasCapability: vi.fn(async () => false) });
+    expect((await lookup(app, log)).status).toBe(404);
+    expect(dependencies.findIssueIdByFingerprint).not.toHaveBeenCalled();
   });
 });
 

@@ -37,6 +37,7 @@ vi.mock("../../../../packages/core/src/db/error-issues.js", () => ({
   errorIssueHours: vi.fn(),
   errorIssueStatusCounts: vi.fn(),
   findErrorIssue: mocks.find,
+  findErrorIssueIdByFingerprint: vi.fn(),
   listErrorIssues: mocks.list,
   setErrorIssueStatus: mocks.setStatus,
 }));
