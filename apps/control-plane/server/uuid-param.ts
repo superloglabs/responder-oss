@@ -9,7 +9,7 @@ export function requireUuidParam(
   name: string,
   notFound: string,
 ): MiddlewareHandler {
-  return async (context, next) => {
+  return async function requireUuidParam(context, next) {
     if (!z.uuid().safeParse(context.req.param(name)).success) {
       return context.json({ error: notFound }, 404);
     }

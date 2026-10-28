@@ -134,7 +134,7 @@ const billingRequests = createRateLimiter({
 });
 
 export const billingRoutes = new Hono<{ Variables: { tenant: ActiveTenant } }>()
-  .use("*", async (context, next) => {
+  .use("*", async function billingAccess(context, next) {
     const tenant = await getActiveTenant(context.req.raw.headers);
     if (tenant.ok === false) {
       return context.json({ error: tenant.error }, tenant.status);

@@ -19,7 +19,7 @@ function managesAllKeys(role: string): boolean {
 // Session routes for Settings → API keys. The keys themselves authenticate
 // only the management API and MCP server.
 export const apiKeyRoutes = new Hono()
-  .use("*", async (context, next) => {
+  .use("*", async function noStore(context, next) {
     await next();
     context.header("Cache-Control", "no-store");
   })

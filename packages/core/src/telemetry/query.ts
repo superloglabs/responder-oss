@@ -481,6 +481,11 @@ const TRACE_RECENT_SCAN_CAP = 50_000;
 // shrink the page below the requested limit.
 const TRACE_CANDIDATE_OVERFETCH = 5;
 
+// Orders a trace's spans for choosing its root: spans without a parent first,
+// then by start time. Sorting by start time alone can pick a child that starts
+// in the same millisecond as the root.
+const ROOT_SPAN_ORDER = "(ParentSpanId != '', Timestamp)";
+
 // The trace-summary fast path holds one aggregate-state row per trace with no
 // per-span dimensions, and picks "recent" from a span-only time index — so it
 // can only answer the unfiltered trace list (the default view, and the one that
@@ -592,13 +597,65 @@ async function queryTracesAggregatedFromSummary(
     ORDER BY start_time DESC, trace_id
     LIMIT {limit:UInt32} OFFSET {offset:UInt32}
   `;
-  return retryOneConnectionReset(async () => {
+  const traces = await retryOneConnectionReset(async () => {
     const r = await ch.query({
       query,
       query_params: { organizationId, since: sinceSql, until: untilSql, limit: params.limit, offset: params.offset ?? 0 },
       format: "JSONEachRow",
     });
-    return withSpanStatus(await r.json());
+    return r.json<TraceSummaryRow>();
+  });
+  return withSpanStatus(await withRootSpans(ch, organizationId, traces));
+}
+
+type TraceSummaryRow = {
+  trace_id: string;
+  start_time?: string;
+  root_span_name?: string;
+  root_service?: string;
+  root_status_code?: string;
+};
+
+// The summary's root columns hold the earliest span, which ties with the real
+// root when a child starts in the same millisecond, as Hono middleware does
+// under Sentry. Replace them with each trace's span that has no parent. Root
+// spans start at or after their trace's start, so the page's start times bound
+// the scan. A trace whose root never arrived keeps its earliest span.
+async function withRootSpans(ch: ClickHouseClient, organizationId: string, traces: TraceSummaryRow[]) {
+  const starts = traces.map((trace) => trace.start_time).filter((start): start is string => !!start).sort();
+  if (starts.length === 0) return traces;
+  const roots = await retryOneConnectionReset(async () => {
+    const r = await ch.query({
+      query: `
+      SELECT
+        TraceId AS trace_id,
+        argMin(SpanName, Timestamp) AS root_span_name,
+        argMin(ServiceName, Timestamp) AS root_service,
+        argMin(StatusCode, Timestamp) AS root_status_code
+      FROM otel_traces
+      WHERE SuperlogProjectId = {organizationId:String}
+        AND Timestamp >= {firstStart:DateTime64(9)}
+        AND Timestamp <= {lastStart:DateTime64(9)} + INTERVAL 1 MINUTE
+        AND TraceId IN {traceIds:Array(String)}
+        AND ParentSpanId = ''
+      GROUP BY TraceId
+    `,
+      query_params: {
+        organizationId,
+        firstStart: starts[0],
+        lastStart: starts.at(-1),
+        traceIds: traces.map((trace) => trace.trace_id),
+      },
+      format: "JSONEachRow",
+    });
+    return r.json<Required<Omit<TraceSummaryRow, "start_time">>>();
+  });
+  const byTrace = new Map(roots.map((root) => [root.trace_id, root]));
+  return traces.map((trace) => {
+    const root = byTrace.get(trace.trace_id);
+    return root
+      ? { ...trace, root_span_name: root.root_span_name, root_service: root.root_service, root_status_code: root.root_status_code }
+      : trace;
   });
 }
 
@@ -672,9 +729,9 @@ export async function queryTracesAggregated(
     SELECT
       TraceId AS trace_id,
       toString(min(Timestamp)) AS start_time,
-      argMin(SpanName, Timestamp) AS root_span_name,
-      argMin(ServiceName, Timestamp) AS root_service,
-      argMin(StatusCode, Timestamp) AS root_status_code,
+      argMin(SpanName, ${ROOT_SPAN_ORDER}) AS root_span_name,
+      argMin(ServiceName, ${ROOT_SPAN_ORDER}) AS root_service,
+      argMin(StatusCode, ${ROOT_SPAN_ORDER}) AS root_status_code,
       count() AS span_count,
       countIf(${ERROR_SPAN_COND}) AS error_count,
       uniqExact(ServiceName) AS service_count,

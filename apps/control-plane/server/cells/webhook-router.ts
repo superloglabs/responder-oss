@@ -154,7 +154,7 @@ export function cellWebhookRouter(
   dependencies: CellWebhookRouterDependencies = defaultDependencies,
   cache: OwnerCache = new Map(),
 ): MiddlewareHandler {
-  return async (context, next) => {
+  return async function cellWebhookRouter(context, next) {
     const directory = dependencies.directory();
     const token = dependencies.cellToken();
     if (

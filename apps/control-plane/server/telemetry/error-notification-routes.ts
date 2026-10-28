@@ -13,7 +13,7 @@ const defaults = {
   refresh: refreshSlackChannelResources,
 };
 export function createErrorNotificationRoutes(deps = defaults) {
-  return new Hono<{ Variables: { organizationId: string } }>().use("*", async (context, next) => {
+  return new Hono<{ Variables: { organizationId: string } }>().use("*", async function requireErrorNotificationAdmin(context, next) {
     const tenant = await deps.tenant(context.req.raw.headers);
     if (!tenant.ok) return context.json({ error: tenant.error }, tenant.status);
     if (!(await deps.hasCapability(tenant.organizationId, "telemetry"))) return context.json({ error: "Errors are not available" }, 404);

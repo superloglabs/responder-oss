@@ -41,7 +41,7 @@ function honoPath(path: string): string {
 }
 
 const routes = new Hono()
-  .use("*", async (context, next) => {
+  .use("*", async function noStore(context, next) {
     await next();
     context.header("Cache-Control", "no-store");
   })

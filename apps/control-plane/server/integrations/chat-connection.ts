@@ -57,7 +57,7 @@ function page(title: string, message: string, returnUrl: string | null = null) {
 }
 
 export const chatConnectionRoutes = new Hono()
-  .use("*", async (context, next) => {
+  .use("*", async function chatConnectionHeaders(context, next) {
     context.header("Cache-Control", "no-store");
     context.header("Referrer-Policy", "no-referrer");
     context.header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'");
