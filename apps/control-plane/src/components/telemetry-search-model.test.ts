@@ -1,3 +1,4 @@
+import { metricQueryFromParams, metricQueryParams, maxMetricFilters } from "../metrics-api";
 import { describe, expect, it } from "vitest";
 import { logExplorerParams, logExplorerQuery, traceExplorerParams, traceSearchQuery } from "../telemetry-api";
 import { durationMs, parseSearchDraft, queryWithTokens, searchFields, searchTokens } from "./telemetry-search-model";
@@ -52,5 +53,33 @@ describe("attribute and value discovery", () => {
   });
   it.each([["500ms", 500], ["1.5s", 1500], ["2m", 120000], ["60m", 3600000], ["500", null], ["-1s", null], ["0ms", null], ["61m", null], ["NaNms", null]])("validates duration %s", (value, expected) => {
     expect(durationMs(value as string)).toBe(expected);
+  });
+});
+
+
+describe("metric search", () => {
+  it("preserves metric, unit, aggregation, grouping, chart and range while editing scoped filters", () => {
+    const query = metricQueryFromParams(new URLSearchParams("metric=v8js.heap&kind=gauge&unit=By&aggregation=max&by=attr:space&chart=bar&from=2026-10-01T00:00:00Z&to=2026-10-02T00:00:00Z&filter=resource.service.name=api&filter=attr:space!=old=x"))!;
+    expect(searchTokens(query).map(({ key, op, value }) => ({ key, op, value }))).toEqual([
+      { key: "resource.service.name", op: "=", value: "api" },
+      { key: "attr:space", op: "!=", value: "old=x" },
+    ]);
+    const next = queryWithTokens(query, searchTokens(query).map(t => t.key === "attr:space" ? { ...t, value: "new" } : t));
+    expect(metricQueryFromParams(metricQueryParams(next))).toEqual(next);
+    expect(next).toEqual({ ...query, filters: [{ key: "resource.service.name", value: "api" }, { key: "attr:space", op: "neq", value: "new" }] });
+    expect(queryWithTokens(query, [])).toEqual({ ...query, filters: [] });
+  });
+  it("discovers actual metric attributes without log or trace pseudo-fields", () => {
+    const fields = searchFields("metrics", ["resource.service.name", "attr:space", "resource.space", "attr:space"]);
+    expect(fields).toHaveLength(3);
+    expect(fields.filter(f => f.label === "space").map(f => f.key)).toEqual(["attr:space", "resource.space"]);
+    expect(parseSearchDraft('attr:space!="old=x"', fields)).toMatchObject({ field: { key: "attr:space" }, op: "!=", value: "old=x" });
+    expect(parseSearchDraft('attr:undiscovered=value', fields)).toMatchObject({ field: { key: "attr:undiscovered" }, value: "value" });
+  });
+  it("retains empty values, deduplicates, and respects the filter limit", () => {
+    const query = metricQueryFromParams(new URLSearchParams("metric=heap&kind=gauge"))!;
+    const token = { id: "a", key: "attr:space", op: "=" as const, value: "" };
+    expect(queryWithTokens(query, [token, token]).filters).toEqual([{ key: "attr:space", value: "" }]);
+    expect(queryWithTokens(query, Array.from({ length: 60 }, (_, i) => ({ ...token, key: `attr:k${i}` }))).filters).toHaveLength(maxMetricFilters);
   });
 });

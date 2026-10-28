@@ -1359,3 +1359,14 @@
     transition-duration: 0.01ms;
   }
 }
+
+/* Canonical compact toolbar controls: same outline and spacing as workspace buttons. */
+.dsField--compact .dsSelect__trigger { height: 26px; min-height: 26px; gap: 5px; padding: 3px 7px; border: 1px solid #ddd; border-radius: 6px; background: #fff; color: #202020; box-shadow: 0 1px 3px #00000008; font: 400 13px/18px var(--ds-font-sans); }
+.dsField--compact .dsSelect__trigger svg { width: 12px; height: 12px; color: #666; }
+.dsSegmentedControl--compact { gap: 0; padding: 0; border: 1px solid #ddd; border-radius: 6px; background: #fff; box-shadow: 0 1px 3px #00000008; }
+.dsSegmentedControl--compact .dsSegmentedControl__option { display: inline-flex; align-items: center; gap: 5px; min-height: 24px; padding: 3px 7px; border: 0; border-radius: 0; color: #444; font: 400 13px/18px var(--ds-font-sans); }
+.dsSegmentedControl--compact .dsSegmentedControl__option + .dsSegmentedControl__option { border-left: 1px solid #ddd; }
+.dsSegmentedControl--compact .dsSegmentedControl__option:first-child { border-radius: 5px 0 0 5px; }
+.dsSegmentedControl--compact .dsSegmentedControl__option:last-child { border-radius: 0 5px 5px 0; }
+.dsSegmentedControl--compact .dsSegmentedControl__option[aria-checked="true"] { background: #f5f5f5; color: #202020; box-shadow: none; }
+.dsSegmentedControl--compact .dsSegmentedControl__option:focus-visible { outline-color: #4e58f9; outline-offset: -2px; }

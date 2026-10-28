@@ -1,3 +1,4 @@
+import { maxMetricFilters, type MetricQuery } from "../metrics-api";
 import { CaretLeftIcon, MagnifyingGlassIcon, XIcon } from "@phosphor-icons/react";
 import { Fragment, useEffect, useId, useRef, useState } from "react";
 import type { FacetCount, LogExplorerQuery, TraceSearchQuery } from "../telemetry-api";
@@ -12,7 +13,7 @@ type Props = {
   keysError?: string | null;
   onRetryKeys: () => void;
   loadValues: (key: string) => Promise<FacetCount[]>;
-} & ({ signal: "logs"; query: LogExplorerQuery; onChange: (query: LogExplorerQuery) => void } | {
+} & ({ signal: "metrics"; query: MetricQuery; onChange: (query: MetricQuery) => void } | { signal: "logs"; query: LogExplorerQuery; onChange: (query: LogExplorerQuery) => void } | {
   signal: "traces"; query: TraceSearchQuery; onChange: (query: TraceSearchQuery) => void; onOpenTrace: (id: string) => void;
 });
 type Draft = { field: SearchField | null; op: SearchOperator; text: string; edit: string | null; operators: boolean };
@@ -66,7 +67,11 @@ export function TelemetrySearch(props: Props) {
   }, []);
 
   function changeTokens(next: SearchToken[]) {
-    if (props.signal === "logs") {
+    if (props.signal === "metrics") {
+      const updated = queryWithTokens(props.query, next);
+      setPendingSignature(JSON.stringify(searchTokens(updated)));
+      props.onChange(updated);
+    } else if (props.signal === "logs") {
       const updated = queryWithTokens(props.query, next);
       setPendingSignature(JSON.stringify(searchTokens(updated)));
       props.onChange(updated);
@@ -78,7 +83,11 @@ export function TelemetrySearch(props: Props) {
   }
   function dismiss() { setDraft(emptyDraft); setOpen(false); setActive(0); }
   function commit(token: Omit<SearchToken, "id">) {
-    const next = tokens.filter(t => t.id !== draft.edit && !(token.key === "message" || token.key === "duration" ? t.key === token.key : t.key === token.key && t.op === token.op && t.value === token.value));
+    if (signal === "metrics" && !draft.edit && tokens.length >= maxMetricFilters) {
+      setAnnouncement(`A graph supports up to ${maxMetricFilters} filters. Remove one before adding another.`);
+      return;
+    }
+    const next = tokens.filter(t => t.id !== draft.edit && !(signal !== "metrics" && (token.key === "message" || token.key === "duration") ? t.key === token.key : t.key === token.key && t.op === token.op && t.value === token.value));
     changeTokens([...next, { ...token, id: "new" }]);
     setAnnouncement(`Applied ${field?.label ?? token.key} ${token.op} ${token.value}`);
     input.current?.focus(); dismiss();
@@ -87,7 +96,7 @@ export function TelemetrySearch(props: Props) {
     setDraft({ ...draft, field: next, op: next.operators[0], text: "", operators: false }); setActive(0); setOpen(true); input.current?.focus();
   }
   function editToken(token: SearchToken) {
-    const found = token.key === "message" ? messageField : fields.find(f => f.key === token.key);
+    const found = signal !== "metrics" && token.key === "message" ? messageField : fields.find(f => f.key === token.key);
     if (!found) return;
     setDraft({ field: found, op: token.op, text: token.value, edit: token.id, operators: false });
     setActive(0); setOpen(true); input.current?.focus();
@@ -103,7 +112,7 @@ export function TelemetrySearch(props: Props) {
   if (!field) {
     options = fields.filter(f => [f.key, f.label, ...(f.aliases ?? [])].some(s => s.toLowerCase().includes(needle.toLowerCase())))
       .map(f => ({ id: f.key, label: f.label, group: f.group, field: f }));
-    if (needle) {
+    if (needle && signal !== "metrics") {
       if (traceIdPattern.test(needle)) {
         options.unshift(signal === "traces" ? { id: "trace", label: `Open trace ${needle}`, trace: needle.toLowerCase() } : { id: "trace", label: `trace.id = ${needle}`, token: { key: "field.trace_id", op: "=", value: needle.toLowerCase() } });
       } else {
@@ -114,7 +123,7 @@ export function TelemetrySearch(props: Props) {
     options = field.operators.map(op => ({ id: op, label: `${op}  ${operatorLabels[op]}`, op }));
   } else {
     const available = field.kind === "duration" ? ["100ms", "500ms", "1s", "5s"] : field.kind ? [] : values.isFetching || values.error ? [] : (values.data ?? []).map(v => v.group);
-    const label = (v: string) => field.key === "status" ? statusLabels[v] ?? v : v;
+    const label = (v: string) => signal !== "metrics" && field.key === "status" ? statusLabels[v] ?? v : v;
     options = [...new Set(available)].filter(v => `${v} ${label(v)}`.toLowerCase().includes(needle.toLowerCase())).map(value => ({ id: `value:${value}`, label: label(value) || "(empty)", token: { key: field.key, op: draft.op, value } }));
     const valid = field.kind === "duration" ? durationMs(needle) !== null : field.kind === "trace" ? traceIdPattern.test(needle) : Boolean(needle);
     if (valid && !options.some(o => o.token?.value.toLowerCase() === needle.toLowerCase())) {
@@ -136,12 +145,12 @@ export function TelemetrySearch(props: Props) {
   }, [open, activeIndex, id]);
 
   return <div className="telemetrySearch" ref={root} onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false); }}>
-    <div className="telemetrySearch__bar" role="search" aria-label={signal === "logs" ? "Log search" : "Trace search"}>
+    <div className="telemetrySearch__bar" role="search" aria-label={signal === "metrics" ? "Metric search" : signal === "logs" ? "Log search" : "Trace search"}>
       <MagnifyingGlassIcon className="telemetrySearch__icon" aria-hidden="true" size={14} />
       <div className="telemetrySearch__entry">
         {tokens.map(token => {
           const label = fields.find(f => f.key === token.key)?.label ?? fieldLabel(token.key);
-          const value = token.key === "status" ? statusLabels[token.value] ?? token.value : token.value;
+          const value = signal !== "metrics" && token.key === "status" ? statusLabels[token.value] ?? token.value : token.value;
           return <span className="telemetrySearch__chip" key={token.id} data-editing={draft.edit === token.id}>
             <button type="button" aria-label={`Edit ${label} ${token.op} ${value}`} onClick={() => editToken(token)}><span>{label} {token.op}</span> {value || "(empty)"}</button>
             <button type="button" className="telemetrySearch__remove" aria-label={`Remove ${label} ${value}`} onClick={() => { changeTokens(tokens.filter(t => t.id !== token.id)); input.current?.focus(); dismiss(); }}><XIcon size={11} aria-hidden="true" /></button>
@@ -149,8 +158,8 @@ export function TelemetrySearch(props: Props) {
         })}
         <div className="telemetrySearch__composer">
           {field ? <><button type="button" aria-label="Change attribute" onClick={() => { setDraft({ ...draft, field: null, text: "", operators: false }); setActive(0); setOpen(true); input.current?.focus(); }}>{field.label}</button><button type="button" aria-label={`Change operator, ${operatorLabels[draft.op]}`} onClick={() => { setDraft({ ...draft, operators: !draft.operators }); setActive(0); setOpen(true); input.current?.focus(); }}>{draft.op}</button></> : null}
-          <input {...searchInputProps} ref={input} role="combobox" aria-label={signal === "logs" ? "Search logs" : "Filter traces"} aria-autocomplete="list" aria-expanded={open} aria-controls={open ? `${id}-list` : undefined} aria-activedescendant={open && options.length ? `${id}-${activeIndex}` : undefined}
-            maxLength={500} spellCheck={false} value={draft.text} placeholder={field ? field.kind === "duration" ? "Enter a duration, e.g. 500ms" : "Search values…" : signal === "logs" ? "Search messages, attributes, or a trace ID…" : "Search span names, attributes, or a trace ID…"}
+          <input {...searchInputProps} ref={input} role="combobox" aria-label={signal === "metrics" ? "Filter metrics" : signal === "logs" ? "Search logs" : "Filter traces"} aria-autocomplete="list" aria-expanded={open} aria-controls={open ? `${id}-list` : undefined} aria-activedescendant={open && options.length ? `${id}-${activeIndex}` : undefined}
+            maxLength={500} spellCheck={false} value={draft.text} placeholder={field ? field.kind === "duration" ? "Enter a duration, e.g. 500ms" : "Search values…" : signal === "metrics" ? "Filter by service, host, or attribute…" : signal === "logs" ? "Search messages, attributes, or a trace ID…" : "Search span names, attributes, or a trace ID…"}
             onChange={event => changeText(event.target.value)} onFocus={() => setOpen(true)} onClick={() => setOpen(true)}
             onKeyDown={event => {
               if (event.nativeEvent.isComposing) return;

@@ -6,14 +6,13 @@ import {
   ChartLineIcon,
   MagnifyingGlassIcon,
   PlusIcon,
-  XIcon,
 } from "@phosphor-icons/react";
-import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { AppShell } from "../components/app-shell";
 import { DashboardTimePicker } from "../components/dashboard-time-picker";
 import { ChartSkeleton, ListSkeleton } from "../components/screen-skeletons";
-import { MetricKindIcon } from "../components/metric-kind-icon";
+import { TelemetrySearch } from "../components/telemetry-search";
 import { TelemetryGate } from "../components/telemetry";
 import { seriesColors, TimeseriesChart } from "../components/timeseries-chart";
 import {
@@ -32,7 +31,6 @@ import {
   fetchDashboards,
   formatWidgetValue,
   type ChartData,
-  type DashboardWidgetFilter,
   type TelemetryDashboardSummary,
   type WidgetUnit,
 } from "../dashboards-api";
@@ -55,11 +53,9 @@ import {
   metricRangeParams,
   metricWidgetDraft,
   metricWidgetUnit,
-  maxMetricFilters,
   searchMetrics,
   seriesStats,
   type MetricCatalogEntry,
-  type MetricDimension,
   type MetricQuery,
 } from "../metrics-api";
 import { useOrganizationCapabilities } from "../organization-capabilities";
@@ -77,6 +73,7 @@ function useLoaded<T>(key: string | null, read: () => Promise<T>) {
     key: null,
     value: null,
   });
+  const [attempt, setAttempt] = useState(0);
   const latest = useRef(key);
   const readRef = useRef(read);
   useEffect(() => {
@@ -93,9 +90,9 @@ function useLoaded<T>(key: string | null, read: () => Promise<T>) {
         }
       },
     );
-  }, [key]);
+  }, [key, attempt]);
   const current = state.key === key;
-  return { error: current ? state.error : null, loading: !current, value: current ? state.value : null };
+  return { error: current ? state.error : null, loading: !current, value: current ? state.value : null, retry: () => setAttempt(value => value + 1) };
 }
 
 function MetricList({
@@ -110,8 +107,20 @@ function MetricList({
   selected: { kind: string; name: string; unit: string | null };
 }) {
   const [search, setSearch] = useState("");
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const groups = useMemo(() => groupMetrics(searchMetrics(catalog ?? [], search)), [catalog, search]);
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const selectedLink = useRef<HTMLAnchorElement>(null);
+  const groups = useMemo(() => {
+    const grouped = groupMetrics(searchMetrics(catalog ?? [], search));
+    const selectedIndex = grouped.findIndex(group => group.metrics.some(metric =>
+      metric.name === selected.name && metric.kind === selected.kind && (selected.unit === null || metric.unit === selected.unit),
+    ));
+    // Keep the current metric's namespace visible above the rest of the catalog.
+    if (selectedIndex > 0) grouped.unshift(...grouped.splice(selectedIndex, 1));
+    return grouped;
+  }, [catalog, search, selected.name, selected.kind, selected.unit]);
+  useEffect(() => {
+    selectedLink.current?.scrollIntoView({ block: "nearest" });
+  }, [catalog, selected.name, selected.kind, selected.unit]);
   return (
     <nav aria-label="Metrics" className="metricList">
       <label className="telemetryPage__search metricList__search">
@@ -119,7 +128,7 @@ function MetricList({
         <input
           aria-label="Find a metric"
           onChange={(event) => setSearch(event.target.value)}
-          placeholder="Find a metric or attribute"
+          placeholder="Search metrics"
           type="search"
           value={search}
         />
@@ -127,133 +136,52 @@ function MetricList({
       {error ? <p className="formError" role="alert">{error}</p> : null}
       {catalog === null && !error ? <ListSkeleton label="Loading metrics…" rows={8} /> : null}
       {catalog !== null && groups.length === 0 ? <p className="telemetryPage__status">No metrics match.</p> : null}
-      {groups.map((group) => {
-        // A search shows every match.
-        const open = Boolean(search.trim()) || !collapsed.has(group.namespace);
-        return (
-          <section className="metricList__group" key={group.namespace}>
-            <button
-              aria-expanded={open}
-              className={group.cloud ? "metricList__groupHeader metricList__groupHeader--friendly" : "metricList__groupHeader"}
-              onClick={() =>
-                setCollapsed((current) => {
-                  const next = new Set(current);
-                  if (next.has(group.namespace)) next.delete(group.namespace);
-                  else next.add(group.namespace);
-                  return next;
-                })
-              }
-              type="button"
-            >
-              {open ? <CaretDownIcon aria-hidden="true" size={12} /> : <CaretRightIcon aria-hidden="true" size={12} />}
-              <span className="metricList__groupName">{group.namespace}</span>
-              <span className="metricList__count">{group.metrics.length}</span>
-            </button>
-            {open ? (
-              <ul>
-                {group.metrics.map((metric) => {
-                  const current = metric.name === selected.name && metric.kind === selected.kind &&
-                    (selected.unit === null || metric.unit === selected.unit);
-                  const display = metricDisplay(metric);
-                  const friendly = display.title !== metric.name;
-                  const rest = friendly ? display.title : metric.name.slice(group.namespace.length + 1) || metric.name;
-                  return (
-                    <li key={`${metric.kind}:${metric.name}:${metric.unit}`}>
-                      <Link
-                        aria-current={current ? "page" : undefined}
-                        className="metricList__item"
-                        title={metric.name}
-                        to={metricExplorerHref(metric, context)}
-                      >
-                        <MetricKindIcon kind={metric.kind} />
-                        <span className={friendly ? "metricList__name metricList__name--friendly" : "metricList__name"}>{rest}</span>
-                        <span className="metricList__unit">{metric.unit}</span>
-                      </Link>
-                    </li>
-                  );
-                })}
-              </ul>
-            ) : null}
-          </section>
-        );
-      })}
+      <div className="metricList__groups">
+        {groups.map((group) => {
+          // A search shows every match.
+          const selectedGroup = group.metrics.some(metric => metric.name === selected.name && metric.kind === selected.kind && (selected.unit === null || metric.unit === selected.unit));
+          const open = Boolean(search.trim()) || (expanded[group.namespace] ?? selectedGroup);
+          return (
+            <section className="metricList__group" key={group.namespace}>
+              <button
+                aria-expanded={open}
+                className="metricList__groupHeader"
+                onClick={() => setExpanded(current => ({ ...current, [group.namespace]: !open }))}
+                type="button"
+              >
+                <span className="metricList__groupName">{group.namespace}</span>
+                <span className="metricList__count">{group.metrics.length}</span>
+                {open ? <CaretDownIcon aria-hidden="true" size={12} /> : <CaretRightIcon aria-hidden="true" size={12} />}
+              </button>
+              {open ? (
+                <ul>
+                  {group.metrics.map((metric) => {
+                    const current = metric.name === selected.name && metric.kind === selected.kind &&
+                      (selected.unit === null || metric.unit === selected.unit);
+                    const display = metricDisplay(metric);
+                    const friendly = display.title !== metric.name;
+                    const rest = friendly ? display.title : metric.name.slice(group.namespace.length + 1) || metric.name;
+                    return (
+                      <li key={`${metric.kind}:${metric.name}:${metric.unit}`}>
+                        <Link
+                          ref={current ? selectedLink : undefined}
+                          aria-current={current ? "page" : undefined}
+                          className="metricList__item"
+                          title={metric.name}
+                          to={metricExplorerHref(metric, context)}
+                        >
+                          <span className="metricList__name">{rest}</span>
+                        </Link>
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : null}
+            </section>
+          );
+        })}
+      </div>
     </nav>
-  );
-}
-
-// Adds a filter inline, in the query bar, from an attribute and one of its
-// values or a typed value.
-function AddFilter({
-  dimensions,
-  onAdd,
-}: {
-  dimensions: MetricDimension[];
-  onAdd: (filter: DashboardWidgetFilter) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [key, setKey] = useState("");
-  const [value, setValue] = useState("");
-  const dimension = dimensions.find((entry) => entry.key === key);
-
-  function close() {
-    setOpen(false);
-    setKey("");
-    setValue("");
-  }
-
-  function submit(event: FormEvent) {
-    event.preventDefault();
-    if (!key || !value.trim()) return;
-    onAdd({ key, value: value.trim() });
-    close();
-  }
-
-  if (!open) {
-    return (
-      <button className="metricQuery__add" onClick={() => setOpen(true)} type="button">
-        <PlusIcon aria-hidden="true" size={11} />Filter
-      </button>
-    );
-  }
-  return (
-    <form className="metricQuery__filterForm" onKeyDown={(event) => { if (event.key === "Escape") close(); }} onSubmit={submit}>
-      <SelectField
-        className="metricQuery__select"
-        label="Attribute"
-        onChange={(next) => {
-          setKey(next);
-          setValue(dimensions.find((entry) => entry.key === next)?.values[0]?.value ?? "");
-        }}
-        options={[
-          { label: "Attribute", value: "" },
-          ...dimensions.map((entry) => ({
-            description: `${entry.cardinality} ${entry.cardinality === 1 ? "value" : "values"}`,
-            label: entry.name,
-            value: entry.key,
-          })),
-        ]}
-        searchable={dimensions.length > 8}
-        value={key}
-      />
-      <span className="metricQuery__word">=</span>
-      <input
-        aria-label="Value"
-        className="metricQuery__value"
-        disabled={!key}
-        list="metric-filter-values"
-        maxLength={500}
-        onChange={(event) => setValue(event.target.value)}
-        placeholder="Value"
-        value={value}
-      />
-      <datalist id="metric-filter-values">
-        {dimension?.values.map((entry) => <option key={entry.value} value={entry.value} />)}
-      </datalist>
-      <Button disabled={!key || !value.trim()} size="small" type="submit" variant="primary">Add</Button>
-      <button aria-label="Cancel filter" className="metricQuery__cancel" onClick={close} type="button">
-        <XIcon size={11} />
-      </button>
-    </form>
   );
 }
 
@@ -289,7 +217,7 @@ function SeriesTable({
               <th scope="row">
                 <button aria-pressed={!hidden.has(series.name)} onClick={() => onToggle(series.name)} type="button">
                   <span className={`timeseriesChart__swatch timeseriesChart__color--${index % seriesColors}`} />
-                  <span className="metricSeries__name" title={series.name}>{series.name}</span>
+                  <span className="metricSeries__name" title={series.name}>{label === "Series" ? "All services" : series.name}</span>
                 </button>
               </th>
               <td>{formatWidgetValue(stats.average, unit)}</td>
@@ -300,90 +228,6 @@ function SeriesTable({
         })}
       </tbody>
     </table>
-  );
-}
-
-function DimensionsRail({
-  dimensions,
-  error,
-  loading,
-  onFilter,
-  onGroup,
-  query,
-}: {
-  dimensions: MetricDimension[] | null;
-  error: string | null;
-  loading: boolean;
-  onFilter: (filter: DashboardWidgetFilter) => void;
-  onGroup: (key: string) => void;
-  query: MetricQuery;
-}) {
-  const [expanded, setExpanded] = useState<string | null>(null);
-  const filtered = new Set(query.filters.map((filter) => filter.key));
-  const sections = [
-    { label: "Data point", rows: (dimensions ?? []).filter((entry) => entry.scope === "point") },
-    { label: "Resource", rows: (dimensions ?? []).filter((entry) => entry.scope === "resource") },
-  ].filter((section) => section.rows.length > 0);
-  return (
-    <aside aria-label="Dimensions" className="metricDimensionsRail">
-      <header>
-        <h2>Dimensions</h2>
-        {dimensions ? <span>{dimensions.length}</span> : null}
-      </header>
-      <p className="metricDimensionsRail__hint">Attributes on this metric's points in the time range.</p>
-      {loading ? <ListSkeleton label="Loading dimensions…" rows={4} /> : null}
-      {error ? <p className="formError" role="alert">{error}</p> : null}
-      {!loading && dimensions?.length === 0 ? <p className="telemetryPage__status">This metric has no attributes.</p> : null}
-      {sections.map((section) => (
-        <section className="metricDimensionsRail__section" key={section.label}>
-          <h3>{section.label}</h3>
-          {section.rows.map((dimension) => {
-            const open = expanded === dimension.key;
-            const grouped = query.groupBy === dimension.key;
-            return (
-              <div className={open ? "metricDimension metricDimension--open" : "metricDimension"} key={dimension.key}>
-                <button
-                  aria-expanded={open}
-                  className="metricDimension__header"
-                  onClick={() => setExpanded(open ? null : dimension.key)}
-                  type="button"
-                >
-                  <code>{dimension.name}</code>
-                  {grouped ? <Badge tone="info">Grouped</Badge> : null}
-                  {filtered.has(dimension.key) ? <Badge tone="neutral">Filtered</Badge> : null}
-                  <span className="metricDimension__count">{dimension.cardinality}</span>
-                </button>
-                {open ? (
-                  <div className="metricDimension__body">
-                    <ul aria-label={`Values of ${dimension.name}`}>
-                      {dimension.values.map((entry) => (
-                        <li key={entry.value}>
-                          <button
-                            onClick={() => onFilter({ key: dimension.key, value: entry.value })}
-                            title={`Filter to ${entry.value}`}
-                            type="button"
-                          >
-                            <span className="metricDimension__value">{entry.value || "(empty)"}</span>
-                            <span className="metricDimension__share">{Math.round(entry.share * 100)}%</span>
-                            <span className="metricDimension__bar" style={{ width: `${Math.max(2, entry.share * 100)}%` }} />
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                    <div className="metricDimension__actions">
-                      <Button disabled={grouped} onClick={() => onGroup(dimension.key)} size="small">Group by</Button>
-                      {dimension.cardinality > dimension.values.length ? (
-                        <span>+{dimension.cardinality - dimension.values.length} more</span>
-                      ) : null}
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-            );
-          })}
-        </section>
-      ))}
-    </aside>
   );
 }
 
@@ -479,11 +323,6 @@ export function MetricExplorerPage() {
     if (change.range) setNow(Date.now());
     setParams(metricQueryParams({ ...query!, ...change }), { replace: true });
   }
-  function addFilter(filter: DashboardWidgetFilter) {
-    const filters = query!.filters.filter((existing) => existing.key !== filter.key);
-    if (filters.length >= maxMetricFilters) return;
-    update({ filters: [...filters, filter] });
-  }
   const dimensionOptions = (dimensions.value ?? []).map((entry) => ({
     description: `${entry.scope === "point" ? "Data point" : "Resource"} · ${entry.cardinality} ${entry.cardinality === 1 ? "value" : "values"}`,
     label: entry.name,
@@ -510,9 +349,19 @@ export function MetricExplorerPage() {
                 <nav aria-label="Breadcrumb" className="automationCreate__breadcrumb">
                   <Link to={catalogHref}>Metrics</Link>
                   <span aria-hidden="true">›</span>
-                  <span aria-current="page">{label}</span>
+                  <span aria-current="page">Explorer</span>
                 </nav>
                 <span className="automationCreate__spacer" />
+                <DashboardTimePicker
+                  now={now}
+                  onChange={(range) => update({ range })}
+                  onTimeZoneChange={changeTimeZone}
+                  onZoomOut={() => update({ range: zoomOutTimeRange(query.range, Date.now(), null).range })}
+                  range={query.range}
+                  timeZone={timeZone}
+                  timeZonePreference={timeZonePreference}
+                  zoomed={false}
+                />
                 {capabilities.includes("alerts") ? (
                   <Button
                     onClick={() => navigate("/alerts/new", { state: { alertDraft: metricAlertDraft(query) } })}
@@ -524,12 +373,12 @@ export function MetricExplorerPage() {
                 {capabilities.includes("dashboards") ? <AddToDashboard query={query} unit={unit} /> : null}
               </div>
               <div className="metricExplorer__titleRow">
-                <h1 className={friendly ? "metricExplorer__friendly" : undefined} title={friendly ? query.name : undefined}>{label}</h1>
-                <Badge tone="info">{metricKindLabel(query.kind)}</Badge>
-                {unit ? <Badge tone="neutral">{unit}</Badge> : null}
+                <h1 title={friendly ? query.name : undefined}>{label}</h1>
+                <Badge tone="neutral">{metricKindLabel(query.kind)}</Badge>
+                {unit ? <Badge tone="neutral">{unit === "By" || unit === "B" ? "Bytes" : unit}</Badge> : null}
               </div>
               <p className="metricExplorer__meta">
-                {friendly ? <><code>{query.name}</code>{" · "}</> : null}
+                {friendly ? <><span>{query.name}</span>{" · "}</> : null}
                 {[
                   description,
                   metric && metric.services.length > 0
@@ -539,36 +388,31 @@ export function MetricExplorerPage() {
                 ].filter(Boolean).join(" · ")}
               </p>
             </header>
+            <TelemetrySearch
+              signal="metrics"
+              query={query}
+              onChange={(next) => update({ filters: next.filters })}
+              dataKey={JSON.stringify([windowKey, query.kind, query.name, query.unit])}
+              attributeKeys={dimensions.value?.map(entry => entry.key) ?? null}
+              keysError={dimensions.error}
+              onRetryKeys={dimensions.retry}
+              loadValues={async (key) => {
+                const entries = dimensions.value ?? await fetchMetricDimensions(window!, query);
+                return (entries.find(entry => entry.key === key)?.values ?? []).map(entry => ({ group: entry.value, value: entry.share }));
+              }}
+            />
             <div className="metricQuery">
               <div className="metricQuery__bar">
                 <SelectField
-                  className="metricQuery__select metricQuery__aggregation"
+                  className="dsField--compact metricQuery__select metricQuery__aggregation"
                   label="Aggregation"
                   onChange={(aggregation) => update({ aggregation })}
                   options={metricAggregationOptions(query.kind)}
                   value={query.aggregation}
                 />
-                <span className="metricQuery__word">where</span>
-                {query.filters.map((filter) => (
-                  <span className="metricQuery__chip" key={filter.key}>
-                    <code>{dimensionLabel(filter.key)} {filter.op === "neq" ? "≠" : "="}</code>
-                    <strong>{filter.value}</strong>
-                    <button
-                      aria-label={`Remove filter on ${dimensionLabel(filter.key)}`}
-                      onClick={() => update({ filters: query.filters.filter((existing) => existing !== filter) })}
-                      type="button"
-                    >
-                      <XIcon size={11} />
-                    </button>
-                  </span>
-                ))}
-                {query.filters.length < maxMetricFilters ? (
-                  <AddFilter dimensions={dimensions.value ?? []} onAdd={addFilter} />
-                ) : null}
-                <span aria-hidden="true" className="metricQuery__divider" />
-                <span className="metricQuery__word">by</span>
+                <span className="metricQuery__word">Group by</span>
                 <SelectField
-                  className="metricQuery__select metricQuery__group"
+                  className="dsField--compact metricQuery__select metricQuery__group"
                   label="Group by"
                   onChange={(groupBy) => update({ groupBy })}
                   options={groupOptions}
@@ -576,7 +420,7 @@ export function MetricExplorerPage() {
                   value={query.groupBy}
                 />
               </div>
-              <div aria-label="Chart type" className="dsSegmentedControl metricQuery__chartType" role="radiogroup">
+              <div aria-label="Chart type" className="dsSegmentedControl dsSegmentedControl--compact metricQuery__chartType" role="radiogroup">
                 {([
                   { icon: ChartLineIcon, label: "Lines", value: "line" },
                   { icon: ChartBarIcon, label: "Bars", value: "bar" },
@@ -587,22 +431,22 @@ export function MetricExplorerPage() {
                     key={option.value}
                     onClick={() => update({ chartType: option.value })}
                     role="radio"
+                    tabIndex={query.chartType === option.value ? 0 : -1}
+                    onKeyDown={(event) => {
+                      if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
+                        event.preventDefault();
+                        const next = event.key === "Home" ? "line" : event.key === "End" ? "bar" : query.chartType === "line" ? "bar" : "line";
+                        update({ chartType: next });
+                        const buttons = event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>("button");
+                        buttons?.[next === "line" ? 0 : 1]?.focus();
+                      }
+                    }}
                     type="button"
                   >
                     <option.icon aria-hidden="true" size={13} />{option.label}
                   </button>
                 ))}
               </div>
-              <DashboardTimePicker
-                now={now}
-                onChange={(range) => update({ range })}
-                onTimeZoneChange={changeTimeZone}
-                onZoomOut={() => update({ range: zoomOutTimeRange(query.range, Date.now(), null).range })}
-                range={query.range}
-                timeZone={timeZone}
-                timeZonePreference={timeZonePreference}
-                zoomed={false}
-              />
             </div>
             <section aria-label="Graph" className="metricChart">
               <header>
@@ -629,6 +473,7 @@ export function MetricExplorerPage() {
                       label={metricChartTitle(query)}
                       onZoom={(since, until) => update({ range: { from: since, kind: "absolute", to: until } })}
                       showLegend={false}
+                      timeZone={timeZone}
                       unit={chartUnit}
                     />
                   </div>
@@ -648,14 +493,6 @@ export function MetricExplorerPage() {
               )}
             </section>
           </section>
-          <DimensionsRail
-            dimensions={dimensions.value}
-            error={dimensions.error}
-            loading={dimensions.loading}
-            onFilter={addFilter}
-            onGroup={(groupBy) => update({ groupBy })}
-            query={query}
-          />
         </div>
       </TelemetryGate>
     </AppShell>

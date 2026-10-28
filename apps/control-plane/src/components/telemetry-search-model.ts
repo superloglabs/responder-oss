@@ -1,3 +1,4 @@
+import { maxMetricFilters, type MetricQuery } from "../metrics-api";
 import { explorerFilterText, type ExplorerFilter, type LogExplorerQuery, type TraceSearchQuery } from "../telemetry-api";
 
 export type SearchOperator = "=" | "!=" | ">=" | "contains";
@@ -10,12 +11,15 @@ export interface SearchField {
   kind?: "duration" | "trace" | "message";
 }
 export interface SearchToken { id: string; key: string; op: SearchOperator; value: string }
-export type SearchQuery = LogExplorerQuery | TraceSearchQuery;
+export type SearchQuery = LogExplorerQuery | TraceSearchQuery | MetricQuery;
 export const traceIdPattern = /^[a-f0-9]{32}$/iu;
 export const statusLabels: Record<string, string> = { STATUS_CODE_ERROR: "Error", STATUS_CODE_OK: "OK", STATUS_CODE_UNSET: "Unset" };
-export const fieldLabel = (key: string) => key.replace(/^(resource|log|span|field)\./u, "");
+export const fieldLabel = (key: string) => key.replace(/^(?:(?:resource|log|span|field)\.|attr:)/u, "");
 
-export function searchFields(signal: "logs" | "traces", keys: string[]): SearchField[] {
+export function searchFields(signal: "logs" | "traces" | "metrics", keys: string[]): SearchField[] {
+  if (signal === "metrics") return [...new Set(keys)].sort().map(key => ({
+    key, label: fieldLabel(key), group: key.startsWith("attr:") ? "Data point attributes" : "Resource attributes", operators: ["=", "!="],
+  }));
   const fields: SearchField[] = [
     { key: "service", label: "service.name", group: "Resource attributes", aliases: ["service", "resource.service.name"], operators: ["="] },
     ...(signal === "logs" ? [
@@ -35,6 +39,9 @@ export function searchFields(signal: "logs" | "traces", keys: string[]): SearchF
 }
 
 export function searchTokens(query: SearchQuery): SearchToken[] {
+  if ("name" in query) return query.filters.map((filter, index) => ({
+    id: `metric:${index}:${filter.key}`, key: filter.key, op: filter.op === "neq" ? "!=" : "=", value: filter.value,
+  }));
   return [
     ...query.services.map(value => ({ id: `service:${value}`, key: "service", op: "=" as const, value })),
     ...("search" in query ? [
@@ -60,6 +67,12 @@ export function durationMs(value: string): number | null {
 // Preserve the time range and expanded sidebar facets. Equality values for a
 // single facet retain the API's OR semantics; distinct facets are ANDed.
 export function queryWithTokens<T extends SearchQuery>(query: T, tokens: SearchToken[]): T {
+  if ("name" in query) {
+    const filters = tokens.filter(t => t.op === "=" || t.op === "!=")
+      .filter((t, i, all) => all.findIndex(other => other.key === t.key && other.op === t.op && other.value === t.value) === i)
+      .slice(0, maxMetricFilters).map(t => ({ key: t.key, ...(t.op === "!=" ? { op: "neq" as const } : {}), value: t.value }));
+    return { ...query, filters };
+  }
   const values = (key: string) => [...new Set(tokens.filter(t => t.key === key).map(t => t.value))];
   const primary = new Set(["service", "severity", "operation", "status", "duration", "message"]);
   const filters: ExplorerFilter[] = tokens.filter(t => !primary.has(t.key)).map(t => ({ key: t.key, op: t.op === "!=" ? "neq" : "eq", value: t.value }));
@@ -72,14 +85,14 @@ export function queryWithTokens<T extends SearchQuery>(query: T, tokens: SearchT
 }
 
 export function parseSearchDraft(text: string, fields: SearchField[]): { field: SearchField; op: SearchOperator; value: string } | null {
-  const match = /^([\w.-]+)\s*(.*)$/su.exec(text.trim());
+  const match = /^((?:attr:)?[\w.-]+)\s*(.*)$/su.exec(text.trim());
   if (!match) return null;
   const operator = ["!=", ">=", "<=", "=", ">", "<", ":"].find(value => match[2].startsWith(value));
   if (!operator) return null;
   const value = match[2].slice(operator.length).trimStart();
   const known = fields.find(f => [f.key, f.label, ...(f.aliases ?? [])].includes(match[1]));
   // Discovery is sampled. A valid attribute can be absent from its suggestions.
-  const key = /^(resource|log|span|field)\./u.test(match[1]) ? match[1] : `resource.${match[1]}`;
+  const key = /^(?:(?:resource|log|span|field)\.|attr:)/u.test(match[1]) ? match[1] : `resource.${match[1]}`;
   const field: SearchField = known ?? { key, label: fieldLabel(key), group: key.startsWith("resource.") ? "Resource attributes" : "Attributes", operators: ["=", "!="] };
   const op = operator === ":" ? "=" : operator;
   // Do not silently interpret an unsupported comparison as a different one.
