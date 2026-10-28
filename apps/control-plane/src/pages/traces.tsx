@@ -70,7 +70,7 @@ export function TraceExplorer({ now, refresh, timeZone, onOpenTrace, openTrace, 
   onOpenTrace: (traceId: string | null) => void;
   openTrace: string | null;
   query: TraceSearchQuery;
-  setQuery: (update: Partial<TraceSearchQuery>) => void;
+  setQuery: (update: Partial<TraceSearchQuery>, closeTrace?: boolean) => void;
 }) {
   // Opening a facet does not reload the rest of the page.
   const params = traceExplorerParams({ ...query, facets: [] });
@@ -83,6 +83,7 @@ export function TraceExplorer({ now, refresh, timeZone, onOpenTrace, openTrace, 
   if (pagination.key !== key) setPagination({ key, page: 0 });
   const traces = useTelemetryQuery(`${key}#${page}`, () => fetchExplorerTraces(requestQuery, page * 50), false, true);
   const rows = traces.data?.slice(0, 50) ?? [];
+  const openTraceIndex = rows.findIndex((row) => row.trace_id === openTrace);
   const hasNext = (traces.data?.length ?? 0) > 50;
   const histogram = useTelemetryQuery(showVolume ? key : null, () => fetchTraceHistogram(requestQuery), false, true);
   const facets = useTelemetryQuery(key, () => fetchTraceFacets(requestQuery), false, true);
@@ -105,9 +106,9 @@ export function TraceExplorer({ now, refresh, timeZone, onOpenTrace, openTrace, 
     setQuery({ [list]: current.includes(value) ? current.filter((item) => item !== value) : [...current, value] });
   }
 
-  function addFilter(filter: ExplorerFilter) {
+  function addFilter(filter: ExplorerFilter, closeTrace = false) {
     const text = explorerFilterText(filter);
-    setQuery({ filters: [...query.filters.filter((item) => explorerFilterText(item) !== text), filter] });
+    setQuery({ filters: [...query.filters.filter((item) => explorerFilterText(item) !== text), filter] }, closeTrace);
   }
 
   return (
@@ -285,7 +286,9 @@ export function TraceExplorer({ now, refresh, timeZone, onOpenTrace, openTrace, 
           key={openTrace}
           listState={listState}
           onClose={() => onOpenTrace(null)}
-          onFilter={(filter) => { addFilter(filter); onOpenTrace(null); }}
+          onFilter={(filter) => addFilter(filter, true)}
+          onPrevious={openTraceIndex > 0 ? () => onOpenTrace(rows[openTraceIndex - 1]!.trace_id) : undefined}
+          onNext={openTraceIndex >= 0 && openTraceIndex < rows.length - 1 ? () => onOpenTrace(rows[openTraceIndex + 1]!.trace_id) : undefined}
           traceId={openTrace}
         />
       ) : null}
@@ -303,9 +306,9 @@ export function TracesPage() {
   const [now, setNow] = useState(() => Date.now());
   const [refresh, setRefresh] = useState(0);
 
-  function setQuery(update: Partial<TraceSearchQuery>) {
+  function setQuery(update: Partial<TraceSearchQuery>, closeTrace = false) {
     if (update.range) setNow(Date.now());
-    navigate({ ...query, ...update }, openTrace);
+    navigate({ ...query, ...update }, closeTrace ? null : openTrace);
   }
 
   function reload() {

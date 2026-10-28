@@ -52,29 +52,47 @@ a.telemetryPage__message:hover { text-decoration: underline; }
 .traceDetail__spanLogs li .dsBadge { flex-shrink: 0; font-family: var(--ds-font-sans); }
 
 /* Span name, timeline and duration columns, shared by the axis and each row. */
-.traceWaterfall { --trace-name-width: minmax(160px, 34%); min-width: 0; overflow: clip; border-radius: 12px; background: #fafafa; box-shadow: 0 0 0 .5px #00000014, 0 1px 2px #0000000d, 0 2px 4px #00000005; }
-.traceWaterfall__axis, .traceWaterfall__row { display: grid; grid-template-columns: var(--trace-name-width) minmax(0, 1fr) 72px; align-items: center; gap: 12px; padding: 0 12px; }
-.traceWaterfall__axis { height: 34px; color: #999; font-size: 11px; font-variant-numeric: tabular-nums; }
-.traceWaterfall__axis .traceWaterfall__name { color: #1a1a1a; font-size: 13px; font-weight: 500; }
+.traceWaterfallView { min-width: 0; }
+.traceWaterfallView__toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 16px 0; font-size: 13px; }
+.traceWaterfallView__search { display: flex; align-items: center; gap: 8px; width: 250px; max-width: 100%; height: 28px; padding: 0 8px; border: .5px solid #ddd; border-radius: 6px; color: #999; }
+.traceWaterfallView__search input { min-width: 0; width: 100%; padding: 0; border: 0; outline: none; background: transparent; color: #373636; font: inherit; font-size: 12px; }
+.traceWaterfallView__search:focus-within { outline: 2px solid #4e58f9; outline-offset: 2px; }
+.traceWaterfallView__legend { display: flex; flex-wrap: wrap; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.traceWaterfallView__legend li { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.traceWaterfallView__legend li span { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.traceWaterfallView__legend i, .traceWaterfall__service { width: 6px; height: 6px; flex-shrink: 0; border-radius: 50%; }
+.traceWaterfallView__toggle { margin-left: auto; }
+.traceWaterfallView__toggle, .traceWaterfallView__footer button { padding: 0; border: 0; background: none; color: #666; font: inherit; cursor: pointer; }
+.traceWaterfallView__toggle:disabled { opacity: .45; cursor: default; }
+.traceWaterfallView__footer { display: flex; justify-content: space-between; gap: 12px; padding: 12px 0; color: #999; font-size: 12px; }
+.traceWaterfall { --trace-name-width: minmax(160px, 47.5%); min-width: 0; overflow: clip; border-radius: 12px; background: #f5f5f5; box-shadow: 0 0 0 .5px #00000014, 0 1px 2px #0000000d, 0 2px 4px #00000005; }
+.traceWaterfall__axis, .traceWaterfall__row { display: grid; grid-template-columns: var(--trace-name-width) minmax(0, 1fr) 80px; align-items: stretch; }
+.traceWaterfall__axis { height: 34px; color: #373636; font-size: 11px; font-variant-numeric: tabular-nums; }
+.traceWaterfall__axis .traceWaterfall__name { padding: 7px 12px; font-size: 13px; font-weight: 500; }
 .traceWaterfall__axis .traceWaterfall__track span { position: absolute; top: 50%; transform: translate(-50%, -50%); white-space: nowrap; }
-.traceWaterfall__axis .traceWaterfall__track span:first-child { transform: translate(0, -50%); }
-.traceWaterfall__axis .traceWaterfall__track span:last-child { transform: translate(-100%, -50%); }
-.traceWaterfall__rows { max-height: calc(100vh - 260px); margin: 0; padding: 4px 0; overflow: auto; border-radius: 12px 12px 0 0; background: #fff; box-shadow: 0 0 0 .5px #e6e8ec; list-style: none; }
+.traceWaterfall__axis .traceWaterfall__track span:first-child { transform: translate(4px, -50%); }
+.traceWaterfall__axis .traceWaterfall__track span:last-child { transform: translate(calc(-100% - 4px), -50%); }
+.traceWaterfall__axis .traceWaterfall__duration { color: #373636; font-size: 13px; font-weight: 500; }
+.traceWaterfall__rows { max-height: calc(100vh - 320px); margin: 0; padding: 0; overflow: auto; border-radius: 12px 12px 0 0; background: #fff; box-shadow: 0 0 0 .5px #e6e8ec; list-style: none; }
 .traceWaterfall__empty { padding: 12px; color: #666; font-size: 12px; }
-.traceWaterfall__row { width: 100%; min-height: 30px; border: 0; background: none; color: inherit; cursor: pointer; text-align: left; font: inherit; }
+.traceWaterfall__row { width: 100%; min-height: 40px; border-bottom: .5px solid #e6e8ec; color: inherit; }
+.traceWaterfall__row:last-child { border-bottom: 0; }
 .traceWaterfall__row:hover { background: #fafafa; }
-.traceWaterfall__row--selected, .traceWaterfall__row--selected:hover { background: #f1f2fe; }
-.traceWaterfall__name { display: flex; align-items: baseline; gap: 6px; min-width: 0; overflow: hidden; font-size: 12px; white-space: nowrap; }
-.traceWaterfall__service { flex-shrink: 0; max-width: 45%; overflow: hidden; color: #666; text-overflow: ellipsis; }
+.traceWaterfall__row--selected, .traceWaterfall__row--selected:hover { background: #f1f1fd; }
+.traceWaterfall__name { display: flex; align-items: center; gap: 6px; min-width: 0; padding-right: 12px; border-right: .5px solid #e6e8ec; font-size: 13px; white-space: nowrap; }
+.traceWaterfall__disclosure { display: flex; width: 12px; flex-shrink: 0; }
+.traceWaterfall__disclosure button { display: flex; padding: 0; border: 0; background: none; color: #666; cursor: pointer; }
+.traceWaterfall__disclosure button[aria-expanded="false"] svg { transform: rotate(-90deg); }
+.traceWaterfall__select { display: flex; align-items: center; gap: 8px; align-self: stretch; width: 100%; min-width: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.traceWaterfall__service { background: var(--trace-service-color); }
 .traceWaterfall__spanName { overflow: hidden; color: #1a1a1a; text-overflow: ellipsis; }
-.traceWaterfall__row--error .traceWaterfall__spanName { color: #b33d43; }
-.traceWaterfall__srOnly { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-.traceWaterfall__track { position: relative; height: 100%; min-height: 30px; }
-.traceWaterfall__bar { position: absolute; top: 50%; min-width: 3px; height: 8px; border-radius: 2px; background: #4e58f9; transform: translateY(-50%); }
-.traceWaterfall__row--error .traceWaterfall__bar { background: #a8474b; }
-.traceWaterfall__duration { color: #666; font-size: 12px; font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.traceWaterfall__select svg { flex-shrink: 0; color: #b33d43; }
+.traceWaterfall__track { position: relative; min-height: 34px; min-width: 0; padding: 0; border: 0; background: none; }
+button.traceWaterfall__track { cursor: pointer; background-image: linear-gradient(to right, transparent calc(100% - .5px), #e6e8ec 0); background-size: 25% 100%; }
+.traceWaterfall__bar { position: absolute; top: 50%; min-width: 2px; max-width: 100%; height: 8px; border-radius: 2px; background: var(--trace-service-color); transform: translateY(-50%); }
+.traceWaterfall__duration { display: flex; align-items: center; justify-content: flex-end; padding: 0 12px; border-left: .5px solid #e6e8ec; color: #666; font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.traceWaterfall button:focus-visible { position: relative; outline: 2px solid #4e58f9; outline-offset: -2px; }
 
-/* Below this width the detail pane would leave the table too narrow. */
 @media (max-width: 1360px) {
   .traceWaterfall__rows { max-height: none; }
   /* Keep the waterfall in view; the span opens below it. */
