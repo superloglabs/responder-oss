@@ -1,3 +1,4 @@
+import { pressErrorNotificationButton } from "./slack-error-notifications.js";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -1652,6 +1653,25 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
 
   if (!action.data.response_url.startsWith("https://hooks.slack.com/actions/")) {
     return context.json({ error: "Invalid Slack response URL" }, 400);
+  }
+
+  const errorButton = action.data.actions.find((item) =>
+    item.action_id === "error_notification_resolve" || item.action_id === "error_notification_silence");
+  if (errorButton) {
+    let response: Record<string, unknown>;
+    try {
+      response = await pressErrorNotificationButton({
+        actionId: errorButton.action_id, deliveryId: errorButton.value,
+        teamId: action.data.team.id, channelId: action.data.channel.id,
+      });
+    } catch (error) {
+      console.error(JSON.stringify({ event: "slack_error_notification_action_failed", errorCode: error instanceof Error ? error.name : typeof error }));
+      response = slackEphemeralResponse("Could not update the error. Please try again or open its error page.");
+    }
+    void sendSlackActionResponse(action.data.response_url, response).catch(() => {
+      console.error(JSON.stringify({ event: "slack_error_notification_response_failed" }));
+    });
+    return context.json({ ok: true });
   }
 
   const automationButton = action.data.actions
