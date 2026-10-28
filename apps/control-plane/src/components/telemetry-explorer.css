@@ -256,7 +256,7 @@
 .explorerResults[aria-busy="true"] { cursor: progress; }
 .logFacets__viewport { overscroll-behavior: none; overflow-anchor: none; }
 .explorerBody--search .logTime { color: #666; }
-.logService { color: #434343; white-space: nowrap; }
+.logService { display: block; overflow: hidden; color: #434343; text-overflow: ellipsis; white-space: nowrap; }
 .logPagination { display: flex; align-items: center; gap: 8px; margin-top: 16px; color: #666; font-size: 12px; }
 .logPagination > span:first-child { margin-right: auto; }
 .logPagination button { display: flex; align-items: center; gap: 8px; }
