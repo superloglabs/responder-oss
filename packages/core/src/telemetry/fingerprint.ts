@@ -54,7 +54,15 @@ const IGNORE_PATH = [
 ];
 
 // Frames that carry no location: native code, eval, and anonymous scripts.
-const LOW_QUALITY_PATHS = new Set(["<anonymous>", "[native code]", "native", "native code", "eval code", "unknown"]);
+const LOW_QUALITY_PATHS = new Set([
+  "<anonymous>",
+  "[native code]",
+  "native",
+  "native code",
+  "eval code",
+  "debugger eval code",
+  "unknown",
+]);
 const ANONYMOUS_FUNCTIONS = new Set(["?", "<anonymous>", "<anonymous function>", "anonymous", "Anonymous function"]);
 
 const NUL_BYTE = String.fromCharCode(0);
@@ -585,8 +593,16 @@ export function parsePythonFrames(stacktrace: string): Frame[] {
 
 function parseJavaScriptFrames(stacktrace: string): Frame[] {
   const out: Frame[] = [];
+  const v8 = /^\s*at /m.test(stacktrace);
   for (const raw of stacktrace.split("\n")) {
-    const frame = parseJavaScriptFrame(raw.trim());
+    const line = raw.trim();
+    // Firefox follows a callback's frames with where it was registered, as
+    // `EventListener.handleEvent*fn@...` or `setTimeout handler*fn@...`.
+    // Other browsers end the stack at the callback, so the stack ends here.
+    // `async*fn@...` is an awaiting caller, which V8 also shows.
+    const marker = v8 ? null : line.match(/^([^@*\s][^@*]*)\*(?=[^@]*@\S+:\d+(?::\d+)?$)/);
+    if (marker && marker[1] !== "async") break;
+    const frame = parseJavaScriptFrame(marker ? line.slice(marker[0].length) : line);
     if (!frame || LOW_QUALITY_PATHS.has(frame.path) || frame.fn === "eval") continue;
     out.push(frame);
   }
