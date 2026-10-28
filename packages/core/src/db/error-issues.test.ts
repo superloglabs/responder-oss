@@ -43,3 +43,22 @@ it("scopes combined filters and tie-breaking pagination to the workspace", async
   expect(query.params).toContain("%100\\%\\_error%");
   expect(limit).toHaveBeenCalledWith(50);
 });
+
+it("finds an issue by its fingerprint in the workspace, preferring the current algorithm's", async () => {
+  const { PgDialect } = await import("drizzle-orm/pg-core");
+  const { getDatabase } = await import("./client.js");
+  const { findErrorIssueIdByFingerprint } = await import("./error-issues.js");
+  const limit = vi.fn().mockResolvedValue([{ id: "issue" }]);
+  const orderBy = vi.fn().mockReturnValue({ limit });
+  const where = vi.fn().mockReturnValue({ orderBy });
+  vi.mocked(getDatabase).mockReturnValue({ select: () => ({ from: () => ({ where }) }) } as never);
+
+  expect(await findErrorIssueIdByFingerprint("workspace-a", "v2:current", ["v1:previous"])).toBe("issue");
+  const dialect = new PgDialect();
+  const query = dialect.sqlToQuery(where.mock.calls[0]![0]);
+  expect(query.sql).toContain('"error_issues"."organization_id" =');
+  expect(query.sql).toContain('"error_issues"."fingerprint" in');
+  expect(query.params).toEqual(["workspace-a", "v2:current", "v1:previous"]);
+  expect(dialect.sqlToQuery(orderBy.mock.calls[0]![0]).sql).toContain('"error_issues"."fingerprint" =');
+  expect(limit).toHaveBeenCalledWith(1);
+});

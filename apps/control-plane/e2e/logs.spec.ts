@@ -292,6 +292,72 @@ test("log drawer fills the viewport and groups attributes without losing search 
 });
 
 
+test("log drawer opens the error issue an error log belongs to", async ({ page }, testInfo) => {
+  const issueId = "33333333-3333-4333-8333-333333333333";
+  await mockWorkspace(page, ["telemetry", "simplified_navigation"]);
+  await page.route("**/api/c15t/**", (route) => route.abort());
+  await page.route("**/api/telemetry/**", async (route) => {
+    const url = new URL(route.request().url());
+    let json: unknown = { available: true };
+    if (url.pathname.endsWith("/logs")) {
+      json = { logs: [
+        { severity: "ERROR", severity_number: 17, body: "payment failed for order 4821" },
+        { severity: "WARN", severity_number: 13, body: "retrying payment" },
+      ].map((log, index) => ({
+        ...log,
+        timestamp: `2026-10-26T17:56:3${index}.551Z`,
+        service: "api",
+        trace_id: "trace-123",
+        span_id: "span-123",
+        log_attrs: {},
+        resource_attrs: {},
+        exception_type: "",
+        exception_message: "",
+        exception_stacktrace: "",
+      })) };
+    } else if (url.pathname.endsWith("/histogram")) {
+      json = { buckets: [], since: "2026-10-26T17:00:00Z", until: "2026-10-26T18:00:00Z", stepMs: 60000 };
+    } else if (url.pathname.endsWith("/facets")) {
+      json = { services: [], severities: [] };
+    } else if (url.pathname.includes("attribute-keys")) json = { keys: [] };
+    await route.fulfill({ json });
+  });
+  const lookups: unknown[] = [];
+  await page.route("**/api/error-issues/for-log", async (route) => {
+    lookups.push(route.request().postDataJSON());
+    await route.fulfill({ json: { issueId } });
+  });
+  await page.route(`**/api/error-issues/${issueId}`, (route) => route.fulfill({ status: 404, json: { error: "Error issue not found" } }));
+  await page.goto("/logs");
+  const consent = page.getByRole("button", { name: "Reject All", exact: true });
+  if (await consent.isVisible()) await consent.click();
+  await page.getByText("payment failed for order 4821", { exact: true }).click();
+  const drawer = page.getByRole("complementary", { name: "Log details" });
+  const openError = drawer.getByRole("link", { name: "Open error" });
+  await expect(openError).toHaveAttribute("href", `/errors/${issueId}`);
+  await expect(drawer.getByRole("link", { name: "Open trace" })).toBeVisible();
+  expect(lookups.at(-1)).toEqual({
+    attributes: {},
+    body: "payment failed for order 4821",
+    exceptionMessage: "",
+    exceptionStacktrace: "",
+    exceptionType: "",
+    service: "api",
+    severity: "ERROR",
+    severityNumber: 17,
+  });
+  const lookupCount = lookups.length;
+  await page.screenshot({ path: testInfo.outputPath("log-drawer-error-issue.png") });
+  await drawer.getByRole("button", { name: "Next log" }).click();
+  await expect(drawer.getByText("retrying payment", { exact: true })).toBeVisible();
+  await expect(drawer.getByRole("link", { name: "Open error" })).toHaveCount(0);
+  // A WARN log has no issue to look up.
+  expect(lookups).toHaveLength(lookupCount);
+  await drawer.getByRole("button", { name: "Previous log" }).click();
+  await drawer.getByRole("link", { name: "Open error" }).click();
+  await expect(page).toHaveURL(new RegExp(`/errors/${issueId}$`));
+});
+
 test("trace search shares grouped facets and keeps its window while filtering", async ({ page }, testInfo) => {
   await mockWorkspace(page, ["telemetry", "simplified_navigation"]);
   await page.route("**/api/c15t/**", (route) => route.abort());
