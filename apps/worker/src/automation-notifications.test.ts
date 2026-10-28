@@ -107,6 +107,15 @@ describe("sending automation notifications", () => {
     expect(ids[0]).not.toBe(ids[1]);
   });
 
+  it("sends structured notification blocks instead of markdown", async () => {
+    const post = vi.fn().mockResolvedValue("1790000000.000200");
+    const blocks = [{ type: "context", elements: [{ type: "plain_text", text: "State: New" }] }];
+    await postAutomationNotification({
+      blocks, markdown: "Fallback", text: "New error", notifications: [notification], organizationId, seed: "error-1",
+    }, { getAccount: vi.fn().mockResolvedValue({ encryptedCredentials: "encrypted" }), post });
+    expect(post).toHaveBeenCalledWith(expect.objectContaining({ blocks, text: "New error" }));
+  });
+
   it("replies in a thread", async () => {
     const post = vi.fn().mockResolvedValue("1790000000.000200");
     await postAutomationNotification({

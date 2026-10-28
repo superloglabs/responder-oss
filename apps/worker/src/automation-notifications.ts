@@ -82,6 +82,8 @@ export type AutomationNotificationDelivery =
 // Posts one message to each channel. A failed channel does not stop the
 // others. The seed makes a retry of the same message a duplicate to Slack.
 export async function postAutomationNotification(input: {
+  // Optional structured content in place of the default markdown block.
+  blocks?: unknown[];
   // Buttons that continue the run, under the message.
   buttonsBlock?: unknown;
   handoff?: { kind: HandoffKind; sourceUrl: string | null };
@@ -123,7 +125,7 @@ export async function postAutomationNotification(input: {
       const message = {
         accessToken,
         blocks: [
-          { type: "markdown", text: input.markdown },
+          ...(input.blocks ?? [{ type: "markdown", text: input.markdown }]),
           ...(input.buttonsBlock ? [input.buttonsBlock] : []),
           ...handoffBlocks,
         ],

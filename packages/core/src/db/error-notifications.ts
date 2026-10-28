@@ -1,6 +1,6 @@
 import { and, eq, inArray, lte, sql } from "drizzle-orm";
 import { getDatabase } from "./client.js";
-import { errorNotificationDeliveries, errorNotificationSettings, errorIssues, telemetryNotificationPauses } from "./schema.js";
+import { errorNotificationDeliveries, errorNotificationSettings, errorIssues, integrationAccounts, telemetryNotificationPauses } from "./schema.js";
 import {
   defaultErrorNotificationSettings, errorNotificationTargetKey, matchesErrorNotification,
   type ErrorNotificationSettings, type ErrorNotificationSnapshot,
@@ -74,4 +74,27 @@ export async function processPendingErrorNotifications(deliver: (delivery: typeo
   }
   // Keep the outbox bounded without deleting pending deliveries.
   await getDatabase().delete(errorNotificationDeliveries).where(and(inArray(errorNotificationDeliveries.status, ["sent", "failed", "cancelled"]), sql`${errorNotificationDeliveries.createdAt} < now() - interval '30 days'`));
+}
+
+// A signed Slack action is only authorized in the original delivery's team
+// and channel, through a connection that still belongs to this organization.
+export async function getErrorNotificationForSlackAction(input: {
+  deliveryId: string; teamId: string; channelId: string;
+}): Promise<{ organizationId: string; issueId: string } | null> {
+  const [row] = await getDatabase().select({
+    organizationId: errorNotificationDeliveries.organizationId,
+    issueId: errorNotificationDeliveries.issueId,
+  }).from(errorNotificationDeliveries).innerJoin(integrationAccounts, and(
+    sql`${integrationAccounts.id}::text = ${errorNotificationDeliveries.target}->>'integrationAccountId'`,
+    eq(integrationAccounts.organizationId, errorNotificationDeliveries.organizationId),
+  )).where(and(
+    eq(errorNotificationDeliveries.id, input.deliveryId),
+    eq(errorNotificationDeliveries.status, "sent"),
+    eq(integrationAccounts.provider, "slack"),
+    eq(integrationAccounts.status, "connected"),
+    eq(integrationAccounts.externalAccountId, input.teamId),
+    sql`${errorNotificationDeliveries.target}->>'kind' = 'slack'`,
+    sql`${errorNotificationDeliveries.target}->>'channelId' = ${input.channelId}`,
+  )).limit(1);
+  return row ?? null;
 }

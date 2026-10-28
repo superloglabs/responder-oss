@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { deliverErrorNotification, errorNotificationMessage } from "./error-notifications.js";
+import { deliverErrorNotification, errorNotificationBlocks, errorNotificationMessage } from "./error-notifications.js";
 import { errorNotificationRetryAt } from "@responder/core/db/error-notifications";
 import { defaultErrorNotificationSettings } from "@responder/core/telemetry/error-notifications";
 
@@ -43,13 +43,56 @@ describe("error notification delivery", () => {
     expect(deps.post).toHaveBeenCalledWith(expect.objectContaining({ organizationId: "workspace", seed: "error-notice/delivery", unfurlLinks: false }));
     await deliverErrorNotification(slack, deps);
     expect(deps.post).toHaveBeenCalledTimes(2);
-    expect(vi.mocked(deps.post).mock.calls[0]?.[0].markdown).toContain("&lt;script&gt;");
+    expect(vi.mocked(deps.post).mock.calls[0]?.[0].blocks).toEqual(errorNotificationBlocks(slack.snapshot, "https://example.com/errors/issue"));
     vi.mocked(deps.post).mockResolvedValue([]);
     await expect(deliverErrorNotification(slack, deps)).rejects.toThrow("Slack notification failed");
+  });
+  it("includes resolve, silence and a Conductor handoff for this delivery", async () => {
+    const deps = dependencies();
+    await deliverErrorNotification(delivery, deps);
+    const block = deps.post.mock.calls[0]![0].buttonsBlock;
+    expect(block).toMatchObject({ type: "actions", elements: [
+      { action_id: "error_notification_resolve", value: delivery.id, text: { text: "Resolve" } },
+      { action_id: "error_notification_silence", value: delivery.id, text: { text: "Silence" } },
+      { action_id: "conductor_fix", text: { text: "Fix in Conductor" }, url: expect.stringContaining("https://example.com/api/ide/conductor#prompt=") },
+    ] });
+    const handoff = (block as { elements: Array<{ url?: string }> }).elements[2]!.url!;
+    expect(decodeURIComponent(handoff)).toContain("https://example.com/errors/issue");
+    expect(decodeURIComponent(handoff)).toContain(delivery.snapshot.title);
   });
   it("distinguishes regressions from first occurrences", () => {
     expect(errorNotificationMessage({ ...delivery.snapshot, transition: "regressed" }, "https://example.com").text).toContain("was resolved and has occurred again");
     expect(errorNotificationMessage(delivery.snapshot, "https://example.com").subject).toMatch(/^New error:/u);
+  });
+  it("uses literal text for error content and a separate linked title", () => {
+    const title = "TypeError: ``` <!channel> *oops* <script>";
+    const blocks = errorNotificationBlocks({ ...delivery.snapshot, title }, "https://example.com/errors/issue");
+    expect(blocks[0]).toEqual({ type: "header", text: { type: "plain_text", text: "New error", emoji: true } });
+    expect(blocks[1]).toEqual({ type: "rich_text", elements: [
+      { type: "rich_text_section", elements: [
+        { type: "text", text: "🔴 " },
+        { type: "link", url: "https://example.com/errors/issue", text: "TypeError", style: { bold: true } },
+      ] },
+    ] });
+    expect(blocks[2]).toEqual({ type: "rich_text", elements: [
+      { type: "rich_text_preformatted", elements: [{ type: "text", text: "``` <!channel> *oops* <script>" }] },
+    ] });
+    expect(JSON.stringify(blocks)).not.toContain("State:");
+    expect(blocks[3]?.elements).toContainEqual(expect.objectContaining({ type: "mrkdwn", text: expect.stringContaining("First seen: <!date^") }));
+  });
+  it("marks returning errors and tolerates missing metadata", () => {
+    const blocks = errorNotificationBlocks({ ...delivery.snapshot, transition: "regressed", service: null, seenAt: "invalid" }, "https://example.com");
+    expect(JSON.stringify(blocks)).toContain("🟠 ");
+    expect(blocks[0]).toEqual({ type: "header", text: { type: "plain_text", text: "Error recurrence", emoji: true } });
+    expect(blocks[3]?.elements).toEqual([
+      { type: "plain_text", text: "Service: unknown", emoji: true },
+    ]);
+  });
+  it("bounds large error content without dropping the issue link", () => {
+    const blocks = errorNotificationBlocks({ ...delivery.snapshot, title: "x".repeat(20_000), service: "s".repeat(20_000), exceptionType: "t".repeat(20_000) }, "https://example.com");
+    expect(JSON.stringify(blocks).length).toBeLessThan(3000);
+    expect(JSON.stringify(blocks)).toContain('"url":"https://example.com"');
+    expect(JSON.stringify(blocks)).toContain("…");
   });
   it("backs off retries up to one hour", () => {
     const now = new Date(0);

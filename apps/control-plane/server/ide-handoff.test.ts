@@ -1,5 +1,4 @@
 import { runInNewContext } from "node:vm";
-import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { handoffScript, ideHandoffRoutes } from "./ide-handoff.js";
 
@@ -22,11 +21,22 @@ describe("desktop handoff page", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("referrer-policy")).toBe("no-referrer");
     expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(response.headers.get("content-security-policy")).toContain(`'sha256-${createHash("sha256").update(handoffScript).digest("base64")}'`);
+    expect(response.headers.get("content-security-policy")).toContain("script-src 'self'");
     const html = await response.text();
     expect(html).not.toContain("evil");
     expect(html).toContain('aria-label="Task context"');
     expect(html).not.toContain("innerHTML");
+  });
+
+  it("loads its script from the same origin under the production policy that blocks inline scripts", async () => {
+    const html = await (await ideHandoffRoutes.request("/conductor")).text();
+    expect(html).toContain('<script src="/api/ide/conductor.js" defer></script>');
+    expect(html).not.toContain("<script>");
+    const script = await ideHandoffRoutes.request("/conductor.js");
+    expect(script.status).toBe(200);
+    expect(script.headers.get("content-type")).toBe("application/javascript; charset=UTF-8");
+    expect(script.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(await script.text()).toBe(handoffScript);
   });
 
   it("round-trips an untrusted prompt to the documented flat URL scheme", () => {
