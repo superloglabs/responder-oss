@@ -6,7 +6,7 @@ function routes(overrides: Partial<BrowserRelayDependencies> = {}) {
     new Response('{"partialSuccess":{}}', { headers: { "content-type": "application/json" }, status: 200 }),
   );
   const app = createBrowserRelayRoutes({
-    endpoint: () => "https://superlog.sh/api/ingest/v1/traces",
+    endpoint: (signal) => `https://superlog.sh/api/ingest/v1/${signal}`,
     forward,
     headers: () => ({ Authorization: "Bearer sl_key" }),
     signedIn: async () => true,
@@ -34,6 +34,25 @@ describe("browser telemetry relay", () => {
       method: "POST",
     });
     expect(new TextDecoder().decode(forward.mock.calls[0]![1]!.body as ArrayBuffer)).toBe(body);
+  });
+
+  it("forwards browser error logs to the server's logs endpoint", async () => {
+    const { app, forward } = routes();
+    const response = await app.request("/v1/logs", {
+      body: JSON.stringify({ resourceLogs: [] }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    expect(forward).toHaveBeenCalledWith("https://superlog.sh/api/ingest/v1/logs", expect.objectContaining({ method: "POST" }));
+  });
+
+  it("answers 404 for signals it does not relay", async () => {
+    const { app, forward } = routes();
+    const response = await app.request("/v1/metrics", { body, headers: { "content-type": "application/json" }, method: "POST" });
+    expect(response.status).toBe(404);
+    expect(forward).not.toHaveBeenCalled();
   });
 
   it("answers 404 when the server exports no telemetry", async () => {

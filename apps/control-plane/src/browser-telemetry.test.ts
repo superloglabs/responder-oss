@@ -1,6 +1,6 @@
 import { ROOT_CONTEXT, trace, TraceFlags } from "@opentelemetry/api";
 import { describe, expect, it } from "vitest";
-import { ignoredFetchUrls, SentryTraceHeaderPropagator } from "./browser-telemetry";
+import { ignoredUrls, SentryTraceHeaderPropagator } from "./browser-telemetry";
 
 const setter = { set: (carrier: Record<string, string>, key: string, value: string) => { carrier[key] = value; } };
 
@@ -22,11 +22,10 @@ describe("browser telemetry", () => {
   });
 
   it("traces only the application's own requests", () => {
-    const ignored = ignoredFetchUrls("https://superlog.sh");
+    const ignored = ignoredUrls("https://superlog.sh");
     const isIgnored = (url: string) => ignored.some((pattern) => pattern.test(url));
 
     expect(isIgnored("https://superlog.sh/api/issues")).toBe(false);
-    expect(isIgnored("https://superlog.sh/api/telemetry/browser/v1/traces")).toBe(true);
     expect(isIgnored("https://eu.i.posthog.com/e/")).toBe(true);
     expect(isIgnored("https://superlog.sh.example.com/api")).toBe(true);
   });

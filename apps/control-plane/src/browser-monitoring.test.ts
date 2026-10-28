@@ -10,6 +10,9 @@ const sentryMocks = vi.hoisted(() => ({
 
 vi.mock("@sentry/react", () => sentryMocks);
 
+const telemetryMocks = vi.hoisted(() => ({ setAttributes: vi.fn(), setUser: vi.fn() }));
+vi.mock("@superlog/browser/api", () => telemetryMocks);
+
 import {
   initializeBrowserMonitoring,
   setBrowserMonitoringIdentity,
@@ -23,6 +26,8 @@ describe("browser error monitoring", () => {
     sentryMocks.isInitialized.mockReset().mockReturnValue(false);
     sentryMocks.setTag.mockClear();
     sentryMocks.setUser.mockClear();
+    telemetryMocks.setAttributes.mockClear();
+    telemetryMocks.setUser.mockClear();
   });
 
   it("does not initialize without a DSN", () => {
@@ -64,6 +69,16 @@ describe("browser error monitoring", () => {
     expect(sentryMocks.setUser).toHaveBeenLastCalledWith(null);
     expect(sentryMocks.setTag).toHaveBeenCalledWith("organization_id", "");
     expect(sentryMocks.setTag).toHaveBeenLastCalledWith("organization_name", "");
+  });
+
+  it("sends the user and organization to browser telemetry", () => {
+    setBrowserMonitoringIdentity("user-1", "organization-1", "Ada", "Acme");
+    expect(telemetryMocks.setUser).toHaveBeenLastCalledWith({ id: "user-1", name: "Ada" });
+    expect(telemetryMocks.setAttributes).toHaveBeenLastCalledWith({ "organization.id": "organization-1", "organization.name": "Acme" });
+
+    setBrowserMonitoringIdentity();
+    expect(telemetryMocks.setUser).toHaveBeenLastCalledWith(null);
+    expect(telemetryMocks.setAttributes).toHaveBeenLastCalledWith({ "organization.id": undefined, "organization.name": undefined });
   });
 
   it("starts browser traces after sign-in only when a sample rate is set", async () => {

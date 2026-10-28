@@ -1,4 +1,5 @@
-import { Navigate, Outlet, Route, Routes, useLocation } from "react-router-dom";
+import { SuperlogRoutes } from "@superlog/react/router";
+import { Navigate, Outlet, Route, useLocation } from "react-router-dom";
 import { AuthGate } from "./components/auth-gate";
 import { AgentDetailPage, AgentEditRedirect } from "./pages/agent-detail";
 import { AgentCreatePage } from "./pages/agent-create";
@@ -98,7 +99,7 @@ export function App() {
   usePageMetadata(editionSeoMetadataForPath(pathname));
 
   return (
-    <Routes>
+    <SuperlogRoutes>
       <Route element={<HomePage />} path="/" />
       <Route element={<PricingPage />} path="/pricing" />
       <Route element={<EnterprisePage />} path="/enterprise" />
@@ -218,6 +219,6 @@ export function App() {
         <Route element={<SuperuserUsersPage />} path="/superuser/users" />
       </Route>
       <Route element={<Navigate replace to="/" />} path="*" />
-    </Routes>
+    </SuperlogRoutes>
   );
 }
