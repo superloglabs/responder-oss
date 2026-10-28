@@ -108,10 +108,10 @@ class Names {
   }
 }
 
+// Leaves out unset fields. Empty strings stay, since a filter value or a
+// variable's default can be empty on purpose.
 function withoutNulls(value: Record<string, unknown>): Record<string, unknown> {
-  return Object.fromEntries(
-    Object.entries(value).filter(([, item]) => item !== null && item !== undefined && item !== ""),
-  );
+  return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== null && item !== undefined));
 }
 
 function nonDefault<T>(value: T, fallback: T): T | undefined {
@@ -255,8 +255,9 @@ export function terraformExport(input: TerraformExportInput): string {
           ? check.assertions.map((assertion) => withoutNulls({
               kind: assertion.kind,
               op: assertion.op,
-              key: assertion.key,
-              value: assertion.value,
+              // The provider reads an empty key as none, and value defaults to "".
+              key: assertion.key || undefined,
+              value: assertion.value || undefined,
               severity: assertion.severity === "critical" ? undefined : assertion.severity,
             }))
           : undefined,

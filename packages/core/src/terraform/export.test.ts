@@ -133,6 +133,22 @@ describe("terraform export", () => {
     expect(hcl).not.toContain('severity = "critical"');
   });
 
+  it("keeps empty strings that are set on purpose", () => {
+    const hcl = terraformExport({
+      alerts: [{ ...alert, filter: { resourceAttrs: [{ key: "user.tier", value: "" }] } }],
+      checks: [{ ...check, assertions: [{ key: "", kind: "header", op: "exists", severity: "critical", value: "" }] }],
+      dashboards: [{ ...dashboard, variables: [{ defaultValue: "", name: "tier", options: ["", "pro"] }] }],
+      endpoint: "https://superlog.sh",
+      slackChannels: [],
+    });
+
+    expect(hcl).toContain('key   = "user.tier"\n        value = ""');
+    expect(hcl).toContain('default_value = ""');
+    expect(hcl).toContain('options       = ["", "pro"]');
+    // An assertion's empty key and value are the provider's defaults.
+    expect(hcl).toContain('{\n      kind = "header"\n      op   = "exists"\n    }');
+  });
+
   it("keeps Slack IDs for a channel that is no longer listed", () => {
     const hcl = terraformExport({ alerts: [alert], checks: [], dashboards: [], endpoint: "https://us.superlog.sh", slackChannels: [] });
 

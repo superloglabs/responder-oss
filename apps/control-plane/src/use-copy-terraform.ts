@@ -6,7 +6,11 @@ export type CopyState = "copied" | "failed" | "idle";
 
 // Copies the selection's Terraform configuration. The copy starts in the
 // click, so the clipboard accepts it after the configuration loads.
-export function useCopyTerraform(selection: TerraformSelection): [CopyState, () => void] {
+// `beforeCopy` finishes saving changes the export should include.
+export function useCopyTerraform(
+  selection: TerraformSelection,
+  beforeCopy?: () => Promise<void>,
+): [CopyState, () => void] {
   const [state, setState] = useState<CopyState>("idle");
   useEffect(() => {
     if (state === "idle") return;
@@ -15,11 +19,12 @@ export function useCopyTerraform(selection: TerraformSelection): [CopyState, () 
   }, [state]);
   const key = JSON.stringify(selection);
   const copy = useCallback(() => {
-    copyText(fetchTerraform(JSON.parse(key) as TerraformSelection)).then(
+    const saved = beforeCopy ? beforeCopy() : Promise.resolve();
+    copyText(saved.then(() => fetchTerraform(JSON.parse(key) as TerraformSelection))).then(
       () => setState("copied"),
       () => setState("failed"),
     );
-  }, [key]);
+  }, [beforeCopy, key]);
   return [state, copy];
 }
 

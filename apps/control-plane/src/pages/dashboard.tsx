@@ -166,10 +166,10 @@ export function DashboardPage() {
   const [editingVariables, setEditingVariables] = useState(false);
   const [removing, setRemoving] = useState<TelemetryDashboardWidget | "dashboard" | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
-  const [terraformState, copyTerraform] = useCopyTerraform({ dashboardIds: [dashboardId] });
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Layout changes not yet saved, by widget.
   const pendingLayouts = useRef(new Map<string, TelemetryDashboardWidget["layout"]>());
+  const layoutSaves = useRef<Promise<void>>(Promise.resolve());
   useDocumentTitle(dashboard ? `${dashboard.name} · Dashboards` : "Dashboards");
 
   const load = useCallback(async () => {
@@ -224,21 +224,28 @@ export function DashboardPage() {
     setParams((current) => variableParams(next, current), { replace: true });
   }
 
-  // Saves layout changes still waiting for the debounce.
-  const flushLayouts = useCallback((leaving = false) => {
+  // Saves layout changes still waiting for the debounce. Resolves once every
+  // layout save started so far has finished.
+  const flushLayouts = useCallback((leaving = false): Promise<void> => {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = null;
-    if (pendingLayouts.current.size === 0) return;
-    const widgets = [...pendingLayouts.current].map(([id, layout]) => ({ id, layout }));
-    pendingLayouts.current.clear();
-    updateLayout(dashboardId, widgets, { keepalive: leaving }).catch((cause: unknown) =>
-      setError(cause instanceof Error ? cause.message : "Unable to save the layout"),
-    );
+    if (pendingLayouts.current.size > 0) {
+      const widgets = [...pendingLayouts.current].map(([id, layout]) => ({ id, layout }));
+      pendingLayouts.current.clear();
+      const save = updateLayout(dashboardId, widgets, { keepalive: leaving }).then(
+        () => undefined,
+        (cause: unknown) => setError(cause instanceof Error ? cause.message : "Unable to save the layout"),
+      );
+      layoutSaves.current = Promise.all([layoutSaves.current, save]).then(() => undefined);
+    }
+    return layoutSaves.current;
   }, [dashboardId]);
+  // Exports the layout on screen, including a move still being saved.
+  const [terraformState, copyTerraform] = useCopyTerraform({ dashboardIds: [dashboardId] }, flushLayouts);
 
   // Leaving the page or closing the tab saves a move made just before.
   useEffect(() => {
-    const leave = () => flushLayouts(true);
+    const leave = () => void flushLayouts(true);
     window.addEventListener("pagehide", leave);
     return () => {
       window.removeEventListener("pagehide", leave);
@@ -259,7 +266,7 @@ export function DashboardPage() {
     });
     for (const change of changes) pendingLayouts.current.set(change.id, change.layout);
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => flushLayouts(), 400);
+    saveTimer.current = setTimeout(() => void flushLayouts(), 400);
   }
 
   async function saveWidget(draft: WidgetDraft) {
