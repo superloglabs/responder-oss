@@ -75,6 +75,7 @@ async function callTool(name: string, args: Record<string, unknown> = {}) {
 
 const logRow = {
   body: "payment failed",
+  event_name: "payment.failed",
   exception_message: "card declined",
   exception_stacktrace: "Error: card declined\n    at charge (pay.ts:12)",
   exception_type: "CardError",
@@ -172,6 +173,7 @@ describe("telemetry operations", () => {
       logs: [{
         attributes: { "event.name": "payment.failed" },
         body: "payment failed",
+        eventName: "payment.failed",
         exception: {
           message: "card declined",
           stacktrace: "Error: card declined\n    at charge (pay.ts:12)",

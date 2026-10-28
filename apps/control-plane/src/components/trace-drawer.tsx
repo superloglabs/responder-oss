@@ -9,6 +9,7 @@ import {
   formatTelemetryTime,
   levelLabel,
   logExplorerParams,
+  logMessage,
   logTimestamp,
   severityTextTone,
   spanKindLabel,
@@ -96,7 +97,7 @@ function SpanPanel({
                   <Badge tone={severityTextTone(log.severity)}>{levelLabel(log.severity)}</Badge>
                   <span className="explorerCell--muted">+{formatDuration(Number(BigInt(log.ts_ns) - traceStart) / 1_000_000)}</span>
                 </span>
-                <span className="traceDrawer__logBody">{log.body}</span>
+                <span className="traceDrawer__logBody">{logMessage(log)}</span>
               </li>
             ))}
           </ul>
@@ -246,11 +247,11 @@ export function TraceDrawer({
                     key: "message",
                     // Opens the span that wrote the log, when the trace has it.
                     render: (log) => spans.some((span) => span.span_id === log.span_id) ? (
-                      <button className="explorerCell--message" onClick={() => openSpan(log.span_id)} title={log.body} type="button">
-                        {log.body}
+                      <button className="explorerCell--message" onClick={() => openSpan(log.span_id)} title={logMessage(log)} type="button">
+                        {logMessage(log)}
                       </button>
                     ) : (
-                      <span className="explorerCell--message" title={log.body}>{log.body}</span>
+                      <span className="explorerCell--message" title={logMessage(log)}>{logMessage(log)}</span>
                     ),
                   },
                 ]}

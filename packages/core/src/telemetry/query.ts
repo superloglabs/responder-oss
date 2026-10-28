@@ -28,7 +28,7 @@ export type ResourceAttrFilter = {
 
 type AttributeColumn = "Attributes" | "ResourceAttributes" | "SpanAttributes" | "LogAttributes";
 // `field` is not an attribute map — it routes a `field.<name>` filter key to a
-// top-level column (TraceId, SpanId, SeverityNumber) via the fieldColumnExpr
+// top-level column (TraceId, SpanId, SeverityNumber, EventName) via the fieldColumnExpr
 // allowlist below, so the explore UI can filter on identifiers, not just attrs.
 type AttributeScope = "resource" | "span" | "log" | "field";
 type ParsedAttributeKey = { scope: AttributeScope; key: string };
@@ -59,6 +59,8 @@ export function fieldColumnExpr(field: string, source: FieldFilterSource): strin
     case "severity_number":
       // SeverityNumber only exists on logs; cast so the String param compares.
       return source === "logs" ? "toString(SeverityNumber)" : null;
+    case "event_name":
+      return source === "logs" ? "EventName" : null;
     default:
       return null;
   }
@@ -200,6 +202,10 @@ function spanStatusExpr(column: string): string {
 }
 const SPAN_STATUS = spanStatusExpr("StatusCode");
 const SPAN_KIND = "if(startsWith(SpanKind, 'SPAN_KIND_'), SpanKind, concat('SPAN_KIND_', upper(SpanKind)))";
+// OpenTelemetry events, such as browser page views, have a name and no body,
+// so log search matches either.
+const LOG_SEARCH =
+  "(positionCaseInsensitive(Body, {search:String}) > 0 OR positionCaseInsensitive(EventName, {search:String}) > 0)";
 const ERROR_SPAN_COND = "StatusCode IN ('Error', 'STATUS_CODE_ERROR')";
 
 function spanStatusCode(value: string): string {
@@ -323,7 +329,7 @@ export async function queryLogs(
   ];
   if (params.service) conds.push("ServiceName = {service:String}");
   if (params.severity) conds.push("upper(SeverityText) = upper({severity:String})");
-  if (params.search) conds.push("positionCaseInsensitive(Body, {search:String}) > 0");
+  if (params.search) conds.push(LOG_SEARCH);
   if (params.traceId) conds.push("TraceId = {traceId:String}");
 
   const query = `
@@ -333,6 +339,7 @@ export async function queryLogs(
       SeverityText AS severity,
       toUInt8(SeverityNumber) AS severity_number,
       Body AS body,
+      EventName AS event_name,
       TraceId AS trace_id,
       SpanId AS span_id,
       LogAttributes AS log_attrs,
@@ -854,6 +861,7 @@ export async function getTraceDetail(ch: ClickHouseClient, organizationId: strin
         ServiceName AS service,
         SeverityText AS severity,
         Body AS body,
+        EventName AS event_name,
         TraceId AS trace_id,
         SpanId AS span_id,
         LogAttributes AS log_attrs,
@@ -2956,7 +2964,7 @@ function countConditions(organizationId: string, source: SeriesSource, filter: S
     // prune partitions, as in queryLogs.
     conds.push(`TimestampTime >= (${sinceExpr}) - INTERVAL 1 SECOND`, `TimestampTime <= ${untilExpr}`);
     if (filter.severity) conds.push("upper(SeverityText) = upper({severity:String})");
-    if (filter.search) conds.push("positionCaseInsensitive(Body, {search:String}) > 0");
+    if (filter.search) conds.push(LOG_SEARCH);
   } else {
     if (filter.spanName) conds.push("SpanName = {spanName:String}");
     if (filter.statusCode) conds.push(`${SPAN_STATUS} = {statusCode:String}`);

@@ -12,7 +12,7 @@ import {
   type VariableValues,
   type WidgetData,
 } from "../dashboards-api";
-import { formatDuration, formatTelemetryTime, severityTone, traceHref } from "../telemetry-api";
+import { formatDuration, formatTelemetryTime, logMessage, severityTone, traceHref } from "../telemetry-api";
 import { ChartSkeleton } from "./screen-skeletons";
 import { TimeseriesChart } from "./timeseries-chart";
 import { BarListValues, NumberValue, ValueTable } from "./widget-values";
@@ -116,8 +116,8 @@ function WidgetData({
               <td className="dashboardWidget__muted">{formatTelemetryTime(log.timestamp, timeZone)}</td>
               <td><Badge tone={severityTone(log.severity_number)}>{log.severity || "Unset"}</Badge></td>
               <td className="dashboardWidget__muted">{log.service || "—"}</td>
-              <td className="dashboardWidget__mono" title={log.body}>
-                {log.trace_id ? <Link to={traceHref(log.trace_id)}>{log.body}</Link> : log.body}
+              <td className="dashboardWidget__mono" title={logMessage(log)}>
+                {log.trace_id ? <Link to={traceHref(log.trace_id)}>{logMessage(log)}</Link> : logMessage(log)}
               </td>
             </tr>
           ))}
