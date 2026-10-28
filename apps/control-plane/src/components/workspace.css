@@ -225,6 +225,7 @@
 .appShell--workspace .dsButton--primary:hover:not(:disabled) { background: #414be2; }
 .appShell--workspace .dsButton--secondary { background: #fff; border-color: #ddd; color: #444; }
 .appShell--workspace .dsButton--secondary:hover:not(:disabled) { background: #f5f5f5; }
+.appShell--workspace .dsButton--ghost { box-shadow: none; }
 .appShell--workspace .dsIconButton { border-radius: 5px; }
 .appShell--workspace .emptyState { min-height: 220px; background: transparent; border: none; }
 .appShell--workspace .emptyState h2 { font-size: 15px; }
