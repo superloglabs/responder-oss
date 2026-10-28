@@ -88,4 +88,32 @@ describe("queue health metrics", () => {
     expect(error).toHaveBeenCalledWith(expect.stringContaining("queue_health_read_failed"));
     error.mockRestore();
   });
+
+  it("skips a collection while the previous read is still running", async () => {
+    const { collect, meter } = fakeMeter();
+    let finish: (() => void) | undefined;
+    const read = vi.fn(
+      () => new Promise<never>((_, reject) => {
+        finish = () => reject(new Error("canceling statement due to statement timeout"));
+      }),
+    );
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.useFakeTimers();
+    try {
+      startQueueHealthMetrics(read, meter);
+      const first = collect();
+      await vi.advanceTimersByTimeAsync(15_000);
+      await expect(first).resolves.toEqual([]);
+      await expect(collect()).resolves.toEqual([]);
+      expect(read).toHaveBeenCalledTimes(1);
+
+      finish?.();
+      await vi.advanceTimersByTimeAsync(0);
+      void collect();
+      expect(read).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+      error.mockRestore();
+    }
+  });
 });

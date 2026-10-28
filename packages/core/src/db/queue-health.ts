@@ -31,10 +31,12 @@ const finishedWindow = sql`interval '15 minutes'`;
 const leaseGrace = sql`interval '2 minutes'`;
 
 export async function readQueueHealth(): Promise<QueueHealth> {
-  const database = getDatabase();
   const runQueues = [automationRunQueue, legacyAutomationRunQueue];
-  const [runs, finished, jobs] = await Promise.all([
-    database.execute<{
+  // The reads share one connection, and the database cancels them when they
+  // run long, so a slow database cannot fill the shared pool with them.
+  const [runs, finished, jobs] = await getDatabase().transaction(async (database) => {
+    await database.execute(sql`set local statement_timeout = '10s'`);
+    const runs = await database.execute<{
       lease_expired: string;
       oldest_pending_seconds: string | null;
       orphaned: string;
@@ -60,14 +62,14 @@ export async function readQueueHealth(): Promise<QueueHealth> {
         ) as orphaned
       from automation_runs r
       where r.status in ('pending', 'running')
-    `),
-    database.execute<{ count: string; status: string }>(sql`
+    `);
+    const finished = await database.execute<{ count: string; status: string }>(sql`
       select status, count(*) as count
       from automation_runs
       where completed_at > now() - ${finishedWindow}
       group by status
-    `),
-    database.execute<{
+    `);
+    const jobs = await database.execute<{
       failed: string;
       last_completed_seconds: string | null;
       name: string;
@@ -87,8 +89,9 @@ export async function readQueueHealth(): Promise<QueueHealth> {
       from pgboss.job
       where completed_on is null or completed_on > now() - interval '1 day'
       group by name
-    `),
-  ]);
+    `);
+    return [runs, finished, jobs] as const;
+  });
 
   const run = runs.rows[0];
   return {

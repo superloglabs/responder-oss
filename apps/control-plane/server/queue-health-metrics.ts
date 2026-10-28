@@ -99,11 +99,20 @@ export function startQueueHealthMetrics(
   meter: Meter = metrics.getMeter("responder-control-plane"),
 ): void {
   const gauges = createGauges(meter);
+  // A read that outlives its collection keeps its connection until the
+  // database cancels it. The next collections skip rather than add another.
+  let inFlight: Promise<QueueHealth> | undefined;
   meter.addBatchObservableCallback(async (result) => {
+    if (inFlight) return;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    const reading = read();
+    inFlight = reading;
+    void reading.catch(() => undefined).finally(() => {
+      inFlight = undefined;
+    });
     try {
       const health = await Promise.race([
-        read(),
+        reading,
         new Promise<never>((_, reject) => {
           timer = setTimeout(() => reject(new Error("Queue health read timed out")), readTimeoutMs);
         }),
