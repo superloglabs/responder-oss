@@ -166,7 +166,7 @@ export function buildOpenApiDocument(
     },
     info: {
       description:
-        "Manage a Superlog workspace's automations, runs, tag mode, model access, and secrets, read its telemetry, and build dashboards and alerts over it. Every request acts as the member who created the API key.",
+        "Manage a Superlog workspace's automations, runs, tag mode, model access, and secrets, read its telemetry, build dashboards and alerts over it, run synthetic checks, and export them to Terraform. Every request acts as the member who created the API key.",
       title: "Superlog management API",
       version: "1.0.0",
     },
