@@ -22,6 +22,7 @@ export interface ApiKeySummary {
 
 export interface ApiKeyPrincipal {
   apiKeyId: string;
+  apiKeyName: string;
   organizationId: string;
   role: string;
   user: { email: string; id: string; name: string };
@@ -133,6 +134,7 @@ export async function authenticateApiKey(
   const rows = await db
     .select({
       apiKeyId: apiKeys.id,
+      apiKeyName: apiKeys.name,
       email: user.email,
       lastUsedAt: apiKeys.lastUsedAt,
       name: user.name,
@@ -180,6 +182,7 @@ export async function authenticateApiKey(
   }
   return {
     apiKeyId: row.apiKeyId,
+    apiKeyName: row.apiKeyName,
     organizationId: row.organizationId,
     role: row.role,
     user: { email: row.email, id: row.userId, name: row.name },

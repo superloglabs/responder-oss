@@ -115,6 +115,17 @@
 .errorIssue .syntheticCheck__section > header .errorIssue__eventTime { margin-left: 0; }
 .errorIssue__eventMessage { margin: 0; padding: 10px 12px; border-radius: 4px; background: var(--ds-surface-hover); color: var(--ds-text-primary); font: 12px/20px ui-monospace, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
 .errorIssue__stackPanel summary { cursor: pointer; padding: 8px 12px; font-size: 12px; }
+.errorIssue__claim { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+.errorIssue__release { padding: 0; border: 0; background: none; color: var(--ds-text-muted); font: inherit; font-size: 12px; cursor: pointer; }
+.errorIssue__release:hover:not(:disabled) { color: var(--ds-text-primary); text-decoration: underline; }
+.errorIssue__pullRequests { display: flex; flex-direction: column; gap: 2px; }
+.errorIssue__activity { display: flex; flex-direction: column; gap: 14px; margin: 0; padding: 0; list-style: none; font-size: 13px; line-height: 20px; }
+.errorIssue__activity p { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 6px; margin: 0; }
+.errorIssue__activity strong { font-weight: 500; }
+.errorIssue__activityMessage { margin-top: 4px; padding-left: 12px; border-left: 2px solid var(--ds-border-default); color: var(--ds-text-secondary); overflow-wrap: anywhere; }
+.errorIssue__activityMessage > :first-child { margin-top: 0; }
+.errorIssue__activityMessage > :last-child { margin-bottom: 0; }
+.errorIssue__activityMessage pre { overflow-x: auto; }
 .errorIssue__status { display: inline-flex; align-items: center; gap: 6px; }
 .errorIssue__status i { width: 6px; height: 6px; border-radius: 50%; background: var(--ds-text-muted); }
 .errorIssue__status--open i { background: #cb444c; }

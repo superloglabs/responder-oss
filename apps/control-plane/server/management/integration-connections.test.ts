@@ -16,7 +16,7 @@ vi.mock("../../../../packages/core/src/db/organization-capabilities.js", async (
 
 const caller: ManagementContext = {
   organizationId: "11111111-1111-4111-8111-111111111111", apiKeyId: null,
-  oauthClientId: "chat-client", source: "mcp", role: "member",
+  clientName: "Chat", oauthClientId: "chat-client", source: "mcp", role: "member",
   user: { id: "22222222-2222-4222-8222-222222222222", name: "Ash", email: "ash@example.com" },
 };
 const start = integrationConnectionOperations.find((item) => item.name === "start_integration_connection")!;

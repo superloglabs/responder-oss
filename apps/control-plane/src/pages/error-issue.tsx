@@ -5,6 +5,7 @@ import { useTimeZonePreference } from "../use-time-zone-preference";
 import { traceExplorerParams, traceSearchQuery, type TraceSearchQuery } from "../telemetry-api";
 import { TraceExplorer } from "./traces";
 import { useCallback, useEffect, useRef, useState } from "react";
+import Markdown from "react-markdown";
 import { Link, useParams } from "react-router-dom";
 import { relativeTime } from "../agents-api";
 import { AppShell } from "../components/app-shell";
@@ -12,10 +13,14 @@ import { ErrorIssueSkeleton } from "../components/screen-skeletons";
 import { TimeseriesChart } from "../components/timeseries-chart";
 import { Badge, Button } from "../design-system";
 import {
+  errorIssueActivitySummary,
+  errorIssueActorName,
   errorIssueDetailChart,
   errorIssueStatusLabels,
   fetchErrorIssue,
   formatEventCount,
+  pullRequestLabel,
+  releaseErrorIssue,
   updateErrorIssueStatus,
   type ErrorIssueDetail,
   type ErrorIssueStatus,
@@ -65,12 +70,32 @@ function RelatedTraces({ issue }: { issue: ErrorIssueDetail["issue"] }) {
   );
 }
 
+function ErrorIssueActivityLog({ activity }: { activity: ErrorIssueDetail["activity"] }) {
+  return (
+    <section aria-label="Activity" className="syntheticCheck__section">
+      <header><h2>Activity</h2></header>
+      <ol className="errorIssue__activity">
+        {activity.map((entry) => (
+          <li key={entry.id}>
+            <p>
+              <strong>{errorIssueActorName(entry.actor)}</strong> {errorIssueActivitySummary(entry)}
+              {entry.pullRequestUrl ? <> <a href={entry.pullRequestUrl} rel="noreferrer" target="_blank">{pullRequestLabel(entry.pullRequestUrl)}</a></> : null}
+              <time className="dashboardPage__meta" dateTime={entry.createdAt} title={new Date(entry.createdAt).toLocaleString()}>{relativeTime(entry.createdAt)}</time>
+            </p>
+            {entry.message ? <div className="errorIssue__activityMessage"><Markdown>{entry.message}</Markdown></div> : null}
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
 export function ErrorIssuePage() {
   const { issueId = "" } = useParams();
   const [detail, setDetail] = useState<ErrorIssueDetail | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState<ErrorIssueStatus | null>(null);
+  const [saving, setSaving] = useState<ErrorIssueStatus | "release" | null>(null);
   // A load is kept only if no other load or status change started after it.
   const generation = useRef(0);
   useDocumentTitle(detail?.issue.title ?? "Error");
@@ -97,10 +122,24 @@ export function ErrorIssuePage() {
     setSaving(status);
     setError(null);
     try {
-      const issue = await updateErrorIssueStatus(issueId, status);
-      setDetail((current) => (current ? { ...current, issue } : current));
+      await updateErrorIssueStatus(issueId, status);
+      await load();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Unable to change the status");
+    } finally {
+      setSaving(null);
+    }
+  }
+
+  async function release() {
+    generation.current += 1;
+    setSaving("release");
+    setError(null);
+    try {
+      await releaseErrorIssue(issueId);
+      await load();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to release the issue");
     } finally {
       setSaving(null);
     }
@@ -177,6 +216,27 @@ export function ErrorIssuePage() {
           </div>
           <dl className="errorIssue__properties">
             <div><dt>Status</dt><dd><span className={`errorIssue__status errorIssue__status--${issue.status}`}><i aria-hidden="true" />{errorIssueStatusLabels[issue.status]}</span></dd></div>
+            <div>
+              <dt>Claimed by</dt>
+              <dd>
+                {issue.claim ? (
+                  <span className="errorIssue__claim">
+                    <span title={`Since ${new Date(issue.claim.claimedAt).toLocaleString()}`}>{errorIssueActorName(issue.claim)}</span>
+                    <button className="errorIssue__release" disabled={saving !== null} onClick={() => void release()} type="button">Release</button>
+                  </span>
+                ) : "—"}
+              </dd>
+            </div>
+            {detail.pullRequests.length > 0 ? (
+              <div>
+                <dt>Pull requests</dt>
+                <dd className="errorIssue__pullRequests">
+                  {detail.pullRequests.map((pullRequest) => (
+                    <a href={pullRequest.url} key={pullRequest.url} rel="noreferrer" target="_blank">{pullRequestLabel(pullRequest.url)}</a>
+                  ))}
+                </dd>
+              </div>
+            ) : null}
             {[
               ["Service", issue.service ?? "—"],
               ["Environment", sample.resourceAttributes["deployment.environment.name"] ?? sample.resourceAttributes["deployment.environment"] ?? sample.attributes["deployment.environment.name"] ?? sample.attributes["deployment.environment"] ?? "—"],
@@ -195,6 +255,8 @@ export function ErrorIssuePage() {
             <TimeseriesChart chart={chart} chartType="bar" density="compact" adjacentBars={hourly} label={hourly ? "Occurrences every 3 hours" : "Occurrences per day"} showLegend={false} />
           </div>
         </section>
+
+        {detail.activity.length > 0 ? <ErrorIssueActivityLog activity={detail.activity} /> : null}
 
         <RelatedTraces issue={issue} key={issue.id} />
 

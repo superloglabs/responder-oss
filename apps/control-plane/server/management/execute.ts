@@ -31,12 +31,15 @@ export async function authenticateManagementRequest(
       scope: mcpOAuthScope,
     });
     if (principal) {
-      const { clientId, ...rest } = principal;
-      context = { ...rest, apiKeyId: null, oauthClientId: clientId, source };
+      const { clientId, clientName, ...rest } = principal;
+      context = { ...rest, apiKeyId: null, clientName, oauthClientId: clientId, source };
     }
   } else {
     const principal = await authenticateApiKey(token);
-    if (principal) context = { ...principal, oauthClientId: null, source };
+    if (principal) {
+      const { apiKeyName, ...rest } = principal;
+      context = { ...rest, clientName: apiKeyName, oauthClientId: null, source };
+    }
   }
   if (!context) return null;
   Sentry.setUser({ id: context.user.id, username: context.user.name });

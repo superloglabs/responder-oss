@@ -43,7 +43,14 @@ import type {
   DashboardWidgetLayout,
   DashboardWidgetType,
 } from "../telemetry/dashboards.js";
-import type { ErrorIssueKind, ErrorIssueSample, ErrorIssueStatus } from "../telemetry/error-issues.js";
+import type {
+  ErrorIssueActivityType,
+  ErrorIssueActor,
+  ErrorIssueClaim,
+  ErrorIssueKind,
+  ErrorIssueSample,
+  ErrorIssueStatus,
+} from "../telemetry/error-issues.js";
 import type {
   AutomationHarnessKind,
   AutomationInferenceSource,
@@ -952,6 +959,8 @@ export const errorIssues = pgTable(
     statusChangedAt: timestamp("status_changed_at", { withTimezone: true }),
     // When a resolved issue last occurred again.
     regressedAt: timestamp("regressed_at", { withTimezone: true }),
+    // Who is working on the issue. Resolving or silencing it ends the claim.
+    claim: jsonb("claim").$type<ErrorIssueClaim>(),
     eventCount: bigint("event_count", { mode: "number" }).notNull().default(0),
     firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).notNull(),
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull(),
@@ -997,6 +1006,30 @@ export const sourceMaps = pgTable(
     uniqueIndex("source_maps_debug_id_idx").on(table.organizationId, table.debugId),
     index("source_maps_created_at_idx").on(table.createdAt),
   ],
+);
+
+// Claims, progress updates, linked pull requests, and status changes on an
+// error issue, oldest first.
+export const errorIssueActivities = pgTable(
+  "error_issue_activities",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    issueId: uuid("issue_id")
+      .notNull()
+      .references(() => errorIssues.id, { onDelete: "cascade" }),
+    type: text("type").$type<ErrorIssueActivityType>().notNull(),
+    actor: jsonb("actor").$type<ErrorIssueActor>().notNull(),
+    message: text("message"),
+    pullRequestUrl: text("pull_request_url"),
+    status: text("status").$type<ErrorIssueStatus>(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [index("error_issue_activities_issue_idx").on(table.issueId, table.createdAt)],
 );
 
 // Occurrences of an error issue per UTC day.

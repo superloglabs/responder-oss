@@ -18,6 +18,38 @@ export type ErrorIssueKind = (typeof errorIssueKinds)[number];
 export const errorIssueStatuses = ["open", "resolved", "silenced"] as const;
 export type ErrorIssueStatus = (typeof errorIssueStatuses)[number];
 
+// Who changed an issue: a member, and the MCP client or API key acting for
+// them. Changes made in the app have no client.
+export type ErrorIssueActor = {
+  // The name an agent gives itself, so agents acting for the same member can
+  // tell their claims apart.
+  agent: string | null;
+  client: string | null;
+  user: { id: string; name: string };
+};
+
+// The agent or member working on an issue. The credential is the API key or
+// MCP client the claim was made with; with the member and agent name it
+// tells whether a later call comes from the same claimant.
+export type ErrorIssueClaim = ErrorIssueActor & { claimedAt: string; credential: string };
+
+export const errorIssueActivityTypes = ["claimed", "released", "update", "status"] as const;
+export type ErrorIssueActivityType = (typeof errorIssueActivityTypes)[number];
+
+export type ErrorIssueActivity = {
+  actor: ErrorIssueActor;
+  createdAt: string;
+  id: string;
+  message: string | null;
+  // A pull request linked by an update.
+  pullRequestUrl: string | null;
+  // The status a status change set.
+  status: ErrorIssueStatus | null;
+  type: ErrorIssueActivityType;
+};
+
+export type ErrorIssuePullRequest = { linkedAt: string; url: string };
+
 // What an occurrence means for its issue:
 // - new: the fingerprint had no issue
 // - regressed: the issue was resolved before the occurrence, and is open again

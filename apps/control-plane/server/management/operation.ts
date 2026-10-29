@@ -5,6 +5,8 @@ import type { z } from "zod";
 // approved the MCP client.
 export interface ManagementContext {
   apiKeyId: string | null;
+  // The API key's or MCP client's name.
+  clientName: string | null;
   oauthClientId: string | null;
   organizationId: string;
   role: string;

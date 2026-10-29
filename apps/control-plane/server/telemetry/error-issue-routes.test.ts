@@ -9,6 +9,7 @@ const issueId = "11111111-1111-4111-8111-111111111111";
 const now = new Date("2026-10-22T12:00:00.000Z");
 
 const summary: ErrorIssueSummary = {
+  claim: null,
   eventCount: 12,
   exceptionType: "TypeError",
   firstSeenAt: "2026-10-20T08:00:00.000Z",
@@ -45,6 +46,7 @@ const issue: ErrorIssue = {
 
 function routes(overrides: Partial<ErrorIssueRouteDependencies> = {}) {
   const dependencies: ErrorIssueRouteDependencies = {
+    activity: vi.fn(async () => ({ activity: [], pullRequests: [{ linkedAt: "2026-10-22T11:30:00.000Z", url: "https://github.com/acme/api/pull/7" }] })),
     environments: vi.fn(async () => ["production"]),
     days: vi.fn(async () => new Map([[issueId, [{ day: "2026-10-22", eventCount: 12 }]]])),
     findIssue: vi.fn(async () => issue),
@@ -53,11 +55,12 @@ function routes(overrides: Partial<ErrorIssueRouteDependencies> = {}) {
     hours: vi.fn(async () => new Map([[issueId, [{ eventCount: 12, hour: "2026-10-22T11:00:00.000Z" }]]])),
     listIssues: vi.fn(async () => [summary]),
     now: () => now,
+    release: vi.fn(async () => ({ issue, ok: true as const })),
     services: vi.fn(async () => ["api"]),
     setStatus: vi.fn(async (_organizationId, _issueId, status) => ({ ...issue, status })),
     sourceMaps: vi.fn(async () => new Map()),
     statusCounts: vi.fn(async () => ({ open: 1, resolved: 2, silenced: 0 })),
-    tenant: vi.fn(async () => ({ ok: true as const, organizationId, user: { id: "user" } })),
+    tenant: vi.fn(async () => ({ ok: true as const, organizationId, user: { id: "user", name: "Ash" } })),
     ...overrides,
   };
   return { app: createErrorIssueRoutes(dependencies), dependencies };
@@ -157,7 +160,14 @@ describe("error issue routes", () => {
     const { app, dependencies } = routes();
     const response = await app.request(`/${issueId}`);
 
-    expect(await response.json()).toEqual({ days: [{ day: "2026-10-22", eventCount: 12 }], hours: [{ eventCount: 12, hour: "2026-10-22T11:00:00.000Z" }], issue, since: "2026-09-23" });
+    expect(await response.json()).toEqual({
+      activity: [],
+      days: [{ day: "2026-10-22", eventCount: 12 }],
+      hours: [{ eventCount: 12, hour: "2026-10-22T11:00:00.000Z" }],
+      issue,
+      pullRequests: [{ linkedAt: "2026-10-22T11:30:00.000Z", url: "https://github.com/acme/api/pull/7" }],
+      since: "2026-09-23",
+    });
     expect(dependencies.hours).toHaveBeenCalledWith([issueId], "2026-09-23T00:00:00.000Z");
     expect(dependencies.findIssue).toHaveBeenCalledWith(organizationId, issueId);
   });
@@ -178,7 +188,19 @@ describe("error issue routes", () => {
 
     expect(response.status).toBe(200);
     expect(((await response.json()) as { issue: ErrorIssue }).issue.status).toBe("resolved");
-    expect(dependencies.setStatus).toHaveBeenCalledWith(organizationId, issueId, "resolved");
+    expect(dependencies.setStatus).toHaveBeenCalledWith(organizationId, issueId, "resolved", {
+      actor: { agent: null, client: null, user: { id: "user", name: "Ash" } },
+    });
+  });
+
+  it("ends anyone's claim for a member", async () => {
+    const { app, dependencies } = routes();
+    const response = await app.request(`/${issueId}/release`, { method: "POST" });
+
+    expect(response.status).toBe(200);
+    expect(dependencies.release).toHaveBeenCalledWith(organizationId, issueId, {
+      agent: null, client: null, user: { id: "user", name: "Ash" },
+    });
   });
 
   it("rejects an unknown status", async () => {
