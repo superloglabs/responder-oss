@@ -21,6 +21,7 @@ const routes = [
   { appIds: [legacyApp], path: "/api/webhooks/slack", url: "https://api.superlog.sh/slack/events" },
   { appIds: [legacyApp], path: "/api/webhooks/slack/actions", url: "https://api.superlog.sh/slack/interactivity" },
   { appIds: ["3485414"], path: "/api/webhooks/github", url: "https://api.superlog.sh/github/webhook" },
+  { appIds: ["linear-old-client"], path: "/api/webhooks/linear", url: "https://api.superlog.sh/linear/webhook" },
 ];
 
 function harness(overrides: Partial<LegacyWebhookForwarderDependencies> = {}) {
@@ -48,6 +49,10 @@ function harness(overrides: Partial<LegacyWebhookForwarderDependencies> = {}) {
       return context.json({ from: "application" });
     })
     .post("/api/webhooks/github", async (context) => {
+      handled(await context.req.text());
+      return context.json({ from: "application" });
+    })
+    .post("/api/webhooks/linear", async (context) => {
       handled(await context.req.text());
       return context.json({ from: "application" });
     });
@@ -87,7 +92,88 @@ const githubEvent = (appId: string) => ({
   method: "POST",
 });
 
+const linearEvent = (clientId: string) => ({
+  body: JSON.stringify({
+    action: "created",
+    agentSession: { id: "session-1" },
+    oauthClientId: clientId,
+    organizationId: "linear-org-1",
+    type: "AgentSessionEvent",
+    webhookTimestamp: 1,
+  }),
+  headers: {
+    "content-type": "application/json",
+    "linear-delivery": "delivery-1",
+    "linear-event": "AgentSessionEvent",
+    "linear-signature": "abc",
+  },
+  method: "POST",
+});
+
 describe("legacy webhook forwarder", () => {
+  it("sends an old Linear app's agent session to the old product alone while no active workspace holds it", async () => {
+    const { app, dependencies, handled } = harness({
+      tenantState: vi.fn(async () => ({ active: false, held: true })),
+    });
+
+    const response = await app.request("/api/webhooks/linear", linearEvent("linear-old-client"));
+
+    expect(await response.json()).toEqual({ from: "legacy" });
+    expect(handled).not.toHaveBeenCalled();
+    expect(dependencies.tenantState).toHaveBeenCalledWith({
+      appId: "linear-old-client",
+      key: "linear-org-1",
+      provider: "linear",
+    });
+    const [url, init] = vi.mocked(dependencies.forward).mock.calls[0]!;
+    expect(url).toBe("https://api.superlog.sh/linear/webhook");
+    const headers = new Headers(init.headers);
+    expect(headers.get("linear-signature")).toBe("abc");
+    expect(headers.get("linear-delivery")).toBe("delivery-1");
+    expect(headers.get("linear-event")).toBe("AgentSessionEvent");
+  });
+
+  it("sends an old Linear app's session to the old product when active workspaces hold the Linear workspace only through another app", async () => {
+    const tenantState = vi.fn(async (tenant: { appId?: string }) =>
+      tenant.appId === "linear-old-client" ? { active: false, held: false } : { active: true, held: true });
+    const askCell = vi.fn(async (_cell: unknown, tenant: { appId?: string }) =>
+      tenant.appId === "linear-old-client" ? { active: false, held: false } : { active: true, held: true });
+    const { app, dependencies, handled } = harness({ askCell, tenantState });
+
+    const response = await app.request("/api/webhooks/linear", linearEvent("linear-old-client"));
+
+    expect(await response.json()).toEqual({ from: "legacy" });
+    expect(handled).not.toHaveBeenCalled();
+    expect(askCell).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "us" }),
+      { appId: "linear-old-client", key: "linear-org-1", provider: "linear" },
+      "cell-token",
+    );
+    expect(vi.mocked(dependencies.forward).mock.calls[0]![0]).toBe("https://api.superlog.sh/linear/webhook");
+  });
+
+  it("keeps an old Linear app's agent session in the application once an active workspace holds it", async () => {
+    const { app, dependencies, handled } = harness({
+      tenantState: vi.fn(async () => ({ active: true, held: true })),
+    });
+
+    const response = await app.request("/api/webhooks/linear", linearEvent("linear-old-client"));
+
+    expect(await response.json()).toEqual({ from: "application" });
+    expect(handled).toHaveBeenCalledOnce();
+    expect(dependencies.forward).not.toHaveBeenCalled();
+  });
+
+  it("leaves the application's own Linear app's sessions alone", async () => {
+    const { app, dependencies, handled } = harness();
+
+    const response = await app.request("/api/webhooks/linear", linearEvent("linear-current-client"));
+
+    expect(await response.json()).toEqual({ from: "application" });
+    expect(handled).toHaveBeenCalledOnce();
+    expect(dependencies.forward).not.toHaveBeenCalled();
+  });
+
   it("sends an old GitHub App's event to both products", async () => {
     const { app, dependencies, handled } = harness();
 

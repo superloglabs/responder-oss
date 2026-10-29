@@ -1876,6 +1876,7 @@ async function getRuntimeMcpConnections(
       id: integrationAccounts.id,
       displayName: integrationAccounts.displayName,
       encryptedCredentials: integrationAccounts.encryptedCredentials,
+      metadata: integrationAccounts.metadata,
     })
     .from(integrationAccounts)
     .where(
@@ -1936,7 +1937,10 @@ async function getRuntimeMcpConnections(
 
       if (linearAccessTokenNeedsRefresh(credentials)) {
         try {
-          credentials = await refreshLinearOAuthCredentials({ credentials });
+          credentials = await refreshLinearOAuthCredentials({
+            clientId: account.metadata.clientId,
+            credentials,
+          });
         } catch (error) {
           console.error(
             JSON.stringify(

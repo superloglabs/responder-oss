@@ -1,13 +1,16 @@
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { getDatabase } from "./client.js";
+import { linearAccountOfApp } from "./linear-agent-sessions.js";
 import { automations, integrationAccounts, telemetryNotificationPauses } from "./schema.js";
 
 // A provider tenant, as named in a webhook: an external account of a provider,
 // one of this cell's integration accounts by ID, or one of its automations by
-// ID.
+// ID. A Linear tenant may also name the OAuth app the webhook came from; it is
+// then active only through connections of that app.
 export const webhookTenantSchema = z.discriminatedUnion("provider", [
   z.object({
+    appId: z.string().min(1).max(256).optional(),
     key: z.string().min(1).max(256),
     provider: z.enum(["discord", "github", "linear", "sentry", "slack"]),
   }),
@@ -60,6 +63,7 @@ export async function webhookTenantState(
     .where(and(
       eq(integrationAccounts.provider, tenant.provider),
       eq(integrationAccounts.externalAccountId, tenant.key),
+      tenant.provider === "linear" && tenant.appId ? linearAccountOfApp(tenant.appId) : undefined,
     ));
   return { active: rows.some((row) => row.paused === null), held: rows.length > 0 };
 }

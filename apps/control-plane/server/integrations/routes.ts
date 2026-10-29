@@ -161,6 +161,7 @@ import {
   LINEAR_MCP_URL,
   LINEAR_READONLY_MCP_URL,
   linearAuthorizeUrl,
+  linearDefaultClientId,
 } from "../../../../packages/core/src/integrations/linear.js";
 import {
   CLICKSTACK_CLOUD_MCP_URL,
@@ -3850,6 +3851,7 @@ export const integrationRoutes = new Hono()
           actor: LINEAR_APP_ACTOR,
           authType: "linear_oauth",
           authVersion: LINEAR_AUTH_VERSION,
+          clientId: linearDefaultClientId(),
           mcpUrl: LINEAR_MCP_URL,
           mentionable: true,
           toolCount,

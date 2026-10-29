@@ -160,6 +160,60 @@ describe("Linear OAuth", () => {
     );
   });
 
+  it("refreshes with the app the connection records", async () => {
+    vi.stubEnv("LINEAR_CLIENT_ID", "linear-client");
+    vi.stubEnv("LINEAR_CLIENT_SECRET", "linear-secret");
+    vi.stubEnv("LINEAR_ADDITIONAL_APPS", JSON.stringify([
+      { clientId: "earlier-client", clientSecret: "earlier-secret", webhookSecret: "earlier-webhook" },
+    ]));
+    const fetchImpl = vi.fn().mockResolvedValue(Response.json({
+      access_token: "new-access-token",
+      expires_in: 86_399,
+      refresh_token: "new-refresh-token",
+      scope: "read write",
+      token_type: "Bearer",
+    }));
+
+    await refreshLinearOAuthCredentials({
+      clientId: "earlier-client",
+      credentials: {
+        accessToken: "old-access-token",
+        authType: "linear_oauth",
+        expiresAt: Date.now() - 1,
+        mcpUrl: "https://mcp.linear.app/mcp",
+        refreshToken: "old-refresh-token",
+        scope: "read write",
+        tokenType: "Bearer",
+      },
+      fetchImpl,
+    });
+
+    const body = new URLSearchParams(fetchImpl.mock.calls[0]![1].body);
+    expect(body.get("client_id")).toBe("earlier-client");
+    expect(body.get("client_secret")).toBe("earlier-secret");
+  });
+
+  it("does not refresh with another app when the recorded one is not configured", async () => {
+    vi.stubEnv("LINEAR_CLIENT_ID", "linear-client");
+    vi.stubEnv("LINEAR_CLIENT_SECRET", "linear-secret");
+    const fetchImpl = vi.fn();
+
+    await expect(refreshLinearOAuthCredentials({
+      clientId: "removed-client",
+      credentials: {
+        accessToken: "old-access-token",
+        authType: "linear_oauth",
+        expiresAt: Date.now() - 1,
+        mcpUrl: "https://mcp.linear.app/mcp",
+        refreshToken: "old-refresh-token",
+        scope: "read write",
+        tokenType: "Bearer",
+      },
+      fetchImpl,
+    })).rejects.toThrow("Linear app removed-client is not configured");
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
 });
 
 describe("Linear ticket templates", () => {

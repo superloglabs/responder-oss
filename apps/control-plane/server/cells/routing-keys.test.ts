@@ -88,6 +88,11 @@ describe("webhook routing keys", () => {
     expect(webhookAppId("/api/webhooks/slack/actions", "application/x-www-form-urlencoded", body)).toBe("A2");
     expect(webhookAppId("/api/webhooks/slack", "application/json", json({ team_id: "T1" }))).toBeNull();
     expect(webhookAppId("/api/webhooks/github", "application/json", json({ api_app_id: "A1" }))).toBeNull();
+    expect(webhookAppId("/api/webhooks/linear", "application/json", json({
+      oauthClientId: "linear-client",
+      organizationId: "org-1",
+    }))).toBe("linear-client");
+    expect(webhookAppId("/api/webhooks/linear", "application/json", json({ organizationId: "org-1" }))).toBeNull();
     expect(webhookAppId("/api/webhooks/github", "application/json", json({}), new Headers({
       "x-github-hook-installation-target-id": "3485414",
       "x-github-hook-installation-target-type": "integration",

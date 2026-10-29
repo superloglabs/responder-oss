@@ -188,6 +188,7 @@ vi.mock("../../../../packages/core/src/integrations/linear.js", () => ({
   LINEAR_MCP_URL: "https://mcp.linear.app/mcp",
   LINEAR_READONLY_MCP_URL: "https://mcp.linear.app/mcp/readonly",
   linearAuthorizeUrl: vi.fn(),
+  linearDefaultClientId: () => "linear-client",
 }));
 
 vi.mock("./langfuse.js", async (importOriginal) => {
@@ -252,7 +253,7 @@ describe("integration callback routing", () => {
     );
     vi.mocked(withIntegrationAccountCredentialLease).mockImplementation(
       async (input) => {
-        const result = await input.operation("encrypted-credentials");
+        const result = await input.operation("encrypted-credentials", {});
         return result.value;
       },
     );
@@ -1057,7 +1058,11 @@ describe("integration callback routing", () => {
       expect.objectContaining({
         displayName: "Example Linear",
         externalAccountId: "linear-workspace-id",
-        metadata: expect.objectContaining({ actor: "app", mentionable: true }),
+        metadata: expect.objectContaining({
+          actor: "app",
+          clientId: "linear-client",
+          mentionable: true,
+        }),
         provider: "linear",
         status: "connected",
       }),

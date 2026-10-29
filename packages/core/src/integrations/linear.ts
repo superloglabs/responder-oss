@@ -4,6 +4,11 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { IssueEvidence } from "../investigations/report.js";
 import { z } from "zod";
+import {
+  type LinearApp,
+  linearAppForConnection,
+  linearDefaultApp,
+} from "./linear-apps.js";
 
 export const LINEAR_MCP_URL = "https://mcp.linear.app/mcp";
 export const LINEAR_READONLY_MCP_URL = "https://mcp.linear.app/mcp/readonly";
@@ -47,13 +52,19 @@ export function parseLinearOAuthCredentials(
 
 function linearOAuthEnvironment(
   environment: NodeJS.ProcessEnv = process.env,
-): { clientId: string; clientSecret: string } {
-  const clientId = environment.LINEAR_CLIENT_ID;
-  const clientSecret = environment.LINEAR_CLIENT_SECRET;
-  if (!clientId || !clientSecret) {
+): LinearApp {
+  const app = linearDefaultApp(environment);
+  if (!app) {
     throw new Error("Linear application credentials are not configured");
   }
-  return { clientId, clientSecret };
+  return app;
+}
+
+// The client ID new connections record as their app.
+export function linearDefaultClientId(
+  environment: NodeJS.ProcessEnv = process.env,
+): string {
+  return linearOAuthEnvironment(environment).clientId;
 }
 
 export function createLinearPkce(): {
@@ -86,10 +97,11 @@ export function linearAuthorizeUrl(input: {
 }
 
 async function requestLinearOAuthToken(input: {
+  app: LinearApp;
   fetchImpl?: typeof fetch;
   parameters: Record<string, string>;
 }): Promise<LinearOAuthCredentials> {
-  const { clientId, clientSecret } = linearOAuthEnvironment();
+  const { clientId, clientSecret } = input.app;
   const response = await (input.fetchImpl ?? fetch)(LINEAR_OAUTH_TOKEN_URL, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
@@ -115,13 +127,14 @@ async function requestLinearOAuthToken(input: {
   };
 }
 
-export function exchangeLinearOAuthCode(input: {
+export async function exchangeLinearOAuthCode(input: {
   authorizationCode: string;
   codeVerifier: string;
   fetchImpl?: typeof fetch;
   redirectUri: string;
 }): Promise<LinearOAuthCredentials> {
-  return requestLinearOAuthToken({
+  return await requestLinearOAuthToken({
+    app: linearOAuthEnvironment(),
     fetchImpl: input.fetchImpl,
     parameters: {
       code: input.authorizationCode,
@@ -139,11 +152,16 @@ export function linearAccessTokenNeedsRefresh(
   return credentials.expiresAt <= now + 60_000;
 }
 
-export function refreshLinearOAuthCredentials(input: {
+// Refreshes with the app the connection was authorized through, named by the
+// client ID in its metadata, because only that app can redeem its refresh
+// token.
+export async function refreshLinearOAuthCredentials(input: {
+  clientId?: unknown;
   credentials: LinearOAuthCredentials;
   fetchImpl?: typeof fetch;
 }): Promise<LinearOAuthCredentials> {
-  return requestLinearOAuthToken({
+  return await requestLinearOAuthToken({
+    app: linearAppForConnection(input.clientId),
     fetchImpl: input.fetchImpl,
     parameters: {
       grant_type: "refresh_token",

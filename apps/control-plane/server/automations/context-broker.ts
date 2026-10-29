@@ -705,7 +705,10 @@ async function linearAccessToken(
         decryptCredentials<Record<string, unknown>>(encryptedCredentials),
       );
       if (!linearAccessTokenNeedsRefresh(current)) return { value: current };
-      const updated = await dependencies.refreshLinear({ credentials: current });
+      const updated = await dependencies.refreshLinear({
+        clientId: claim.account.metadata.clientId,
+        credentials: current,
+      });
       return {
         encryptedCredentials: encryptCredentials(updated),
         value: updated,

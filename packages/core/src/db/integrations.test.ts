@@ -106,7 +106,10 @@ describe("integration account tenancy", () => {
   it("serializes rotating credential updates without holding a transaction", async () => {
     const returning = vi
       .fn()
-      .mockResolvedValueOnce([{ encryptedCredentials: "old-credentials" }])
+      .mockResolvedValueOnce([{
+        encryptedCredentials: "old-credentials",
+        metadata: { clientId: "client-1" },
+      }])
       .mockResolvedValueOnce([{ id: "account-1" }]);
     const where = vi.fn(() => ({ returning }));
     const database = {
@@ -134,7 +137,7 @@ describe("integration account tenancy", () => {
 
     expect(database.transaction).not.toHaveBeenCalled();
     expect(database.update).toHaveBeenCalledTimes(2);
-    expect(operation).toHaveBeenCalledWith("old-credentials");
+    expect(operation).toHaveBeenCalledWith("old-credentials", { clientId: "client-1" });
     expect(where).toHaveBeenCalledTimes(2);
   });
 

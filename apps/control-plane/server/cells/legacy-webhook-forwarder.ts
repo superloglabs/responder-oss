@@ -13,14 +13,17 @@ import { forwardedHeader } from "./webhook-router.js";
 // product (ADR 0012). LEGACY_WEBHOOK_FORWARDS names, per webhook path, the old
 // apps and the old product's address for it:
 // [{ "path": "/api/webhooks/slack", "appIds": ["A…"], "url": "https://…/slack/events" }]
-// GitHub Apps are named by their numeric ID.
+// GitHub Apps are named by their numeric ID, and Linear apps by their OAuth
+// client ID.
 //
 // - An event goes to both products, and the old product's answer is
 //   returned, so the provider retries when the old product misses it. The
 //   application handles a retry it already saw as a duplicate.
-// - An interaction gets one answer: the application's when a workspace that is
-//   not paused holds the tenant, otherwise the old product's, whose messages
-//   the interaction most likely came from.
+// - A Slack interaction or a Linear agent session event gets one answer: the
+//   application's when a workspace that is not paused holds the tenant,
+//   otherwise the old product's. An interaction most likely came from the old
+//   product's messages, and both products would answer the same agent
+//   session.
 
 const routesSchema = z.array(z.object({
   appIds: z.array(z.string().min(1)).min(1),
@@ -29,12 +32,12 @@ const routesSchema = z.array(z.object({
 }));
 type LegacyRoute = z.infer<typeof routesSchema>[number];
 
-const interactivePaths = /^\/api\/webhooks\/slack\/actions$/u;
+const singleAnswerPaths = /^\/api\/webhooks\/(?:slack\/actions|linear)$/u;
 const forwardTimeoutMs = 8_000;
 
 // Signature and content headers the old product verifies. Load balancer
 // headers stay behind.
-const forwardedHeaderPattern = /^(?:content-type|user-agent|x-github-.+|x-hub-.+|x-slack-.+)$/u;
+const forwardedHeaderPattern = /^(?:content-type|user-agent|linear-.+|x-github-.+|x-hub-.+|x-slack-.+)$/u;
 
 type TenantState = { active: boolean; held: boolean };
 export type ProviderTenant = Extract<WebhookTenant, { provider: "discord" | "github" | "linear" | "sentry" | "slack" }>;
@@ -206,10 +209,13 @@ export function legacyWebhookForwarder(
     const route = appId ? candidates.find((candidate) => candidate.appIds.includes(appId)) : undefined;
     if (!route) return next();
 
-    if (interactivePaths.test(path)) {
+    if (singleAnswerPaths.test(path)) {
       const tenant = webhookRoutingKey(path, contentType, body);
+      // A Linear session can be answered only through a connection of its own
+      // app, so a workspace connected through another app does not hold it.
       const holder = tenant && tenant.provider !== "automation" && tenant.provider !== "integration_account"
-        ? await activeHolder(tenant, dependencies).catch(() => null)
+        ? await activeHolder(tenant.provider === "linear" && appId ? { ...tenant, appId } : tenant, dependencies)
+          .catch(() => null)
         : null;
       // The cell router keeps a tenant held here. Another cell gets the
       // interaction directly: the router routes by holding alone and could

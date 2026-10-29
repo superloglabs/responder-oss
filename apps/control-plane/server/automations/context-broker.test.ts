@@ -1496,7 +1496,9 @@ describe("automation context broker", () => {
 
   it("serves Linear's read tools and create_issue with a refreshed token", async () => {
     vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 4).toString("base64"));
-    const { app, dependencies } = appFor(claim("linear", linearCredentials({ expiresAt: Date.now() - 1 })));
+    const linearClaim = claim("linear", linearCredentials({ expiresAt: Date.now() - 1 }));
+    linearClaim.account.metadata = { clientId: "earlier-linear-client" };
+    const { app, dependencies } = appFor(linearClaim);
 
     const initialize = await app.request(
       `/api/automation-context-broker/v1/${accountId}`,
@@ -1510,7 +1512,9 @@ describe("automation context broker", () => {
     );
     const listBody = await list.json() as { result: { tools: Array<{ name: string }> } };
     expect(listBody.result.tools.map((tool) => tool.name)).toEqual(["list_users", "create_issue"]);
-    expect(dependencies.refreshLinear).toHaveBeenCalled();
+    expect(dependencies.refreshLinear).toHaveBeenCalledWith(expect.objectContaining({
+      clientId: "earlier-linear-client",
+    }));
     expect(dependencies.linear.listTools).toHaveBeenCalledWith({ accessToken: "fresh-linear-token" });
 
     const create = await app.request(

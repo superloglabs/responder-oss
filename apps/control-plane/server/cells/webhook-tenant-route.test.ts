@@ -38,6 +38,15 @@ describe("webhook tenant route", () => {
     expect(webhookTenantState).toHaveBeenCalledWith({ key: "T123", provider: "slack" });
   });
 
+  it("passes a Linear tenant's app on", async () => {
+    vi.stubEnv("RESPONDER_CELL_TOKEN", "cell-token");
+    webhookTenantState.mockResolvedValue({ active: false, held: false });
+
+    await ask({ appId: "linear-client", key: "linear-org", provider: "linear" }, "cell-token");
+
+    expect(webhookTenantState).toHaveBeenCalledWith({ appId: "linear-client", key: "linear-org", provider: "linear" });
+  });
+
   it("counts a held integration account or automation as active", async () => {
     vi.stubEnv("RESPONDER_CELL_TOKEN", "cell-token");
     hasWebhookTenant.mockResolvedValue(true);

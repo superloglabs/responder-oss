@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import { linearGraphql } from "./linear.js";
+import { type LinearApp, linearApps } from "./linear-apps.js";
 
 // People mention Responder or delegate an issue to it in Linear. Linear then
 // opens an agent session and sends AgentSessionEvent webhooks: `created` for
@@ -84,6 +85,18 @@ export function verifyLinearWebhook(input: {
     Number.isFinite(timestamp) &&
     Math.abs((input.now ?? Date.now()) - timestamp) <= linearWebhookMaxAgeMs
   );
+}
+
+// Linear signs an app's webhooks with that app's secret, so the app a webhook
+// came from is the one whose secret verifies it. Null when none does.
+export function linearWebhookApp(
+  input: { body: string; now?: number; signature: string | undefined },
+  environment: NodeJS.ProcessEnv = process.env,
+): LinearApp | null {
+  return linearApps(environment).find((app) =>
+    app.webhookSecret !== undefined &&
+    verifyLinearWebhook({ ...input, secret: app.webhookSecret })
+  ) ?? null;
 }
 
 // The request text the agent works on. A new session carries Linear's

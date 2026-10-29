@@ -85,8 +85,9 @@ export function webhookRoutingKey(
 }
 
 // The provider app a webhook was sent to, where the provider names it: Slack
-// puts `api_app_id` in events and interactions, and GitHub sends the app's ID
-// in a header.
+// puts `api_app_id` in events and interactions, GitHub sends the app's ID in a
+// header, and Linear puts the OAuth app's `oauthClientId` in agent session
+// events.
 export function webhookAppId(
   path: string,
   contentType: string | undefined,
@@ -105,6 +106,7 @@ export function webhookAppId(
     return payload ? text(parseJson(new TextEncoder().encode(payload))?.api_app_id) : null;
   }
   if (route === "/api/webhooks/slack") return text(parseJson(body)?.api_app_id);
+  if (route === "/api/webhooks/linear") return text(parseJson(body)?.oauthClientId);
   return null;
 }
 
