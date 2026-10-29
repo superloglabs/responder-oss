@@ -77,7 +77,9 @@ const githubEvent = (appId: string) => ({
   body: JSON.stringify({ action: "opened", installation: { id: 134387340 } }),
   headers: {
     "content-type": "application/json",
+    "x-github-delivery": "72d3162e-cc78-11e3-81ab-4c9367dc0958",
     "x-github-event": "pull_request",
+    "x-github-hook-id": "292430182",
     "x-github-hook-installation-target-id": appId,
     "x-github-hook-installation-target-type": "integration",
     "x-hub-signature-256": "sha256=abc",
@@ -98,6 +100,11 @@ describe("legacy webhook forwarder", () => {
     const headers = new Headers(init.headers);
     expect(headers.get("x-github-event")).toBe("pull_request");
     expect(headers.get("x-hub-signature-256")).toBe("sha256=abc");
+    expect(headers.get("x-github-delivery")).toBe("72d3162e-cc78-11e3-81ab-4c9367dc0958");
+    expect(headers.get("x-github-hook-id")).toBe("292430182");
+    expect(new TextDecoder().decode(init.body as Uint8Array)).toBe(githubEvent("3485414").body);
+    // An event reaches both products whoever holds the installation.
+    expect(dependencies.tenantState).not.toHaveBeenCalled();
   });
 
   it("leaves the application's own GitHub App's events alone", async () => {

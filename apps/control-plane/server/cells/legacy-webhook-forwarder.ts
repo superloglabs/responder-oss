@@ -37,15 +37,19 @@ const forwardTimeoutMs = 8_000;
 const forwardedHeaderPattern = /^(?:content-type|user-agent|x-github-.+|x-hub-.+|x-slack-.+)$/u;
 
 type TenantState = { active: boolean; held: boolean };
-type ProviderTenant = Extract<WebhookTenant, { provider: "discord" | "github" | "linear" | "sentry" | "slack" }>;
+export type ProviderTenant = Extract<WebhookTenant, { provider: "discord" | "github" | "linear" | "sentry" | "slack" }>;
 
-export type LegacyWebhookForwarderDependencies = {
+// What it takes to find the workspace that holds a provider tenant.
+export type TenantHolderDependencies = {
   askCell: (cell: Cell, tenant: ProviderTenant, token: string) => Promise<TenantState>;
   cellToken: () => string | undefined;
   directory: () => CellDirectory | null;
+  tenantState: (tenant: ProviderTenant) => Promise<TenantState>;
+};
+
+export type LegacyWebhookForwarderDependencies = TenantHolderDependencies & {
   forward: (url: string, init: RequestInit) => Promise<Response>;
   routes: () => LegacyRoute[];
-  tenantState: (tenant: ProviderTenant) => Promise<TenantState>;
 };
 
 export function legacyWebhookRoutes(environment: NodeJS.ProcessEnv = process.env): LegacyRoute[] {
@@ -72,13 +76,17 @@ async function askCellForTenantState(cell: Cell, tenant: ProviderTenant, token: 
   return { active: typeof answer.active === "boolean" ? answer.active : held, held };
 }
 
-const defaultDependencies: LegacyWebhookForwarderDependencies = {
+export const tenantHolderDependencies: TenantHolderDependencies = {
   askCell: askCellForTenantState,
   cellToken: () => process.env.RESPONDER_CELL_TOKEN?.trim() || undefined,
   directory: () => cellDirectory(),
+  tenantState: webhookTenantState,
+};
+
+const defaultDependencies: LegacyWebhookForwarderDependencies = {
+  ...tenantHolderDependencies,
   forward: (url, init) => fetch(url, init),
   routes: () => legacyWebhookRoutes(),
-  tenantState: webhookTenantState,
 };
 
 function errorMessage(error: unknown): string {
@@ -88,9 +96,9 @@ function errorMessage(error: unknown): string {
 // Where a workspace that is not paused holds the tenant: this cell, another
 // cell, or none. Stops at the first active answer, and a cell that cannot be
 // asked counts as not holding the tenant, so the old product answers.
-async function activeHolder(
+export async function activeHolder(
   tenant: ProviderTenant,
-  dependencies: LegacyWebhookForwarderDependencies,
+  dependencies: TenantHolderDependencies,
 ): Promise<"here" | Cell | null> {
   if ((await dependencies.tenantState(tenant)).active) return "here";
   const directory = dependencies.directory();

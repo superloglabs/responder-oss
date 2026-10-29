@@ -307,7 +307,18 @@ app keep working when `GITHUB_ADDITIONAL_APPS` lists it as JSON,
 creates an installation's tokens with whichever configured app owns it, and
 accepts webhooks signed by any of them. An entry in `LEGACY_WEBHOOK_FORWARDS`
 for `/api/webhooks/github` names GitHub Apps by their numeric ID; their events
-go to both products, as for Slack.
+go to both products, and GitHub gets the other product's answer. GitHub does
+not retry a failed delivery; it can be redelivered from the app's advanced
+settings or its deliveries API.
+
+When that app's setup URL points at `/api/integrations/github/callback`,
+`LEGACY_GITHUB_SETUP_URL` names the other product's setup address. A callback
+whose state Responder created continues in Responder. A callback without state,
+which GitHub sends after someone changes an installation on GitHub, stays in
+Responder when the signed-in user has a GitHub connection pending or a
+workspace whose telemetry notifications are not paused holds the installation.
+Every other callback is redirected to the other product with its query
+unchanged.
 
 The private key never enters the investigation sandbox. Responder creates a
 short-lived installation token and materializes only selected repositories.

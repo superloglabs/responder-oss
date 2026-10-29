@@ -11,6 +11,7 @@ import {
   webhookTenantState,
 } from "../../../packages/core/src/db/webhook-tenants.js";
 import { cellCallbackRouter } from "./cells/callback-router.js";
+import { legacyGitHubSetupRedirect } from "./cells/legacy-github-setup.js";
 import { legacyWebhookForwarder } from "./cells/legacy-webhook-forwarder.js";
 import {
   supportUserSearchSchema,
@@ -343,6 +344,7 @@ instrumentedApp.use("/api/*", requestMetrics());
 // handlers.
 instrumentedApp.use("/api/webhooks/*", legacyWebhookForwarder());
 instrumentedApp.use("/api/webhooks/*", cellWebhookRouter());
+instrumentedApp.use("/api/integrations/github/callback", legacyGitHubSetupRedirect());
 instrumentedApp.use("/api/integrations/:provider/callback", cellCallbackRouter());
 
 export const app = instrumentedApp
