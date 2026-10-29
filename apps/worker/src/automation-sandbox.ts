@@ -136,6 +136,9 @@ interface SerializedModelBrokerAccess {
 }
 
 const modelBrokerDrainTimeoutMs = 30_000;
+// How long an aborted run callback may keep using the sandbox after its
+// model operations drain, before the sandbox is paused or deleted anyway.
+const abortedRunSettleTimeoutMs = 10_000;
 
 function abortReason(signal: AbortSignal): Error {
   return signal.reason instanceof Error
@@ -159,6 +162,21 @@ async function abortable<Result>(
     return await Promise.race([operation, aborted]);
   } finally {
     signal.removeEventListener("abort", onAbort);
+  }
+}
+
+// Resolves when the operation settles or the timeout passes.
+async function settled(operation: Promise<unknown>, timeoutMs: number): Promise<void> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      operation.then(() => undefined, () => undefined),
+      new Promise<void>((resolve) => {
+        timeout = setTimeout(resolve, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
   }
 }
 
@@ -348,8 +366,9 @@ export async function runInFreshAutomationSandbox<T>(
     let outcome:
       | { error: unknown; succeeded: false }
       | { succeeded: true; value: T };
+    let run: Promise<T> | undefined;
     try {
-      const run = input.run(activeSession, modelBroker.run, input.signal, resumed);
+      run = input.run(activeSession, modelBroker.run, input.signal, resumed);
       const value = await abortable(run, input.signal);
       outcome = { succeeded: true, value };
     } catch (error) {
@@ -364,6 +383,10 @@ export async function runInFreshAutomationSandbox<T>(
         [outcome.error, queueError],
         "Automation callback and queued model operation failed",
       );
+    } finally {
+      // An aborted callback still reads the sandbox after its harness
+      // stops, so the sandbox stays up until the callback settles.
+      if (run) await settled(run, abortedRunSettleTimeoutMs);
     }
     if (!outcome.succeeded) throw outcome.error;
     executionOutcome = { succeeded: true, value: outcome.value };

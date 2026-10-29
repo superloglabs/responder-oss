@@ -143,27 +143,71 @@ describe("fresh automation sandbox", () => {
     ).toBeUndefined();
   });
 
-  it("closes the sandbox when the run is aborted", async () => {
+  it("closes the sandbox when an aborted run never settles", async () => {
+    vi.useFakeTimers();
     const { dependencies, session } = harness();
     const controller = new AbortController();
     const timeout = new Error("runtime limit reached");
+
+    try {
+      const run = runInFreshAutomationSandbox(
+        {
+          ...input,
+          run: vi.fn(() => new Promise(() => undefined)),
+          signal: controller.signal,
+        },
+        dependencies,
+      );
+
+      controller.abort(timeout);
+      const rejection = expect(run).rejects.toBe(timeout);
+      await vi.runAllTimersAsync();
+      await rejection;
+      expect(dependencies.close).toHaveBeenCalledWith(
+        session,
+        input.config,
+        { jobId: "run-1", organizationId: "organization-1" },
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the sandbox until an aborted run stops reading it", async () => {
+    const { dependencies } = harness();
+    const controller = new AbortController();
+    const timeout = new Error("runtime limit reached");
+    const events: string[] = [];
+    let finishRead: (() => void) | undefined;
+    dependencies.close.mockImplementation(async () => {
+      events.push("close");
+    });
+
     const run = runInFreshAutomationSandbox(
       {
         ...input,
-        run: vi.fn(() => new Promise(() => undefined)),
+        run: async () => {
+          // The run reads its final transcript after the abort.
+          await new Promise<void>((resolve) => {
+            finishRead = resolve;
+          });
+          events.push("read");
+          throw timeout;
+        },
         signal: controller.signal,
       },
       dependencies,
     );
 
+    await vi.waitFor(() => {
+      expect(finishRead).toBeDefined();
+    });
     controller.abort(timeout);
-
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(events).toEqual([]);
+    finishRead?.();
     await expect(run).rejects.toBe(timeout);
-    expect(dependencies.close).toHaveBeenCalledWith(
-      session,
-      input.config,
-      { jobId: "run-1", organizationId: "organization-1" },
-    );
+    expect(events).toEqual(["read", "close"]);
   });
 
   it("passes the run's abort signal to sandbox creation", async () => {
