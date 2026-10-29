@@ -6,7 +6,8 @@ import { getDatabase } from "./client.js";
 // read from the database, so they stay correct when the worker is stuck.
 export type QueueHealth = {
   automationRuns: {
-    // Runs that finished in the last 15 minutes, by final status.
+    // Runs that finished in the last 15 minutes, by final status. Runs the
+    // usage allowance refused are counted as usage_limit_reached, not failed.
     finished: Record<string, number>;
     // Running runs whose worker lease expired more than two minutes ago.
     leaseExpired: number;
@@ -64,10 +65,16 @@ export async function readQueueHealth(): Promise<QueueHealth> {
       where r.status in ('pending', 'running')
     `);
     const finished = await database.execute<{ count: string; status: string }>(sql`
-      select status, count(*) as count
+      select
+        case
+          when status = 'failed' and failure_category = 'usage_limit_reached'
+            then 'usage_limit_reached'
+          else status
+        end as status,
+        count(*) as count
       from automation_runs
       where completed_at > now() - ${finishedWindow}
-      group by status
+      group by 1
     `);
     const jobs = await database.execute<{
       failed: string;
