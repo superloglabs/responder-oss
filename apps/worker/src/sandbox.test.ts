@@ -814,6 +814,35 @@ describe("Daytona sandbox cleanup", () => {
     expect(harness.sleep).toHaveBeenCalledWith(500);
   });
 
+  it("retries a lifecycle change that conflicts with another change", async () => {
+    const harness = cleanupHarness();
+    const conflict = Object.assign(
+      new Error("Sandbox was modified by another operation"),
+      { name: "DaytonaConflictError", statusCode: 409 },
+    );
+    const setAutoDeleteInterval = vi.fn().mockResolvedValue(undefined);
+    const setAutoArchiveInterval = vi
+      .fn()
+      .mockRejectedValueOnce(conflict)
+      .mockResolvedValue(undefined);
+    harness.get.mockResolvedValue({
+      id: "sandbox-1",
+      setAutoArchiveInterval,
+      setAutoDeleteInterval,
+    });
+
+    await configureDaytonaSandboxLifecycle(
+      harness.session,
+      { daytonaApiKey: "daytona-test" },
+      [],
+      24 * 60,
+      harness.dependencies,
+    );
+
+    expect(setAutoArchiveInterval).toHaveBeenCalledTimes(2);
+    expect(harness.sleep).toHaveBeenCalledWith(500);
+  });
+
   it("mounts opaque secrets and restarts before enabling stop-time deletion", async () => {
     const harness = cleanupHarness();
     const calls: string[] = [];

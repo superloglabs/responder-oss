@@ -168,6 +168,9 @@ function isRetryableCreationError(error: unknown): boolean {
   );
 }
 
+// Daytona rejects a change with a conflict while another change to the same
+// sandbox is still being saved, such as two lifecycle settings in a row or a
+// state change Daytona makes itself. The change succeeds when tried again.
 async function retryTransientDaytonaOperation<T>(
   operation: () => Promise<T>,
   dependencies: DaytonaCleanupDependencies,
@@ -179,7 +182,9 @@ async function retryTransientDaytonaOperation<T>(
       return await operation();
     } catch (error) {
       lastError = error;
-      if (!isTransientDaytonaError(error)) throw error;
+      if (!(isTransientDaytonaError(error) || isDaytonaConflict(error))) {
+        throw error;
+      }
     }
   }
   throw lastError;
