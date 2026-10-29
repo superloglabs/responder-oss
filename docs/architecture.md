@@ -141,6 +141,15 @@ types. `drizzle/` contains the ordered schema history.
   Responses are parsed with their documented schemas, so undocumented fields
   are dropped. Operations that take a secret value, such as storing a
   workspace secret or a model API key, are not offered as MCP tools.
+- While customers move from the old Superlog product, its MCP server forwards
+  a migrated project's requests to `/api/mcp` with the shared
+  `LEGACY_MCP_FORWARD_TOKEN` in `x-legacy-mcp-forward-token`. The request acts
+  as the member whose verified email is in `x-legacy-mcp-user-email`, in the
+  workspace whose ID is in `x-legacy-mcp-project-id`; it is refused when the
+  workspace is not in this cell or the person is not its member. A token that
+  could only read in the old product sends `x-legacy-mcp-access: read` and
+  gets only read-only tools. Without the token configured, forwarded requests
+  are refused. This is removed when the old product shuts down.
 
 ## Management API and MCP server
 
