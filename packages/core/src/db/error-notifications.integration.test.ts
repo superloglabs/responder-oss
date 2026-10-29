@@ -3,9 +3,11 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { getDatabase, closeDatabase } from "./client.js";
 import { organization } from "./auth-schema.js";
-import { errorIssues, errorNotificationDeliveries, telemetryNotificationPauses } from "./schema.js";
-import { recordErrorOccurrences, setErrorIssueStatus } from "./error-issues.js";
-import { saveErrorNotificationSettings, processPendingErrorNotifications } from "./error-notifications.js";
+import { errorIssues, errorNotificationDeliveries, errorNotificationFollowups, telemetryNotificationPauses } from "./schema.js";
+import { claimErrorIssue, postErrorIssueUpdate, recordErrorOccurrences, setErrorIssueStatus } from "./error-issues.js";
+import {
+  saveErrorNotificationSettings, processPendingErrorNotificationFollowups, processPendingErrorNotifications, type ErrorNotificationFollowup,
+} from "./error-notifications.js";
 import { groupErrorCandidates } from "../telemetry/error-issues.js";
 import { defaultErrorNotificationSettings } from "../telemetry/error-notifications.js";
 
@@ -69,12 +71,38 @@ describe.skipIf(!testUrl)("error notification outbox (PostgreSQL)", () => {
     await processPendingErrorNotifications(fail);
     expect((await deliveries(first.issueId))[0]).toMatchObject({ attempts: 1, status: "pending" });
     await getDatabase().update(errorNotificationDeliveries).set({ status: "sending", nextAttemptAt: new Date(0) }).where(eq(errorNotificationDeliveries.issueId, first.issueId));
-    const send = vi.fn(async () => true);
+    const send = vi.fn(async () => "123.456");
     await Promise.all([processPendingErrorNotifications(send), processPendingErrorNotifications(send)]);
     expect(send).toHaveBeenCalledTimes(1);
-    expect((await deliveries(first.issueId))[0]).toMatchObject({ attempts: 2, status: "sent" });
+    expect((await deliveries(first.issueId))[0]).toMatchObject({ attempts: 2, status: "sent", messageTimestamp: "123.456" });
     await processPendingErrorNotifications(send);
     expect(send).toHaveBeenCalledTimes(1);
+  });
+  it("queues each activity for the latest sent notification's thread, with the issue as it is now", async () => {
+    await saveErrorNotificationSettings(organizationId, settings);
+    const actor = { agent: "fixer", client: "Claude Code", user: { id: randomUUID(), name: "Ash" } };
+    const first = await getDatabase().transaction((tx) => recordErrorOccurrences(tx, occurrences("followup")));
+    // Activity before the notification is sent has no thread to go to.
+    await postErrorIssueUpdate(organizationId, first.issueId, actor, { message: "Early" });
+    await processPendingErrorNotifications(async () => "111.000");
+    await setErrorIssueStatus(organizationId, first.issueId, "resolved", { actor });
+    await getDatabase().transaction((tx) => recordErrorOccurrences(tx, occurrences("followup")));
+    await processPendingErrorNotifications(async () => "222.000");
+
+    await claimErrorIssue(organizationId, first.issueId, { actor, credential: "oauth:client" });
+    await postErrorIssueUpdate(organizationId, first.issueId, actor, { message: "Fix", pullRequestUrl: "https://github.com/acme/api/pull/7" });
+    await setErrorIssueStatus(organizationId, first.issueId, "silenced", { actor: { ...actor, agent: null }, message: "Noise" });
+    const posted: ErrorNotificationFollowup[] = [];
+    await processPendingErrorNotificationFollowups(async (followup) => { posted.push(followup); return true; });
+
+    // The resolve went to the first message's thread; later activity goes to the recurrence's.
+    expect(posted.map((followup) => [followup.delivery.messageTimestamp, followup.activity.type])).toEqual([
+      ["111.000", "status"], ["222.000", "claimed"], ["222.000", "update"], ["222.000", "status"],
+    ]);
+    expect(posted[2]!.activity).toMatchObject({ message: "Fix", pullRequestUrl: "https://github.com/acme/api/pull/7" });
+    expect(posted[3]!.issue).toEqual({ claim: null, status: "silenced", statusActor: { ...actor, agent: null } });
+    const rows = await getDatabase().select().from(errorNotificationFollowups).where(eq(errorNotificationFollowups.organizationId, organizationId));
+    expect(rows.every((row) => row.status === "sent")).toBe(true);
   });
   it("cancels queued deliveries on configuration changes", async () => {
     const first = await getDatabase().transaction((tx) => recordErrorOccurrences(tx, occurrences("cancel")));

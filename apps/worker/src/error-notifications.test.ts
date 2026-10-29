@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { deliverErrorNotification, errorNotificationBlocks, errorNotificationMessage } from "./error-notifications.js";
+import { SlackApiError } from "@responder/core/integrations/slack";
+import type { ErrorNotificationFollowup } from "@responder/core/db/error-notifications";
+import {
+  deliverErrorNotification, deliverErrorNotificationFollowup, errorNotificationBlocks, errorNotificationFollowupBlocks, errorNotificationMessage,
+} from "./error-notifications.js";
 import { errorNotificationRetryAt } from "@responder/core/db/error-notifications";
 import { defaultErrorNotificationSettings } from "@responder/core/telemetry/error-notifications";
 
@@ -7,7 +11,7 @@ type Delivery = Parameters<typeof deliverErrorNotification>[0];
 const delivery: Delivery = {
   id: "delivery", organizationId: "workspace", issueId: "issue", eventKey: "new", targetKey: "slack:account:C123",
   target: { kind: "slack", integrationAccountId: "account", channelId: "C123" }, snapshot: { title: "TypeError: <script>alert(1)</script>", service: "api", exceptionType: "TypeError", seenAt: "2026-10-28T12:00:00Z", transition: "new" },
-  status: "pending", attempts: 0, createdAt: new Date(), nextAttemptAt: new Date(), sentAt: null,
+  status: "pending", attempts: 0, createdAt: new Date(), nextAttemptAt: new Date(), sentAt: null, messageTimestamp: null,
 };
 function dependencies() {
   return {
@@ -20,18 +24,18 @@ function dependencies() {
 describe("error notification delivery", () => {
   it("does not deliver to an unavailable channel", async () => {
     const deps = dependencies(); deps.channels.mockResolvedValue([]);
-    expect(await deliverErrorNotification(delivery, deps)).toBe(false);
+    expect(await deliverErrorNotification(delivery, deps)).toBeNull();
     expect(deps.post).not.toHaveBeenCalled();
   });
   it("honors pauses, disabled settings, removed destinations", async () => {
     const deps = dependencies();
     deps.paused.mockResolvedValue(new Set(["workspace"]));
-    expect(await deliverErrorNotification(delivery, deps)).toBe(false);
+    expect(await deliverErrorNotification(delivery, deps)).toBeNull();
     deps.paused.mockResolvedValue(new Set());
     deps.settings.mockResolvedValue({ ...defaultErrorNotificationSettings, targets: [delivery.target] });
-    expect(await deliverErrorNotification(delivery, deps)).toBe(false);
+    expect(await deliverErrorNotification(delivery, deps)).toBeNull();
     deps.settings.mockResolvedValue({ ...defaultErrorNotificationSettings, enabled: true, targets: [] });
-    expect(await deliverErrorNotification(delivery, deps)).toBe(false);
+    expect(await deliverErrorNotification(delivery, deps)).toBeNull();
     expect(deps.post).not.toHaveBeenCalled();
   });
   it("uses the same Slack identity on retries", async () => {
@@ -39,7 +43,7 @@ describe("error notification delivery", () => {
     const slack: Delivery = { ...delivery, targetKey: "slack:account:C123", target: { kind: "slack", integrationAccountId: "account", channelId: "C123" } };
     vi.mocked(deps.settings).mockResolvedValue({ ...defaultErrorNotificationSettings, enabled: true, targets: [slack.target] });
     vi.mocked(deps.post).mockResolvedValue([{ notification: { kind: "slack", integrationAccountId: "account", channelId: "C123" }, timestamp: "123.456" }]);
-    expect(await deliverErrorNotification(slack, deps)).toBe(true);
+    expect(await deliverErrorNotification(slack, deps)).toBe("123.456");
     expect(deps.post).toHaveBeenCalledWith(expect.objectContaining({ organizationId: "workspace", seed: "error-notice/delivery", unfurlLinks: false }));
     await deliverErrorNotification(slack, deps);
     expect(deps.post).toHaveBeenCalledTimes(2);
@@ -99,5 +103,83 @@ describe("error notification delivery", () => {
     expect(errorNotificationRetryAt(1, now).getTime()).toBe(60_000);
     expect(errorNotificationRetryAt(2, now).getTime()).toBe(120_000);
     expect(errorNotificationRetryAt(10, now).getTime()).toBe(3_600_000);
+  });
+});
+
+describe("error notification follow-ups", () => {
+  const actor = { agent: "fixer", client: "Claude Code", user: { id: "user", name: "Ash" } };
+  const followup: ErrorNotificationFollowup = {
+    id: "followup",
+    activity: { actor, createdAt: "2026-10-28T12:30:00.000Z", id: "activity", message: "Fixed in <!channel> `loadInvoice`", pullRequestUrl: null, status: "resolved", type: "status" },
+    delivery: { ...delivery, status: "sent", messageTimestamp: "123.456" },
+    issue: { claim: null, status: "resolved", statusActor: actor },
+  };
+  function followupDependencies() {
+    return { ...dependencies(), update: vi.fn<NonNullable<Parameters<typeof deliverErrorNotificationFollowup>[1]>["update"]>().mockResolvedValue() };
+  }
+
+  it("marks the notification resolved without its buttons, then replies in its thread", async () => {
+    const deps = followupDependencies();
+    expect(await deliverErrorNotificationFollowup(followup, deps)).toBe(true);
+    const update = deps.update.mock.calls[0]![0];
+    expect(update).toMatchObject({ organizationId: "workspace", integrationAccountId: "account", channelId: "C123", timestamp: "123.456" });
+    expect(update.blocks).toEqual(errorNotificationBlocks(delivery.snapshot, "https://example.com/errors/issue", followup.issue));
+    expect(JSON.stringify(update.blocks)).toContain("✅ Resolved by fixer via Claude Code for Ash");
+    expect(JSON.stringify(update.blocks)).not.toContain("error_notification_resolve");
+    expect(deps.post).toHaveBeenCalledWith(expect.objectContaining({
+      seed: "error-followup/followup", threadTimestamp: "123.456", text: "fixer via Claude Code for Ash resolved this error",
+      blocks: errorNotificationFollowupBlocks(followup.activity),
+    }));
+  });
+
+  it("keeps the buttons on an open issue and names its claimant", async () => {
+    const deps = followupDependencies();
+    const claim = { ...actor, claimedAt: "2026-10-28T12:10:00.000Z", credential: "oauth:client" };
+    await deliverErrorNotificationFollowup({
+      ...followup,
+      activity: { ...followup.activity, message: null, status: null, type: "claimed" },
+      issue: { claim, status: "open", statusActor: null },
+    }, deps);
+    const blocks = JSON.stringify(deps.update.mock.calls[0]![0].blocks);
+    expect(blocks).toContain("🛠 Claimed by fixer via Claude Code for Ash");
+    expect(blocks).toContain("error_notification_resolve");
+    expect(blocks).toContain("🔴 ");
+  });
+
+  it("still replies when Slack cannot edit the notification, and retries other edit failures", async () => {
+    const deps = followupDependencies();
+    deps.update.mockRejectedValueOnce(new SlackApiError("chat.update", "message_not_found"));
+    expect(await deliverErrorNotificationFollowup(followup, deps)).toBe(true);
+    expect(deps.post).toHaveBeenCalledTimes(1);
+    deps.update.mockRejectedValueOnce(new SlackApiError("chat.update", "ratelimited"));
+    await expect(deliverErrorNotificationFollowup(followup, deps)).rejects.toThrow("ratelimited");
+    expect(deps.post).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends nothing once the destination is no longer configured", async () => {
+    const deps = followupDependencies();
+    deps.settings.mockResolvedValue({ ...defaultErrorNotificationSettings, enabled: false, targets: [delivery.target] });
+    expect(await deliverErrorNotificationFollowup(followup, deps)).toBe(false);
+    expect(deps.update).not.toHaveBeenCalled();
+    expect(deps.post).not.toHaveBeenCalled();
+  });
+
+  it("keeps agent text literal, links pull requests, and mentions Slack users", () => {
+    const update = errorNotificationFollowupBlocks({ ...followup.activity, pullRequestUrl: "https://github.com/acme/api/pull/7", status: null, type: "update" });
+    expect(update).toEqual([{ type: "rich_text", elements: [
+      { type: "rich_text_section", elements: [
+        { type: "text", text: "fixer via Claude Code for Ash", style: { bold: true } },
+        { type: "text", text: " linked a pull request" },
+        { type: "text", text: ": " },
+        { type: "link", url: "https://github.com/acme/api/pull/7", text: "acme/api#7" },
+      ] },
+      { type: "rich_text_quote", elements: [{ type: "text", text: "Fixed in <!channel> `loadInvoice`" }] },
+    ] }]);
+    const slack = errorNotificationFollowupBlocks({
+      ...followup.activity, actor: { agent: null, client: "Slack", slackUserId: "U123", user: { id: "U123", name: "ash" } }, message: null, status: "silenced",
+    });
+    expect(slack[0]!.elements).toEqual([{ type: "rich_text_section", elements: [
+      { type: "user", user_id: "U123" }, { type: "text", text: " silenced this error" },
+    ] }]);
   });
 });

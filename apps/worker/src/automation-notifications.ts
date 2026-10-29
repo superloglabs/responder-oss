@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import type { AutomationNotification } from "@responder/core/automations/config";
 import { decryptCredentials } from "@responder/core/credentials/encryption";
 import { getAutomationNotificationAccount } from "@responder/core/db/automations";
-import { postSlackMessage, SlackApiError, uploadSlackImage } from "@responder/core/integrations/slack";
+import { postSlackMessage, SlackApiError, updateSlackMessage, uploadSlackImage } from "@responder/core/integrations/slack";
 import { responderAutomationRunUrl } from "@responder/core/responder-urls";
 import { z } from "zod";
 
@@ -27,6 +27,25 @@ const defaultDependencies: AutomationNotificationDependencies = {
   post: postSlackMessage,
   uploadImage: uploadSlackImage,
 };
+
+// Replaces a message the Slack app posted.
+export async function updateSlackNotification(input: {
+  blocks: unknown[];
+  channelId: string;
+  integrationAccountId: string;
+  organizationId: string;
+  text: string;
+  timestamp: string;
+}, dependencies: { getAccount: typeof getAutomationNotificationAccount; update: typeof updateSlackMessage } = {
+  getAccount: getAutomationNotificationAccount, update: updateSlackMessage,
+}): Promise<void> {
+  const account = await dependencies.getAccount({ integrationAccountId: input.integrationAccountId, organizationId: input.organizationId });
+  if (!account) throw new Error("The Slack connection is unavailable");
+  const { accessToken } = z.object({ accessToken: z.string().min(1) }).parse(
+    decryptCredentials<Record<string, unknown>>(account.encryptedCredentials),
+  );
+  await dependencies.update({ accessToken, blocks: input.blocks, channelId: input.channelId, text: input.text, timestamp: input.timestamp });
+}
 
 // Slack deduplicates a retried post by this ID, which must be a UUID.
 function notificationMessageId(seed: string, channelId: string): string {

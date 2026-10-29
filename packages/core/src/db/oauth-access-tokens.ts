@@ -5,6 +5,8 @@ import { getDatabase } from "./client.js";
 
 export interface OAuthAccessTokenPrincipal {
   clientId: string;
+  // The name the client registered with, such as "Claude Code".
+  clientName: string | null;
   organizationId: string;
   role: string;
   user: { email: string; id: string; name: string };
@@ -31,6 +33,7 @@ export async function authenticateOAuthAccessToken(
   const rows = await getDatabase()
     .select({
       clientId: oauthAccessToken.clientId,
+      clientName: oauthClient.name,
       email: user.email,
       name: user.name,
       organizationId: member.organizationId,
@@ -65,6 +68,7 @@ export async function authenticateOAuthAccessToken(
   if (!row) return null;
   return {
     clientId: row.clientId,
+    clientName: row.clientName,
     organizationId: row.organizationId,
     role: row.role,
     user: { email: row.email, id: row.userId, name: row.name },

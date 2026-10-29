@@ -1,17 +1,22 @@
-import { and, asc, count, desc, eq, gte, ilike, inArray, isNotNull, lt, or, type SQL, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, ilike, inArray, isNotNull, isNull, lt, or, type SQL, sql } from "drizzle-orm";
 import {
   type ErrorCandidateCursor,
+  type ErrorIssueActivity,
+  type ErrorIssueActor,
+  type ErrorIssueClaim,
   type ErrorIssueKind,
+  type ErrorIssuePullRequest,
   type ErrorIssueSample,
   type ErrorIssueStatus,
   type ErrorIssueTransition,
   type ErrorOccurrences,
+  errorIssueActorName,
   occurrenceTransition,
 } from "../telemetry/error-issues.js";
-import { enqueueErrorNotifications } from "./error-notifications.js";
+import { enqueueErrorNotificationFollowups, enqueueErrorNotifications } from "./error-notifications.js";
 import { getDatabase } from "./client.js";
 import { pausedTelemetryNotificationOrganizations } from "./telemetry-notification-pauses.js";
-import { errorIssueCursors, errorIssueDailyCounts, errorIssueHourlyCounts, errorIssues, organizationCapabilities } from "./schema.js";
+import { errorIssueActivities, errorIssueCursors, errorIssueDailyCounts, errorIssueHourlyCounts, errorIssues, organizationCapabilities } from "./schema.js";
 
 type Database = ReturnType<typeof getDatabase>;
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
@@ -193,6 +198,7 @@ export async function recordErrorOccurrences(
 }
 
 export type ErrorIssueSummary = {
+  claim: ErrorIssueClaim | null;
   eventCount: number;
   exceptionType: string;
   firstSeenAt: string;
@@ -222,6 +228,8 @@ export type ErrorIssueHour = { eventCount: number; hour: string };
 export type ErrorIssueListFilter = {
   // The last issue of the previous page, by last seen time then ID.
   before?: { id: string; lastSeenAt: string; firstSeenAt?: string; eventCount?: number };
+  // Only claimed issues, or only unclaimed ones.
+  claimed?: boolean;
   sort?: "lastSeen" | "firstSeen" | "events";
   limit: number;
   statuses?: ErrorIssueStatus[];
@@ -236,6 +244,7 @@ export type ErrorIssueListFilter = {
 };
 
 const summaryColumns = {
+  claim: errorIssues.claim,
   eventCount: errorIssues.eventCount,
   exceptionType: errorIssues.exceptionType,
   firstSeenAt: errorIssues.firstSeenAt,
@@ -288,6 +297,7 @@ export async function listErrorIssues(
 ): Promise<ErrorIssueSummary[]> {
   const conditions: SQL[] = [eq(errorIssues.organizationId, organizationId)];
   if (filter.status) conditions.push(eq(errorIssues.status, filter.status));
+  if (filter.claimed !== undefined) conditions.push(filter.claimed ? isNotNull(errorIssues.claim) : isNull(errorIssues.claim));
   if (filter.service) conditions.push(eq(errorIssues.service, filter.service));
   if (filter.statuses?.length) conditions.push(inArray(errorIssues.status, filter.statuses));
   if (filter.services?.length) conditions.push(inArray(errorIssues.service, filter.services));
@@ -409,23 +419,189 @@ export async function errorIssueHours(issueIds: string[], since: string): Promis
   return hours;
 }
 
-// Resolves, silences, or reopens an issue. Returns null when the workspace
-// has no such issue. Setting the status it already has keeps the time it was
-// set, since the worker compares late occurrences with that time.
+// A member, through one API key, MCP client, or the app, and the agent name
+// they give. A claim belongs to the one who made it.
+export type ErrorIssueClaimant = { actor: ErrorIssueActor; credential: string };
+
+function sameClaimant(claim: ErrorIssueClaim, claimant: ErrorIssueClaimant): boolean {
+  return claim.user.id === claimant.actor.user.id
+    && claim.credential === claimant.credential
+    && claim.agent === claimant.actor.agent;
+}
+
+async function lockIssue(tx: Transaction, organizationId: string, issueId: string) {
+  const [row] = await tx
+    .select({ claim: errorIssues.claim, status: errorIssues.status })
+    .from(errorIssues)
+    .where(and(eq(errorIssues.organizationId, organizationId), eq(errorIssues.id, issueId)))
+    .for("update");
+  return row ?? null;
+}
+
+// Records an activity and queues it for the threads of the issue's Slack
+// notifications, in the same transaction.
+async function addActivity(
+  executor: Executor,
+  organizationId: string,
+  issueId: string,
+  activity: Pick<ErrorIssueActivity, "actor" | "type"> & Partial<Pick<ErrorIssueActivity, "message" | "pullRequestUrl" | "status">>,
+) {
+  const [created] = await executor.insert(errorIssueActivities).values({
+    actor: activity.actor,
+    issueId,
+    message: activity.message ?? null,
+    organizationId,
+    pullRequestUrl: activity.pullRequestUrl ?? null,
+    status: activity.status ?? null,
+    type: activity.type,
+  }).returning({ id: errorIssueActivities.id });
+  await enqueueErrorNotificationFollowups(executor, { organizationId, issueId, activityId: created!.id });
+}
+
+export type ErrorIssueClaimResult =
+  | { issue: ErrorIssue; ok: true }
+  | { claim: ErrorIssueClaim; ok: false };
+
+// Claims an issue for the claimant. Claiming an issue someone else holds
+// fails unless the claimant takes it over. Returns null when the workspace
+// has no such issue.
+export async function claimErrorIssue(
+  organizationId: string,
+  issueId: string,
+  claimant: ErrorIssueClaimant,
+  options: { message?: string; takeOver?: boolean } = {},
+): Promise<ErrorIssueClaimResult | null> {
+  const outcome = await getDatabase().transaction(async (tx) => {
+    const issue = await lockIssue(tx, organizationId, issueId);
+    if (!issue) return null;
+    if (issue.claim && sameClaimant(issue.claim, claimant)) return { ok: true as const };
+    if (issue.claim && !options.takeOver) return { claim: issue.claim, ok: false as const };
+    const now = new Date();
+    await tx
+      .update(errorIssues)
+      .set({ claim: { ...claimant.actor, claimedAt: now.toISOString(), credential: claimant.credential }, updatedAt: now })
+      .where(eq(errorIssues.id, issueId));
+    await addActivity(tx, organizationId, issueId, {
+      actor: claimant.actor,
+      message: options.message ?? (issue.claim ? `Took over from ${errorIssueActorName(issue.claim)}` : null),
+      type: "claimed",
+    });
+    return { ok: true as const };
+  });
+  if (!outcome) return null;
+  if (!outcome.ok) return outcome;
+  const issue = await findErrorIssue(organizationId, issueId);
+  return issue ? { issue, ok: true } : null;
+}
+
+// Ends a claim. With `holder`, only that claimant's claim ends; otherwise
+// any claim does. Returns null when the workspace has no such issue.
+export async function releaseErrorIssue(
+  organizationId: string,
+  issueId: string,
+  actor: ErrorIssueActor,
+  options: { holder?: ErrorIssueClaimant; message?: string } = {},
+): Promise<ErrorIssueClaimResult | null> {
+  const outcome = await getDatabase().transaction(async (tx) => {
+    const issue = await lockIssue(tx, organizationId, issueId);
+    if (!issue) return null;
+    if (!issue.claim) return { ok: true as const };
+    if (options.holder && !sameClaimant(issue.claim, options.holder)) return { claim: issue.claim, ok: false as const };
+    await tx.update(errorIssues).set({ claim: null, updatedAt: new Date() }).where(eq(errorIssues.id, issueId));
+    await addActivity(tx, organizationId, issueId, { actor, message: options.message ?? null, type: "released" });
+    return { ok: true as const };
+  });
+  if (!outcome) return null;
+  if (!outcome.ok) return outcome;
+  const issue = await findErrorIssue(organizationId, issueId);
+  return issue ? { issue, ok: true } : null;
+}
+
+// Adds a progress update to an issue, optionally linking a pull request.
+// Returns null when the workspace has no such issue.
+export async function postErrorIssueUpdate(
+  organizationId: string,
+  issueId: string,
+  actor: ErrorIssueActor,
+  update: { message: string; pullRequestUrl?: string },
+): Promise<ErrorIssue | null> {
+  const found = await getDatabase().transaction(async (tx) => {
+    if (!(await lockIssue(tx, organizationId, issueId))) return false;
+    await addActivity(tx, organizationId, issueId, {
+      actor,
+      message: update.message,
+      pullRequestUrl: update.pullRequestUrl ?? null,
+      type: "update",
+    });
+    return true;
+  });
+  return found ? findErrorIssue(organizationId, issueId) : null;
+}
+
+// An issue's newest activity, oldest first, and every pull request linked to
+// it.
+export async function errorIssueActivity(
+  issueId: string,
+  limit = 100,
+): Promise<{ activity: ErrorIssueActivity[]; pullRequests: ErrorIssuePullRequest[] }> {
+  const database = getDatabase();
+  const [rows, pullRequests] = await Promise.all([
+    database
+      .select({
+        actor: errorIssueActivities.actor,
+        createdAt: errorIssueActivities.createdAt,
+        id: errorIssueActivities.id,
+        message: errorIssueActivities.message,
+        pullRequestUrl: errorIssueActivities.pullRequestUrl,
+        status: errorIssueActivities.status,
+        type: errorIssueActivities.type,
+      })
+      .from(errorIssueActivities)
+      .where(eq(errorIssueActivities.issueId, issueId))
+      .orderBy(desc(errorIssueActivities.createdAt), desc(errorIssueActivities.id))
+      .limit(limit),
+    database
+      .select({ linkedAt: sql<Date>`min(${errorIssueActivities.createdAt})`.mapWith(errorIssueActivities.createdAt), url: errorIssueActivities.pullRequestUrl })
+      .from(errorIssueActivities)
+      .where(and(eq(errorIssueActivities.issueId, issueId), isNotNull(errorIssueActivities.pullRequestUrl)))
+      .groupBy(errorIssueActivities.pullRequestUrl)
+      .orderBy(sql`min(${errorIssueActivities.createdAt})`),
+  ]);
+  return {
+    activity: rows.reverse().map((row) => ({ ...row, createdAt: row.createdAt.toISOString() })),
+    pullRequests: pullRequests.flatMap((row) => row.url ? [{ linkedAt: row.linkedAt.toISOString(), url: row.url }] : []),
+  };
+}
+
+// Resolves, silences, or reopens an issue, and records the change when the
+// status changes or comes with a message. Resolving or silencing ends the
+// claim. Returns null when the workspace has no such issue. Setting the
+// status it already has keeps the time it was set, since the worker compares
+// late occurrences with that time.
 export async function setErrorIssueStatus(
   organizationId: string,
   issueId: string,
   status: ErrorIssueStatus,
+  change?: { actor: ErrorIssueActor; message?: string },
 ): Promise<ErrorIssue | null> {
-  const now = new Date();
-  const updated = await getDatabase()
-    .update(errorIssues)
-    .set({
-      status,
-      statusChangedAt: sql`case when ${errorIssues.status} = ${status} then ${errorIssues.statusChangedAt} else ${now.toISOString()}::timestamptz end`,
-      updatedAt: now,
-    })
-    .where(and(eq(errorIssues.organizationId, organizationId), eq(errorIssues.id, issueId)))
-    .returning({ id: errorIssues.id });
-  return updated.length > 0 ? findErrorIssue(organizationId, issueId) : null;
+  const found = await getDatabase().transaction(async (tx) => {
+    const issue = await lockIssue(tx, organizationId, issueId);
+    if (!issue) return false;
+    const changed = issue.status !== status;
+    const now = new Date();
+    await tx
+      .update(errorIssues)
+      .set({
+        ...(status === "open" ? {} : { claim: null }),
+        status,
+        ...(changed ? { statusChangedAt: now } : {}),
+        updatedAt: now,
+      })
+      .where(eq(errorIssues.id, issueId));
+    if (change && (changed || change.message)) {
+      await addActivity(tx, organizationId, issueId, { actor: change.actor, message: change.message ?? null, status, type: "status" });
+    }
+    return true;
+  });
+  return found ? findErrorIssue(organizationId, issueId) : null;
 }

@@ -5,11 +5,25 @@ import type {
   ErrorIssueHour,
   ErrorIssueSummary,
 } from "../../../packages/core/src/db/error-issues";
-import type { ErrorIssueStatus } from "../../../packages/core/src/telemetry/error-issues";
+import type {
+  ErrorIssueActivity,
+  ErrorIssueActor,
+  ErrorIssuePullRequest,
+  ErrorIssueStatus,
+} from "../../../packages/core/src/telemetry/error-issues";
 import type { ChartData } from "./dashboards-api";
 import type { LogRecord } from "./telemetry-api";
 
-export type { ErrorIssue, ErrorIssueDay, ErrorIssueHour, ErrorIssueStatus, ErrorIssueSummary };
+export type {
+  ErrorIssue,
+  ErrorIssueActivity,
+  ErrorIssueActor,
+  ErrorIssueDay,
+  ErrorIssueHour,
+  ErrorIssuePullRequest,
+  ErrorIssueStatus,
+  ErrorIssueSummary,
+};
 
 // Hours are set when the list's counts are hourly.
 export type ErrorIssueListItem = ErrorIssueSummary & { days: ErrorIssueDay[]; hours?: ErrorIssueHour[] };
@@ -26,9 +40,11 @@ export interface ErrorIssueList {
 }
 
 export interface ErrorIssueDetail {
+  activity: ErrorIssueActivity[];
   hours?: ErrorIssueHour[];
   days: ErrorIssueDay[];
   issue: ErrorIssue;
+  pullRequests: ErrorIssuePullRequest[];
   since: string;
 }
 
@@ -123,6 +139,36 @@ export async function updateErrorIssueStatus(issueId: string, status: ErrorIssue
     method: "PATCH",
   });
   return body.issue;
+}
+
+// Ends whoever's claim the issue has.
+export async function releaseErrorIssue(issueId: string): Promise<ErrorIssue> {
+  const body = await request<{ issue: ErrorIssue }>(`${base}/${encodeURIComponent(issueId)}/release`, { method: "POST" });
+  return body.issue;
+}
+
+// Who made a change, such as "Claude Code via MCP for Ash". Matches the
+// server's errorIssueActorName.
+export function errorIssueActorName(actor: ErrorIssueActor): string {
+  if (actor.slackUserId) return `${actor.user.name} in Slack`;
+  const by = [actor.agent, actor.client].filter(Boolean).join(" via ");
+  return by ? `${by} for ${actor.user.name}` : actor.user.name;
+}
+
+// What an activity did, after the actor's name.
+export function errorIssueActivitySummary(activity: ErrorIssueActivity): string {
+  if (activity.type === "claimed") return "claimed this issue";
+  if (activity.type === "released") return "released this issue";
+  if (activity.type === "status") {
+    return { open: "reopened this issue", resolved: "resolved this issue", silenced: "ignored this issue" }[activity.status ?? "open"];
+  }
+  return activity.pullRequestUrl ? "linked a pull request" : "posted an update";
+}
+
+// A GitHub or GitLab pull request URL as `owner/repo#number`.
+export function pullRequestLabel(url: string): string {
+  const match = /^https:\/\/[^/]+\/(.+?)\/(?:-\/)?(?:pull|merge_requests)\/(\d+)/u.exec(url);
+  return match ? `${match[1]}#${match[2]}` : url.replace(/^https:\/\//u, "");
 }
 
 export const errorIssueStatusLabels: Record<ErrorIssueStatus, string> = {

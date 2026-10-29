@@ -1089,6 +1089,19 @@ grouped by, and resolves, silences or reopens it. The API is
 `/api/error-issues`. The management API and MCP server offer
 `list_error_issues`, `get_error_issue` and `update_error_issue`.
 
+Agents coordinate work on an issue through the MCP server. `claim_error_issue`
+marks the issue as taken, and `list_error_issues` with `claim: unclaimed`
+leaves claimed issues out. A claimant is the member, the API key or MCP client
+they called through, and an optional `agent` name, so several agents acting
+for one member can hold separate claims. Claiming an issue someone else holds
+fails with `error_issue_claimed` unless the caller passes `takeOver`.
+`post_error_issue_update` adds a Markdown update and can link a pull request
+with `pullRequestUrl`. `release_error_issue` ends the caller's own claim, and
+resolving or silencing the issue ends any claim. Claims, updates and status
+changes are kept in `error_issue_activities`, and the issue's page shows the
+claimant, linked pull requests and activity. Members can release any claim
+from the page.
+
 Workspace owners and admins can open **Errors → Notifications** to enable
 Slack notifications and choose one channel. Notifications are off by default.
 When enabled, they always notify on new errors and resolved errors that happen again.
@@ -1107,6 +1120,18 @@ delivery records are retained for 30 days. The settings API is
 `/api/error-notifications` and requires a workspace owner or admin session.
 The management API and MCP server offer `get_error_notifications` and
 `update_error_notifications`, for workspace owners and admins.
+
+Each sent notification records its Slack message. An issue's claims,
+updates, linked pull requests and status changes are posted in the thread of
+the latest notification sent to each destination, queued with the activity
+in `error_notification_followups`. Posting one also edits the notification to
+show the issue as it is now: resolved or silenced and by whom, or who has
+claimed it, with the Resolve and Silence buttons only while the issue is
+open. Pressing those buttons records the change as the Slack user's, so it
+reaches the thread too. Agent text is posted literally, so it cannot mention
+people or channels. Follow-ups use the same checks, retries and 30-day
+retention as notifications; a notification sent before its message was
+recorded, or deleted after 30 days, gets none.
 
 An automation can start on error issues with the **Errors** trigger, offered
 in workspaces with telemetry. It runs on new issues, regressions (a resolved

@@ -11,6 +11,7 @@ import { Button, Checkbox, DataTable, SelectField } from "../design-system";
 import {
   dailyCounts,
   daysThroughToday,
+  errorIssueActorName,
   errorState,
   fetchErrorIssues,
   formatEventCount,
@@ -256,7 +257,7 @@ export function ErrorsPage() {
                           <strong>{issue.title}</strong>
                         </Link>
                         <small className="errorIssues__meta">
-                          {[issue.service, issue.id.slice(0, 8), issue.topFrame].filter(Boolean).join(" · ") || issue.exceptionType}
+                          {[issue.claim ? `Claimed by ${errorIssueActorName(issue.claim)}` : null, issue.service, issue.id.slice(0, 8), issue.topFrame].filter(Boolean).join(" · ") || issue.exceptionType}
                         </small>
                       </span>
                     ),

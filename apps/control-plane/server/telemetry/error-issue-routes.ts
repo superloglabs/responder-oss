@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import {
+  errorIssueActivity,
   errorIssueDays,
   errorIssueEnvironments,
   errorIssueHours,
@@ -9,12 +10,14 @@ import {
   findErrorIssue,
   findErrorIssueIdByFingerprint,
   listErrorIssues,
+  releaseErrorIssue,
   setErrorIssueStatus,
 } from "../../../../packages/core/src/db/error-issues.js";
 import { organizationHasCapability } from "../../../../packages/core/src/db/organization-capabilities.js";
 import { loadSourceMaps } from "../../../../packages/core/src/db/source-maps.js";
 import {
   type ErrorCandidate,
+  type ErrorIssueActor,
   errorIssueStatuses,
   groupErrorCandidates,
   zeroCandidateId,
@@ -25,6 +28,7 @@ import { getActiveTenant } from "../tenant.js";
 // Error issues: the workspace's telemetry exceptions grouped by fingerprint.
 // They come with telemetry.
 export type ErrorIssueRouteDependencies = {
+  activity: typeof errorIssueActivity;
   days: typeof errorIssueDays;
   environments: typeof errorIssueEnvironments;
   findIssue: typeof findErrorIssue;
@@ -33,6 +37,7 @@ export type ErrorIssueRouteDependencies = {
   hours: typeof errorIssueHours;
   listIssues: typeof listErrorIssues;
   now: () => Date;
+  release: typeof releaseErrorIssue;
   services: typeof errorIssueServices;
   setStatus: typeof setErrorIssueStatus;
   sourceMaps: SourceMapLoader;
@@ -40,12 +45,13 @@ export type ErrorIssueRouteDependencies = {
   tenant: (
     headers: Headers,
   ) => Promise<
-    | { ok: true; organizationId: string; user: { id: string } }
+    | { ok: true; organizationId: string; user: { id: string; name: string } }
     | { error: string; ok: false; status: 401 | 403 | 409 }
   >;
 };
 
 const defaultDependencies: ErrorIssueRouteDependencies = {
+  activity: errorIssueActivity,
   days: errorIssueDays,
   environments: errorIssueEnvironments,
   findIssue: findErrorIssue,
@@ -54,6 +60,7 @@ const defaultDependencies: ErrorIssueRouteDependencies = {
   hours: errorIssueHours,
   listIssues: listErrorIssues,
   now: () => new Date(),
+  release: releaseErrorIssue,
   services: errorIssueServices,
   setStatus: setErrorIssueStatus,
   sourceMaps: loadSourceMaps,
@@ -110,7 +117,7 @@ export function firstDay(now: Date, days: number): string {
 
 export function createErrorIssueRoutes(dependencies: ErrorIssueRouteDependencies = defaultDependencies) {
   async function access(headers: Headers): Promise<
-    | { ok: true; organizationId: string }
+    | { actor: ErrorIssueActor; ok: true; organizationId: string }
     | { error: string; ok: false; status: 401 | 403 | 404 | 409 }
   > {
     const tenant = await dependencies.tenant(headers);
@@ -118,7 +125,11 @@ export function createErrorIssueRoutes(dependencies: ErrorIssueRouteDependencies
     if (!(await dependencies.hasCapability(tenant.organizationId, "telemetry"))) {
       return { error: "Errors are not available", ok: false, status: 404 };
     }
-    return { ok: true, organizationId: tenant.organizationId };
+    return {
+      actor: { agent: null, client: null, user: { id: tenant.user.id, name: tenant.user.name } },
+      ok: true,
+      organizationId: tenant.organizationId,
+    };
   }
 
   return new Hono()
@@ -228,11 +239,12 @@ export function createErrorIssueRoutes(dependencies: ErrorIssueRouteDependencies
       const issue = await dependencies.findIssue(tenant.organizationId, issueId.data);
       if (!issue) return context.json({ error: "Error issue not found" }, 404);
       const since = firstDay(dependencies.now(), errorIssueDetailDays);
-      const [days, hours] = await Promise.all([
+      const [days, hours, activity] = await Promise.all([
         dependencies.days([issue.id], since),
         dependencies.hours([issue.id], `${since}T00:00:00.000Z`),
+        dependencies.activity(issue.id),
       ]);
-      return context.json({ days: days.get(issue.id) ?? [], hours: hours.get(issue.id) ?? [], issue, since });
+      return context.json({ ...activity, days: days.get(issue.id) ?? [], hours: hours.get(issue.id) ?? [], issue, since });
     })
     .patch("/:issueId", async (context) => {
       const tenant = await access(context.req.raw.headers);
@@ -241,8 +253,18 @@ export function createErrorIssueRoutes(dependencies: ErrorIssueRouteDependencies
       if (!issueId.success) return context.json({ error: "Error issue not found" }, 404);
       const body = statusSchema.safeParse(await context.req.json().catch(() => null));
       if (!body.success) return context.json({ error: "Choose open, resolved, or silenced" }, 400);
-      const issue = await dependencies.setStatus(tenant.organizationId, issueId.data, body.data.status);
+      const issue = await dependencies.setStatus(tenant.organizationId, issueId.data, body.data.status, { actor: tenant.actor });
       if (!issue) return context.json({ error: "Error issue not found" }, 404);
       return context.json({ issue });
+    })
+    // Members can end anyone's claim, such as one an agent abandoned.
+    .post("/:issueId/release", async (context) => {
+      const tenant = await access(context.req.raw.headers);
+      if (!tenant.ok) return context.json({ error: tenant.error }, tenant.status);
+      const issueId = idSchema.safeParse(context.req.param("issueId"));
+      if (!issueId.success) return context.json({ error: "Error issue not found" }, 404);
+      const result = await dependencies.release(tenant.organizationId, issueId.data, tenant.actor);
+      if (!result?.ok) return context.json({ error: "Error issue not found" }, 404);
+      return context.json({ issue: result.issue });
     });
 }

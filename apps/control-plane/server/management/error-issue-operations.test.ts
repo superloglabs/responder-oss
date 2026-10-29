@@ -10,11 +10,15 @@ const issueId = "41414141-4141-4141-8141-414141414141";
 const token = `slk_${"a".repeat(43)}`;
 
 const mocks = vi.hoisted(() => ({
+  activity: vi.fn(),
   authenticate: vi.fn(),
+  claim: vi.fn(),
   capability: vi.fn(),
   days: vi.fn(),
   find: vi.fn(),
   list: vi.fn(),
+  postUpdate: vi.fn(),
+  release: vi.fn(),
   setStatus: vi.fn(),
 }));
 
@@ -31,6 +35,8 @@ vi.mock("../../../../packages/core/src/db/organization-capabilities.js", () => (
   organizationHasCapability: mocks.capability,
 }));
 vi.mock("../../../../packages/core/src/db/error-issues.js", () => ({
+  claimErrorIssue: mocks.claim,
+  errorIssueActivity: mocks.activity,
   errorIssueDays: mocks.days,
   errorIssueServices: vi.fn(),
   errorIssueEnvironments: vi.fn(),
@@ -39,6 +45,8 @@ vi.mock("../../../../packages/core/src/db/error-issues.js", () => ({
   findErrorIssue: mocks.find,
   findErrorIssueIdByFingerprint: vi.fn(),
   listErrorIssues: mocks.list,
+  postErrorIssueUpdate: mocks.postUpdate,
+  releaseErrorIssue: mocks.release,
   setErrorIssueStatus: mocks.setStatus,
 }));
 
@@ -68,6 +76,7 @@ async function callTool(name: string, args: Record<string, unknown> = {}) {
 }
 
 const summary = {
+  claim: null,
   eventCount: 12,
   exceptionType: "TypeError",
   firstSeenAt: "2026-10-20T08:00:00.000Z",
@@ -100,12 +109,29 @@ const issue = {
   },
   message: "Cannot read properties of undefined",
 };
+const pullRequestUrl = "https://github.com/acme/api/pull/7";
+const activity = {
+  activity: [{
+    actor: { agent: "fixer", client: "CI key", user: { id: userId, name: "Ash" } },
+    createdAt: "2026-10-22T11:30:00.000Z",
+    id: "51515151-5151-4151-8151-515151515151",
+    message: "Guarded the missing invoice.",
+    pullRequestUrl,
+    status: null,
+    type: "update",
+  }],
+  pullRequests: [{ linkedAt: "2026-10-22T11:30:00.000Z", url: pullRequestUrl }],
+};
+// The caller as the API key mock authenticates it.
+const actor = { agent: "fixer", client: "CI key", user: { id: userId, name: "Ash" } };
+const holder = { actor, credential: `api_key:${apiKeyId}` };
 
 describe("error issue operations", () => {
   beforeEach(() => {
     vi.useFakeTimers({ now: new Date("2026-10-22T12:00:00.000Z"), toFake: ["Date"] });
     mocks.authenticate.mockResolvedValue({
       apiKeyId,
+      apiKeyName: "CI key",
       organizationId,
       role: "member",
       user: { email: "ash@example.com", id: userId, name: "Ash" },
@@ -115,6 +141,10 @@ describe("error issue operations", () => {
     mocks.find.mockResolvedValue(issue);
     mocks.days.mockResolvedValue(new Map([[issueId, [{ day: "2026-10-22", eventCount: 12 }]]]));
     mocks.setStatus.mockImplementation(async (_organization: string, _id: string, status: string) => ({ ...issue, status }));
+    mocks.activity.mockResolvedValue(activity);
+    mocks.claim.mockResolvedValue({ issue: { ...issue, claim: { ...actor, claimedAt: "2026-10-22T12:00:00.000Z", credential: holder.credential } }, ok: true });
+    mocks.release.mockResolvedValue({ issue, ok: true });
+    mocks.postUpdate.mockResolvedValue(issue);
   });
 
   afterEach(() => {
@@ -122,7 +152,7 @@ describe("error issue operations", () => {
     vi.clearAllMocks();
   });
 
-  it("lists the tools, with only status changes as a write", async () => {
+  it("lists the tools, with status, claim, and update changes as writes", async () => {
     const { tools } = await mcp("tools/list") as {
       tools: Array<{ annotations: Record<string, unknown>; name: string }>;
     };
@@ -130,7 +160,9 @@ describe("error issue operations", () => {
 
     expect(annotations("list_error_issues")).toMatchObject({ readOnlyHint: true });
     expect(annotations("get_error_issue")).toMatchObject({ readOnlyHint: true });
-    expect(annotations("update_error_issue")).toMatchObject({ readOnlyHint: false });
+    for (const name of ["update_error_issue", "claim_error_issue", "release_error_issue", "post_error_issue_update"]) {
+      expect(annotations(name)).toMatchObject({ readOnlyHint: false });
+    }
   });
 
   it("lists open issues by default, with a link to each", async () => {
@@ -138,6 +170,12 @@ describe("error issue operations", () => {
 
     expect(body).toEqual({ issues: [{ ...summary, url: `http://localhost:3000/errors/${issueId}` }] });
     expect(mocks.list).toHaveBeenCalledWith(organizationId, { limit: 25, service: "api", status: "open" });
+  });
+
+  it("lists only unclaimed issues", async () => {
+    await callTool("list_error_issues", { claim: "unclaimed" });
+
+    expect(mocks.list).toHaveBeenCalledWith(organizationId, { claimed: false, limit: 25, status: "open" });
   });
 
   it("accepts a limit from a REST query string", async () => {
@@ -149,20 +187,65 @@ describe("error issue operations", () => {
     expect(mocks.list).toHaveBeenCalledWith(organizationId, { limit: 50 });
   });
 
-  it("returns an issue with its sample and 30 days of counts", async () => {
+  it("returns an issue with its sample, 30 days of counts, activity, and pull requests", async () => {
     const { body } = await callTool("get_error_issue", { issueId });
 
     expect(body).toEqual({
-      issue: { ...issue, days: [{ day: "2026-10-22", eventCount: 12 }], url: `http://localhost:3000/errors/${issueId}` },
+      issue: { ...issue, ...activity, days: [{ day: "2026-10-22", eventCount: 12 }], url: `http://localhost:3000/errors/${issueId}` },
     });
     expect(mocks.days).toHaveBeenCalledWith([issueId], "2026-09-23");
   });
 
-  it("resolves an issue", async () => {
-    const { body } = await callTool("update_error_issue", { issueId, status: "resolved" });
+  it("resolves an issue with a message from the caller", async () => {
+    const { body } = await callTool("update_error_issue", { agent: "fixer", issueId, message: "Fixed in acme/api#7.", status: "resolved" });
 
     expect((body.issue as { status: string }).status).toBe("resolved");
-    expect(mocks.setStatus).toHaveBeenCalledWith(organizationId, issueId, "resolved");
+    expect(mocks.setStatus).toHaveBeenCalledWith(organizationId, issueId, "resolved", { actor, message: "Fixed in acme/api#7." });
+  });
+
+  it("claims an issue for the caller, without exposing the credential", async () => {
+    const { body, isError } = await callTool("claim_error_issue", { agent: "fixer", issueId, message: "Looking into it." });
+
+    expect(isError).toBeUndefined();
+    expect((body.issue as { claim: unknown }).claim).toEqual({ ...actor, claimedAt: "2026-10-22T12:00:00.000Z" });
+    expect(mocks.claim).toHaveBeenCalledWith(organizationId, issueId, holder, { message: "Looking into it.", takeOver: false });
+  });
+
+  it("answers a conflict naming the claimant when someone else holds the issue", async () => {
+    mocks.claim.mockResolvedValue({
+      claim: { agent: "other", claimedAt: "2026-10-22T11:00:00.000Z", client: "Claude Code", credential: "oauth:client", user: { id: userId, name: "Ash" } },
+      ok: false,
+    });
+    const { body, isError } = await callTool("claim_error_issue", { agent: "fixer", issueId });
+
+    expect(isError).toBe(true);
+    expect(body).toMatchObject({ code: "error_issue_claimed" });
+    expect(body.error).toContain("other via Claude Code for Ash");
+  });
+
+  it("releases only the caller's own claim", async () => {
+    await callTool("release_error_issue", { agent: "fixer", issueId, message: "Could not reproduce." });
+
+    expect(mocks.release).toHaveBeenCalledWith(organizationId, issueId, actor, { holder, message: "Could not reproduce." });
+  });
+
+  it("posts an update that links a pull request", async () => {
+    const response = await app.request(`/api/v1/error-issues/${issueId}/updates`, {
+      body: JSON.stringify({ agent: "fixer", message: "Guarded the missing invoice.", pullRequestUrl }),
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(201);
+    expect(mocks.postUpdate).toHaveBeenCalledWith(organizationId, issueId, actor, { message: "Guarded the missing invoice.", pullRequestUrl });
+  });
+
+  it("rejects a pull request link that is not https", async () => {
+    const { body, isError } = await callTool("post_error_issue_update", { issueId, message: "Fix", pullRequestUrl: "javascript:alert(1)" });
+
+    expect(isError).toBe(true);
+    expect(body).toMatchObject({ code: "invalid_request" });
+    expect(mocks.postUpdate).not.toHaveBeenCalled();
   });
 
   it("answers not found for another workspace's issue", async () => {

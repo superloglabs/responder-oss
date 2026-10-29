@@ -11,6 +11,7 @@ const organizationId = "0b9f6b9e-2f4a-4c1e-9d2b-3f8a6c1d7e01";
 const issueId = "11111111-1111-4111-8111-111111111111";
 
 const issue: ErrorIssue = {
+  claim: null,
   eventCount: 1834,
   exceptionType: "TypeError",
   fingerprint: "v1:2e22350e88415f95",
