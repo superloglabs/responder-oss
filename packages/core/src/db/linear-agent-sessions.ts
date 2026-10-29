@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, or, sql } from "drizzle-orm";
 import {
   decryptCredentials,
   encryptCredentials,
@@ -12,6 +12,7 @@ import {
   createLinearAgentActivity,
   type LinearAgentActivityContent,
 } from "../integrations/linear-agent.js";
+import { linearDefaultApp } from "../integrations/linear-apps.js";
 import { getDatabase } from "./client.js";
 import { withIntegrationAccountCredentialLease } from "./integrations.js";
 import { agents, integrationAccounts } from "./schema.js";
@@ -24,11 +25,21 @@ export interface LinearAgentTarget {
   tagMode: { agentId: string; enabled: boolean } | null;
 }
 
+// Connections through one Linear app. Connections that record no app belong
+// to the default app.
+export function linearAccountOfApp(clientId: string) {
+  const recorded = sql`${integrationAccounts.metadata}->>'clientId' = ${clientId}`;
+  return linearDefaultApp()?.clientId === clientId
+    ? or(recorded, sql`${integrationAccounts.metadata}->>'clientId' is null`)
+    : recorded;
+}
+
 // A Linear workspace can be connected to more than one Responder workspace,
 // but Linear opens a single agent session per mention. The most recent
-// connection answers it.
+// connection through the app the session belongs to answers it.
 export async function findLinearAgentTarget(
   linearOrganizationId: string,
+  clientId: string,
 ): Promise<LinearAgentTarget | null> {
   const rows = await getDatabase()
     .select({
@@ -50,6 +61,7 @@ export async function findLinearAgentTarget(
         eq(integrationAccounts.provider, "linear"),
         eq(integrationAccounts.externalAccountId, linearOrganizationId),
         eq(integrationAccounts.status, "connected"),
+        linearAccountOfApp(clientId),
       ),
     )
     .orderBy(desc(integrationAccounts.createdAt))
@@ -74,12 +86,13 @@ export async function linearAccountAccessToken(input: {
   const credentials = await withIntegrationAccountCredentialLease({
     allowedStatuses: ["connected"],
     integrationAccountId: input.integrationAccountId,
-    operation: async (encryptedCredentials) => {
+    operation: async (encryptedCredentials, metadata) => {
       const current = parseLinearOAuthCredentials(
         decryptCredentials<Record<string, unknown>>(encryptedCredentials),
       );
       if (!linearAccessTokenNeedsRefresh(current)) return { value: current };
       const updated = await refreshLinearOAuthCredentials({
+        clientId: metadata.clientId,
         credentials: current,
       });
       return {

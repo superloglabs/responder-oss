@@ -804,7 +804,10 @@ export class IntegrationAccountCredentialSupersededError extends Error {
 export async function withIntegrationAccountCredentialLease<T>(input: {
   allowedStatuses: Array<"connected" | "error" | "pending">;
   integrationAccountId: string;
-  operation: (encryptedCredentials: string) => Promise<{
+  operation: (
+    encryptedCredentials: string,
+    metadata: Record<string, unknown>,
+  ) => Promise<{
     encryptedCredentials?: string;
     status?: "connected" | "error" | "pending";
     value: T;
@@ -853,6 +856,7 @@ export async function withIntegrationAccountCredentialLease<T>(input: {
       )
       .returning({
         encryptedCredentials: integrationAccounts.encryptedCredentials,
+        metadata: integrationAccounts.metadata,
       });
     const account = rows[0];
     if (!account?.encryptedCredentials) {
@@ -877,7 +881,10 @@ export async function withIntegrationAccountCredentialLease<T>(input: {
     }
 
     try {
-      const result = await input.operation(account.encryptedCredentials);
+      const result = await input.operation(
+        account.encryptedCredentials,
+        account.metadata,
+      );
       const updated = await db
         .update(integrationAccounts)
         .set({

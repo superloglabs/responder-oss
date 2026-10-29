@@ -11,10 +11,11 @@ import {
   linearAgentSessionAttribute,
   linearAgentSessionEventSchema,
   linearIssueIdentifierAttribute,
-  verifyLinearWebhook,
+  linearWebhookApp,
   type LinearAgentActivityContent,
   type LinearAgentSessionEvent,
 } from "../../../../packages/core/src/integrations/linear-agent.js";
+import { linearApps } from "../../../../packages/core/src/integrations/linear-apps.js";
 import { slackAssistantAttribute } from "../../../../packages/core/src/integrations/slack-assistant.js";
 import { queueSlackThreadInvestigation } from "../investigations/queue.js";
 
@@ -64,18 +65,15 @@ function linearSourceUrl(event: LinearAgentSessionEvent): string | undefined {
 }
 
 export const linearWebhookRoutes = new Hono().post("/", async (context) => {
-  const secret = process.env.LINEAR_WEBHOOK_SECRET;
-  if (!secret) {
+  if (!linearApps().some((candidate) => candidate.webhookSecret)) {
     return context.json({ error: "Linear webhooks are not configured" }, 503);
   }
   const body = await context.req.text();
-  if (
-    !verifyLinearWebhook({
-      body,
-      secret,
-      signature: context.req.header("linear-signature"),
-    })
-  ) {
+  const app = linearWebhookApp({
+    body,
+    signature: context.req.header("linear-signature"),
+  });
+  if (!app) {
     return context.json({ error: "Invalid Linear signature" }, 401);
   }
 
@@ -91,7 +89,9 @@ export const linearWebhookRoutes = new Hono().post("/", async (context) => {
   const requestBody = linearAgentRequestBody(event);
   if (!requestBody) return context.json({ ok: true, ignored: true });
 
-  const target = await findLinearAgentTarget(event.organizationId);
+  // The session belongs to the app that sent it, and only that app's
+  // connection can answer in it.
+  const target = await findLinearAgentTarget(event.organizationId, app.clientId);
   if (!target) return context.json({ ok: true, ignored: true });
   if (!target.tagMode?.enabled) {
     postActivity(target, event, { type: "error", body: linearTagModeOffMessage });

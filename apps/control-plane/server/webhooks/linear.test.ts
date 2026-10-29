@@ -66,6 +66,8 @@ function deliver(payload: unknown, signature?: string) {
 
 describe("Linear webhooks", () => {
   beforeEach(() => {
+    vi.stubEnv("LINEAR_CLIENT_ID", "linear-client");
+    vi.stubEnv("LINEAR_CLIENT_SECRET", "linear-client-secret");
     vi.stubEnv("LINEAR_WEBHOOK_SECRET", secret);
     vi.mocked(findLinearAgentTarget).mockResolvedValue({
       integrationAccountId,
@@ -90,6 +92,28 @@ describe("Linear webhooks", () => {
 
     expect(response.status).toBe(401);
     expect(queueSlackThreadInvestigation).not.toHaveBeenCalled();
+  });
+
+  it("answers a session of an additional app only with that app's connection", async () => {
+    vi.stubEnv("LINEAR_ADDITIONAL_APPS", JSON.stringify([
+      { clientId: "earlier-client", clientSecret: "earlier-secret", webhookSecret: "earlier-webhook" },
+    ]));
+    const body = JSON.stringify(sessionEvent({ oauthClientId: "earlier-client" }));
+
+    const response = await deliver(
+      JSON.parse(body),
+      createHmac("sha256", "earlier-webhook").update(body).digest("hex"),
+    );
+
+    expect(response.status).toBe(200);
+    expect(findLinearAgentTarget).toHaveBeenCalledWith("linear-organization", "earlier-client");
+    expect(queueSlackThreadInvestigation).toHaveBeenCalledOnce();
+  });
+
+  it("looks up the default app's connections for its own sessions", async () => {
+    await deliver(sessionEvent());
+
+    expect(findLinearAgentTarget).toHaveBeenCalledWith("linear-organization", "linear-client");
   });
 
   it("queues a mention as a tag mode request in the agent session and acknowledges it", async () => {
