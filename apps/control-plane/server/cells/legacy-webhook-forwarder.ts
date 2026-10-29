@@ -102,10 +102,12 @@ export async function findActiveHolder(
 ): Promise<"here" | "unknown" | Cell | null> {
   if ((await dependencies.tenantState(tenant)).active) return "here";
   const directory = dependencies.directory();
-  const token = dependencies.cellToken();
-  if (!directory || !token) return null;
+  if (!directory) return null;
   const others = directory.cells.filter((cell) => cell.id !== directory.current);
   if (others.length === 0) return null;
+  // Without the cell token the other cells cannot be asked.
+  const token = dependencies.cellToken();
+  if (!token) return "unknown";
   return new Promise((resolve) => {
     let pending = others.length;
     let unchecked = false;

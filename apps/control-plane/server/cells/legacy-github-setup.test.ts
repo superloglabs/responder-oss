@@ -127,6 +127,16 @@ describe("legacy GitHub setup redirect", () => {
     expect(handled).toHaveBeenCalledOnce();
   });
 
+  it("keeps a callback without state when other cells exist but there is no cell token to ask them", async () => {
+    const { app, dependencies, handled } = harness({ cellToken: () => undefined });
+
+    const response = await app.request(`${callbackPath}?installation_id=42&setup_action=update`);
+
+    expect(await response.json()).toEqual({ from: "application" });
+    expect(handled).toHaveBeenCalledOnce();
+    expect(dependencies.askCell).not.toHaveBeenCalled();
+  });
+
   it("lets the application answer when it cannot tell whose callback it is", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const { app, handled } = harness({
