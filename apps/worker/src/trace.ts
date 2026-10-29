@@ -190,7 +190,11 @@ export function investigationTraceEventFromStream(
           kind: "tool-result",
           output: safeTraceValue(item.output ?? raw.output, environment),
         },
-        status: raw.status === "incomplete" ? "failed" : "completed",
+        // Function results report "incomplete"; apply_patch results report "failed".
+        status:
+          raw.status === "incomplete" || raw.status === "failed"
+            ? "failed"
+            : "completed",
       },
       at,
     );
