@@ -179,6 +179,34 @@ describe("investigation trace events", () => {
     });
   });
 
+  it("marks a patch that did not apply as failed", () => {
+    const event = investigationTraceEventFromStream(
+      {
+        type: "run_item_stream_event",
+        name: "tool_output",
+        item: {
+          output: "Invalid Context 50:\n\t\tconst check = checkRunResult();",
+          rawItem: {
+            callId: "call_patch",
+            status: "failed",
+            type: "apply_patch_call_output",
+          },
+        },
+      } as never,
+      {},
+      at,
+    );
+
+    expect(event?.data).toEqual({
+      result: {
+        callId: "call_patch",
+        kind: "tool-result",
+        output: "Invalid Context 50:\n\t\tconst check = checkRunResult();",
+      },
+      status: "failed",
+    });
+  });
+
   it("ignores token-by-token model events", () => {
     expect(
       investigationTraceEventFromStream(
