@@ -1,5 +1,6 @@
 import { gunzipSync } from "node:zlib";
 import { Hono } from "hono";
+import { cors } from "hono/cors";
 import {
   findTelemetryIngestKey,
   hashTelemetryIngestToken,
@@ -20,6 +21,10 @@ import { parseVercelLogs, vercelLogsToOtlp } from "../../../../packages/core/src
 // collector request's x-superlog-project-id header, and the collector writes
 // it onto every resource as superlog.project_id, replacing any superlog.*
 // attribute the application sent.
+//
+// Browsers send OTLP straight from the page, so the OTLP routes answer CORS
+// requests from any origin. The ingest key only adds telemetry to its
+// workspace, and no response carries workspace data.
 //
 // Cloud providers that deliver in their own formats are converted to OTLP
 // first: Vercel log drains at /api/ingest/vercel/logs, and AWS Firehose
@@ -103,6 +108,16 @@ export function createIngestRoutes(dependencies: IngestRouteDependencies = defau
   }
 
   return new Hono()
+    .use(
+      "/v1/*",
+      cors({
+        allowHeaders: ["authorization", "content-encoding", "content-type", "traceparent", "tracestate", "x-api-key"],
+        allowMethods: ["POST", "OPTIONS"],
+        exposeHeaders: ["retry-after"],
+        maxAge: 86_400,
+        origin: "*",
+      }),
+    )
     .post("/v1/:signal", async (context) => {
       const signal = context.req.param("signal");
       const collector = dependencies.collectorUrl();
