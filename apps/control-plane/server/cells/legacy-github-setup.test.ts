@@ -114,6 +114,19 @@ describe("legacy GitHub setup redirect", () => {
     expect(handled).not.toHaveBeenCalled();
   });
 
+  it("keeps a callback without state when a cell that might hold the installation cannot be asked", async () => {
+    const { app, handled } = harness({
+      askCell: vi.fn(async () => {
+        throw new Error("cell unavailable");
+      }),
+    });
+
+    const response = await app.request(`${callbackPath}?installation_id=42&setup_action=update`);
+
+    expect(await response.json()).toEqual({ from: "application" });
+    expect(handled).toHaveBeenCalledOnce();
+  });
+
   it("lets the application answer when it cannot tell whose callback it is", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const { app, handled } = harness({

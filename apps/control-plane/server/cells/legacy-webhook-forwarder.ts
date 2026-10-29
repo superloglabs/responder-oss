@@ -94,12 +94,12 @@ function errorMessage(error: unknown): string {
 }
 
 // Where a workspace that is not paused holds the tenant: this cell, another
-// cell, or none. Stops at the first active answer, and a cell that cannot be
-// asked counts as not holding the tenant, so the old product answers.
-export async function activeHolder(
+// cell, none, or "unknown" when none answered active but some cell could not
+// be asked. Stops at the first active answer.
+export async function findActiveHolder(
   tenant: ProviderTenant,
   dependencies: TenantHolderDependencies,
-): Promise<"here" | Cell | null> {
+): Promise<"here" | "unknown" | Cell | null> {
   if ((await dependencies.tenantState(tenant)).active) return "here";
   const directory = dependencies.directory();
   const token = dependencies.cellToken();
@@ -108,16 +108,30 @@ export async function activeHolder(
   if (others.length === 0) return null;
   return new Promise((resolve) => {
     let pending = others.length;
+    let unchecked = false;
     for (const cell of others) {
       dependencies.askCell(cell, tenant, token)
-        .catch(() => ({ active: false, held: false }))
+        .catch(() => {
+          unchecked = true;
+          return { active: false, held: false };
+        })
         .then((answer) => {
           if (answer.active) resolve(cell);
           pending -= 1;
-          if (pending === 0) resolve(null);
+          if (pending === 0) resolve(unchecked ? "unknown" : null);
         });
     }
   });
+}
+
+// As findActiveHolder, but a cell that cannot be asked counts as not holding
+// the tenant, so the old product answers an interaction.
+export async function activeHolder(
+  tenant: ProviderTenant,
+  dependencies: TenantHolderDependencies,
+): Promise<"here" | Cell | null> {
+  const holder = await findActiveHolder(tenant, dependencies);
+  return holder === "unknown" ? null : holder;
 }
 
 // Hands an interaction to the cell whose active workspace holds the tenant.

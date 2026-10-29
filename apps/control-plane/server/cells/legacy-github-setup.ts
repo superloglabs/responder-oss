@@ -3,7 +3,7 @@ import { z } from "zod";
 import { getPendingIntegrationConnectionState } from "../../../../packages/core/src/db/integrations.js";
 import { getActiveTenant } from "../tenant.js";
 import {
-  activeHolder,
+  findActiveHolder,
   type TenantHolderDependencies,
   tenantHolderDependencies,
 } from "./legacy-webhook-forwarder.js";
@@ -17,7 +17,8 @@ import {
 // GitHub leaves the state out when someone changes an installation on GitHub.
 // Such a callback stays in the application when the signed-in user has a
 // GitHub connection pending, or when a workspace that is not paused holds the
-// installation. Otherwise it goes to the old product.
+// installation, or when a cell that might hold it cannot be asked. Otherwise
+// it goes to the old product.
 
 const applicationStatePrefix = "responder-v1.";
 
@@ -71,8 +72,10 @@ export function legacyGitHubSetupRedirect(
         const installationId = z.coerce.number().int().positive()
           .safeParse(requestUrl.searchParams.get("installation_id"));
         if (installationId.success) {
-          const holder = await activeHolder({ key: String(installationId.data), provider: "github" }, dependencies);
-          if (holder === "here") return next();
+          const holder = await findActiveHolder({ key: String(installationId.data), provider: "github" }, dependencies);
+          // A cell that could not be asked may hold it, so the application
+          // answers rather than sending its user to the old product.
+          if (holder === "here" || holder === "unknown") return next();
           if (holder) {
             console.info(JSON.stringify({ cell: holder.id, event: "github_setup_callback_forwarded" }));
             return context.redirect(`${holder.url}${requestUrl.pathname}${requestUrl.search}`, 302);
