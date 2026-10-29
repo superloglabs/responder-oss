@@ -19,14 +19,24 @@ export const errorIssueStatuses = ["open", "resolved", "silenced"] as const;
 export type ErrorIssueStatus = (typeof errorIssueStatuses)[number];
 
 // Who changed an issue: a member, and the MCP client or API key acting for
-// them. Changes made in the app have no client.
+// them. Changes made in the app have no client. A change made with a Slack
+// notification's buttons comes from the Slack user who pressed it, with the
+// Slack user ID as the user's ID.
 export type ErrorIssueActor = {
   // The name an agent gives itself, so agents acting for the same member can
   // tell their claims apart.
   agent: string | null;
   client: string | null;
+  slackUserId?: string;
   user: { id: string; name: string };
 };
+
+// How a change names who made it, such as "Claude Code via MCP for Ash".
+export function errorIssueActorName(actor: ErrorIssueActor): string {
+  if (actor.slackUserId) return `${actor.user.name} in Slack`;
+  const by = [actor.agent, actor.client].filter(Boolean).join(" via ");
+  return by ? `${by} for ${actor.user.name}` : actor.user.name;
+}
 
 // The agent or member working on an issue. The credential is the API key or
 // MCP client the claim was made with; with the member and agent name it

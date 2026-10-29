@@ -36,8 +36,6 @@ vi.mock("../../../../packages/core/src/db/organization-capabilities.js", () => (
 }));
 vi.mock("../../../../packages/core/src/db/error-issues.js", () => ({
   claimErrorIssue: mocks.claim,
-  claimName: (claim: { agent: string | null; client: string | null; user: { name: string } }) =>
-    `${[claim.agent, claim.client].filter(Boolean).join(" via ")} for ${claim.user.name}`,
   errorIssueActivity: mocks.activity,
   errorIssueDays: mocks.days,
   errorIssueServices: vi.fn(),

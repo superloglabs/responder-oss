@@ -1121,6 +1121,18 @@ delivery records are retained for 30 days. The settings API is
 The management API and MCP server offer `get_error_notifications` and
 `update_error_notifications`, for workspace owners and admins.
 
+Each sent notification records its Slack message. An issue's claims,
+updates, linked pull requests and status changes are posted in the thread of
+the latest notification sent to each destination, queued with the activity
+in `error_notification_followups`. Posting one also edits the notification to
+show the issue as it is now: resolved or silenced and by whom, or who has
+claimed it, with the Resolve and Silence buttons only while the issue is
+open. Pressing those buttons records the change as the Slack user's, so it
+reaches the thread too. Agent text is posted literally, so it cannot mention
+people or channels. Follow-ups use the same checks, retries and 30-day
+retention as notifications; a notification sent before its message was
+recorded, or deleted after 30 days, gets none.
+
 An automation can start on error issues with the **Errors** trigger, offered
 in workspaces with telemetry. It runs on new issues, regressions (a resolved
 issue that occurs again), or both, and can be limited to some services. The

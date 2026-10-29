@@ -1,5 +1,5 @@
 {
-  "id": "11116ff8-d085-424c-be8e-ce1cc6db7ab5",
+  "id": "64970f32-6ca3-46ad-838d-8343715101c7",
   "prevId": "b420882f-5e2d-45e2-af22-9a4019b0e513",
   "version": "7",
   "dialect": "postgresql",
@@ -5291,6 +5291,12 @@
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
+        },
+        "message_timestamp": {
+          "name": "message_timestamp",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -5305,6 +5311,21 @@
             },
             {
               "expression": "next_attempt_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "error_notification_issue_idx": {
+          "name": "error_notification_issue_idx",
+          "columns": [
+            {
+              "expression": "issue_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -5353,6 +5374,149 @@
             "issue_id",
             "event_key",
             "target_key"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.error_notification_followups": {
+      "name": "error_notification_followups",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "delivery_id": {
+          "name": "delivery_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "activity_id": {
+          "name": "activity_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "attempts": {
+          "name": "attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "next_attempt_at": {
+          "name": "next_attempt_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "sent_at": {
+          "name": "sent_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "error_notification_followup_pending_idx": {
+          "name": "error_notification_followup_pending_idx",
+          "columns": [
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "next_attempt_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "error_notification_followups_organization_id_organization_id_fk": {
+          "name": "error_notification_followups_organization_id_organization_id_fk",
+          "tableFrom": "error_notification_followups",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "error_notification_followups_delivery_id_error_notification_deliveries_id_fk": {
+          "name": "error_notification_followups_delivery_id_error_notification_deliveries_id_fk",
+          "tableFrom": "error_notification_followups",
+          "tableTo": "error_notification_deliveries",
+          "columnsFrom": [
+            "delivery_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "error_notification_followups_activity_id_error_issue_activities_id_fk": {
+          "name": "error_notification_followups_activity_id_error_issue_activities_id_fk",
+          "tableFrom": "error_notification_followups",
+          "tableTo": "error_issue_activities",
+          "columnsFrom": [
+            "activity_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "error_notification_followup_key": {
+          "name": "error_notification_followup_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "delivery_id",
+            "activity_id"
           ]
         }
       },

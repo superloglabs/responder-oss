@@ -1663,6 +1663,7 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
       response = await pressErrorNotificationButton({
         actionId: errorButton.action_id, deliveryId: errorButton.value,
         teamId: action.data.team.id, channelId: action.data.channel.id,
+        user: { id: action.data.user.id, ...(action.data.user.name ?? action.data.user.username ? { name: action.data.user.name ?? action.data.user.username } : {}) },
       });
     } catch (error) {
       console.error(JSON.stringify({ event: "slack_error_notification_action_failed", errorCode: error instanceof Error ? error.name : typeof error }));

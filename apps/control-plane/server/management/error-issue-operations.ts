@@ -1,7 +1,6 @@
 import { z } from "zod";
 import {
   claimErrorIssue,
-  claimName,
   errorIssueActivity,
   errorIssueDays,
   findErrorIssue,
@@ -19,6 +18,7 @@ import { responderErrorIssueUrl } from "../../../../packages/core/src/responder-
 import {
   type ErrorIssueClaim,
   errorIssueActivityTypes,
+  errorIssueActorName,
   errorIssueKinds,
   errorIssueStatuses,
 } from "../../../../packages/core/src/telemetry/error-issues.js";
@@ -38,7 +38,8 @@ const message = z.string().trim().min(1).max(4000);
 const actorSchema = z.object({
   agent: z.string().nullable(),
   client: z.string().nullable().describe("The MCP client or API key the change came through. Changes made in the app have none."),
-  user: z.object({ id: z.string(), name: z.string() }).describe("The member the change was made for."),
+  user: z.object({ id: z.string(), name: z.string() })
+    .describe("The member the change was made for. For a change made from a Slack notification, the Slack user, with their Slack user ID."),
 });
 const claimSchema = actorSchema.extend({ claimedAt: z.string() }).nullable()
   .describe("Who is working on the issue. Resolving or silencing the issue ends the claim.");
@@ -126,7 +127,7 @@ function claimant(context: ManagementContext, agentName: string | undefined): Er
 
 const claimedByOther = (claim: ErrorIssueClaim, hint: string) => new ManagementError(
   409,
-  `${claimName(claim)} claimed this issue at ${claim.claimedAt}. ${hint}`,
+  `${errorIssueActorName(claim)} claimed this issue at ${claim.claimedAt}. ${hint}`,
   "error_issue_claimed",
 );
 

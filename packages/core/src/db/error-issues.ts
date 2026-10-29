@@ -10,9 +10,10 @@ import {
   type ErrorIssueStatus,
   type ErrorIssueTransition,
   type ErrorOccurrences,
+  errorIssueActorName,
   occurrenceTransition,
 } from "../telemetry/error-issues.js";
-import { enqueueErrorNotifications } from "./error-notifications.js";
+import { enqueueErrorNotificationFollowups, enqueueErrorNotifications } from "./error-notifications.js";
 import { getDatabase } from "./client.js";
 import { pausedTelemetryNotificationOrganizations } from "./telemetry-notification-pauses.js";
 import { errorIssueActivities, errorIssueCursors, errorIssueDailyCounts, errorIssueHourlyCounts, errorIssues, organizationCapabilities } from "./schema.js";
@@ -437,13 +438,15 @@ async function lockIssue(tx: Transaction, organizationId: string, issueId: strin
   return row ?? null;
 }
 
+// Records an activity and queues it for the threads of the issue's Slack
+// notifications, in the same transaction.
 async function addActivity(
   executor: Executor,
   organizationId: string,
   issueId: string,
   activity: Pick<ErrorIssueActivity, "actor" | "type"> & Partial<Pick<ErrorIssueActivity, "message" | "pullRequestUrl" | "status">>,
 ) {
-  await executor.insert(errorIssueActivities).values({
+  const [created] = await executor.insert(errorIssueActivities).values({
     actor: activity.actor,
     issueId,
     message: activity.message ?? null,
@@ -451,7 +454,8 @@ async function addActivity(
     pullRequestUrl: activity.pullRequestUrl ?? null,
     status: activity.status ?? null,
     type: activity.type,
-  });
+  }).returning({ id: errorIssueActivities.id });
+  await enqueueErrorNotificationFollowups(executor, { organizationId, issueId, activityId: created!.id });
 }
 
 export type ErrorIssueClaimResult =
@@ -479,7 +483,7 @@ export async function claimErrorIssue(
       .where(eq(errorIssues.id, issueId));
     await addActivity(tx, organizationId, issueId, {
       actor: claimant.actor,
-      message: options.message ?? (issue.claim ? `Took over from ${claimName(issue.claim)}` : null),
+      message: options.message ?? (issue.claim ? `Took over from ${errorIssueActorName(issue.claim)}` : null),
       type: "claimed",
     });
     return { ok: true as const };
@@ -488,12 +492,6 @@ export async function claimErrorIssue(
   if (!outcome.ok) return outcome;
   const issue = await findErrorIssue(organizationId, issueId);
   return issue ? { issue, ok: true } : null;
-}
-
-// How a claim names its claimant, such as "Claude Code for Ash".
-export function claimName(claim: ErrorIssueActor): string {
-  const by = [claim.agent, claim.client].filter(Boolean).join(" via ");
-  return by ? `${by} for ${claim.user.name}` : claim.user.name;
 }
 
 // Ends a claim. With `holder`, only that claimant's claim ends; otherwise

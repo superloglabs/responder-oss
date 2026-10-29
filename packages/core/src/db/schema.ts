@@ -2743,7 +2743,27 @@ export const errorNotificationDeliveries = pgTable("error_notification_deliverie
   nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).defaultNow().notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   sentAt: timestamp("sent_at", { withTimezone: true }),
+  // The posted Slack message, whose thread gets the issue's follow-ups.
+  messageTimestamp: text("message_timestamp"),
 }, (table) => [
   unique("error_notification_event_target_key").on(table.issueId, table.eventKey, table.targetKey),
   index("error_notification_pending_idx").on(table.status, table.nextAttemptAt),
+  index("error_notification_issue_idx").on(table.issueId),
+]);
+// An issue's activity to post in the thread of a notification already sent,
+// queued with the activity. Posting it also updates the notification to the
+// issue's current status and claim.
+export const errorNotificationFollowups = pgTable("error_notification_followups", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  organizationId: uuid("organization_id").notNull().references(() => organization.id, { onDelete: "cascade" }),
+  deliveryId: uuid("delivery_id").notNull().references(() => errorNotificationDeliveries.id, { onDelete: "cascade" }),
+  activityId: uuid("activity_id").notNull().references(() => errorIssueActivities.id, { onDelete: "cascade" }),
+  status: text("status").$type<"pending" | "sending" | "sent" | "failed" | "cancelled">().default("pending").notNull(),
+  attempts: integer("attempts").default(0).notNull(),
+  nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).defaultNow().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  sentAt: timestamp("sent_at", { withTimezone: true }),
+}, (table) => [
+  unique("error_notification_followup_key").on(table.deliveryId, table.activityId),
+  index("error_notification_followup_pending_idx").on(table.status, table.nextAttemptAt),
 ]);

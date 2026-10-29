@@ -147,8 +147,10 @@ export async function releaseErrorIssue(issueId: string): Promise<ErrorIssue> {
   return body.issue;
 }
 
-// Who made a change, such as "Claude Code via Claude for Ash".
+// Who made a change, such as "Claude Code via MCP for Ash". Matches the
+// server's errorIssueActorName.
 export function errorIssueActorName(actor: ErrorIssueActor): string {
+  if (actor.slackUserId) return `${actor.user.name} in Slack`;
   const by = [actor.agent, actor.client].filter(Boolean).join(" via ");
   return by ? `${by} for ${actor.user.name}` : actor.user.name;
 }

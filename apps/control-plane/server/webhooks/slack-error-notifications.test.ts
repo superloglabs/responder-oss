@@ -34,7 +34,9 @@ describe("error notification Slack actions", () => {
   it.each([["resolve", "resolved"], ["silence", "silenced"]])("handles %s and privately confirms the result", async (action, status) => {
     expect((await press(`error_notification_${action}`)).status).toBe(200);
     expect(mocks.find).toHaveBeenCalledWith({ deliveryId, teamId: "T123", channelId: "C123" });
-    expect(mocks.setStatus).toHaveBeenCalledWith("organization", "issue", status);
+    expect(mocks.setStatus).toHaveBeenCalledWith("organization", "issue", status, {
+      actor: { agent: null, client: "Slack", slackUserId: "U123", user: { id: "U123", name: "A Slack user" } },
+    });
     const [url, init] = vi.mocked(fetch).mock.calls[0]!;
     expect(url).toBe(responseUrl);
     expect(JSON.parse(init!.body as string)).toMatchObject({ response_type: "ephemeral", replace_original: false, text: expect.stringContaining(`Error ${status}.`) });
