@@ -73,7 +73,7 @@ export function recordQueueHealth(
   result.observe(gauges.oldestPendingRunAge, runs.oldestPendingSeconds);
   result.observe(gauges.leaseExpiredRuns, runs.leaseExpired);
   result.observe(gauges.orphanedRuns, runs.orphaned);
-  for (const status of ["succeeded", "failed", "cancelled"]) {
+  for (const status of ["succeeded", "failed", "usage_limit_reached", "cancelled"]) {
     result.observe(gauges.finishedRuns, runs.finished[status] ?? 0, {
       "automation_run.status": status,
     });

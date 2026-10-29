@@ -32,7 +32,7 @@ describe("queue health metrics", () => {
     const { collect, meter } = fakeMeter();
     startQueueHealthMetrics(async () => ({
       automationRuns: {
-        finished: { failed: 2, succeeded: 7 },
+        finished: { failed: 2, succeeded: 7, usage_limit_reached: 3 },
         leaseExpired: 1,
         oldestPendingSeconds: 540,
         orphaned: 3,
@@ -66,6 +66,7 @@ describe("queue health metrics", () => {
       ["responder.automation_runs.orphaned", 3, undefined],
       ["responder.automation_runs.finished", 7, { "automation_run.status": "succeeded" }],
       ["responder.automation_runs.finished", 2, { "automation_run.status": "failed" }],
+      ["responder.automation_runs.finished", 3, { "automation_run.status": "usage_limit_reached" }],
       ["responder.automation_runs.finished", 0, { "automation_run.status": "cancelled" }],
       ["responder.jobs.queued", 4, automationQueue],
       ["responder.jobs.queued.oldest_age", 600, automationQueue],
