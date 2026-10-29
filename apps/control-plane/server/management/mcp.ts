@@ -16,6 +16,11 @@ import {
   authenticateManagementRequest,
   executeOperation,
 } from "./execute.js";
+import {
+  authenticateLegacyMcpForward,
+  isLegacyMcpForward,
+  legacyMcpForwardRefusedBody,
+} from "./legacy-mcp-forward.js";
 import { jsonSchema } from "./openapi.js";
 import type { ManagementContext, ManagementOperation } from "./operation.js";
 import { managementOperations } from "./operations.js";
@@ -50,7 +55,11 @@ export function mcpTool(operation: ManagementOperation): Tool {
   };
 }
 
-export function createManagementMcpServer(context: ManagementContext): Server {
+// A read-only caller sees and calls only the operations that change nothing.
+export function createManagementMcpServer(
+  context: ManagementContext,
+  { readOnly = false }: { readOnly?: boolean } = {},
+): Server {
   const server = new Server(
     { name: "superlog", title: "Superlog", version: "1.0.0", icons: [{ src: new URL("/superlog-silver-icon.png", controlPlaneBaseUrl()).href, mimeType: "image/png", sizes: ["1400x1400"] }] },
     { capabilities: { tools: {}, resources: {} }, instructions },
@@ -69,11 +78,14 @@ export function createManagementMcpServer(context: ManagementContext): Server {
       },
     }] };
   });
+  const available = readOnly
+    ? mcpOperations.filter((operation) => operation.effect === "read")
+    : mcpOperations;
   const operations = new Map(
-    mcpOperations.map((operation) => [operation.name, operation]),
+    available.map((operation) => [operation.name, operation]),
   );
   server.setRequestHandler(ListToolsRequestSchema, () => ({
-    tools: mcpOperations.map(mcpTool),
+    tools: available.map(mcpTool),
   }));
   server.setRequestHandler(
     CallToolRequestSchema,
@@ -105,27 +117,44 @@ export const mcpUnauthorizedBody = {
   error: "Connect with OAuth, or send a valid API key as `Authorization: Bearer <key>`. Create keys in Superlog under Settings → API keys.",
 };
 
+async function handleMcpRequest(
+  request: Request,
+  caller: ManagementContext,
+  options: { readOnly?: boolean } = {},
+): Promise<Response> {
+  const server = createManagementMcpServer(caller, options);
+  const transport = new WebStandardStreamableHTTPServerTransport({
+    enableJsonResponse: true,
+    sessionIdGenerator: undefined,
+  });
+  await server.connect(transport);
+  try {
+    return await transport.handleRequest(request);
+  } finally {
+    await server.close().catch(() => undefined);
+  }
+}
+
 // A stateless Streamable HTTP endpoint: each POST is handled by a new server
 // for the API key or OAuth access token that sent it. The challenge points
-// MCP clients to the OAuth metadata so they can sign the person in.
+// MCP clients to the OAuth metadata so they can sign the person in. A request
+// forwarded by the old product's MCP server is refused without a challenge,
+// since signing in here would not fix it.
 export const managementMcpRoutes = new Hono()
   .post("/", async (context) => {
+    if (isLegacyMcpForward(context.req.raw.headers)) {
+      const forwarded = await authenticateLegacyMcpForward(context.req.raw.headers);
+      if (!forwarded) return context.json(legacyMcpForwardRefusedBody, 403);
+      return handleMcpRequest(context.req.raw, forwarded.context, {
+        readOnly: forwarded.readOnly,
+      });
+    }
     const caller = await authenticateManagementRequest(context.req.raw.headers, "mcp");
     if (!caller) {
       context.header("WWW-Authenticate", mcpWwwAuthenticate(controlPlaneBaseUrl()));
       return context.json(mcpUnauthorizedBody, 401);
     }
-    const server = createManagementMcpServer(caller);
-    const transport = new WebStandardStreamableHTTPServerTransport({
-      enableJsonResponse: true,
-      sessionIdGenerator: undefined,
-    });
-    await server.connect(transport);
-    try {
-      return await transport.handleRequest(context.req.raw);
-    } finally {
-      await server.close().catch(() => undefined);
-    }
+    return handleMcpRequest(context.req.raw, caller);
   })
   .on(["GET", "DELETE"], "/", (context) => {
     context.header("Allow", "POST");
