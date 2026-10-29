@@ -51,7 +51,11 @@ metadata. Connections made through an earlier app keep working when
 `LINEAR_ADDITIONAL_APPS` lists it as JSON,
 `[{ "clientId": "…", "clientSecret": "…", "webhookSecret": "…" }]`. A
 connection's token is refreshed with the app it records, or the default app
-when it records none. Linear rotates the refresh token on every refresh, so
+when it records none. Connections made before Responder recorded the app carry
+no client ID and follow `LINEAR_CLIENT_ID`. Before changing the default app,
+set `metadata.clientId` to the current client ID on every Linear connection
+that lacks one; otherwise their token refreshes fail and their agent sessions
+go unanswered. Linear rotates the refresh token on every refresh, so
 only one deployment may refresh a given connection's token. A webhook is
 accepted when it verifies with any listed app's webhook secret, and an agent
 session is answered only by a connection of the app whose secret signed it.
@@ -60,8 +64,9 @@ While customers move from another product that uses the same Linear app, an
 entry in `LEGACY_WEBHOOK_FORWARDS` for `/api/webhooks/linear` names that app by
 its client ID, which Linear sends as `oauthClientId` in agent session events.
 Each such event goes to one product: Responder when a workspace whose
-telemetry notifications are not paused holds the Linear workspace, otherwise
-the other product, so one session never gets two answers.
+telemetry notifications are not paused holds the Linear workspace through a
+connection of that app, otherwise the other product, so one session never gets
+two answers.
 
 Responder authorizes the app with `actor=app`, so Linear shows the app, not the
 person who connected it, as the creator of each issue. Settings asks

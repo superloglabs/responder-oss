@@ -120,13 +120,36 @@ describe("legacy webhook forwarder", () => {
 
     expect(await response.json()).toEqual({ from: "legacy" });
     expect(handled).not.toHaveBeenCalled();
-    expect(dependencies.tenantState).toHaveBeenCalledWith({ key: "linear-org-1", provider: "linear" });
+    expect(dependencies.tenantState).toHaveBeenCalledWith({
+      appId: "linear-old-client",
+      key: "linear-org-1",
+      provider: "linear",
+    });
     const [url, init] = vi.mocked(dependencies.forward).mock.calls[0]!;
     expect(url).toBe("https://api.superlog.sh/linear/webhook");
     const headers = new Headers(init.headers);
     expect(headers.get("linear-signature")).toBe("abc");
     expect(headers.get("linear-delivery")).toBe("delivery-1");
     expect(headers.get("linear-event")).toBe("AgentSessionEvent");
+  });
+
+  it("sends an old Linear app's session to the old product when active workspaces hold the Linear workspace only through another app", async () => {
+    const tenantState = vi.fn(async (tenant: { appId?: string }) =>
+      tenant.appId === "linear-old-client" ? { active: false, held: false } : { active: true, held: true });
+    const askCell = vi.fn(async (_cell: unknown, tenant: { appId?: string }) =>
+      tenant.appId === "linear-old-client" ? { active: false, held: false } : { active: true, held: true });
+    const { app, dependencies, handled } = harness({ askCell, tenantState });
+
+    const response = await app.request("/api/webhooks/linear", linearEvent("linear-old-client"));
+
+    expect(await response.json()).toEqual({ from: "legacy" });
+    expect(handled).not.toHaveBeenCalled();
+    expect(askCell).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "us" }),
+      { appId: "linear-old-client", key: "linear-org-1", provider: "linear" },
+      "cell-token",
+    );
+    expect(vi.mocked(dependencies.forward).mock.calls[0]![0]).toBe("https://api.superlog.sh/linear/webhook");
   });
 
   it("keeps an old Linear app's agent session in the application once an active workspace holds it", async () => {

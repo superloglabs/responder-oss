@@ -211,8 +211,11 @@ export function legacyWebhookForwarder(
 
     if (singleAnswerPaths.test(path)) {
       const tenant = webhookRoutingKey(path, contentType, body);
+      // A Linear session can be answered only through a connection of its own
+      // app, so a workspace connected through another app does not hold it.
       const holder = tenant && tenant.provider !== "automation" && tenant.provider !== "integration_account"
-        ? await activeHolder(tenant, dependencies).catch(() => null)
+        ? await activeHolder(tenant.provider === "linear" && appId ? { ...tenant, appId } : tenant, dependencies)
+          .catch(() => null)
         : null;
       // The cell router keeps a tenant held here. Another cell gets the
       // interaction directly: the router routes by holding alone and could

@@ -8,6 +8,12 @@ import { z } from "zod";
 //
 // A connection records its app's client ID in `metadata.clientId`. One that
 // records none belongs to the default app.
+//
+// Connections made before apps were recorded carry no client ID, so they
+// follow whatever LINEAR_CLIENT_ID names. Before LINEAR_CLIENT_ID changes,
+// record the current client ID in every Linear connection's metadata
+// (ADR 0012); otherwise their tokens are refreshed with the new app and fail,
+// and their agent sessions are no longer answered.
 
 export interface LinearApp {
   clientId: string;
@@ -56,6 +62,8 @@ export function linearAppForConnection(
     if (!app) throw new Error(`Linear app ${clientId} is not configured`);
     return app;
   }
+  // An unrecorded connection is assumed to belong to the default app; see
+  // the note above before changing it.
   const defaultApp = linearDefaultApp(environment);
   if (!defaultApp) throw new Error("Linear application credentials are not configured");
   return defaultApp;
