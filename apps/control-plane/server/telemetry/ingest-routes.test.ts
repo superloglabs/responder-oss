@@ -78,6 +78,28 @@ describe("telemetry ingest", () => {
     expect((await send(routes({ collectorUrl: () => null }).app, "/v1/logs")).status).toBe(404);
     expect((await send(routes().app, "/v1/profiles")).status).toBe(404);
   });
+
+  it("answers browser preflights and lets pages read the answer", async () => {
+    const { app, dependencies } = routes();
+
+    const preflight = await app.request("/v1/traces", {
+      headers: {
+        "access-control-request-headers": "content-type,x-api-key",
+        "access-control-request-method": "POST",
+        origin: "https://shop.example.com",
+      },
+      method: "OPTIONS",
+    });
+    expect(preflight.status).toBe(204);
+    expect(preflight.headers.get("access-control-allow-origin")).toBe("*");
+    expect(preflight.headers.get("access-control-allow-methods")).toContain("POST");
+    expect(preflight.headers.get("access-control-allow-headers")).toContain("x-api-key");
+    expect(dependencies.forward).not.toHaveBeenCalled();
+
+    const response = await send(app, "/v1/logs", { origin: "https://shop.example.com", "x-api-key": token });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("access-control-allow-origin")).toBe("*");
+  });
 });
 
 describe("Vercel log drain ingest", () => {

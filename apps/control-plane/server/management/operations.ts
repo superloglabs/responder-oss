@@ -2,6 +2,8 @@ import { integrationConnectionOperations } from "./integration-connections.js";
 import { alertOperations } from "./alert-operations.js";
 import { dashboardOperations } from "./dashboard-operations.js";
 import { errorIssueOperations } from "./error-issue-operations.js";
+import { errorNotificationOperations } from "./error-notification-operations.js";
+import { ingestKeyOperations } from "./ingest-key-operations.js";
 import { syntheticOperations } from "./synthetic-operations.js";
 import { terraformOperations } from "./terraform-operations.js";
 import { telemetryOperations } from "./telemetry-operations.js";
@@ -1058,7 +1060,9 @@ export const managementOperations: ManagementOperation[] = [
     },
   }),
   ...telemetryOperations,
+  ...ingestKeyOperations,
   ...errorIssueOperations,
+  ...errorNotificationOperations,
   ...dashboardOperations,
   ...alertOperations,
   ...syntheticOperations,

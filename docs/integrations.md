@@ -1029,6 +1029,12 @@ telemetry Overview page to send logs, traces and metrics. Every option needs a c
 Removing a source revokes its ingest key. Responder also removes Vercel
 drains; an AWS stack stays until the customer deletes it.
 
+The OTLP routes, `<cell>/api/ingest/v1/{logs,traces,metrics}`, answer CORS
+requests from any origin, so browser apps can send to them directly. An ingest
+key only adds telemetry to its workspace. The management API and MCP server
+offer `list_ingest_keys` and `create_ingest_key`; creating a key returns its
+value once, with the OpenTelemetry SDK settings for it.
+
 ## Error issues
 
 The worker groups a telemetry workspace's exceptions into error issues by
@@ -1099,6 +1105,8 @@ may finish. Existing errors are not backfilled when notifications are enabled.
 Delivery failures are logged as `error_notification_delivery_failed`; terminal
 delivery records are retained for 30 days. The settings API is
 `/api/error-notifications` and requires a workspace owner or admin session.
+The management API and MCP server offer `get_error_notifications` and
+`update_error_notifications`, for workspace owners and admins.
 
 An automation can start on error issues with the **Errors** trigger, offered
 in workspaces with telemetry. It runs on new issues, regressions (a resolved
