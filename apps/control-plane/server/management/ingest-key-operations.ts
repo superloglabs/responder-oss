@@ -5,7 +5,7 @@ import {
   listTelemetryIngestKeys,
 } from "../../../../packages/core/src/db/telemetry-ingest-keys.js";
 import { telemetryCollectorUrl } from "../../../../packages/core/src/telemetry/client.js";
-import { controlPlaneBaseUrl } from "../integrations/urls.js";
+import { cellOrigin } from "../integrations/urls.js";
 import { defineOperation, ManagementError, type ManagementContext } from "./operation.js";
 
 // Keys applications send telemetry with. A key can only add telemetry to its
@@ -25,8 +25,9 @@ async function requireIngest(context: ManagementContext): Promise<void> {
   }
 }
 
+// Ingest is not routed between cells, so keys send to this cell's own origin.
 function ingestEndpoint(): string {
-  return `${controlPlaneBaseUrl().replace(/\/+$/u, "")}/api/ingest`;
+  return `${cellOrigin()}/api/ingest`;
 }
 
 export const ingestKeyOperations = [

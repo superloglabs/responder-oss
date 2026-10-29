@@ -112,6 +112,15 @@ describe("error notification operations", () => {
     expect(body).toEqual({ notifications: { enabled: false, slack } });
   });
 
+  it("turns notifications off after their channel became unavailable", async () => {
+    stored = { enabled: true, targets: [{ kind: "slack", ...slack }] };
+    mocks.channels.mockResolvedValue([]);
+    const { body, isError } = await callTool("update_error_notifications", { enabled: false });
+
+    expect(isError).toBeFalsy();
+    expect(body).toEqual({ notifications: { enabled: false, slack } });
+  });
+
   it("needs a channel to turn notifications on", async () => {
     expect(await callTool("update_error_notifications", { enabled: true })).toMatchObject({
       body: { code: "slack_channel_required" },

@@ -77,7 +77,10 @@ export const errorNotificationOperations = [
       if (input.enabled && !slack) {
         throw new ManagementError(422, "Choose a Slack channel before turning notifications on.", "slack_channel_required");
       }
-      if (slack) {
+      // Turning notifications off keeps the saved channel even if Superlog can
+      // no longer post to it. Only a channel being turned on or newly chosen
+      // has to be available.
+      if (slack && (input.enabled || input.slack)) {
         const channels = await listTelemetryAlertSlackChannels(context.organizationId);
         if (!channels.some((channel) => channel.channelId === slack.channelId && channel.integrationAccountId === slack.integrationAccountId)) {
           throw new ManagementError(
