@@ -7,6 +7,7 @@ import {
   codexCliVersion,
   prepareCodexAutomationHarness,
   runCodexAutomation,
+  SubscriptionLoginRejectedError,
 } from "./codex-automation-harness.js";
 
 const input = {
@@ -418,6 +419,38 @@ it("says so when the ChatGPT workspace behind the subscription is deactivated", 
     "The ChatGPT workspace of the connected subscription is deactivated. Reconnect a ChatGPT account with an active plan.",
   );
   await expect(run).rejects.toHaveProperty("organizationFixable", true);
+});
+
+it("marks a run whose ChatGPT login was rejected so the worker renews it", async () => {
+  const authJson = JSON.stringify({
+    tokens: {
+      id_token: "id-token",
+      access_token: "dtn_secret_access",
+      refresh_token: runOnlyRefreshToken,
+      account_id: "account",
+    },
+  });
+  const rejected = JSON.stringify({ type: "error", message: "workspace routing discovery unauthorized (401)" });
+  const session = {
+    execCommand: vi
+      .fn()
+      .mockResolvedValue("Process exited with code 0\n")
+      .mockResolvedValueOnce("Process exited with code 0\n")
+      .mockResolvedValueOnce("Process exited with code 0\n")
+      .mockResolvedValueOnce("Process exited with code 0\n")
+      .mockResolvedValueOnce("Process exited with code 0\n")
+      .mockResolvedValueOnce(`Process exited with code 1\nOutput:\n${rejected}\n`),
+    materializeEntry: vi.fn().mockResolvedValue(undefined),
+  } as unknown as DaytonaSandboxSession;
+
+  const run = runCodexAutomation(session, {
+    ...input,
+    model: { ...input.model, subscription: { authJson } },
+  });
+
+  await expect(run).rejects.toBeInstanceOf(SubscriptionLoginRejectedError);
+  await expect(run).rejects.toThrow("Codex automation harness failed: workspace routing discovery unauthorized (401)");
+  await expect(run).rejects.toHaveProperty("organizationFixable", false);
 });
 
 it("names only the refusal that ended the turn", async () => {

@@ -6,7 +6,7 @@ import { AutomationHarnessError } from "./automation-harness.js";
 import { processAutomationRun, type AutomationRunDependencies } from "./automation-run.js";
 import { ModelCatalogError } from "@responder/core/automations/model-catalog";
 import { awsScriptRunnerGuidance } from "@responder/core/investigations/prompt-parts";
-import type { runCodexAutomation } from "./codex-automation-harness.js";
+import { SubscriptionLoginRejectedError, type runCodexAutomation } from "./codex-automation-harness.js";
 
 vi.mock("@responder/core/credentials/encryption", () => ({
   decryptCredentials: vi.fn(() => ({ accessToken: "xoxb-token" })),
@@ -151,6 +151,7 @@ function dependencies() {
     subscriptionAuth: vi.fn<(owner: { credentialId: string; organizationId: string }, validUntil: Date) => Promise<string>>(),
     createSubscriptionSecret: vi.fn<AutomationRunDependencies["createSubscriptionSecret"]>().mockResolvedValue({ id: "secret-1", name: "responder_chatgpt_run", placeholder: "dtn_secret_run" }),
     deleteSubscriptionSecret: vi.fn<AutomationRunDependencies["deleteSubscriptionSecret"]>().mockResolvedValue(undefined),
+    refreshSubscription: vi.fn<AutomationRunDependencies["refreshSubscription"]>().mockResolvedValue(undefined),
     slackCard: {
       now: () => Date.parse("2026-09-22T19:00:00.000Z"),
       post: vi.fn().mockResolvedValue("1790000001.000200"),
@@ -1824,6 +1825,40 @@ describe("automation run processor", () => {
     await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
     expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({ status: "failed" }));
     expect(deps.deleteSubscriptionSecret).toHaveBeenCalledWith("secret-1");
+  });
+
+  it("renews the stored login when ChatGPT rejects it during a run", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    const authJson = JSON.stringify({ tokens: { id_token: "id", access_token: "access", refresh_token: "refresh", account_id: "account" } });
+    deps.claimRun.mockResolvedValue(claimedRun());
+    deps.getCredential.mockResolvedValue({ apiKey: "subscription-context-only", provider: "openai", subscription: { credentialId, authJson } });
+    deps.subscriptionAuth.mockResolvedValue(authJson);
+    deps.runCodex.mockRejectedValue(new SubscriptionLoginRejectedError(
+      "Codex automation harness failed: workspace routing discovery unauthorized (401)",
+      "",
+    ));
+    await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
+    expect(deps.refreshSubscription).toHaveBeenCalledWith({ credentialId, organizationId });
+    expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({
+      failureMessage: "Codex automation harness failed: workspace routing discovery unauthorized (401)",
+      status: "failed",
+    }));
+  });
+
+  it("leaves the stored login alone when a subscription run fails for another reason", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    const authJson = JSON.stringify({ tokens: { id_token: "id", access_token: "access", refresh_token: "refresh", account_id: "account" } });
+    deps.claimRun.mockResolvedValue(claimedRun());
+    deps.getCredential.mockResolvedValue({ apiKey: "subscription-context-only", provider: "openai", subscription: { credentialId, authJson } });
+    deps.subscriptionAuth.mockResolvedValue(authJson);
+    deps.runCodex.mockRejectedValue(new AutomationHarnessError("Codex automation harness failed", ""));
+    await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
+    expect(deps.refreshSubscription).not.toHaveBeenCalled();
+    expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({ status: "failed" }));
   });
 
   it("fails a subscription run before starting a sandbox when the login cannot cover it", async () => {
