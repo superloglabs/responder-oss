@@ -1326,6 +1326,8 @@ export interface SyncedRepository {
   metadata?: Record<string, unknown>;
 }
 
+const REPOSITORY_UPSERT_BATCH_SIZE = 500;
+
 export async function replaceRepositories(
   integrationAccountId: string,
   syncedRepositories: SyncedRepository[],
@@ -1338,28 +1340,34 @@ export async function replaceRepositories(
       .set({ available: false, updatedAt: new Date() })
       .where(eq(repositories.integrationAccountId, integrationAccountId));
 
-    for (const repository of syncedRepositories) {
+    // One statement per batch instead of one per repository. Later entries
+    // win when GitHub lists the same repository twice, since a single upsert
+    // cannot touch the same row more than once.
+    const unique = [
+      ...new Map(syncedRepositories.map((repository) => [repository.externalId, repository])).values(),
+    ];
+    for (let start = 0; start < unique.length; start += REPOSITORY_UPSERT_BATCH_SIZE) {
+      const batch = unique.slice(start, start + REPOSITORY_UPSERT_BATCH_SIZE);
       await tx
         .insert(repositories)
-        .values({
-          integrationAccountId,
-          externalId: repository.externalId,
-          fullName: repository.fullName,
-          defaultBranch: repository.defaultBranch,
-          private: repository.private,
-          metadata: repository.metadata ?? {},
-        })
-        .onConflictDoUpdate({
-          target: [
-            repositories.integrationAccountId,
-            repositories.externalId,
-          ],
-          set: {
+        .values(
+          batch.map((repository) => ({
+            integrationAccountId,
+            externalId: repository.externalId,
             fullName: repository.fullName,
             defaultBranch: repository.defaultBranch,
             private: repository.private,
-            available: true,
             metadata: repository.metadata ?? {},
+          })),
+        )
+        .onConflictDoUpdate({
+          target: [repositories.integrationAccountId, repositories.externalId],
+          set: {
+            fullName: sql`excluded.full_name`,
+            defaultBranch: sql`excluded.default_branch`,
+            private: sql`excluded.private`,
+            available: true,
+            metadata: sql`excluded.metadata`,
             updatedAt: new Date(),
           },
         });
