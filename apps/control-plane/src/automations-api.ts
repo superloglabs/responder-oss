@@ -27,6 +27,7 @@ export type AutomationTrigger =
     }
   | {
       eventTypes: Array<"new_issue" | "regression">;
+      exceptionsOnly?: boolean;
       kind: "errors";
       services?: string[];
     }

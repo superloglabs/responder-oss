@@ -18,6 +18,7 @@ const slackSchema = z.object({
 
 const notificationsSchema = z.object({
   enabled: z.boolean(),
+  exceptionsOnly: z.boolean(),
   slack: z.object({ channelId: z.string(), integrationAccountId: z.string() }).nullable(),
 });
 
@@ -36,6 +37,7 @@ function presented(settings: ErrorNotificationSettings) {
   const target = settings.targets[0];
   return {
     enabled: settings.enabled,
+    exceptionsOnly: settings.exceptionsOnly ?? false,
     slack: target ? { channelId: target.channelId, integrationAccountId: target.integrationAccountId } : null,
   };
 }
@@ -67,6 +69,7 @@ export const errorNotificationOperations = [
     effect: "write",
     input: z.object({
       enabled: z.boolean(),
+      exceptionsOnly: z.boolean().optional().describe("Post only exceptions, not plain error log lines. Keeps the current value when left out."),
       slack: slackSchema.nullable().optional().describe("Required to turn notifications on. Keeps the current channel when left out."),
     }),
     output: z.object({ notifications: notificationsSchema }),
@@ -92,6 +95,7 @@ export const errorNotificationOperations = [
       }
       const settings: ErrorNotificationSettings = {
         enabled: input.enabled,
+        exceptionsOnly: input.exceptionsOnly ?? current.exceptionsOnly ?? false,
         targets: slack ? [{ kind: "slack", ...slack }] : [],
       };
       await saveErrorNotificationSettings(context.organizationId, settings);

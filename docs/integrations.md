@@ -1142,6 +1142,9 @@ When enabled, they always notify on new errors and resolved errors that happen a
 Repeated occurrences of an open or silenced issue do not notify. This does
 not require an investigation automation.
 
+**Only exceptions** posts only span exceptions and logs with a stack trace.
+Plain error log lines stay on the Errors page.
+
 The worker persists each destination with the error transition, retries failed
 sends independently up to ten attempts with backoff, and recovers interrupted
 deliveries. The worker needs `RESPONDER_APP_URL` (or `BETTER_AUTH_URL`) for issue links.
@@ -1169,7 +1172,8 @@ recorded, or deleted after 30 days, gets none.
 
 An automation can start on error issues with the **Errors** trigger, offered
 in workspaces with telemetry. It runs on new issues, regressions (a resolved
-issue that occurs again), or both, and can be limited to some services. The
+issue that occurs again), or both, and can be limited to some services or to
+exceptions only. The
 worker starts the runs after the pass that opened the issue is saved. A new
 issue runs each automation once; a regression runs it once per time the
 issue reopens. The run's trigger has the issue's title, service, counts,
