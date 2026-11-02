@@ -312,8 +312,11 @@ export function AppShell({
           </nav>
         </div>
         <div className="globalHeader__right" ref={menuRef}>
-          {!workspace ? <ColorThemeToggle className="globalThemeToggle" /> : null}
           {workspace && !guest ? <TelemetryCallCard /> : null}
+          <ColorThemeToggle
+            className={workspace ? "globalThemeToggle globalThemeToggle--workspace" : "globalThemeToggle"}
+            showLabel={workspace}
+          />
           {guest ?? <div className="accountMenu">
             <button
               aria-expanded={isMenuOpen}

@@ -6,6 +6,30 @@
   --issues-line: #e6e8ec;
   --issues-text: #1a1a1a;
   --issues-muted: #434343;
+  /* Sidebar and card chrome. The light values are the base; the dark set
+     below mirrors the design-system dark tokens so both shells read as one
+     product. */
+  --issues-brand: #373636;
+  --issues-nav-text: #5d5d5d;
+  --issues-nav-icon: #666;
+  --issues-nav-hover: #ededed;
+  --issues-nav-active: #e3e3e3;
+  --issues-nav-active-text: #121212;
+  --issues-nav-active-icon: #444;
+  --issues-nav-label: #a0a0a0;
+  --issues-focus: #4e58f9;
+  --issues-strong-text: #202020;
+  --issues-strong-hover: #3a3a3a;
+  --issues-faint: #888;
+  --issues-popover: #fff;
+  --issues-popover-line: #e6e6e6;
+  --issues-popover-label: #777;
+  --issues-chip: #f2f2f2;
+  --issues-chip-hover: #e9e9e9;
+  --issues-icon-well: #f6f6f6;
+  --issues-accent-text: #4e58c7;
+  --issues-card-shadow: 0 0 0 .5px #00000014, 0 1px 2px #0000000d, 0 2px 4px #00000005;
+  --issues-card-shadow-hover: 0 0 0 1px #0000002e, 0 2px 4px #0000000f, 0 6px 12px #00000008;
   --background: var(--issues-canvas);
   --foreground: var(--issues-text);
   --surface: var(--issues-row);
@@ -27,6 +51,38 @@
   font-family: var(--ds-font-sans);
   font-size: 13px;
 }
+:root[data-color-theme="dark"] .appShell.appShell--workspace {
+  --issues-canvas: rgb(7 7 7);
+  --issues-panel: rgb(13 13 13);
+  --issues-row: rgb(17 17 17);
+  --issues-header: #171717;
+  --issues-line: rgb(30 30 30);
+  --issues-text: #efefed;
+  --issues-muted: #aaa9a5;
+  --issues-brand: #c9c9c4;
+  --issues-nav-text: #aaa9a5;
+  --issues-nav-icon: #777773;
+  --issues-nav-hover: #1c1c1c;
+  --issues-nav-active: #232323;
+  --issues-nav-active-text: #f2f2f0;
+  --issues-nav-active-icon: #c9c9c4;
+  --issues-nav-label: #5c5c58;
+  --issues-focus: #91afca;
+  --issues-strong-text: #efefed;
+  --issues-strong-hover: #d6d6d1;
+  --issues-faint: #5c5c58;
+  --issues-popover: rgb(17 17 17);
+  --issues-popover-line: rgb(30 30 30);
+  --issues-popover-label: #777773;
+  --issues-chip: #1c1c1c;
+  --issues-chip-hover: #262626;
+  --issues-icon-well: #1c1c1c;
+  --issues-accent-text: #91afca;
+  --issues-card-shadow: 0 0 0 .5px rgb(255 255 255 / 10%);
+  --issues-card-shadow-hover: 0 0 0 1px rgb(255 255 255 / 18%);
+  --ds-surface-hover: #232323;
+  color-scheme: dark;
+}
 .appShell--workspace .globalHeader {
   position: fixed;
   inset: 0 auto 0 0;
@@ -39,57 +95,63 @@
 }
 .appShell--workspace .globalHeader__left { flex-direction: column; align-items: stretch; gap: 24px; min-height: 0; }
 .appShell--workspace .brand { height: 16px; width: fit-content; padding-left: 8px; }
-.appShell--workspace .brandPictogram { width: 16px; height: 16px; color: #373636; opacity: .65; }
+.appShell--workspace .brandPictogram { width: 16px; height: 16px; color: var(--issues-brand); opacity: .65; }
 /* The list scrolls when the window is too short, so the bottom of the sidebar
    stays visible. The padding keeps focus outlines inside the scroll area. */
 .appShell--workspace .primaryNav { flex-direction: column; align-items: stretch; gap: 4px; min-height: 0; margin: -4px; padding: 4px; overflow-y: auto; scrollbar-width: thin; }
 .appShell--workspace .primaryNav a {
   display: flex; align-items: center; gap: 8px; height: 32px; padding: 8px;
-  border-radius: 4px; color: #5d5d5d; font-weight: 500;
+  border-radius: 4px; color: var(--issues-nav-text); font-weight: 500;
 }
-.appShell--workspace .primaryNav svg { width: 16px; height: 16px; flex-shrink: 0; color: #666; opacity: .6; }
-.appShell--workspace .primaryNav a:hover { background: #ededed; }
-.appShell--workspace .primaryNav a:focus-visible { outline: 2px solid #4e58f9; outline-offset: 2px; }
-.appShell--workspace .primaryNav a.isActive { background: #e3e3e3; color: #121212; font-weight: 600; }
-.appShell--workspace .primaryNav a.isActive svg { color: #444; opacity: 1; }
-.appShell--workspace .primaryNav__children { display: flex; flex-direction: column; gap: 4px; margin: 2px 0 4px 15px; padding-left: 8px; border-left: 1px solid #e3e3e3; }
+.appShell--workspace .primaryNav svg { width: 16px; height: 16px; flex-shrink: 0; color: var(--issues-nav-icon); opacity: .6; }
+.appShell--workspace .primaryNav a:hover { background: var(--issues-nav-hover); }
+.appShell--workspace .primaryNav a:focus-visible { outline: 2px solid var(--issues-focus); outline-offset: 2px; }
+.appShell--workspace .primaryNav a.isActive { background: var(--issues-nav-active); color: var(--issues-nav-active-text); font-weight: 600; }
+.appShell--workspace .primaryNav a.isActive svg { color: var(--issues-nav-active-icon); opacity: 1; }
+.appShell--workspace .primaryNav__children { display: flex; flex-direction: column; gap: 4px; margin: 2px 0 4px 15px; padding-left: 8px; border-left: 1px solid var(--issues-nav-active); }
 .appShell--workspace .primaryNav__children a { height: 30px; padding: 6px 8px; }
 .appShell--workspace .primaryNav__group { display: flex; flex-direction: column; gap: 4px; padding-top: 12px; }
 .appShell--workspace .primaryNav__group + a { margin-top: 12px; }
-.appShell--workspace .primaryNav__label { padding: 4px 8px; color: #a0a0a0; font-size: 11px; font-weight: 500; line-height: 16px; letter-spacing: .02em; }
+.appShell--workspace .primaryNav__label { padding: 4px 8px; color: var(--issues-nav-label); font-size: 11px; font-weight: 500; line-height: 16px; letter-spacing: .02em; }
 .appShell--workspace .globalHeader__right { margin-top: auto; flex-direction: column; align-items: stretch; flex-shrink: 0; gap: 12px; padding-top: 12px; }
-.telemetryCallCard { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 12px; border: 1px solid #e6e6e6; border-radius: 12px; background: #fff; box-shadow: 0 1px 2px #0000000d; }
-.telemetryCallCard__dismiss { position: absolute; top: 8px; right: 8px; display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: #8a8a8a; cursor: pointer; }
-.telemetryCallCard__dismiss:hover { background: #f2f2f2; color: #202020; }
-.telemetryCallCard__eyebrow { padding: 1px 8px; border: 1px solid #e3e3e3; border-radius: 999px; background: #fafafa; color: #5d5d5d; font-size: 11px; font-weight: 500; line-height: 16px; }
-.telemetryCallCard__title { margin: 2px 0 0; padding-right: 16px; color: #202020; font-size: 13px; font-weight: 600; line-height: 18px; text-wrap: balance; }
-.telemetryCallCard__body { margin: 0; color: #666; font-size: 12px; line-height: 17px; }
-.telemetryCallCard__action { display: flex; align-items: center; justify-content: center; gap: 6px; align-self: stretch; height: 32px; margin-top: 4px; border-radius: 8px; background: #202020; color: #fff; font-size: 12px; font-weight: 500; text-decoration: none; }
-.telemetryCallCard__action:hover { background: #3a3a3a; }
-.telemetryCallCard :is(.telemetryCallCard__dismiss, .telemetryCallCard__action):focus-visible { outline: 2px solid #4e58f9; outline-offset: 2px; }
+.telemetryCallCard { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 12px; border: 1px solid var(--issues-popover-line); border-radius: 12px; background: var(--issues-popover); box-shadow: 0 1px 2px #0000000d; }
+.telemetryCallCard__dismiss { position: absolute; top: 8px; right: 8px; display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--issues-faint); cursor: pointer; }
+.telemetryCallCard__dismiss:hover { background: var(--issues-chip); color: var(--issues-strong-text); }
+.telemetryCallCard__eyebrow { padding: 1px 8px; border: 1px solid var(--issues-nav-active); border-radius: 999px; background: var(--issues-header); color: var(--issues-nav-text); font-size: 11px; font-weight: 500; line-height: 16px; }
+.telemetryCallCard__title { margin: 2px 0 0; padding-right: 16px; color: var(--issues-strong-text); font-size: 13px; font-weight: 600; line-height: 18px; text-wrap: balance; }
+.telemetryCallCard__body { margin: 0; color: var(--ds-text-muted); font-size: 12px; line-height: 17px; }
+.telemetryCallCard__action { display: flex; align-items: center; justify-content: center; gap: 6px; align-self: stretch; height: 32px; margin-top: 4px; border-radius: 8px; background: var(--issues-strong-text); color: var(--issues-canvas); font-size: 12px; font-weight: 500; text-decoration: none; }
+.telemetryCallCard__action:hover { background: var(--issues-strong-hover); }
+.telemetryCallCard :is(.telemetryCallCard__dismiss, .telemetryCallCard__action):focus-visible { outline: 2px solid var(--issues-focus); outline-offset: 2px; }
 @media (max-height: 560px) { .telemetryCallCard { display: none; } }
 .appShell--workspace .accountMenuTrigger { width: 100%; max-width: none; height: 48px; border-radius: 8px; padding: 8px; justify-content: flex-start; }
-.appShell--workspace .accountMenuTrigger { color: #202020; border: 0; gap: 8px; font-size: 14px; line-height: 17.5px; }
+.appShell--workspace .accountMenuTrigger { color: var(--issues-strong-text); border: 0; gap: 8px; font-size: 14px; line-height: 17.5px; }
 .appShell--workspace .accountMenuTrigger:hover,
 .appShell--workspace .accountMenuTrigger:focus-visible,
-.appShell--workspace .accountMenuTrigger[aria-expanded="true"] { background: #ededed; color: #202020; }
-.appShell--workspace .accountMenuTrigger:focus-visible { outline: 2px solid #4e58f9; outline-offset: 2px; }
+.appShell--workspace .accountMenuTrigger[aria-expanded="true"] { background: var(--issues-nav-hover); color: var(--issues-strong-text); }
+.appShell--workspace .accountMenuTrigger:focus-visible { outline: 2px solid var(--issues-focus); outline-offset: 2px; }
 .appShell--workspace .accountMenuTrigger__avatar { display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; overflow: hidden; }
 .appShell--workspace .accountMenuTrigger__workspace { flex: 1; text-align: left; }
-.appShell--workspace .accountPopover { top: auto; bottom: 54px; left: 0; right: auto; width: 224px; max-width: calc(100vw - 32px); max-height: calc(100svh - 96px); overflow-y: auto; padding: 6px; border: 1px solid #ddd; border-radius: 14px; background: #fff; box-shadow: 0 2px 4px #00000008, 0 8px 24px #0000000d; }
+/* Theme switch as a sidebar row, above the account menu. */
+.appShell--workspace .globalThemeToggle--workspace { width: 100%; height: 36px; display: flex; justify-content: flex-start; align-items: center; gap: 8px; padding: 8px; border: 0; border-radius: 8px; background: transparent; color: var(--issues-nav-text); font-size: 13px; font-weight: 500; line-height: 18px; }
+.appShell--workspace .globalThemeToggle--workspace:hover, .appShell--workspace .globalThemeToggle--workspace:focus-visible { background: var(--issues-nav-hover); color: var(--issues-strong-text); }
+.appShell--workspace .globalThemeToggle--workspace:focus-visible { outline: 2px solid var(--issues-focus); outline-offset: 2px; }
+.appShell--workspace .globalThemeToggle--workspace svg { width: 16px; height: 16px; color: var(--issues-nav-icon); opacity: .6; }
+.appShell--workspace .globalThemeToggle--workspace:hover svg { color: var(--issues-nav-active-icon); opacity: 1; }
+.appShell--workspace .accountPopover { top: auto; bottom: 54px; left: 0; right: auto; width: 224px; max-width: calc(100vw - 32px); max-height: calc(100svh - 96px); overflow-y: auto; padding: 6px; border: 1px solid var(--ds-border-strong); border-radius: 14px; background: var(--issues-popover); box-shadow: 0 2px 4px #00000008, 0 8px 24px #0000000d; }
 .appShell--workspace .accountPopover__user { padding: 10px 8px 12px; border: 0; gap: 4px; }
-.appShell--workspace .accountPopover__user strong { color: #202020; font-size: 13px; font-weight: 500; }
-.appShell--workspace .accountPopover__user span { color: #666; font-size: 12px; }
-.appShell--workspace .accountPopover__section { padding: 6px 0; border-top: 1px solid #e6e6e6; }
+.appShell--workspace .accountPopover__user strong { color: var(--issues-strong-text); font-size: 13px; font-weight: 500; }
+.appShell--workspace .accountPopover__user span { color: var(--ds-text-muted); font-size: 12px; }
+.appShell--workspace .accountPopover__section { padding: 6px 0; border-top: 1px solid var(--issues-popover-line); }
 .appShell--workspace .accountPopover__section:last-child { padding-bottom: 0; }
-.appShell--workspace .accountPopover__label { padding: 4px 8px 6px; color: #777; font-size: 11px; font-weight: 400; letter-spacing: normal; text-transform: none; }
-.appShell--workspace .accountPopover__item { min-height: 34px; padding: 8px; gap: 10px; border-radius: 6px; color: #202020; font-size: 13px; line-height: 18px; }
-.appShell--workspace .accountPopover__item > svg { width: 16px; height: 16px; flex-shrink: 0; color: #666; }
+.appShell--workspace .accountPopover__label { padding: 4px 8px 6px; color: var(--issues-popover-label); font-size: 11px; font-weight: 400; letter-spacing: normal; text-transform: none; }
+.appShell--workspace .accountPopover__item { min-height: 34px; padding: 8px; gap: 10px; border-radius: 6px; color: var(--issues-strong-text); font-size: 13px; line-height: 18px; }
+.appShell--workspace .accountPopover__item > svg { width: 16px; height: 16px; flex-shrink: 0; color: var(--ds-text-muted); }
 .appShell--workspace .accountPopover__item > span:not(.workspaceMonogram):not(.menuCheck) { min-width: 0; overflow-wrap: anywhere; }
 .appShell--workspace .accountPopover__item:disabled { opacity: .5; cursor: wait; }
-.appShell--workspace .accountPopover__item--danger:hover { color: #b33d43; background: #fdf1f2; }
+.appShell--workspace .accountPopover__item--danger:hover { color: var(--ds-danger); background: var(--ds-danger-surface); }
 .appShell--workspace .workspaceMonogram { display: flex; align-items: center; justify-content: center; width: 16px; height: 16px; font-size: 9px; border-radius: 4px; }
-.appShell--workspace .accountPopover__error { color: #b33d43; }
+.appShell--workspace .accountPopover__error { color: var(--ds-danger); }
 .mobileSidebarBar, .mobileSidebarClose, .mobileSidebarBackdrop { display: none; }
 .workspaceSurface { flex: 1; min-width: 0; min-height: 0; overflow: auto; overscroll-behavior: contain; background: var(--issues-panel); border-radius: 14px; box-shadow: 0 1px 3px #0000001a, 0 1px 2px -1px #0000001a; }
 .workspaceContent { width: 100%; max-width: 1024px; margin: 0 auto; padding: 32px 40px 64px; display: flex; flex-direction: column; gap: 32px; }
@@ -106,7 +168,7 @@
 .issuesFilters__popover .issuesFilters__archive { display: flex; align-items: center; }
 .issuesGroup { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .issuesGroup h2 { margin: 0; padding-left: 12px; font-size: 12px; font-weight: 500; line-height: 16px; color: var(--issues-muted); }
-.issuesTableSurface { overflow: hidden; border-radius: 12px; background: var(--issues-header); box-shadow: 0 0 0 .5px #00000014, 0 1px 2px #0000000d, 0 2px 4px #00000005; }
+.issuesTableSurface { overflow: hidden; border-radius: 12px; background: var(--issues-header); box-shadow: var(--issues-card-shadow); }
 .issuesTable { width: 100%; table-layout: fixed; border-spacing: 0; border-collapse: separate; font-size: 13px; line-height: 19.5px; }
 .issuesTable col { width: 16%; }
 .issuesTable .issuesTable__titleColumn { width: 68%; }
@@ -169,7 +231,7 @@
     color: var(--issues-text); cursor: pointer;
   }
   .appShell--workspace :is(.mobileSidebarTrigger, .mobileSidebarClose):focus-visible {
-    outline: 2px solid #4e58f9; outline-offset: 2px;
+    outline: 2px solid var(--issues-focus); outline-offset: 2px;
   }
   .workspaceSurface { min-height: 240px; }
   .workspaceContent { padding: 24px 12px; gap: 24px; }
@@ -182,8 +244,9 @@
 }
 
 
-/* Neutral light tokens are scoped to the redesigned application surfaces. */
-.appShell.appShell--workspace {
+/* Neutral light tokens are scoped to the redesigned application surfaces.
+   In dark mode the surfaces fall back to the design-system dark tokens. */
+:root:not([data-color-theme="dark"]) .appShell.appShell--workspace {
   --ds-canvas: #fcfcfc;
   --ds-surface-base: #fff;
   --ds-surface-raised: #fafafa;
@@ -209,39 +272,42 @@
   --ds-danger-surface: #fdf1f2;
   --ds-info-border: #dadcff;
   --ds-info-surface: #f2f3ff;
+}
+/* Corners are tighter than the rest of the product in both themes. */
+.appShell.appShell--workspace {
   --ds-radius-small: 6px;
   --ds-radius-medium: 8px;
   --ds-radius-large: 12px;
 }
 .workspaceHeading { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 8px; }
-.workspaceHeading h1 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 13px; font-weight: 500; line-height: 20px; color: #434343; }
+.workspaceHeading h1 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 13px; font-weight: 500; line-height: 20px; color: var(--issues-muted); }
 .workspaceHeading__actions { display: flex; align-items: center; gap: 16px; }
-.workspaceBreadcrumb { display: flex; align-items: center; gap: 10px; color: #666; font-size: 12px; line-height: 16px; }
+.workspaceBreadcrumb { display: flex; align-items: center; gap: 10px; color: var(--ds-text-muted); font-size: 12px; line-height: 16px; }
 .workspaceBreadcrumb a { color: inherit; text-decoration: none; }
-.workspaceBreadcrumb a:hover { color: #121212; }
+.workspaceBreadcrumb a:hover { color: var(--issues-nav-active-text); }
 .appShell--workspace .dsButton { min-height: 26px; height: auto; padding: 3px 7px; border-radius: 6px; font-size: 13px; font-weight: 400; line-height: 18px; gap: 5px; box-shadow: 0 1px 3px #00000008; }
 .appShell--workspace .dsButton svg { width: 14px; height: 14px; flex-shrink: 0; }
 .appShell--workspace .dsButton--primary { background: #4e58f9; border-color: #3f4af8; color: #fdfdfd; }
 .appShell--workspace .dsButton--primary:hover:not(:disabled) { background: #414be2; }
-.appShell--workspace .dsButton--secondary { background: #fff; border-color: #ddd; color: #444; }
-.appShell--workspace .dsButton--secondary:hover:not(:disabled) { background: #f5f5f5; }
+.appShell--workspace .dsButton--secondary { background: var(--ds-surface-base); border-color: var(--ds-border-strong); color: var(--ds-text-secondary); }
+.appShell--workspace .dsButton--secondary:hover:not(:disabled) { background: var(--ds-surface-hover); }
 .appShell--workspace .dsButton--ghost { box-shadow: none; }
 .appShell--workspace .dsIconButton { border-radius: 5px; }
 .appShell--workspace .emptyState { min-height: 220px; background: transparent; border: none; }
 .appShell--workspace .emptyState h2 { font-size: 15px; }
 .appShell--workspace .emptyState p { font-size: 13px; }
-.appShell--workspace .formError { color: #b33d43; }
+.appShell--workspace .formError { color: var(--ds-danger); }
 .appShell--workspace .billingBanner { margin: 16px 24px 0; }
 
 /* Shared surface for workspace data tables. The first row owns the header divider. */
-.appShell--workspace .dsDataTable.dsDataTable--workspace { border: 0; border-radius: 12px; background: #fafafa; box-shadow: 0 0 0 .5px #00000014, 0 1px 2px #0000000d, 0 2px 4px #00000005; overflow: auto; }
+.appShell--workspace .dsDataTable.dsDataTable--workspace { border: 0; border-radius: 12px; background: var(--ds-surface-raised); box-shadow: var(--issues-card-shadow); overflow: auto; }
 .appShell--workspace .dsDataTable--workspace table { width: 100%; min-width: 600px; border-collapse: separate; border-spacing: 0; table-layout: fixed; }
-.appShell--workspace .dsDataTable.dsDataTable--workspace th { height: auto; padding: 7px 12px; border-bottom: 0; background: #fafafa; color: #1a1a1a; font-size: 13px; font-weight: 400; line-height: 20px; text-transform: none; letter-spacing: normal; }
-.appShell--workspace .dsDataTable.dsDataTable--workspace td { height: auto; padding: 10px 12px; border-top: .5px solid #e6e8ec; border-bottom: 0; background: #fff; font-size: 13px; line-height: 20px; }
-.appShell--workspace .dsDataTable--workspace :is(th, td):not(:last-child) { border-right: .5px solid #e6e8ec; }
+.appShell--workspace .dsDataTable.dsDataTable--workspace th { height: auto; padding: 7px 12px; border-bottom: 0; background: var(--ds-surface-raised); color: var(--ds-text-primary); font-size: 13px; font-weight: 400; line-height: 20px; text-transform: none; letter-spacing: normal; }
+.appShell--workspace .dsDataTable.dsDataTable--workspace td { height: auto; padding: 10px 12px; border-top: .5px solid var(--issues-line); border-bottom: 0; background: var(--ds-surface-base); font-size: 13px; line-height: 20px; }
+.appShell--workspace .dsDataTable--workspace :is(th, td):not(:last-child) { border-right: .5px solid var(--issues-line); }
 .appShell--workspace .dsDataTable--workspace tbody tr:first-child td:first-child { border-top-left-radius: 12px; }
 .appShell--workspace .dsDataTable--workspace tbody tr:first-child td:last-child { border-top-right-radius: 12px; }
-.appShell--workspace .dsDataTable--workspace tr:hover td { background: #fafafa; }
+.appShell--workspace .dsDataTable--workspace tr:hover td { background: var(--ds-surface-raised); }
 
 /* Agent-specific column sizing and typography. */
 .appShell--workspace .agentListTable { min-width: 0; }
@@ -250,11 +316,11 @@
 .appShell--workspace .agentListTable .dsDataTable--workspace td { padding: 12px; }
 .appShell--workspace .agentListTable .dsDataTable--workspace :is(th, td):nth-child(5) { border-right: 0; }
 .appShell--workspace .agentTableTitle { gap: 2px; }
-.appShell--workspace .agentTableTitle strong { font-size: 13px; font-weight: 400; line-height: 20px; color: #1a1a1a; }
-.appShell--workspace .agentTableTitle small, .appShell--workspace .agentTableRun small { color: #666; font-size: 12px; font-weight: 400; line-height: 18px; }
-.appShell--workspace .agentTableCell, .appShell--workspace .agentTableRun { color: #1a1a1a; font-size: 13px; line-height: 20px; }
+.appShell--workspace .agentTableTitle strong { font-size: 13px; font-weight: 400; line-height: 20px; color: var(--ds-text-primary); }
+.appShell--workspace .agentTableTitle small, .appShell--workspace .agentTableRun small { color: var(--ds-text-muted); font-size: 12px; font-weight: 400; line-height: 18px; }
+.appShell--workspace .agentTableCell, .appShell--workspace .agentTableRun { color: var(--ds-text-primary); font-size: 13px; line-height: 20px; }
 .appShell--workspace .agentTableRun { gap: 2px; }
-.appShell--workspace .agentRowMenu__popover { background: #fff; border-color: #e3e3e3; color: #444; box-shadow: 0 4px 12px #00000014; }
+.appShell--workspace .agentRowMenu__popover { background: var(--ds-surface-overlay); border-color: var(--ds-border-default); color: var(--ds-text-secondary); box-shadow: 0 4px 12px #00000014; }
 .appShell--workspace .dsBadge { font-size: 12px; font-weight: 400; border-radius: 999px; }
 
 /* Issue details keep the summary and properties together, with full-width remediation. */
@@ -399,5 +465,6 @@
 .appShell--workspace .issueRail .issueSeverity { padding-left: 0; }
 
 html:has(.appShell.appShell--workspace), body:has(.appShell.appShell--workspace) { color-scheme: light; background: #f5f5f5; }
+:root[data-color-theme="dark"]:has(.appShell.appShell--workspace), :root[data-color-theme="dark"] body:has(.appShell.appShell--workspace) { color-scheme: dark; background: rgb(7 7 7); }
 .issuesFilters summary { list-style: none; }
 .issuesFilters summary::-webkit-details-marker { display: none; }
