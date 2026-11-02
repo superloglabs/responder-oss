@@ -163,7 +163,7 @@ function fingerprintLogWith(input: LogFingerprintInput, algorithm: Algorithm): F
   const type = input.exceptionType || input.severity || "LogError";
   const service = input.service || "unknown";
   const normalized = normalizeMessage(input.body ?? "");
-  const canonical = `log::${service}::${type}::${normalized}`;
+  const canonical = `log::${service}::${algorithm.groupType(type)}::${normalized}`;
   const hash = hashCanonical(canonical, algorithm.version);
 
   return {

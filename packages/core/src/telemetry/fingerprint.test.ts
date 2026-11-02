@@ -467,6 +467,13 @@ test("a module-qualified span exception and a short-named log of it share a fing
   expect(span.exceptionType).toBe("cart.drivers.net32.NET32APIError");
 });
 
+test("logs without a stack group by the exception's own name too", () => {
+  const log = { body: "cart failed", service: "api", severity: "ERROR" };
+
+  expect(fingerprintLog({ ...log, exceptionType: "cart.drivers.net32.NET32APIError" }).hash)
+    .toBe(fingerprintLog({ ...log, exceptionType: "NET32APIError" }).hash);
+});
+
 test("the previous fingerprint keeps the full type and version, so known issues move", () => {
   const input = { message: "boom", stacktrace: null, type: "cart.drivers.net32.NET32APIError" };
   const previous = previousFingerprint(input);
