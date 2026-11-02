@@ -11,6 +11,7 @@ import {
   zeroCandidateId,
 } from "./error-issues.js";
 import { fingerprintV1 } from "./fingerprint-v1.js";
+import { previousFingerprint } from "./fingerprint.js";
 
 const organizationId = "0b9f6b9e-2f4a-4c1e-9d2b-3f8a6c1d7e01";
 const stack = [
@@ -60,7 +61,7 @@ describe("groupErrorCandidates", () => {
       topFrame: "loadInvoice@apps/api/src/invoices.ts",
     });
     expect(issue?.sample.traceId).toBe("newest");
-    expect(issue?.fingerprint).toMatch(/^v2:/);
+    expect(issue?.fingerprint).toMatch(/^v3:/);
   });
 
   it("carries each occurrence's previous fingerprint once", () => {
@@ -71,13 +72,11 @@ describe("groupErrorCandidates", () => {
     ]);
 
     expect(issue?.eventCount).toBe(3);
+    const async = stack.replace("at handler", "at async handler");
     expect(issue?.previousFingerprints).toEqual([
+      previousFingerprint({ message: candidate().exception_message, stacktrace: stack, type: "TypeError" }),
       fingerprintV1({ message: candidate().exception_message, stacktrace: stack, type: "TypeError" }),
-      fingerprintV1({
-        message: candidate().exception_message,
-        stacktrace: stack.replace("at handler", "at async handler"),
-        type: "TypeError",
-      }),
+      fingerprintV1({ message: candidate().exception_message, stacktrace: async, type: "TypeError" }),
     ]);
   });
 

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ErrorIssue, ErrorIssueSummary } from "../../../../packages/core/src/db/error-issues.js";
-import { fingerprintLog } from "../../../../packages/core/src/telemetry/fingerprint.js";
+import { fingerprintLog, previousFingerprintLog } from "../../../../packages/core/src/telemetry/fingerprint.js";
 import { fingerprintLogV1 } from "../../../../packages/core/src/telemetry/fingerprint-v1.js";
 import { createErrorIssueRoutes, type ErrorIssueRouteDependencies, firstDay, firstHour } from "./error-issue-routes.js";
 
@@ -246,7 +246,7 @@ describe("error issue for a log", () => {
     expect(dependencies.findIssueIdByFingerprint).toHaveBeenCalledWith(
       organizationId,
       fingerprintLog(input).hash,
-      [fingerprintLogV1(input)],
+      [previousFingerprintLog(input), fingerprintLogV1(input)],
     );
   });
 
