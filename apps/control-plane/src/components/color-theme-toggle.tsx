@@ -18,7 +18,7 @@ export function ColorThemeToggle({
       aria-label={label}
       className={className}
       onClick={toggleTheme}
-      title={label}
+      title={showLabel ? undefined : label}
       type="button"
     >
       {theme === "dark" ? (

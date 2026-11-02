@@ -1,5 +1,5 @@
 .appShell--workspace .agentTableRun small.automationRunStatus--running { color: var(--issues-accent-text); }
-.appShell--workspace .agentTableRun small.automationRunStatus--failed { color: var(--ds-danger); }
+.appShell--workspace .agentTableRun small.automationRunStatus--failed { color: var(--issues-run-failed); }
 
 /* Templates follow the empty state, so it does not fill the page. */
 .appShell--workspace .emptyState.automationsEmpty { min-height: 0; margin: 0 auto; padding: 24px 0; }
