@@ -105,7 +105,7 @@ export async function startErrorIssueAutomations(
       if (!issue) continue;
       const matches = await dependencies.find({
         eventType: change.transition === "regressed" ? "regression" : "new_issue",
-        exception: isExceptionIssue(issue),
+        exception: isExceptionIssue({ kind: issue.kind, stacktrace: issue.lastSample.stacktrace }),
         organizationId: change.organizationId,
         service: issue.service,
       });

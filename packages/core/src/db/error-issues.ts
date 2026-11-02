@@ -191,7 +191,7 @@ export async function recordErrorOccurrences(
       organizationId: occurrences.organizationId,
       issueId,
       eventKey: transition === "new" ? "new" : `regressed:${now.toISOString()}`,
-      exception: isExceptionIssue(occurrences),
+      exception: isExceptionIssue({ kind: occurrences.kind, stacktrace: occurrences.sample.stacktrace }),
       snapshot: { title: occurrences.title, service: occurrences.service, exceptionType: occurrences.exceptionType,
         seenAt: occurrences.lastSeenAt.toISOString(), transition },
     });

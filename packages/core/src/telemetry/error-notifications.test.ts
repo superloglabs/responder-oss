@@ -5,9 +5,12 @@ import { notifiesErrorIssue } from "./error-notifications.js";
 
 describe("exceptions only", () => {
   it("counts span exceptions and logs with a stack trace as exceptions", () => {
-    expect(isExceptionIssue({ frames: [], kind: "span" })).toBe(true);
-    expect(isExceptionIssue({ frames: ["get_price@app/price.py"], kind: "log" })).toBe(true);
-    expect(isExceptionIssue({ frames: [], kind: "log" })).toBe(false);
+    expect(isExceptionIssue({ kind: "span", stacktrace: null })).toBe(true);
+    expect(isExceptionIssue({ kind: "log", stacktrace: "Traceback (most recent call last):" })).toBe(true);
+    // A stack the fingerprint cannot parse is still an exception.
+    expect(isExceptionIssue({ kind: "log", stacktrace: "java.lang.IllegalStateException\n\tat Foo.bar(Foo.java:1)" })).toBe(true);
+    expect(isExceptionIssue({ kind: "log", stacktrace: null })).toBe(false);
+    expect(isExceptionIssue({ kind: "log", stacktrace: "  " })).toBe(false);
   });
 
   it("posts plain error log lines unless the workspace chose only exceptions", () => {

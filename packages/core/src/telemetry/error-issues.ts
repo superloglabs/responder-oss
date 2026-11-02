@@ -62,8 +62,8 @@ export type ErrorIssuePullRequest = { linkedAt: string; url: string };
 
 // An exception is a span's exception event or a log with a stack trace. Other
 // issues are plain error log lines, which change with each message's wording.
-export function isExceptionIssue(issue: { frames: readonly string[]; kind: ErrorIssueKind }): boolean {
-  return issue.kind === "span" || issue.frames.length > 0;
+export function isExceptionIssue(issue: { kind: ErrorIssueKind; stacktrace: string | null }): boolean {
+  return issue.kind === "span" || Boolean(issue.stacktrace?.trim());
 }
 
 // What an occurrence means for its issue:
