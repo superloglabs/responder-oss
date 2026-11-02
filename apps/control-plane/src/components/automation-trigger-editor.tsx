@@ -11,6 +11,7 @@ import { AutomationTriggerIcon } from "./automation-trigger-icon";
 import { AutomationResourcePicker } from "./automation-resource-picker";
 import { AxiomWebhookDialog } from "./axiom-webhook-dialog";
 import { DevRevConnectionDialog } from "./devrev-connection-dialog";
+import { Switch } from "../design-system";
 import { SignozConnectionDialog } from "./signoz-connection-dialog";
 import { SignozWebhookDialog } from "./signoz-webhook-dialog";
 import { HoneycombConnectionDialog } from "./honeycomb-connection-dialog";
@@ -96,6 +97,8 @@ function ErrorsFields({ trigger, onChange }: { trigger: ErrorsTrigger; onChange:
     </label>
     <AutomationResourcePicker empty="No errors yet. Services appear here once their errors are grouped." label="Service" resources={resources} selected={selected} summary={selected.length > 0 ? undefined : "All services"} onChange={(names) => onChange({ ...trigger, services: names.length > 0 ? names : undefined })} />
     <p className="automationTrigger__hint">{selected.length > 0 ? "Only errors from these services start a run." : "Errors from every service start a run."} A new error is a fingerprint seen for the first time; a regression is a resolved error that occurs again.</p>
+    <Switch label="Only exceptions" checked={trigger.exceptionsOnly ?? false} onCheckedChange={(exceptionsOnly) => onChange({ ...trigger, exceptionsOnly: exceptionsOnly || undefined })} />
+    <p className="automationTrigger__hint">Plain error log lines do not start a run.</p>
   </>;
 }
 

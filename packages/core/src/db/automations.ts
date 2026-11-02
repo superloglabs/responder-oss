@@ -17,6 +17,7 @@ import type {
   AutomationNotification,
   AutomationTrigger,
 } from "../automations/config.js";
+import { errorTriggerMatches } from "../automations/config.js";
 import { isAutomationContextProvider } from "../automations/context-providers.js";
 import { dueScheduleSlot } from "../automations/schedule.js";
 import { matchesSlackPhrase } from "../automations/slack-phrase-match.js";
@@ -533,6 +534,7 @@ export async function automationAcceptsWebhook(automationId: string): Promise<bo
 // limited to the issue's service when the trigger names services.
 export async function findAutomationsForErrorIssue(input: {
   eventType: "new_issue" | "regression";
+  exception: boolean;
   organizationId: string;
   service: string | null;
 }): Promise<Array<{ automationId: string }>> {
@@ -562,11 +564,7 @@ export async function findAutomationsForErrorIssue(input: {
       ),
     );
   return rows.flatMap((row) =>
-    row.triggers.some((trigger) =>
-      trigger.kind === "errors" &&
-      trigger.eventTypes.includes(input.eventType) &&
-      (!trigger.services?.length || (input.service !== null && trigger.services.includes(input.service)))
-    )
+    row.triggers.some((trigger) => errorTriggerMatches(trigger, input))
       ? [{ automationId: row.automationId }]
       : []
   );

@@ -6,6 +6,7 @@ import {
 import { findErrorIssue, type ErrorIssue } from "@responder/core/db/error-issues";
 import { pausedTelemetryNotificationOrganizations } from "@responder/core/db/telemetry-notification-pauses";
 import { responderErrorIssueUrl } from "@responder/core/responder-urls";
+import { isExceptionIssue } from "@responder/core/telemetry/error-issues";
 import type { ErrorIssueChange } from "./error-issues.js";
 
 export interface ErrorIssueAutomationDependencies {
@@ -104,6 +105,7 @@ export async function startErrorIssueAutomations(
       if (!issue) continue;
       const matches = await dependencies.find({
         eventType: change.transition === "regressed" ? "regression" : "new_issue",
+        exception: isExceptionIssue(issue),
         organizationId: change.organizationId,
         service: issue.service,
       });

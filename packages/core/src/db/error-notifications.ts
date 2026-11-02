@@ -5,7 +5,7 @@ import {
   integrationAccounts, telemetryNotificationPauses,
 } from "./schema.js";
 import {
-  defaultErrorNotificationSettings, errorNotificationTargetKey, matchesErrorNotification,
+  defaultErrorNotificationSettings, errorNotificationTargetKey, notifiesErrorIssue,
   type ErrorNotificationSettings, type ErrorNotificationSnapshot,
 } from "../telemetry/error-notifications.js";
 import type { ErrorIssueActivity, ErrorIssueActor, ErrorIssueClaim, ErrorIssueStatus } from "../telemetry/error-issues.js";
@@ -30,14 +30,15 @@ export async function saveErrorNotificationSettings(organizationId: string, sett
   });
 }
 export async function enqueueErrorNotifications(tx: Database | ErrorNotificationTransaction, input: {
-  organizationId: string; issueId: string; eventKey: string; snapshot: ErrorNotificationSnapshot;
+  organizationId: string; issueId: string; eventKey: string; exception: boolean; snapshot: ErrorNotificationSnapshot;
 }): Promise<void> {
+  const { exception, ...delivery } = input;
   const [pause] = await tx.select().from(telemetryNotificationPauses).where(eq(telemetryNotificationPauses.organizationId, input.organizationId));
   if (pause) return;
   const [row] = await tx.select().from(errorNotificationSettings).where(eq(errorNotificationSettings.organizationId, input.organizationId));
-  if (!row || !matchesErrorNotification(row.settings) || row.settings.targets.length === 0) return;
+  if (!row || !notifiesErrorIssue(row.settings, exception) || row.settings.targets.length === 0) return;
   await tx.insert(errorNotificationDeliveries).values(row.settings.targets.map((target) => ({
-    ...input, target, targetKey: errorNotificationTargetKey(target),
+    ...delivery, target, targetKey: errorNotificationTargetKey(target),
   }))).onConflictDoNothing();
 }
 
