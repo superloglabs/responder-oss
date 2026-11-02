@@ -11,7 +11,10 @@ import { createHash } from "node:crypto";
 // any hash must bump it and keep the previous algorithm, as fingerprint-v1.ts
 // keeps v1, so existing issues move to the new fingerprint instead of opening
 // again as new.
-export const fingerprintVersion = "v2";
+export const fingerprintVersion = "v3";
+// v3 groups by the exception type's own name, so a module-qualified name on a
+// span and the short name on a log of the same exception are one issue.
+const previousVersion = "v2";
 
 export type Fingerprint = {
   hash: string;
@@ -76,11 +79,39 @@ export function stripNullBytes<T extends string | null | undefined>(value: T): T
   return (typeof value === "string" ? value.split(NUL_BYTE).join("") : value) as T;
 }
 
+// The type without its module or package, such as `NET32APIError` for
+// `cart.drivers.net32.NET32APIError`.
+function exceptionName(type: string): string {
+  return type.split(/\.|::/u).at(-1) || type;
+}
+
+type Algorithm = { groupType: (type: string) => string; version: string };
+const currentAlgorithm: Algorithm = { groupType: exceptionName, version: fingerprintVersion };
+const previousAlgorithm: Algorithm = { groupType: (type) => type, version: previousVersion };
+
 export function fingerprint(input: {
   type: string;
   stacktrace: string | null | undefined;
   message?: string | null;
 }): Fingerprint {
+  return fingerprintWith(input, currentAlgorithm);
+}
+
+// The fingerprint the previous algorithm gave this occurrence. An occurrence
+// whose current fingerprint has no issue yet takes over that issue.
+export function previousFingerprint(input: {
+  type: string;
+  stacktrace: string | null | undefined;
+  message?: string | null;
+}): string {
+  return fingerprintWith(input, previousAlgorithm).hash;
+}
+
+function fingerprintWith(input: {
+  type: string;
+  stacktrace: string | null | undefined;
+  message?: string | null;
+}, algorithm: Algorithm): Fingerprint {
   const type = input.type || "Error";
   const frames = parseFrames(input.stacktrace ?? "");
   const userFrames = frames.filter(isUserFrame).slice(0, TOP_N_FRAMES);
@@ -91,8 +122,8 @@ export function fingerprint(input: {
   // often carries per-occurrence values that no rule catches.
   const messageBucket = userFrames.length > 0 ? "" : messageBucketFor(input.message);
   const builtin = builtinGroup(type, input.message);
-  const canonical = builtin ?? `${type}::${messageBucket}::${normalized.join("|")}`;
-  const hash = hashCanonical(canonical);
+  const canonical = builtin ?? `${algorithm.groupType(type)}::${messageBucket}::${normalized.join("|")}`;
+  const hash = hashCanonical(canonical, algorithm.version);
 
   // The hash is hex (always safe); the human-readable fields below are persisted
   // to Postgres, so they must be NUL-free.
@@ -106,26 +137,34 @@ export function fingerprint(input: {
 }
 
 export function fingerprintLog(input: LogFingerprintInput): Fingerprint {
+  return fingerprintLogWith(input, currentAlgorithm);
+}
+
+export function previousFingerprintLog(input: LogFingerprintInput): string {
+  return fingerprintLogWith(input, previousAlgorithm).hash;
+}
+
+function fingerprintLogWith(input: LogFingerprintInput, algorithm: Algorithm): Fingerprint {
   if (input.stacktrace && input.stacktrace.trim().length > 0) {
-    return fingerprint({
+    return fingerprintWith({
       message: input.message,
       type: input.exceptionType || input.severity || "LogError",
       stacktrace: input.stacktrace,
-    });
+    }, algorithm);
   }
 
   // A Python traceback logged as the body groups like a span's exception.
   // Postgres driver errors keep their own grouping below.
   const traceback = extractPsycopgHeadline(input.body ?? "") ? null : pythonTracebackException(input.body ?? "");
   if (traceback) {
-    return fingerprint({ message: traceback.message, stacktrace: input.body, type: traceback.type });
+    return fingerprintWith({ message: traceback.message, stacktrace: input.body, type: traceback.type }, algorithm);
   }
 
   const type = input.exceptionType || input.severity || "LogError";
   const service = input.service || "unknown";
   const normalized = normalizeMessage(input.body ?? "");
-  const canonical = `log::${service}::${type}::${normalized}`;
-  const hash = hashCanonical(canonical);
+  const canonical = `log::${service}::${algorithm.groupType(type)}::${normalized}`;
+  const hash = hashCanonical(canonical, algorithm.version);
 
   return {
     hash,
@@ -149,8 +188,8 @@ export function pythonTracebackException(body: string): { message: string; type:
   return null;
 }
 
-function hashCanonical(canonical: string): string {
-  return `${fingerprintVersion}:${createHash("sha256").update(canonical).digest("hex").slice(0, HASH_LEN)}`;
+function hashCanonical(canonical: string, version: string): string {
+  return `${version}:${createHash("sha256").update(canonical).digest("hex").slice(0, HASH_LEN)}`;
 }
 
 // Browser errors that one cause produces from many places, grouped whatever

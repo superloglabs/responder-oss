@@ -5,6 +5,8 @@ import {
   fingerprintLog,
   pythonTracebackException,
   stripNullBytes,
+  previousFingerprint,
+  previousFingerprintLog,
 } from "./fingerprint.js";
 import { fingerprintLogV1, fingerprintV1 } from "./fingerprint-v1.js";
 
@@ -290,7 +292,9 @@ export function groupErrorCandidates(candidates: ErrorCandidate[]): ErrorOccurre
       stacktrace: bodyTraceback ? null : stacktrace,
     };
     const fp = candidate.kind === "span" ? fingerprint(spanInput) : fingerprintLog(logInput);
-    const previousFingerprint = candidate.kind === "span" ? fingerprintV1(spanInput) : fingerprintLogV1(logInput);
+    const previousFingerprints = candidate.kind === "span"
+      ? [previousFingerprint(spanInput), fingerprintV1(spanInput)]
+      : [previousFingerprintLog(logInput), fingerprintLogV1(logInput)];
     const message = stripNullBytes(
       candidate.kind === "span"
         ? candidate.exception_message
@@ -327,7 +331,7 @@ export function groupErrorCandidates(candidates: ErrorCandidate[]): ErrorOccurre
         lastSeenAt: seenAt,
         message: sample.message,
         organizationId: candidate.project_id,
-        previousFingerprints: [previousFingerprint],
+        previousFingerprints,
         sample,
         service,
         title: errorIssueTitle(fp, message),
@@ -336,7 +340,9 @@ export function groupErrorCandidates(candidates: ErrorCandidate[]): ErrorOccurre
       continue;
     }
     existing.eventCount += 1;
-    if (!existing.previousFingerprints.includes(previousFingerprint)) existing.previousFingerprints.push(previousFingerprint);
+    for (const previous of previousFingerprints) {
+      if (!existing.previousFingerprints.includes(previous)) existing.previousFingerprints.push(previous);
+    }
     existing.dailyCounts[day] = (existing.dailyCounts[day] ?? 0) + 1;
     existing.hourlyCounts[hour] = (existing.hourlyCounts[hour] ?? 0) + 1;
     if (seenAt < existing.firstSeenAt) existing.firstSeenAt = seenAt;

@@ -1073,7 +1073,7 @@ value once, with the OpenTelemetry SDK settings for it.
 
 The worker groups a telemetry workspace's exceptions into error issues by
 fingerprint. An exception is a span event named `exception` or a log at ERROR
-severity or above. The fingerprint is the exception type and the top five
+severity or above. The fingerprint is the exception type, without its module, and the top five
 frames of the application's own code. When the stack has none of the
 application's code, the message takes the frames' place, with URLs, paths,
 IDs, generated codes, numbers and timestamps replaced. A frame is its function
@@ -1085,8 +1085,8 @@ and Python stacks are read; other languages group by type and message. Chunk
 load errors and React hydration errors each group into one issue whatever
 their stack. A log without a stack groups by its service, severity and
 normalized body. Fingerprints start with the algorithm version
-(`v2:`). An occurrence whose fingerprint has no issue takes over the issue its
-`v1:` fingerprint named, so the change of algorithm opens no known error again
+(`v3:`). An occurrence whose fingerprint has no issue takes over the issue its
+`v2:` or `v1:` fingerprint named, so the change of algorithm opens no known error again
 as new.
 
 ### Source maps

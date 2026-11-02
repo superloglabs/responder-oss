@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { fingerprint, fingerprintLog, messageBucketFor, stripNullBytes } from "./fingerprint.js";
+import { fingerprint, fingerprintLog, messageBucketFor, previousFingerprint, previousFingerprintLog, stripNullBytes } from "./fingerprint.js";
 
 test("fingerprint groups equivalent Next.js stacks whose generated chunk hashes differ", () => {
   const stackFor = (chunkHash: string) =>
@@ -447,8 +447,41 @@ test("fingerprintLog strips NUL bytes from exception type", () => {
 });
 
 test("fingerprints carry the algorithm version", () => {
-  expect(fingerprint({ type: "Error", stacktrace: null, message: "boom" }).hash).toMatch(/^v2:[0-9a-f]{16}$/);
-  expect(fingerprintLog({ service: "api", severity: "ERROR", body: "boom" }).hash).toMatch(/^v2:[0-9a-f]{16}$/);
+  expect(fingerprint({ type: "Error", stacktrace: null, message: "boom" }).hash).toMatch(/^v3:[0-9a-f]{16}$/);
+  expect(fingerprintLog({ service: "api", severity: "ERROR", body: "boom" }).hash).toMatch(/^v3:[0-9a-f]{16}$/);
+});
+
+test("a module-qualified span exception and a short-named log of it share a fingerprint", () => {
+  const stacktrace = pythonTraceback({ line: 40, libraryVersion: "1.2.3" });
+  const span = fingerprint({ message: "cart_fetch_status_429", stacktrace, type: "cart.drivers.net32.NET32APIError" });
+  const log = fingerprintLog({
+    body: "NET32 cart failed",
+    exceptionType: "NET32APIError",
+    message: "cart_fetch_status_429",
+    service: "api",
+    severity: "ERROR",
+    stacktrace,
+  });
+
+  expect(log.hash).toBe(span.hash);
+  expect(span.exceptionType).toBe("cart.drivers.net32.NET32APIError");
+});
+
+test("logs without a stack group by the exception's own name too", () => {
+  const log = { body: "cart failed", service: "api", severity: "ERROR" };
+
+  expect(fingerprintLog({ ...log, exceptionType: "cart.drivers.net32.NET32APIError" }).hash)
+    .toBe(fingerprintLog({ ...log, exceptionType: "NET32APIError" }).hash);
+});
+
+test("the previous fingerprint keeps the full type and version, so known issues move", () => {
+  const input = { message: "boom", stacktrace: null, type: "cart.drivers.net32.NET32APIError" };
+  const previous = previousFingerprint(input);
+
+  expect(previous).toMatch(/^v2:[0-9a-f]{16}$/);
+  expect(previous).not.toBe(previousFingerprint({ ...input, type: "NET32APIError" }));
+  expect(fingerprint(input).hash).toBe(fingerprint({ ...input, type: "NET32APIError" }).hash);
+  expect(previousFingerprintLog({ body: "boom", service: "api", severity: "ERROR" })).toMatch(/^v2:/);
 });
 
 function pythonTraceback(input: { line: number; libraryVersion: string }): string {
