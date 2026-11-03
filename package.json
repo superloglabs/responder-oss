@@ -48,6 +48,7 @@
     "tunnel:release": "bash scripts/local-tunnel.sh release",
     "tunnel:status": "bash scripts/local-tunnel.sh status",
     "typecheck": "tsc --noEmit",
+    "react:generate-error-codes": "node scripts/generate-react-error-codes.mjs",
     "vercel:generate-api": "node scripts/generate-vercel-read-operations.mjs"
   },
   "devDependencies": {
