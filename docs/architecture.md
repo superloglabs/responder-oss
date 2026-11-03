@@ -268,8 +268,8 @@ share and defaults to 1 while OTLP export is on.
 - Each worker job runs in a root span named for its queue. Database queries
   and middleware outside a traced request or job, such as queue polling, are
   not recorded.
-- Health checks, telemetry ingest, and the browser relay are not traced, so a
-  service that sends to its own ingest endpoint does not trace its exports.
+- Health checks and telemetry ingest are not traced, so a service that sends
+  to its own ingest endpoint does not trace its exports.
 - Every console line is also sent as a log record with the active trace. A
   JSON line's `event` becomes the body and its fields become attributes.
 - Model calls are spans in the GenAI conventions, with the model, provider,
@@ -279,12 +279,13 @@ share and defaults to 1 while OTLP export is on.
   outputs are not recorded.
 - Metrics are the Node.js runtime metrics and `http.server.request.duration`
   by route template, exported every 60 seconds.
-- With `VITE_OTEL_TRACES_SAMPLE_RATE` above 0, the browser traces page loads
-  and same-origin `fetch` calls for signed-in users. It posts OTLP JSON to
-  `/api/telemetry/browser/v1/traces`, and the API forwards the body to its own
-  traces endpoint with its own headers. The browser holds no ingest key.
-  Requests carry `traceparent` and `sentry-trace`, so API spans join the
-  browser's trace.
+- With `VITE_SUPERLOG_INGEST_ENDPOINT` and `VITE_SUPERLOG_INGEST_KEY`, every
+  page load starts `@superlog/browser`, for signed-out visitors too. It sends
+  errors, page loads, and Web Vitals straight to that ingest endpoint with the
+  key, which only adds telemetry to its workspace. Signed-in pages add the
+  user and organization. `VITE_OTEL_TRACES_SAMPLE_RATE` sets the share of
+  traces kept for page loads and same-origin `fetch` calls. Requests carry
+  `traceparent` and `sentry-trace`, so API spans join the browser's trace.
 
 The entry points of both services load secrets and start monitoring before
 they import the rest of the application, so instrumented libraries are

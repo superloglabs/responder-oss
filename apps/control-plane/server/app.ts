@@ -49,7 +49,6 @@ import { createErrorIssueRoutes } from "./telemetry/error-issue-routes.js";
 import { createDashboardRoutes } from "./telemetry/dashboard-routes.js";
 import { createIngestKeyRoutes } from "./telemetry/ingest-key-routes.js";
 import { createIngestRoutes } from "./telemetry/ingest-routes.js";
-import { createBrowserRelayRoutes } from "./telemetry/browser-relay-routes.js";
 import { createSourceRoutes } from "./telemetry/source-routes.js";
 import { createTelemetryRoutes } from "./telemetry/routes.js";
 import { queueInvestigation } from "./investigations/queue.js";
@@ -543,7 +542,6 @@ export const app = instrumentedApp
   .route("/api/scans", scanRoutes)
   .route("/api/suggestions", suggestionRoutes)
   .route("/api/ingest", createIngestRoutes())
-  .route("/api/telemetry/browser", createBrowserRelayRoutes())
   .route("/api/telemetry/ingest-keys", createIngestKeyRoutes())
   .route("/api/telemetry/sources", createSourceRoutes())
   .route("/api/telemetry/alerts", createAlertRoutes())

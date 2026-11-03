@@ -41,26 +41,42 @@ type BrowserTelemetryModule = Pick<
   "startBrowserTelemetry"
 >;
 
-// Browser telemetry goes through a relay that accepts only signed-in users, so
-// it starts after sign-in. @superlog/browser and OpenTelemetry are a separate
-// chunk that loads only when telemetry is on; the identity calls below are
-// part of the main bundle and apply once it starts.
-export function startSignedInBrowserTelemetry(
-  config: BrowserMonitoringConfig & { otelTracesSampleRate?: string } = {
-    ...defaultConfig,
-    otelTracesSampleRate: import.meta.env.VITE_OTEL_TRACES_SAMPLE_RATE,
-  },
+export interface BrowserTelemetryEnvironment {
+  environment?: string;
+  ingestEndpoint?: string;
+  ingestKey?: string;
+  release?: string;
+  tracesSampleRate?: string;
+}
+
+const defaultTelemetryConfig: BrowserTelemetryEnvironment = {
+  environment: defaultConfig.environment,
+  ingestEndpoint: import.meta.env.VITE_SUPERLOG_INGEST_ENDPOINT,
+  ingestKey: import.meta.env.VITE_SUPERLOG_INGEST_KEY,
+  release: defaultConfig.release,
+  tracesSampleRate: import.meta.env.VITE_OTEL_TRACES_SAMPLE_RATE,
+};
+
+// Browser telemetry starts on page load for every visitor, signed in or not,
+// when an ingest endpoint and key are configured. @superlog/browser and
+// OpenTelemetry are a separate chunk; the identity calls below are part of the
+// main bundle and apply once it starts.
+export function initializeBrowserTelemetry(
+  config: BrowserTelemetryEnvironment = defaultTelemetryConfig,
   load: () => Promise<BrowserTelemetryModule> = () => import("./browser-telemetry"),
 ): Promise<boolean> {
-  const sampleRate = sentrySampleRate(config.otelTracesSampleRate);
-  if (sampleRate <= 0) return Promise.resolve(false);
+  const endpoint = config.ingestEndpoint?.trim();
+  const ingestKey = config.ingestKey?.trim();
+  if (!endpoint || !ingestKey) return Promise.resolve(false);
   return load()
     .then(({ startBrowserTelemetry }) => {
       const started = startBrowserTelemetry({
+        endpoint,
         environment: config.environment?.trim() || undefined,
+        ingestKey,
         origin: window.location.origin,
         release: config.release?.trim() || undefined,
-        sampleRate,
+        sampleRate: sentrySampleRate(config.tracesSampleRate),
       });
       if (started) applyTelemetryIdentity();
       return started;

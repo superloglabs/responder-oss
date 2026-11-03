@@ -9,12 +9,10 @@ import {
 import { W3CTraceContextPropagator } from "@opentelemetry/core";
 import { init } from "@superlog/browser";
 
-// The server relays browser telemetry to its OTLP endpoint for signed-in
-// users, at /v1/traces and /v1/logs under this path.
-export const browserTelemetryRelayPath = "/api/telemetry/browser";
-
 export interface BrowserTelemetryConfig {
+  endpoint: string;
   environment?: string;
+  ingestKey: string;
   origin: string;
   release?: string;
   sampleRate: number;
@@ -50,13 +48,14 @@ export function ignoredUrls(origin: string): RegExp[] {
 }
 
 // Sends the application's errors, page loads, Web Vitals, and API request
-// traces through the relay with @superlog/browser.
+// traces to a Superlog ingest endpoint with @superlog/browser. The ingest key
+// only adds telemetry to its workspace, so the page can hold it.
 export function startBrowserTelemetry(config: BrowserTelemetryConfig): boolean {
-  if (!(config.sampleRate > 0)) return false;
   const client = init({
-    endpoint: `${config.origin}${browserTelemetryRelayPath}`,
+    endpoint: config.endpoint,
     environment: config.environment,
     ignoreUrls: ignoredUrls(config.origin),
+    ingestKey: config.ingestKey,
     propagators: [new W3CTraceContextPropagator(), new SentryTraceHeaderPropagator()],
     release: config.release,
     service: "responder-web",
