@@ -115,6 +115,7 @@ function dependencies() {
     hasCapability: vi.fn<AutomationRunDependencies["hasCapability"]>().mockResolvedValue(false),
     hasFinishedTurn: vi.fn(async () => false),
     getWorkspaceSecrets: vi.fn().mockResolvedValue([]),
+    getSandboxNetwork: vi.fn().mockResolvedValue(null),
     getSkills: vi.fn<AutomationRunDependencies["getSkills"]>().mockResolvedValue([]),
     grantAllowanceExhausted: vi.fn().mockResolvedValue(false),
     hasNewMessages: vi.fn().mockResolvedValue(false),
@@ -249,7 +250,7 @@ describe("automation run processor", () => {
     vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
     vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
     const deps = dependencies();
-    const billingKey = { allowedHosts: ["api.billing.example"], daytonaSecretName: "dtn_billing", environmentVariable: "BILLING_API_KEY" };
+    const billingKey = { allowedHosts: ["api.billing.example"], daytonaSecretName: "dtn_billing", encryptedValue: null, environmentVariable: "BILLING_API_KEY" };
     deps.getWorkspaceSecrets.mockResolvedValue([billingKey]);
     deps.getSkills.mockResolvedValue([{
       description: "Look up invoices in the billing API.",
@@ -258,7 +259,7 @@ describe("automation run processor", () => {
       name: "billing-api",
       secrets: [
         billingKey,
-        { allowedHosts: ["status.billing.example"], daytonaSecretName: "dtn_status", environmentVariable: "BILLING_STATUS_TOKEN" },
+        { allowedHosts: ["status.billing.example"], daytonaSecretName: "dtn_status", encryptedValue: null, environmentVariable: "BILLING_STATUS_TOKEN" },
       ],
     }]);
 
@@ -276,7 +277,7 @@ describe("automation run processor", () => {
     expect(deps.runInSandbox).toHaveBeenCalledWith(expect.objectContaining({
       secrets: [
         billingKey,
-        { allowedHosts: ["status.billing.example"], daytonaSecretName: "dtn_status", environmentVariable: "BILLING_STATUS_TOKEN" },
+        { allowedHosts: ["status.billing.example"], daytonaSecretName: "dtn_status", encryptedValue: null, environmentVariable: "BILLING_STATUS_TOKEN" },
       ],
     }));
     const prompt = deps.runCodex.mock.calls[0]![1].prompt;
@@ -1799,7 +1800,7 @@ describe("automation run processor", () => {
     expect(deps.createSubscriptionSecret).toHaveBeenCalledWith({ accessToken: "native-access", runId });
     expect(deps.createGrant).toHaveBeenCalledWith(expect.objectContaining({ credential: { inferenceSource: "byos" } }));
     expect(deps.runInSandbox).toHaveBeenCalledWith(expect.objectContaining({
-      secrets: [{ daytonaSecretName: "responder_chatgpt_run", environmentVariable: "RESPONDER_CHATGPT_ACCESS_TOKEN" }],
+      secrets: [{ allowedHosts: ["chatgpt.com"], daytonaSecretName: "responder_chatgpt_run", environmentVariable: "RESPONDER_CHATGPT_ACCESS_TOKEN" }],
     }));
     const sandboxAuth = JSON.parse(deps.runCodex.mock.calls[0]![1].model.subscription!.authJson);
     expect(sandboxAuth.tokens.access_token).toBe("dtn_secret_run");

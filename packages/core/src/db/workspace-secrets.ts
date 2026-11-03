@@ -1,4 +1,4 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 import { getDatabase } from "./client.js";
 import {
   agentConfigVersions,
@@ -20,7 +20,8 @@ export interface WorkspaceSecretSummary {
 
 export interface RuntimeWorkspaceSecret {
   environmentVariable: string;
-  daytonaSecretName: string;
+  daytonaSecretName: string | null;
+  encryptedValue: string | null;
   allowedHosts: string[];
 }
 
@@ -42,13 +43,23 @@ export async function listWorkspaceSecrets(
 export async function findWorkspaceSecretByName(input: {
   organizationId: string;
   name: string;
-}): Promise<WorkspaceSecretSummary | null> {
+}): Promise<
+  | (WorkspaceSecretSummary & {
+    daytonaSecretId: string | null;
+    daytonaSecretName: string | null;
+    hasValue: boolean;
+  })
+  | null
+> {
   const rows = await getDatabase()
     .select({
       id: workspaceSecrets.id,
       name: workspaceSecrets.name,
       allowedHosts: workspaceSecrets.allowedHosts,
       createdAt: workspaceSecrets.createdAt,
+      daytonaSecretId: workspaceSecrets.daytonaSecretId,
+      daytonaSecretName: workspaceSecrets.daytonaSecretName,
+      encryptedValue: workspaceSecrets.encryptedValue,
     })
     .from(workspaceSecrets)
     .where(
@@ -58,7 +69,41 @@ export async function findWorkspaceSecretByName(input: {
       ),
     )
     .limit(1);
-  return rows[0] ?? null;
+  const row = rows[0];
+  if (!row) return null;
+  const { encryptedValue, ...secret } = row;
+  return { ...secret, hasValue: encryptedValue !== null };
+}
+
+// Fills in what a secret is missing: its stored value, for a secret saved
+// before values were stored, or its Daytona copy, for one saved while Daytona
+// was not in use. The hosts and both copies are written together. Returns
+// false when another save filled it in first.
+export async function storeWorkspaceSecretValue(input: {
+  id: string;
+  allowedHosts: string[];
+  daytonaSecretId: string | null;
+  daytonaSecretName: string | null;
+  encryptedValue: string;
+  missing: "daytonaCopy" | "value";
+}): Promise<boolean> {
+  if (input.allowedHosts.length === 0) {
+    throw new Error("Workspace secrets require at least one allowed host");
+  }
+  const missing = input.missing === "value"
+    ? isNull(workspaceSecrets.encryptedValue)
+    : isNull(workspaceSecrets.daytonaSecretId);
+  const rows = await getDatabase()
+    .update(workspaceSecrets)
+    .set({
+      allowedHosts: input.allowedHosts,
+      daytonaSecretId: input.daytonaSecretId,
+      daytonaSecretName: input.daytonaSecretName,
+      encryptedValue: input.encryptedValue,
+    })
+    .where(and(eq(workspaceSecrets.id, input.id), missing))
+    .returning({ id: workspaceSecrets.id });
+  return rows.length > 0;
 }
 
 export async function createWorkspaceSecretRecord(input: {
@@ -66,8 +111,9 @@ export async function createWorkspaceSecretRecord(input: {
   userId: string;
   name: string;
   allowedHosts: string[];
-  daytonaSecretId: string;
-  daytonaSecretName: string;
+  daytonaSecretId: string | null;
+  daytonaSecretName: string | null;
+  encryptedValue: string;
 }): Promise<WorkspaceSecretSummary> {
   if (!isWorkspaceSecretEnvironmentVariableName(input.name)) {
     throw new Error("Invalid workspace secret environment variable name");
@@ -84,6 +130,7 @@ export async function createWorkspaceSecretRecord(input: {
       allowedHosts: input.allowedHosts,
       daytonaSecretId: input.daytonaSecretId,
       daytonaSecretName: input.daytonaSecretName,
+      encryptedValue: input.encryptedValue,
     })
     .returning({
       id: workspaceSecrets.id,
@@ -103,6 +150,7 @@ export async function getRuntimeWorkspaceSecrets(
     .select({
       environmentVariable: workspaceSecrets.name,
       daytonaSecretName: workspaceSecrets.daytonaSecretName,
+      encryptedValue: workspaceSecrets.encryptedValue,
       allowedHosts: workspaceSecrets.allowedHosts,
     })
     .from(agentVersionSecrets)
@@ -129,6 +177,7 @@ export async function getAutomationRuntimeWorkspaceSecrets(
     .select({
       environmentVariable: workspaceSecrets.name,
       daytonaSecretName: workspaceSecrets.daytonaSecretName,
+      encryptedValue: workspaceSecrets.encryptedValue,
       allowedHosts: workspaceSecrets.allowedHosts,
     })
     .from(automationVersionSecrets)

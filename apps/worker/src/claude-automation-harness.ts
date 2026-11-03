@@ -1,4 +1,4 @@
-import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
+import type { SandboxSession } from "./sandbox-session.js";
 import {
   AutomationHarnessError,
   assertAutomationHarnessModelCompatibility,
@@ -110,7 +110,7 @@ for await (const message of conversation) {
 `;
 
 export async function prepareClaudeAutomationHarness(
-  session: DaytonaSandboxSession,
+  session: SandboxSession,
 ): Promise<void> {
   const output = await session.execCommand({
     cmd: [
@@ -164,7 +164,7 @@ export function buildClaudeAutomationCommand(
 }
 
 export async function runClaudeAutomation(
-  session: DaytonaSandboxSession,
+  session: SandboxSession,
   input: AutomationHarnessInput,
 ): Promise<AutomationHarnessResult> {
   await assertAutomationWorkspaceHasNoSymlinkRedirects(

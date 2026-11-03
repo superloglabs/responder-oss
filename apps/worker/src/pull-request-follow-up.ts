@@ -1,4 +1,4 @@
-import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
+import type { SandboxSession } from "./sandbox-session.js";
 import {
   createGitHubInstallationToken,
   githubAppHeaders,
@@ -97,7 +97,7 @@ export async function checkoutPullRequest(
   input: {
     checkoutAtRef: (reference: RuntimeRepositoryReference) => Promise<CheckedOutRepository>;
     repositories: CheckedOutRepository[];
-    session: DaytonaSandboxSession;
+    session: SandboxSession;
     target: PullRequestTarget;
   },
   dependencies: PullRequestFollowUpDependencies = defaultDependencies,
@@ -128,7 +128,7 @@ export async function checkoutPullRequest(
 // Writes the checkout's changes since its baseline, including new files, to a
 // patch outside the checkout. Returns its path, or nothing without changes.
 async function saveCheckoutChanges(
-  session: DaytonaSandboxSession,
+  session: SandboxSession,
   checkout: CheckedOutRepository,
 ): Promise<string | undefined> {
   const name = checkout.repository.split("/").at(-1) ?? "repository";
@@ -164,7 +164,7 @@ export async function updatePullRequest(
   input: {
     commitMessage: string;
     repositories: CheckedOutRepository[];
-    session: DaytonaSandboxSession;
+    session: SandboxSession;
     target: PullRequestTarget;
   },
   dependencies: PullRequestFollowUpDependencies = defaultDependencies,

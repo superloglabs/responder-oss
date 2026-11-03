@@ -1,5 +1,5 @@
 import { tool } from "@openai/agents";
-import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
+import type { SandboxSession } from "./sandbox-session.js";
 import { z } from "zod";
 import type { CheckedOutRepository } from "./repositories.js";
 
@@ -44,7 +44,7 @@ function checkedTargetScript(repositoryPath: string, targetPath: string): string
 }
 
 async function runInspectionCommand(
-  session: DaytonaSandboxSession,
+  session: SandboxSession,
   input: { cmd: string; workdir: string },
   failureMessage: string,
   allowedExitCodes = [0],
@@ -63,7 +63,7 @@ async function runInspectionCommand(
 
 export function createRepositoryInspectionTools(input: {
   repositories: CheckedOutRepository[];
-  session: DaytonaSandboxSession;
+  session: SandboxSession;
 }) {
   if (input.repositories.length === 0) return [];
 

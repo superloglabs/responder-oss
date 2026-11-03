@@ -7,10 +7,6 @@ import {
 } from "@openai/agents";
 import { Capabilities, SandboxAgent, skills } from "@openai/agents/sandbox";
 import {
-  DaytonaSandboxClient,
-  type DaytonaSandboxSession,
-} from "@openai/agents-extensions/sandbox/daytona";
-import {
   getRuntimeAwsConnections,
   getRuntimeGcpConnections,
   getRuntimeAxiomConnection,
@@ -37,11 +33,7 @@ import {
 } from "@responder/core/db/investigations";
 import { getRuntimeWorkspaceSecrets } from "@responder/core/db/workspace-secrets";
 import { getRuntimeProfile } from "@responder/core/db/runtime-profiles";
-import {
-  daytonaClientOptions,
-  requireDaytonaClientConfig,
-  type DaytonaClientConfig,
-} from "@responder/core/daytona-config";
+import { requireSandboxConfig, sandboxWorkspaceRoot, type SandboxConfig } from "@responder/core/sandbox-config";
 import type {
   InvestigationInput,
   InvestigationTraceEvent,
@@ -91,14 +83,20 @@ import {
   createSubmitInvestigationReportTool,
 } from "./report.js";
 import {
-  closeDaytonaSandbox,
-  configureDaytonaSandboxLifecycle,
-  createDaytonaSandboxSession,
   prepareDaytonaSandbox,
   pauseDaytonaSandbox,
-  resumeDaytonaSandbox,
-  resumedSameDaytonaSandbox,
 } from "./sandbox.js";
+import {
+  applySandboxNetwork,
+  closeSandbox,
+  configureSandbox,
+  createSandboxClient,
+  createSandboxSession,
+  resumedSameSandbox,
+  resumeSandbox,
+  serializeSandboxSession,
+} from "./sandbox-runtime.js";
+import type { SandboxSession } from "./sandbox-session.js";
 import { startSandboxMeter, type SandboxMeter } from "./sandbox-metering.js";
 import { agentUsageIsBillable, recordAgentRunUsage } from "./agent-usage.js";
 import {
@@ -126,16 +124,17 @@ import {
   pullRequestReviewOf,
 } from "./thread-pull-request.js";
 import { createWorkspaceTools } from "./workspace-tools.js";
+import { workspaceSandboxNetwork } from "./sandbox-network.js";
 import { createIssueRemediationUpdateTool } from "./issue-followup.js";
 import {
   createSearchSuggestionsTool,
   createSuggestionTool,
 } from "./suggestion-tools.js";
 
-export interface SandboxAgentConfig extends DaytonaClientConfig {
+export type SandboxAgentConfig = SandboxConfig & {
   model: string;
   openAiApiKey: string;
-}
+};
 
 export function safeInvestigationError(
   error: unknown,
@@ -151,6 +150,7 @@ export function safeInvestigationError(
   for (const name of [
     "OPENAI_API_KEY",
     "DAYTONA_API_KEY",
+    "VERCEL_TOKEN",
     "AI_GATEWAY_API_KEY",
   ] as const) {
     const value = environment[name];
@@ -359,10 +359,10 @@ export function sandboxAgentConfig(
   const openAiApiKey = environment.OPENAI_API_KEY;
   if (!openAiApiKey) throw new Error("OPENAI_API_KEY is required");
 
-  const daytonaConfig = requireDaytonaClientConfig(environment);
+  const sandboxConfig = requireSandboxConfig(environment);
 
   return {
-    ...daytonaConfig,
+    ...sandboxConfig,
     model: environment.OPENAI_AGENT_MODEL ?? "gpt-5.6-sol",
     openAiApiKey,
   };
@@ -947,13 +947,12 @@ export async function runInvestigationAgent(
     .map((server) => new RecoverableMcpServer(server, describeConnectError));
 
   const sandboxName = `responder-investigation-${job.investigationId}`;
-  const client = new DaytonaSandboxClient({
-    ...daytonaClientOptions(config),
+  const client = createSandboxClient(config, {
     name: sandboxName,
     pauseOnExit: threadMode,
   });
 
-  let session: DaytonaSandboxSession | null = null;
+  let session: SandboxSession | null = null;
   let meter: SandboxMeter | null = null;
   let modelUsage: Usage | undefined;
 
@@ -999,7 +998,7 @@ export async function runInvestigationAgent(
     const persistedState = sessionRuntime?.sandboxSessionState;
     if (threadMode && persistedState) {
       try {
-        session = await resumeDaytonaSandbox(client, persistedState, config);
+        session = await resumeSandbox(client, persistedState, config);
       } catch (error) {
         // Daytona deletes a paused thread sandbox after a day; the thread
         // continues in a fresh one.
@@ -1010,7 +1009,18 @@ export async function runInvestigationAgent(
         }));
       }
     }
-    session ??= await createDaytonaSandboxSession(client, config, sandboxName);
+    session ??= await createSandboxSession(
+      client,
+      config,
+      sandboxName,
+      undefined,
+      undefined,
+      { keepPaused: threadMode },
+    );
+    const sandboxNetwork = await workspaceSandboxNetwork(
+      job.config.organizationId,
+      environment,
+    );
     meter = startSandboxMeter({
       billable: usageBillable,
       organizationId: job.config.organizationId,
@@ -1018,30 +1028,31 @@ export async function runInvestigationAgent(
       workload: "investigation",
       workloadId: job.investigationId,
     });
-    const sessionMarker = "/home/daytona/workspace/.responder/thread-session-ready";
+    const sessionMarker = `${sandboxWorkspaceRoot}/.responder/thread-session-ready`;
     // A sandbox Daytona recreated has the marker but not the repositories.
     const sessionReady = Boolean(
       persistedState &&
-        resumedSameDaytonaSandbox(session, persistedState) &&
+        resumedSameSandbox(session, persistedState, config) &&
         await session.pathExists(sessionMarker),
     );
     if (!sessionReady) {
-      await configureDaytonaSandboxLifecycle(
+      await configureSandbox(
         session,
         config,
         workspaceSecrets,
         threadMode ? pausedThreadSandboxLifetimeMinutes : 0,
+        sandboxNetwork,
       );
       if (!config.sandboxSnapshotName) await prepareDaytonaSandbox(session);
     } else {
       // Thread sandboxes set up before the deletion interval existed never
       // expire; give them the same interval.
-      await configureDaytonaSandboxLifecycle(
-        session,
-        config,
-        [],
-        pausedThreadSandboxLifetimeMinutes,
-      );
+      if (!config.vercel) {
+        await configureSandbox(session, config, [], pausedThreadSandboxLifetimeMinutes);
+      }
+      // Vercel drops the firewall rules when a sandbox stops, so this also
+      // mounts its secrets again.
+      await applySandboxNetwork(session, config, workspaceSecrets, sandboxNetwork);
     }
     const repositories = sessionReady
       ? threadMode && job.refreshWorkspace
@@ -1307,10 +1318,10 @@ export async function runInvestigationAgent(
     const report = redactDaytonaSecretPlaceholders(result.finalOutput.trim());
     await writeTrace(traceEvent("session.completed"));
     if (threadMode) {
-      const sandboxSessionState = await client.serializeSessionState(
-        session.state,
-      );
-      delete sandboxSessionState.apiKey;
+      const sandboxSessionState = await serializeSandboxSession(client, session, config, {
+        investigationId: job.investigationId,
+        organizationId: job.config.organizationId,
+      });
       return {
         report,
         sandboxSessionState,
@@ -1343,7 +1354,7 @@ export async function runInvestigationAgent(
             organizationId: job.config.organizationId,
           });
         } else {
-          await closeDaytonaSandbox(session, config, {
+          await closeSandbox(session, config, {
             investigationId: job.investigationId,
             organizationId: job.config.organizationId,
           });

@@ -26,6 +26,7 @@ overrides:
 peerDependencyRules:
   allowedVersions:
     '@daytonaio/sdk': 0.203.0
+    '@vercel/sandbox': 3.3.0
 
 trustPolicy: no-downgrade
 trustPolicyExclude:

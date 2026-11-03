@@ -1,4 +1,4 @@
-import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
+import type { SandboxSession } from "./sandbox-session.js";
 import type { RuntimeRepository } from "@responder/core/db/investigations";
 import {
   createGitHubInstallationToken,
@@ -139,7 +139,7 @@ async function limitedText(response: Response): Promise<string> {
 export function createGitHubReadTools(input: {
   checkedOutRepositories: CheckedOutRepository[];
   repositories(): Promise<RuntimeRepository[]>;
-  session: DaytonaSandboxSession;
+  session: SandboxSession;
 }, dependencies: GitHubReadToolDependencies = defaultDependencies) {
   // Installation tokens last an hour, longer than a run's turn.
   const tokens = new Map<number, Promise<string>>();

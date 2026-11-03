@@ -1,5 +1,6 @@
 import { dir, file, type Dir, type Entry } from "@openai/agents/sandbox";
-import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
+import { sandboxWorkspaceRoot } from "@responder/core/sandbox-config";
+import type { SandboxSession } from "./sandbox-session.js";
 import { parseSkillMarkdown } from "@responder/core/skills/config";
 import { dirname, posix, relative } from "node:path";
 import {
@@ -91,13 +92,13 @@ function discoveryScript(repositories: CheckedOutRepository[]): string {
 // Finds the instruction files and skills in the checked-out repositories.
 // Files that resolve outside their repository are skipped.
 export async function discoverRepositoryAgentDocs(
-  session: DaytonaSandboxSession,
+  session: SandboxSession,
   repositories: CheckedOutRepository[],
 ): Promise<RepositoryAgentDocs> {
   if (repositories.length === 0) return { instructions: [], skills: [] };
   const output = await session.execCommand({
     cmd: discoveryScript(repositories),
-    workdir: "/home/daytona/workspace",
+    workdir: sandboxWorkspaceRoot,
     maxOutputTokens: 100_000,
   });
   if (!commandSucceeded(output)) return { instructions: [], skills: [] };
@@ -170,7 +171,7 @@ export function repositoryAgentDocsInstructions(
 }
 
 async function readSkillFile(
-  session: DaytonaSandboxSession,
+  session: SandboxSession,
   path: string,
   dependencies: RepositorySkillsDependencies,
 ): Promise<Uint8Array> {
@@ -185,12 +186,12 @@ async function readSkillFile(
 }
 
 async function findFiles(
-  session: DaytonaSandboxSession,
+  session: SandboxSession,
   root: string,
 ): Promise<string[]> {
   const output = await session.execCommand({
     cmd: `find ${shellQuote(root)} -type f -print`,
-    workdir: "/home/daytona/workspace",
+    workdir: sandboxWorkspaceRoot,
     maxOutputTokens: 4_000,
   });
   if (!commandSucceeded(output)) return [];
@@ -199,7 +200,7 @@ async function findFiles(
 }
 
 async function readDirectoryEntry(
-  session: DaytonaSandboxSession,
+  session: SandboxSession,
   path: string,
   files: string[],
   dependencies: RepositorySkillsDependencies,
@@ -239,7 +240,7 @@ async function readDirectoryEntry(
 
 // Copies the discovered skills for an investigation agent's skills capability.
 export async function loadRepositorySkills(
-  session: DaytonaSandboxSession,
+  session: SandboxSession,
   repositorySkills: RepositorySkill[],
   dependencies: RepositorySkillsDependencies = defaultDependencies,
 ): Promise<Dir | undefined> {
@@ -273,7 +274,7 @@ const pullRequestTemplateFiles = [
 ] as const;
 
 export async function discoverPullRequestTemplates(
-  session: DaytonaSandboxSession,
+  session: SandboxSession,
   repositories: CheckedOutRepository[],
 ): Promise<string[]> {
   const templates: string[] = [];

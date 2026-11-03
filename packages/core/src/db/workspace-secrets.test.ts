@@ -8,7 +8,7 @@ import {
 } from "../workspace-secret-names.js";
 
 describe("workspace secret storage", () => {
-  it("stores only workspace-scoped Daytona metadata, never plaintext", () => {
+  it("stores workspace-scoped metadata and an encrypted value, never plaintext", () => {
     const table = getTableConfig(workspaceSecrets);
     const columnNames = table.columns.map((column) => column.name);
 
@@ -16,7 +16,7 @@ describe("workspace secret storage", () => {
     expect(columnNames).toContain("daytona_secret_id");
     expect(columnNames).toContain("allowed_hosts");
     expect(columnNames).not.toContain("value");
-    expect(columnNames).not.toContain("encrypted_value");
+    expect(columnNames).toContain("encrypted_value");
   });
 
   it("makes environment variable names unique within a workspace", () => {
