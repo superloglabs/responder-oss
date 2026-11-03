@@ -1,5 +1,5 @@
 import { EnvelopeIcon } from "@phosphor-icons/react";
-import { type FormEvent, useEffect, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { authErrorCode } from "../auth-error-code";
 import { authClient } from "../auth-client";
@@ -491,6 +491,7 @@ export function WorkspaceSettingsPage() {
         ) : null}
 
         <PullRequestAuthorSection currentUserId={session.data?.user.id} />
+        <SandboxImageSection />
         <SandboxNetworkSection />
       </section>
     </AppShell>
@@ -617,6 +618,261 @@ function PullRequestAuthorSection({ currentUserId }: { currentUserId: string | u
         </div>
       ) : null}
     </div>
+  );
+}
+
+type SandboxImageBuildState = "building" | "failed" | "none" | "queued" | "ready";
+
+interface SandboxImageSettingsValue {
+  packages: string[];
+  setupScript: string;
+  startCommand: string;
+  vcpus: number;
+}
+
+interface SandboxImageState {
+  canEdit: boolean;
+  image: {
+    builtAt: string | null;
+    error: string | null;
+    finishedAt: string | null;
+    log: string;
+    startedAt: string | null;
+    state: SandboxImageBuildState;
+  };
+  memoryGiBPerVcpu: number;
+  settings: SandboxImageSettingsValue;
+  supported: boolean;
+  vcpuOptions: number[];
+}
+
+function packageList(text: string): string[] {
+  return text.split(/\s+/u).map((name) => name.trim()).filter(Boolean);
+}
+
+function formattedTime(value: string | null): string {
+  return value ? new Date(value).toLocaleString() : "";
+}
+
+function sandboxImageStatus(image: SandboxImageState["image"]): {
+  text: string;
+  tone: "error" | "success" | "warning" | null;
+} | null {
+  const meanwhile = image.builtAt
+    ? "Until it finishes, runs use the last image that built, or the default image if Superlog has updated it since."
+    : "Until it finishes, runs use the default image.";
+  switch (image.state) {
+    case "none":
+      return null;
+    case "queued":
+      return { text: `Build queued. ${meanwhile}`, tone: "warning" };
+    case "building":
+      return {
+        text: `Building since ${formattedTime(image.startedAt)}. ${meanwhile}`,
+        tone: "warning",
+      };
+    case "failed":
+      return {
+        text: `Build failed: ${image.error ?? "unknown error"}. ${image.builtAt ? "Runs use the last image that built, or the default image if Superlog has updated it since." : "Runs use the default image."}`,
+        tone: "error",
+      };
+    case "ready":
+      return { text: `Image ready, built ${formattedTime(image.builtAt)}.`, tone: "success" };
+  }
+}
+
+async function fetchSandboxImageState(): Promise<SandboxImageState> {
+  const response = await fetch("/api/sandbox-settings");
+  if (!response.ok) throw new Error("Could not load the sandbox settings");
+  return (await response.json()) as SandboxImageState;
+}
+
+// Adds system packages and a setup script to the workspace's sandboxes, built
+// once into an image, plus a command for every sandbox start and the
+// sandbox size.
+function SandboxImageSection() {
+  const [state, setState] = useState<SandboxImageState | null>(null);
+  const [packages, setPackages] = useState("");
+  const [setupScript, setSetupScript] = useState("");
+  const [startCommand, setStartCommand] = useState("");
+  const [vcpus, setVcpus] = useState("2");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  function show(next: SandboxImageState) {
+    setState(next);
+    setPackages(next.settings.packages.join("\n"));
+    setSetupScript(next.settings.setupScript);
+    setStartCommand(next.settings.startCommand);
+    setVcpus(String(next.settings.vcpus));
+  }
+
+  useEffect(() => {
+    fetchSandboxImageState()
+      .then(show)
+      .catch((cause: unknown) => {
+        setError(cause instanceof Error ? cause.message : "Could not load the sandbox settings");
+      });
+  }, []);
+
+  const buildState = state?.image.state;
+  // Counts saves, so a poll that started before one cannot overwrite its result.
+  const saveCount = useRef(0);
+  // Follows a build until it finishes, without touching unsaved edits.
+  useEffect(() => {
+    if (buildState !== "queued" && buildState !== "building") return;
+    const timer = setInterval(() => {
+      const startedAfter = saveCount.current;
+      fetchSandboxImageState()
+        .then((next) => {
+          if (!saving && saveCount.current === startedAfter) setState(next);
+        })
+        .catch(() => undefined);
+    }, 5_000);
+    return () => clearInterval(timer);
+  }, [buildState, saving]);
+
+  async function send(path: string, method: string, body?: unknown) {
+    setError(null);
+    setSaving(true);
+    saveCount.current += 1;
+    try {
+      const response = await fetch(path, {
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        headers: { "content-type": "application/json" },
+        method,
+      });
+      const result = (await response.json().catch(() => null)) as
+        | (SandboxImageState & { error?: string })
+        | null;
+      if (!response.ok || !result) {
+        throw new Error(result?.error ?? "Could not save the sandbox settings");
+      }
+      show(result);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not save the sandbox settings");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    void send("/api/sandbox-settings", "PUT", {
+      packages: packageList(packages),
+      setupScript,
+      startCommand,
+      vcpus: Number(vcpus),
+    });
+  }
+
+  const canEdit = (state?.canEdit ?? false) && (state?.supported ?? false);
+  const changed = state !== null && (
+    packageList(packages).join("\n") !== state.settings.packages.join("\n") ||
+    setupScript.trim() !== state.settings.setupScript ||
+    startCommand.trim() !== state.settings.startCommand ||
+    Number(vcpus) !== state.settings.vcpus
+  );
+  const status = state ? sandboxImageStatus(state.image) : null;
+  const vcpuOptions: Array<SelectOption<string>> = (state?.vcpuOptions ?? [2]).map((count) => ({
+    label: `${count} vCPUs, ${count * (state?.memoryGiBPerVcpu ?? 2)} GB memory`,
+    value: String(count),
+  }));
+
+  return (
+    <form className="memberSection" onSubmit={save}>
+      <div className="memberSection__heading">
+        <h3>Sandbox</h3>
+      </div>
+      <p className="memberAccessNote">
+        Agents run commands in a sandbox on Amazon Linux 2023 with Node.js,
+        Python, git, and the agent tools. Add what your repositories need to
+        build and test, such as browsers or databases. Packages and the setup
+        script are built into an image once, so runs start with them.
+        {state && !state.supported
+          ? " These settings need the Vercel sandbox provider."
+          : state && !state.canEdit ? " Admins can change this." : null}
+      </p>
+      {error ? <p className="settingsNotice settingsNotice--error">{error}</p> : null}
+      {status ? (
+        <p className={`settingsNotice${status.tone ? ` settingsNotice--${status.tone}` : ""}`}>
+          {status.text}
+        </p>
+      ) : null}
+      {state ? (
+        <>
+          <TextAreaField
+            className="sandboxSettings__code"
+            disabled={!canEdit || saving}
+            hint="dnf package names, one per line, installed with sudo dnf install."
+            label="Packages"
+            onChange={(event) => setPackages(event.target.value)}
+            placeholder={"postgresql16-server\nvalkey"}
+            rows={4}
+            spellCheck={false}
+            value={packages}
+          />
+          <TextAreaField
+            className="sandboxSettings__code"
+            disabled={!canEdit || saving}
+            hint="Runs with bash after the packages install, as the sandbox user, who can use sudo. It stops at the first failing command."
+            label="Setup script"
+            onChange={(event) => setSetupScript(event.target.value)}
+            placeholder={"curl -LsSf https://astral.sh/uv/install.sh | sh\nnpx -y playwright install chromium"}
+            rows={8}
+            spellCheck={false}
+            value={setupScript}
+          />
+          <TextAreaField
+            className="sandboxSettings__code"
+            disabled={!canEdit || saving}
+            hint="Runs with bash each time a sandbox starts or resumes, before the agent. Use it for services, such as sudo dockerd &. A failure stops the run."
+            label="Start command"
+            onChange={(event) => setStartCommand(event.target.value)}
+            placeholder="sudo dockerd >/tmp/dockerd.log 2>&1 &"
+            rows={3}
+            spellCheck={false}
+            value={startCommand}
+          />
+          <SelectField
+            disabled={!canEdit || saving}
+            hint="Larger sandboxes use more machine hours."
+            label="Size"
+            name="vcpus"
+            onChange={setVcpus}
+            options={vcpuOptions}
+            value={vcpus}
+          />
+          {state.image.log ? (
+            <details className="sandboxSettings__log">
+              <summary>Build output</summary>
+              <pre>{state.image.log}</pre>
+            </details>
+          ) : null}
+          {canEdit ? (
+            <div className="sandboxSettings__actions">
+              <button
+                className="button button--primary"
+                disabled={!changed || saving}
+                type="submit"
+              >
+                {saving ? "Saving…" : "Save"}
+              </button>
+              {state.image.state === "failed" || state.image.state === "ready" ? (
+                <button
+                  className="button button--secondary"
+                  disabled={changed || saving}
+                  onClick={() => void send("/api/sandbox-settings/rebuild", "POST")}
+                  type="button"
+                >
+                  Rebuild image
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+        </>
+      ) : null}
+    </form>
   );
 }
 

@@ -52,6 +52,7 @@ import { createSyntheticRoutes } from "./synthetics/routes.js";
 import { createAlertRoutes } from "./telemetry/alert-routes.js";
 import { createErrorNotificationRoutes } from "./telemetry/error-notification-routes.js";
 import { createSandboxNetworkRoutes } from "./agents/sandbox-network-routes.js";
+import { createSandboxImageRoutes } from "./agents/sandbox-image-routes.js";
 import { createErrorIssueRoutes } from "./telemetry/error-issue-routes.js";
 import { createDashboardRoutes } from "./telemetry/dashboard-routes.js";
 import { createIngestKeyRoutes } from "./telemetry/ingest-key-routes.js";
@@ -609,6 +610,7 @@ export const app = instrumentedApp
   .route("/api/terraform", terraformRoutes)
   .route("/api/error-notifications", createErrorNotificationRoutes())
   .route("/api/sandbox-network", createSandboxNetworkRoutes())
+  .route("/api/sandbox-settings", createSandboxImageRoutes())
   .route("/api/error-issues", createErrorIssueRoutes())
   .route("/api/telemetry/dashboards", createDashboardRoutes())
   .route("/api/telemetry", createTelemetryRoutes())

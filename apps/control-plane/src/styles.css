@@ -499,6 +499,28 @@ body:has(.appShell--investigation) {
   color: var(--ds-warning);
 }
 
+.appShell--settings .sandboxSettings__code textarea {
+  font-family: var(--ds-font-mono, ui-monospace, "SFMono-Regular", Menlo, monospace);
+  font-size: 12px;
+}
+
+.appShell--settings .sandboxSettings__log pre {
+  max-height: 320px;
+  overflow: auto;
+  margin: 8px 0 0;
+  padding: 8px 12px;
+  border: 1px solid var(--ds-border-subtle);
+  border-radius: var(--ds-radius-small);
+  background: var(--ds-surface-base);
+  font: 12px/1.5 var(--ds-font-mono, ui-monospace, "SFMono-Regular", Menlo, monospace);
+  white-space: pre-wrap;
+}
+
+.appShell--settings .sandboxSettings__actions {
+  display: flex;
+  gap: 8px;
+}
+
 .appShell--settings .settingsNotice--error,
 .appShell--settings .integrationMessage--error {
   border-color: var(--ds-danger-border);

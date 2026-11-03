@@ -117,6 +117,10 @@ function dependencies() {
     hasFinishedTurn: vi.fn(async () => false),
     getWorkspaceSecrets: vi.fn().mockResolvedValue([]),
     getSandboxNetwork: vi.fn().mockResolvedValue(null),
+    getWorkspaceSandbox: vi.fn(async (_organizationId: string, config: unknown) => ({
+      config,
+      startCommand: "",
+    })) as unknown as AutomationRunDependencies["getWorkspaceSandbox"],
     getSkills: vi.fn<AutomationRunDependencies["getSkills"]>().mockResolvedValue([]),
     getMemories: vi.fn<AutomationRunDependencies["getMemories"]>().mockResolvedValue([]),
     grantAllowanceExhausted: vi.fn().mockResolvedValue(false),

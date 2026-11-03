@@ -20,6 +20,8 @@ export interface SandboxMeterInput {
   organizationId: string;
   // Sandboxes from the prebuilt snapshot use its resources.
   snapshot: boolean;
+  // Set when the workspace chose its sandbox size.
+  resources?: { cpu: number; disk: number; memory: number };
   workload: SandboxUsageWorkload;
   workloadId: string;
 }
@@ -52,7 +54,8 @@ export function startSandboxMeter(
   input: SandboxMeterInput,
   dependencies: SandboxMeterDependencies = defaultDependencies,
 ): SandboxMeter {
-  const resources = input.snapshot ? sandboxSnapshotResources : daytonaDefaultResources;
+  const resources = input.resources ??
+    (input.snapshot ? sandboxSnapshotResources : daytonaDefaultResources);
   const usageId = dependencies.start({
     billable: input.billable,
     cpu: resources.cpu,
