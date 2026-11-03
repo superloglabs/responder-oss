@@ -76,7 +76,7 @@ export function useCellDirectory(enabled = true): CellDirectory | null {
   return directory;
 }
 
-export type WorkspaceInCell = { cell: Cell; name: string; slug: string };
+export type WorkspaceInCell = { cell: Cell; name: string };
 
 export type WorkspacesInOtherCells = {
   cookieDomain: string | null;
@@ -94,7 +94,8 @@ export async function fetchWorkspacesInOtherCells(): Promise<WorkspacesInOtherCe
   }
 }
 
-// One line per cell, naming its workspaces, in the order the cells answered.
+// One line per cell, naming its workspaces, in the order of the cell
+// directory.
 export function workspacesByCell(workspaces: WorkspaceInCell[]): Array<{ cell: Cell; names: string[] }> {
   const groups: Array<{ cell: Cell; names: string[] }> = [];
   for (const workspace of workspaces) {

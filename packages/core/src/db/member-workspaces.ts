@@ -4,11 +4,12 @@ import { getDatabase } from "./client.js";
 
 export interface MemberWorkspace {
   name: string;
-  slug: string;
 }
 
-// At most this many workspaces are named for one address.
+// At most this many workspaces are named for one address, each name cut to
+// this many characters.
 export const maxMemberWorkspaces = 5;
+export const maxMemberWorkspaceNameLength = 200;
 
 // The workspaces a person belongs to here, found by an exact email match
 // without regard to case. Only a verified, unbanned account counts, so an
@@ -17,8 +18,8 @@ export async function listVerifiedMemberWorkspaces(
   email: string,
   now = new Date(),
 ): Promise<MemberWorkspace[]> {
-  return getDatabase()
-    .select({ name: organization.name, slug: organization.slug })
+  const rows = await getDatabase()
+    .select({ name: organization.name })
     .from(member)
     .innerJoin(user, eq(user.id, member.userId))
     .innerJoin(organization, eq(organization.id, member.organizationId))
@@ -31,4 +32,5 @@ export async function listVerifiedMemberWorkspaces(
     )
     .orderBy(asc(member.createdAt))
     .limit(maxMemberWorkspaces);
+  return rows.map((row) => ({ name: row.name.slice(0, maxMemberWorkspaceNameLength) }));
 }

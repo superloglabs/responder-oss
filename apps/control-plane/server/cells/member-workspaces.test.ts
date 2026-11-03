@@ -14,10 +14,10 @@ describe("workspaces in other cells", () => {
 
   it("asks every other cell and names each workspace with its cell", async () => {
     const askCell = vi.fn(async (cell: { id: string }) =>
-      cell.id === "us" ? [{ name: "Acme", slug: "acme" }] : []);
+      cell.id === "us" ? [{ name: "Acme" }] : []);
 
     await expect(workspacesInOtherCells({ askCell, directory, email: "ash@example.com", token: "cell-token" }))
-      .resolves.toEqual([{ cell: unitedStates, name: "Acme", slug: "acme" }]);
+      .resolves.toEqual([{ cell: unitedStates, name: "Acme" }]);
     expect(askCell.mock.calls.map(([cell]) => cell.id)).toEqual(["us", "ap"]);
     expect(askCell).toHaveBeenCalledWith(unitedStates, "ash@example.com", "cell-token");
   });
@@ -26,14 +26,15 @@ describe("workspaces in other cells", () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     const askCell = vi.fn(async (cell: { id: string }) => {
       if (cell.id === "us") throw new Error("Cell us answered 503");
-      return [{ name: "Beta", slug: "beta" }];
+      return [{ name: "Beta" }];
     });
 
     await expect(workspacesInOtherCells({ askCell, directory, email: "ash@example.com", token: "cell-token" }))
-      .resolves.toEqual([{ cell: asia, name: "Beta", slug: "beta" }]);
+      .resolves.toEqual([{ cell: asia, name: "Beta" }]);
   });
 
   it("asks no cell in a single-cell deployment or without the cell token", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const askCell = vi.fn();
 
     await expect(workspacesInOtherCells({ askCell, directory: null, email: "ash@example.com", token: "cell-token" }))
@@ -41,15 +42,31 @@ describe("workspaces in other cells", () => {
     await expect(workspacesInOtherCells({ askCell, directory, email: "ash@example.com", token: undefined }))
       .resolves.toEqual([]);
     expect(askCell).not.toHaveBeenCalled();
+    expect(error).toHaveBeenCalledWith(JSON.stringify({ event: "member_workspaces_cell_token_missing" }));
+  });
+
+  it("fails on an error answer and when the cell does not answer in time", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response("unavailable", { status: 503 }))
+      .mockImplementationOnce(async (_url, init) => {
+        const signal = (init as RequestInit).signal!;
+        expect(signal).toBeInstanceOf(AbortSignal);
+        throw new DOMException("The operation timed out.", "TimeoutError");
+      });
+
+    await expect(askCellForMemberWorkspaces(unitedStates, "ash@example.com", "cell-token"))
+      .rejects.toThrow("Cell us answered 503");
+    await expect(askCellForMemberWorkspaces(unitedStates, "ash@example.com", "cell-token"))
+      .rejects.toThrow("timed out");
   });
 
   it("sends the cell token and rejects an answer without a workspace list", async () => {
     const fetch = vi.spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(Response.json({ workspaces: [{ name: "Acme", slug: "acme" }] }))
+      .mockResolvedValueOnce(Response.json({ workspaces: [{ name: "Acme" }] }))
       .mockResolvedValueOnce(Response.json({ users: [] }));
 
     await expect(askCellForMemberWorkspaces(unitedStates, "ash@example.com", "cell-token"))
-      .resolves.toEqual([{ name: "Acme", slug: "acme" }]);
+      .resolves.toEqual([{ name: "Acme" }]);
     expect(fetch).toHaveBeenCalledWith(
       new URL("/api/internal/cells/member-workspaces", unitedStates.url),
       expect.objectContaining({

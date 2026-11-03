@@ -504,9 +504,11 @@ function WorkspaceInOtherCell({
     <AuthFrame>
       <div className="authIntro">
         <h1>
-          {groups.length === 1
-            ? `Your workspace ${workspaceNames(first!.names)} is in the ${first!.cell.label} region`
-            : "Your workspaces are in other regions"}
+          {groups.length > 1
+            ? "Your workspaces are in other regions"
+            : first!.names.length === 1
+              ? `Your workspace ${first!.names[0]} is in the ${first!.cell.label} region`
+              : `Your workspaces ${workspaceNames(first!.names)} are in the ${first!.cell.label} region`}
         </h1>
         <p>Sign in there with the same account.</p>
       </div>

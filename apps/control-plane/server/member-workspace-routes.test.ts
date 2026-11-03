@@ -42,7 +42,7 @@ describe("member workspace routes", () => {
   });
 
   it("names this cell's workspaces for an address to another cell", async () => {
-    mocks.listWorkspaces.mockResolvedValue([{ name: "Acme", slug: "acme" }]);
+    mocks.listWorkspaces.mockResolvedValue([{ name: "Acme" }]);
 
     const response = await app.request("/api/internal/cells/member-workspaces", {
       body: JSON.stringify({ email: "ash@example.com" }),
@@ -50,7 +50,7 @@ describe("member workspace routes", () => {
       method: "POST",
     });
 
-    await expect(response.json()).resolves.toEqual({ workspaces: [{ name: "Acme", slug: "acme" }] });
+    await expect(response.json()).resolves.toEqual({ workspaces: [{ name: "Acme" }] });
     expect(mocks.listWorkspaces).toHaveBeenCalledWith("ash@example.com");
   });
 
@@ -67,13 +67,13 @@ describe("member workspace routes", () => {
       user: { email: "ash@example.com", emailVerified: true, id: "user-verified" },
     });
     const unitedStates = { id: "us", label: "United States", url: "https://us.example.com" };
-    mocks.otherCells.mockResolvedValue([{ cell: unitedStates, name: "Acme", slug: "acme" }]);
+    mocks.otherCells.mockResolvedValue([{ cell: unitedStates, name: "Acme" }]);
 
     const response = await app.request("/api/cells/workspaces");
 
     await expect(response.json()).resolves.toEqual({
       cookieDomain: ".example.com",
-      workspaces: [{ cell: unitedStates, name: "Acme", slug: "acme" }],
+      workspaces: [{ cell: unitedStates, name: "Acme" }],
     });
     expect(mocks.otherCells).toHaveBeenCalledWith(expect.objectContaining({
       email: "ash@example.com",

@@ -44,7 +44,7 @@ describe.skipIf(!testUrl)("verified member workspaces (PostgreSQL)", () => {
 
   it("names a verified member's workspaces by email without regard to case", async () => {
     await expect(listVerifiedMemberWorkspaces(` ${people.member.email.toUpperCase()} `))
-      .resolves.toEqual([{ name: "Acme", slug: organizationId }]);
+      .resolves.toEqual([{ name: "Acme" }]);
   });
 
   it("names none for unverified, banned, and unknown addresses", async () => {

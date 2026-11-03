@@ -27,7 +27,10 @@ export const user = pgTable("user", {
     .defaultNow()
     .$onUpdate(() => /* @__PURE__ */ new Date())
     .notNull(),
-});
+}, (table) => [
+  // Lookups by address ignore case.
+  index("user_email_lower_idx").on(sql`lower(${table.email})`),
+]);
 
 export const session = pgTable(
   "session",

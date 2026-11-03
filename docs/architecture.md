@@ -301,7 +301,10 @@ other over `/api/internal/cells/*` with the shared `RESPONDER_CELL_TOKEN`;
 an empty token refuses every request.
 
 - A provider webhook for a tenant this cell does not hold is forwarded to the
-  cells that hold it. OAuth callbacks return to the cell named in their state.
+  cells that hold it. Event webhooks are copied to every such cell; interactive
+  Slack actions and Discord interactions go to one owner cell, because the
+  provider uses one cell's response. OAuth callbacks return to the cell named
+  in their state.
 - The user support page lists the users of every cell.
 - A person signed in to a cell where they belong to no workspace is told which
   workspaces their address belongs to in other cells, and can switch there

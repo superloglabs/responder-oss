@@ -438,6 +438,10 @@ export const app = instrumentedApp
     }
     const limit = otherCellWorkspaceLookups.take(session.user.id);
     if (!limit.allowed) {
+      // One line per person and window, however many lookups are refused.
+      if (limit.firstRefusal) {
+        console.warn(JSON.stringify({ event: "member_workspaces_rate_limited", userId: session.user.id }));
+      }
       context.header("retry-after", String(limit.retryAfterSeconds));
       return context.json({ error: "Too many requests" }, 429);
     }

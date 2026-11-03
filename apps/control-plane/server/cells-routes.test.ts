@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { verifyBearerToken } from "../../../packages/core/src/auth/internal.js";
 import { app } from "./app.js";
 
 describe("cell directory route", () => {
@@ -70,11 +71,12 @@ describe("member workspace routes", () => {
 
     const response = await app.request("/api/internal/cells/member-workspaces", {
       body: JSON.stringify({ email: "ash@example.com" }),
-      headers: { authorization: "Bearer ", "content-type": "application/json" },
+      headers: { authorization: "Bearer cell-token", "content-type": "application/json" },
       method: "POST",
     });
 
     expect(response.status).toBe(401);
+    expect(verifyBearerToken("Bearer cell-token", "")).toBe(false);
   });
 });
 

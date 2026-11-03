@@ -36,14 +36,14 @@ describe("cell switch URL", () => {
 });
 
 describe("workspaces by cell", () => {
-  it("names each cell's workspaces together, in the order the cells answered", () => {
+  it("names each cell's workspaces together, in the order of the cell directory", () => {
     const unitedStates = { id: "us", label: "United States", url: "https://us.example.com" };
     const asia = { id: "ap", label: "Asia", url: "https://ap.example.com" };
 
     expect(workspacesByCell([
-      { cell: unitedStates, name: "Acme", slug: "acme" },
-      { cell: asia, name: "Beta", slug: "beta" },
-      { cell: unitedStates, name: "Gamma", slug: "gamma" },
+      { cell: unitedStates, name: "Acme" },
+      { cell: asia, name: "Beta" },
+      { cell: unitedStates, name: "Gamma" },
     ])).toEqual([
       { cell: unitedStates, names: ["Acme", "Gamma"] },
       { cell: asia, names: ["Beta"] },

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { Cell, CellDirectory } from "../../../../packages/core/src/cells.js";
 import {
+  maxMemberWorkspaceNameLength,
   maxMemberWorkspaces,
   type MemberWorkspace,
 } from "../../../../packages/core/src/db/member-workspaces.js";
@@ -17,7 +18,7 @@ export const memberWorkspaceSearchSchema = z.object({
 export type WorkspaceInCell = MemberWorkspace & { cell: Cell };
 
 const workspaceListSchema = z.array(
-  z.object({ name: z.string().max(200), slug: z.string().max(200) }),
+  z.object({ name: z.string().max(maxMemberWorkspaceNameLength) }),
 ).max(maxMemberWorkspaces);
 
 export async function askCellForMemberWorkspaces(
@@ -52,7 +53,11 @@ export async function workspacesInOtherCells({
   email: string;
   token: string | undefined;
 }): Promise<WorkspaceInCell[]> {
-  if (!directory || !token) return [];
+  if (!directory) return [];
+  if (!token) {
+    console.error(JSON.stringify({ event: "member_workspaces_cell_token_missing" }));
+    return [];
+  }
   const others = directory.cells.filter((cell) => cell.id !== directory.current);
   const answers = await Promise.allSettled(
     others.map((cell) => askCell(cell, email, token)),
