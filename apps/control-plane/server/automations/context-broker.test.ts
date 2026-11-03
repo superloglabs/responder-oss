@@ -106,10 +106,12 @@ function appFor(activeClaim: ReturnType<typeof claim> | null) {
       beginAttempt: vi.fn(),
       completeAttempt: vi.fn(),
       failAttempt: vi.fn(),
+      finishFileUpload: vi.fn(),
       postMessage: vi.fn(),
       readChannel: vi.fn(),
       readThread: vi.fn(),
       removeReaction: vi.fn(),
+      startFileUpload: vi.fn(),
       search: vi.fn().mockResolvedValue({
         channel: { id: "C123", name: "incidents" },
         matches: [],

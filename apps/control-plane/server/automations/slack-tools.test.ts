@@ -51,8 +51,13 @@ function dependencies() {
     postMessage: vi.fn().mockResolvedValue("100.000009"),
     readChannel: vi.fn().mockResolvedValue({ channelId: "C123", messages: [] }),
     readThread: vi.fn().mockResolvedValue({ channelId: "C999", messages: [] }),
+    finishFileUpload: vi.fn().mockResolvedValue(undefined),
     removeReaction: vi.fn().mockResolvedValue(undefined),
     search: vi.fn(),
+    startFileUpload: vi.fn().mockResolvedValue({
+      fileId: "F0FILE1",
+      uploadUrl: "https://files.slack.com/upload/v1/abc",
+    }),
   };
 }
 
@@ -89,6 +94,8 @@ describe("automation Slack tools", () => {
       ["slack_read_channel", true],
       ["slack_read_thread", true],
       ["slack_post_message", false],
+      ["slack_start_file_upload", false],
+      ["slack_finish_file_upload", false],
       ["slack_add_reaction", false],
       ["slack_remove_reaction", false],
     ]);
@@ -101,6 +108,8 @@ describe("automation Slack tools", () => {
     expect(toolNames(triggerOnly)).toEqual([
       "slack_read_thread",
       "slack_post_message",
+      "slack_start_file_upload",
+      "slack_finish_file_upload",
       "slack_add_reaction",
       "slack_remove_reaction",
     ]);
@@ -405,5 +414,77 @@ describe("automation Slack tools", () => {
       isError: true,
     });
     expect(deps.search).not.toHaveBeenCalled();
+  });
+
+  it("uploads sandbox files and posts them in an allowed thread", async () => {
+    const triggerOnly = claim({ roles: ["trigger"], trigger: slackTrigger });
+    const deps = dependencies();
+
+    await expect(call(triggerOnly, deps, "slack_start_file_upload", {
+      filename: "checkout.webm",
+      length: 482_113,
+    })).resolves.toEqual({
+      content: [{
+        text: JSON.stringify({ file_id: "F0FILE1", upload_url: "https://files.slack.com/upload/v1/abc" }),
+        type: "text",
+      }],
+    });
+    expect(deps.startFileUpload).toHaveBeenCalledWith(expect.objectContaining({
+      accessToken: "xoxb-bot",
+      filename: "checkout.webm",
+      length: 482_113,
+    }));
+
+    await call(triggerOnly, deps, "slack_finish_file_upload", {
+      channel_id: "C999",
+      files: [{ file_id: "F0FILE1", title: "Checkout passes" }],
+      initial_comment: "Recording of the fixed checkout.",
+      thread_ts: "100.000001",
+    });
+    expect(deps.finishFileUpload).toHaveBeenCalledWith(expect.objectContaining({
+      accessToken: "xoxb-bot",
+      channelId: "C999",
+      files: [{ id: "F0FILE1", title: "Checkout passes" }],
+      initialComment: "Recording of the fixed checkout.",
+      threadTimestamp: "100.000001",
+    }));
+    expect(deps.beginAttempt).toHaveBeenCalledWith(expect.objectContaining({
+      kind: "send_slack_message",
+      redactedInput: { channelId: "C999", files: 1, threadTimestamp: "100.000001" },
+    }));
+  });
+
+  it("keeps uploaded files out of channels the automation cannot post in", async () => {
+    const deps = dependencies();
+    await expect(call(claim(), deps, "slack_finish_file_upload", {
+      channel_id: "C777",
+      files: [{ file_id: "F0FILE1" }],
+    })).resolves.toMatchObject({ isError: true });
+    expect(deps.finishFileUpload).not.toHaveBeenCalled();
+  });
+
+  it("refuses a file name with a path or a file over the size limit", async () => {
+    const deps = dependencies();
+    for (const args of [
+      { filename: "../etc/passwd", length: 10 },
+      { filename: "huge.mp4", length: 500 * 1024 * 1024 },
+    ]) {
+      await expect(call(claim(), deps, "slack_start_file_upload", args))
+        .resolves.toMatchObject({ isError: true });
+    }
+    expect(deps.startFileUpload).not.toHaveBeenCalled();
+  });
+
+  it("asks for a Slack reconnect when the connection lacks files:write", async () => {
+    const deps = dependencies();
+    deps.startFileUpload.mockRejectedValue(new SlackApiError("files.getUploadURLExternal", "missing_scope"));
+    await expect(call(claim(), deps, "slack_start_file_upload", { filename: "shot.png", length: 10 }))
+      .resolves.toEqual({
+        content: [{
+          text: "This Slack connection cannot upload files. A workspace admin needs to reconnect Slack in Superlog to allow it.",
+          type: "text",
+        }],
+        isError: true,
+      });
   });
 });

@@ -15,9 +15,11 @@ import {
 } from "../../../../packages/core/src/automations/slack-buttons.js";
 import {
   addSlackReaction,
+  finishSlackFileUpload,
   postSlackMessage,
   removeSlackReaction,
   SlackApiError,
+  startSlackFileUpload,
 } from "../../../../packages/core/src/integrations/slack.js";
 import {
   readSlackChannelHistory,
@@ -43,11 +45,13 @@ export interface SlackToolDependencies {
   beginAttempt: typeof beginAutomationActionAttempt;
   completeAttempt: typeof completeAutomationActionAttempt;
   failAttempt: typeof failAutomationActionAttempt;
+  finishFileUpload: typeof finishSlackFileUpload;
   postMessage: typeof postSlackMessage;
   readChannel: typeof readSlackChannelHistory;
   readThread: typeof readSlackThread;
   removeReaction: typeof removeSlackReaction;
   search: typeof searchSlackChannels;
+  startFileUpload: typeof startSlackFileUpload;
 }
 
 export const defaultSlackToolDependencies: SlackToolDependencies = {
@@ -56,11 +60,13 @@ export const defaultSlackToolDependencies: SlackToolDependencies = {
   beginAttempt: beginAutomationActionAttempt,
   completeAttempt: completeAutomationActionAttempt,
   failAttempt: failAutomationActionAttempt,
+  finishFileUpload: finishSlackFileUpload,
   postMessage: postSlackMessage,
   readChannel: readSlackChannelHistory,
   readThread: readSlackThread,
   removeReaction: removeSlackReaction,
   search: searchSlackChannels,
+  startFileUpload: startSlackFileUpload,
 };
 
 interface SlackTriggerThread {
@@ -148,6 +154,22 @@ const postMessageInput = z.object({
   buttons: automationButtonsSchema.default([]),
   channel_id: z.string().min(1),
   text: z.string().trim().min(1).max(40_000),
+  thread_ts: timestampSchema.optional(),
+});
+// Screenshots and screen recordings, not archives or builds.
+const maxSlackUploadBytes = 200 * 1024 * 1024;
+const maxSlackUploadFiles = 10;
+const startFileUploadInput = z.object({
+  filename: z.string().trim().min(1).max(255).regex(/^[^/\\]+$/u),
+  length: z.number().int().min(1).max(maxSlackUploadBytes),
+});
+const finishFileUploadInput = z.object({
+  channel_id: z.string().min(1),
+  files: z.array(z.object({
+    file_id: z.string().regex(/^F[A-Z0-9]{2,40}$/u),
+    title: z.string().trim().min(1).max(250).optional(),
+  })).min(1).max(maxSlackUploadFiles),
+  initial_comment: z.string().trim().min(1).max(4_000).optional(),
   thread_ts: timestampSchema.optional(),
 });
 const reactionInput = z.object({
@@ -251,6 +273,59 @@ export function slackToolDefinitions(scope: SlackToolScope) {
         type: "object",
       },
       name: "slack_post_message",
+    },
+    {
+      annotations: {
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
+        readOnlyHint: false,
+      },
+      description: `Start uploading a file from the sandbox to Slack, such as a screenshot or a screen recording. Pass the file's name and its size in bytes (stat -c %s <path>). Then upload it from the sandbox with curl -sS -F file=@<path> '<upload_url>', which must answer 200, and post it with slack_finish_file_upload. Files up to ${maxSlackUploadBytes / 1024 / 1024} MB. Images and mp4, mov, or webm videos play in Slack.`,
+      inputSchema: {
+        additionalProperties: false,
+        properties: {
+          filename: { maxLength: 255, minLength: 1, type: "string" },
+          length: { maximum: maxSlackUploadBytes, minimum: 1, type: "integer" },
+        },
+        required: ["filename", "length"],
+        type: "object",
+      },
+      name: "slack_start_file_upload",
+    },
+    {
+      annotations: {
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
+        readOnlyHint: false,
+      },
+      description: `Post files uploaded with slack_start_file_upload to a Slack channel, or a thread with thread_ts, as one message with an optional comment. Up to ${maxSlackUploadFiles} files at once.${onlyThread ? " Only replies in the thread that started this run are allowed." : ""}${threadNote(scope)}`,
+      inputSchema: {
+        additionalProperties: false,
+        properties: {
+          channel_id: { enum: allChannels, type: "string" },
+          files: {
+            items: {
+              additionalProperties: false,
+              properties: {
+                file_id: { type: "string" },
+                title: { maxLength: 250, minLength: 1, type: "string" },
+              },
+              required: ["file_id"],
+              type: "object",
+            },
+            maxItems: maxSlackUploadFiles,
+            minItems: 1,
+            type: "array",
+          },
+          initial_comment: { description: "Text posted with the files. Uses Slack mrkdwn formatting.", maxLength: 4_000, minLength: 1, type: "string" },
+          thread_ts: timestamp,
+        },
+        required: onlyThread ? ["channel_id", "files", "thread_ts"] : ["channel_id", "files"],
+        type: "object",
+      },
+      name: "slack_finish_file_upload",
     },
     {
       annotations: {
@@ -447,6 +522,62 @@ async function runTool(
       ...(result.repeated ? { note: "This message was already posted in this run." } : {}),
     });
   }
+  if (name === "slack_start_file_upload") {
+    const parsed = startFileUploadInput.safeParse(args);
+    if (!parsed.success) return failure("Invalid tool arguments");
+    const upload = await dependencies.startFileUpload({
+      accessToken: botToken,
+      filename: parsed.data.filename,
+      length: parsed.data.length,
+      signal,
+    });
+    return success({ file_id: upload.fileId, upload_url: upload.uploadUrl });
+  }
+  if (name === "slack_finish_file_upload") {
+    const parsed = finishFileUploadInput.safeParse(args);
+    if (!parsed.success) return failure("Invalid tool arguments");
+    const {
+      channel_id: channelId,
+      files,
+      initial_comment: initialComment,
+      thread_ts: threadTimestamp,
+    } = parsed.data;
+    if (
+      !scope.channels.has(channelId) &&
+      !inTriggerThread(scope, channelId, threadTimestamp)
+    ) {
+      return notAllowed;
+    }
+    const result = await recordedWrite({
+      claim,
+      dependencies,
+      identity: [channelId, threadTimestamp ?? null, files.map((file) => file.file_id)],
+      kind: "send_slack_message",
+      redactedInput: {
+        channelId,
+        files: files.length,
+        ...(threadTimestamp ? { threadTimestamp } : {}),
+      },
+      toolName: name,
+      write: async () => {
+        await dependencies.finishFileUpload({
+          accessToken: botToken,
+          channelId,
+          files: files.map((file) => ({ id: file.file_id, ...(file.title ? { title: file.title } : {}) })),
+          ...(initialComment ? { initialComment } : {}),
+          signal,
+          ...(threadTimestamp ? { threadTimestamp } : {}),
+        });
+        return `${channelId}:files:${files.map((file) => file.file_id).join(",")}`;
+      },
+    });
+    return success({
+      channelId,
+      files: files.length,
+      ...(threadTimestamp ? { threadTimestamp } : {}),
+      ...(result.repeated ? { note: "These files were already posted in this run." } : {}),
+    });
+  }
   if (name === "slack_add_reaction" || name === "slack_remove_reaction") {
     const parsed = reactionInput.safeParse(args);
     if (!parsed.success) return failure("Invalid tool arguments");
@@ -481,11 +612,13 @@ async function runTool(
 
 const slackToolNames = new Set([
   "slack_add_reaction",
+  "slack_finish_file_upload",
   "slack_post_message",
   "slack_read_channel",
   "slack_read_thread",
   "slack_remove_reaction",
   "slack_search_channel",
+  "slack_start_file_upload",
 ]);
 
 export class UnknownSlackToolError extends Error {
@@ -515,6 +648,9 @@ export async function callSlackTool(input: {
       input.dependencies,
     );
   } catch (error) {
+    if (error instanceof SlackApiError && error.code === "missing_scope" && error.method.startsWith("files.")) {
+      return failure("This Slack connection cannot upload files. A workspace admin needs to reconnect Slack in Superlog to allow it.");
+    }
     if (error instanceof SlackApiError) {
       return failure(`Slack ${error.method} failed: ${error.code}`);
     }
