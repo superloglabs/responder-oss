@@ -43,6 +43,9 @@ export function MemoryEditorPage() {
   // Counts edits, so a save that finishes after more edits does not mark
   // them saved.
   const edits = useRef(0);
+  // The memory the page shows now. A save that finishes after the page moved
+  // to another memory changes nothing on it.
+  const routeMemoryId = useRef(memoryId);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -50,6 +53,7 @@ export function MemoryEditorPage() {
 
   useEffect(() => {
     let cancelled = false;
+    routeMemoryId.current = memoryId;
     if (!memoryId) {
       // Opening a new memory from an existing one starts from an empty form.
       if (loadedMemoryIdRef.current !== undefined) {
@@ -93,8 +97,10 @@ export function MemoryEditorPage() {
     setSaving(true);
     setError(null);
     const editsAtSave = edits.current;
+    const savingMemoryId = memoryId;
     try {
       const id = await saveMemory(memoryId, memory);
+      if (routeMemoryId.current !== savingMemoryId) return;
       setSavedName(memory.name);
       setSaved(edits.current === editsAtSave);
       setLastSaved({ at: new Date().toISOString(), by: null });
@@ -104,6 +110,7 @@ export function MemoryEditorPage() {
         navigate(`/memory/${id}`, { replace: true });
       }
     } catch (cause) {
+      if (routeMemoryId.current !== savingMemoryId) return;
       setError(cause instanceof Error ? cause.message : "Unable to save the memory");
     } finally {
       setSaving(false);
