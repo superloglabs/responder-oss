@@ -199,14 +199,16 @@ describe("sandbox image build", () => {
     expect(dependencies.fail).not.toHaveBeenCalled();
   });
 
-  it("does not start a build once the worker is shutting down", async () => {
+  it("leaves the image building without a sandbox once the worker is shutting down", async () => {
     const shutdown = new AbortController();
-    shutdown.abort();
     const dependencies = buildDependencies({});
+    dependencies.start.mockImplementationOnce(async () => {
+      shutdown.abort();
+    });
     await expect(buildSandboxImage(organizationId, { signal: shutdown.signal }, environment, dependencies))
       .resolves.toBe("interrupted");
-    expect(dependencies.start).not.toHaveBeenCalled();
     expect(dependencies.createSandbox).not.toHaveBeenCalled();
+    expect(dependencies.fail).not.toHaveBeenCalled();
   });
 
   it("does not rebuild a snapshot that matches the settings", async () => {

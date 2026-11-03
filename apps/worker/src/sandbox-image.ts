@@ -218,14 +218,13 @@ export async function buildSandboxImage(
     );
     return "current";
   }
-  if (options.signal?.aborted) return "interrupted";
-
   await dependencies.start(organizationId, key);
   let log = "";
   const append = async (text: string) => {
     log = `${log}${text}`.slice(-buildLogLimit);
     await dependencies.recordLog(organizationId, key, log);
   };
+  if (options.signal?.aborted) return "interrupted";
   let sandbox: Sandbox;
   try {
     sandbox = await dependencies.createSandbox({
