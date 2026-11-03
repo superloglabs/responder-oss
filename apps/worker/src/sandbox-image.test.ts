@@ -202,9 +202,36 @@ describe("sandbox image build", () => {
     });
     const dependencies = buildDependencies({ sandbox });
     await expect(buildSandboxImage(organizationId, { signal: shutdown.signal }, environment, dependencies))
-      .rejects.toMatchObject({ name: "AbortError" });
+      .resolves.toBe("interrupted");
     expect(sandbox.stop).toHaveBeenCalled();
     expect(dependencies.fail).not.toHaveBeenCalled();
+    expect(dependencies.complete).not.toHaveBeenCalled();
+  });
+
+  it("leaves the image building when its sandbox fails to start while the worker shuts down", async () => {
+    const shutdown = new AbortController();
+    const dependencies = buildDependencies({});
+    dependencies.createSandbox.mockImplementationOnce(async () => {
+      shutdown.abort();
+      throw new Error("connection reset");
+    });
+    await expect(buildSandboxImage(organizationId, { signal: shutdown.signal }, environment, dependencies))
+      .resolves.toBe("interrupted");
+    expect(dependencies.fail).not.toHaveBeenCalled();
+    expect(dependencies.complete).not.toHaveBeenCalled();
+  });
+
+  it("leaves the image building without a sandbox once the worker is shutting down", async () => {
+    const shutdown = new AbortController();
+    const dependencies = buildDependencies({});
+    dependencies.start.mockImplementationOnce(async () => {
+      shutdown.abort();
+    });
+    await expect(buildSandboxImage(organizationId, { signal: shutdown.signal }, environment, dependencies))
+      .resolves.toBe("interrupted");
+    expect(dependencies.createSandbox).not.toHaveBeenCalled();
+    expect(dependencies.fail).not.toHaveBeenCalled();
+    expect(dependencies.complete).not.toHaveBeenCalled();
   });
 
   it("does not rebuild a snapshot that matches the settings", async () => {
