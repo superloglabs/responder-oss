@@ -630,9 +630,9 @@ function domainList(text: string): string[] {
   return text.split(/[\s,]+/u).map((domain) => domain.trim()).filter(Boolean);
 }
 
-// Limits where the workspace's agents can send data from their sandbox.
-// Superlog's host and each secret's hosts stay reachable, so runs keep
-// working with an empty list.
+// Limits where the workspace's agents can send data from their sandbox, which
+// is on by default. Superlog's host and each secret's hosts stay reachable, so
+// runs keep working with an empty list.
 function SandboxNetworkSection() {
   const [state, setState] = useState<SandboxNetworkState | null>(null);
   const [restricted, setRestricted] = useState(false);
@@ -701,10 +701,10 @@ function SandboxNetworkSection() {
         <h3>Sandbox network</h3>
       </div>
       <p className="memberAccessNote">
-        Agents run commands in a sandbox. By default it can reach any address
-        on the internet. Restrict it to the domains below to stop an agent
-        sending data anywhere else. {alwaysAllowed} and the hosts of each
-        secret a run uses stay reachable.
+        Agents run commands in a sandbox. By default it reaches only the
+        domains below, so an agent cannot send data anywhere else.
+        {" "}{alwaysAllowed} and the hosts of each secret a run uses stay
+        reachable. Turn this off to give sandboxes open internet access.
         {canEdit ? null : " Admins can change this."}
       </p>
       {error ? <p className="settingsNotice settingsNotice--error">{error}</p> : null}
@@ -721,7 +721,7 @@ function SandboxNetworkSection() {
           {restricted ? (
             <TextAreaField
               disabled={!canEdit || saving}
-              hint="One domain per line. *.example.com covers example.com and its subdomains. Add package registries, such as registry.npmjs.org, or pypi.org and files.pythonhosted.org, if agents install dependencies."
+              hint="One domain per line. *.example.com covers example.com and its subdomains. The starting list covers common package registries, their installers, and GitHub."
               label="Allowed domains"
               onChange={(event) => setDomains(event.target.value)}
               placeholder={"registry.npmjs.org\n*.example.com"}

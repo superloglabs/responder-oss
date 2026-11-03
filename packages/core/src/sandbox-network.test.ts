@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  defaultSandboxNetworkSettings,
   sandboxAllowedDomains,
   sandboxNetworkFor,
   sandboxNetworkSettingsSchema,
@@ -30,6 +31,14 @@ describe("sandboxNetworkSettingsSchema", () => {
   it("rejects more than 50 domains", () => {
     const allowedDomains = Array.from({ length: 51 }, (_, index) => `host${index}.example.com`);
     expect(sandboxNetworkSettingsSchema.safeParse({ allowedDomains, restricted: true }).success).toBe(false);
+  });
+});
+
+describe("defaultSandboxNetworkSettings", () => {
+  it("restricts a workspace that never saved settings to a list it could save", () => {
+    expect(defaultSandboxNetworkSettings.restricted).toBe(true);
+    expect(sandboxNetworkSettingsSchema.parse(defaultSandboxNetworkSettings)).toEqual(defaultSandboxNetworkSettings);
+    expect(defaultSandboxNetworkSettings.allowedDomains).toContain("registry.npmjs.org");
   });
 });
 
