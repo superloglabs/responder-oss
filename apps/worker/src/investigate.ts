@@ -32,6 +32,7 @@ import {
   type RuntimeSentryConnection,
 } from "@responder/core/db/investigations";
 import { getRuntimeWorkspaceSecrets } from "@responder/core/db/workspace-secrets";
+import { getRuntimeWorkspaceMemories, type RuntimeWorkspaceMemory } from "@responder/core/db/workspace-memories";
 import { getRuntimeProfile } from "@responder/core/db/runtime-profiles";
 import { requireSandboxConfig, sandboxWorkspaceRoot, type SandboxConfig } from "@responder/core/sandbox-config";
 import type {
@@ -125,6 +126,7 @@ import {
 } from "./thread-pull-request.js";
 import { createWorkspaceTools } from "./workspace-tools.js";
 import { workspaceSandboxNetwork } from "./sandbox-network.js";
+import { materializeWorkspaceMemories, workspaceMemoryInstructions } from "./workspace-memories.js";
 import { createIssueRemediationUpdateTool } from "./issue-followup.js";
 import {
   createSearchSuggestionsTool,
@@ -408,6 +410,7 @@ export function investigationInstructions(input: {
   clickStackConnected: boolean;
   repositories: CheckedOutRepository[];
   repositoryInstructions?: string[];
+  workspaceMemories?: RuntimeWorkspaceMemory[];
   runtimeSystemPrompt?: string | null;
   runtimePromptParts?: InvestigationPromptParts;
   sentryConnected: boolean;
@@ -594,6 +597,7 @@ export function investigationInstructions(input: {
           ...repositoryInstructions.map((path) => `- ${path}`),
         ].join("\n")
       : null,
+    workspaceMemoryInstructions(input.workspaceMemories ?? [], input.runtimePromptParts),
     input.threadMode
       ? prompt(assistant ? "assistantSandbox" : "threadSandbox")
       : input.scanMode
@@ -793,6 +797,7 @@ export async function runInvestigationAgent(
     langfuseConnections,
     supabaseConnections,
     workspaceSecrets,
+    workspaceMemories,
   ] = await Promise.all([
     getRuntimeProfile(job.runtimeProfileId),
     getRuntimeAwsConnections(job.config.id),
@@ -822,6 +827,7 @@ export async function runInvestigationAgent(
     getRuntimeLangfuseConnections(job.config.id),
     getRuntimeSupabaseConnections(job.config.id, contextLoadOptions),
     getRuntimeWorkspaceSecrets(job.config.id),
+    getRuntimeWorkspaceMemories(job.config.organizationId),
   ]);
   const awsServers = await Promise.all(
     awsConnections.map((connection) => createAwsMcpServer(connection, environment)),
@@ -1084,6 +1090,7 @@ export async function runInvestigationAgent(
     }
     const agentDocs = await discoverRepositoryAgentDocs(session, repositories);
     const repositorySkills = await loadRepositorySkills(session, agentDocs.skills);
+    await materializeWorkspaceMemories(session, workspaceMemories);
     const repositoryInstructions = agentDocs.instructions.map(
       (instruction) => `${instruction.repository}: ${instruction.path}`,
     );
@@ -1231,6 +1238,7 @@ export async function runInvestigationAgent(
         displayName: connection.displayName,
       })),
       repositoryInstructions,
+      workspaceMemories,
       slackChannels: slackConnection?.channels,
       upstashConnected: upstashServer !== null,
       workspaceSecrets,

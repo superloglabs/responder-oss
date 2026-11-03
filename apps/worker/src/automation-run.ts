@@ -52,6 +52,7 @@ import { workspaceSandboxNetwork } from "./sandbox-network.js";
 import { subscriptionSecretHosts, parseSubscriptionAuth, subscriptionAuthForSandbox } from "@responder/core/automations/chatgpt-subscription";
 import { getAutomationRuntimeWorkspaceSecrets, type RuntimeWorkspaceSecret } from "@responder/core/db/workspace-secrets";
 import { getAutomationRuntimeSkills, type RuntimeWorkspaceSkill } from "@responder/core/db/workspace-skills";
+import { getRuntimeWorkspaceMemories, type RuntimeWorkspaceMemory } from "@responder/core/db/workspace-memories";
 import { organizationHasCapability } from "@responder/core/db/organization-capabilities";
 import { requireSandboxConfig } from "@responder/core/sandbox-config";
 import type { AutomationRunJob } from "@responder/core/jobs";
@@ -141,6 +142,7 @@ import {
   type RepositoryAgentDocs,
 } from "./repository-skills.js";
 import { workspaceSecretUsageInstructions } from "./secret-safety.js";
+import { materializeWorkspaceMemories, workspaceMemoryInstructions } from "./workspace-memories.js";
 
 type ClaimedAutomationRun = NonNullable<Awaited<ReturnType<typeof claimAutomationRun>>>;
 
@@ -166,6 +168,7 @@ export interface AutomationRunDependencies {
   getWorkspaceSecrets: typeof getAutomationRuntimeWorkspaceSecrets;
   getSandboxNetwork: typeof workspaceSandboxNetwork;
   getSkills: typeof getAutomationRuntimeSkills;
+  getMemories: typeof getRuntimeWorkspaceMemories;
   grantAllowanceExhausted: typeof automationModelBrokerGrantAllowanceExhausted;
   hasCapability: typeof organizationHasCapability;
   hasFinishedTurn: typeof automationRunHasFinishedTurn;
@@ -226,6 +229,7 @@ export const defaultAutomationRunDependencies: AutomationRunDependencies = {
   getWorkspaceSecrets: getAutomationRuntimeWorkspaceSecrets,
   getSandboxNetwork: workspaceSandboxNetwork,
   getSkills: getAutomationRuntimeSkills,
+  getMemories: getRuntimeWorkspaceMemories,
   grantAllowanceExhausted: automationModelBrokerGrantAllowanceExhausted,
   hasCapability: organizationHasCapability,
   hasFinishedTurn: automationRunHasFinishedTurn,
@@ -565,13 +569,18 @@ function automationPrompt(
   // of the message whose button this turn answers.
   notificationChannels: { inThread: boolean; names: string[] },
   connections: Parameters<typeof contextInstructions>[0],
-  extensions: { secrets: RuntimeWorkspaceSecret[]; skills: RuntimeWorkspaceSkill[] },
+  extensions: {
+    memories: RuntimeWorkspaceMemory[];
+    secrets: RuntimeWorkspaceSecret[];
+    skills: RuntimeWorkspaceSkill[];
+  },
   workspace?: { integrationsUrl: string },
   reviewCheckout?: { error?: string; savedChanges?: string },
   issueCatalog = false,
 ): string {
   const continuation = conversationPrompt(conversation, resumed, reviewCheckout);
   const secretInstructions = workspaceSecretUsageInstructions(extensions.secrets);
+  const memoryInstructions = workspaceMemoryInstructions(extensions.memories);
   return [
     run.prompt,
     "",
@@ -583,6 +592,7 @@ function automationPrompt(
     ...repositoryAgentDocsInstructions(agentDocs, repositories[0]?.repository),
     ...contextInstructions(connections),
     ...automationSkillInstructions(extensions.skills),
+    ...(memoryInstructions ? [memoryInstructions] : []),
     ...(secretInstructions ? [secretInstructions] : []),
     ...slackTriggerInstructions(run.triggerInput),
     ...devrevTriggerInstructions(run.triggerInput, firstTurn),
@@ -973,10 +983,11 @@ export async function processAutomationRun(
       runId: run.runId,
     });
     grantId = grant.id;
-    const [sandboxConfig, automationSecrets, skills, connections, sandboxNetwork] = await Promise.all([
+    const [sandboxConfig, automationSecrets, skills, memories, connections, sandboxNetwork] = await Promise.all([
       Promise.resolve(requireSandboxConfig(environment)),
       dependencies.getWorkspaceSecrets(run.automationVersionId),
       dependencies.getSkills(run.automationVersionId),
+      dependencies.getMemories(run.organizationId),
       dependencies.getConnections(run.automationVersionId),
       dependencies.getSandboxNetwork(run.organizationId, environment),
     ]);
@@ -1053,6 +1064,7 @@ export async function processAutomationRun(
           });
         }
         await materializeAutomationSkills(session, skills);
+        await materializeWorkspaceMemories(session, memories);
         const agentDocs = await dependencies.discoverAgentDocs(session, repositories);
         await recordEvent(dependencies, run.runId, "repositories_checked_out", {
           ...(resumed ? { resumed: true } : {}),
@@ -1174,7 +1186,7 @@ export async function processAutomationRun(
                   firstTurn,
                   notificationChannels,
                   connections,
-                  { secrets: workspaceSecrets, skills },
+                  { memories, secrets: workspaceSecrets, skills },
                   workspaceTools.length > 0 ? { integrationsUrl } : undefined,
                   reviewCheckout,
                   issueCatalog !== null,

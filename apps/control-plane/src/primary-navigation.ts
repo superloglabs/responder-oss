@@ -8,6 +8,7 @@ export type NavigationSection =
   | "integrations"
   | "issues"
   | "logs"
+  | "memory"
   | "metrics"
   | "pull-requests"
   | "scans"
@@ -49,12 +50,13 @@ export function primaryNavigation(options: NavigationOptions): NavigationItem[] 
   const grouped = Boolean(options.telemetry);
   const inGroup = (group: NavigationGroup, items: NavigationItem[]) =>
     grouped ? items.map((item) => ({ ...item, group })) : items;
-  // Skills extend automations and pull requests come from their runs, so
-  // both appear with them.
+  // Skills and memory extend automations and pull requests come from their
+  // runs, so they appear with them.
   const automations = options.automations
     ? inGroup("Automation", [
         { label: "Automations", section: "automations", to: "/automations" },
         { label: "Skills", section: "skills", to: "/skills" },
+        { label: "Memory", section: "memory", to: "/memory" },
         { label: "PRs", section: "pull-requests", to: "/pull-requests" },
       ])
     : [];

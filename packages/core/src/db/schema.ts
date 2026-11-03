@@ -29,6 +29,7 @@ import type {
   StructuredInvestigationReport,
 } from "../investigations/report.js";
 import type { SuggestionCodeChange } from "../suggestions/model.js";
+import type { MemoryType } from "../memories/config.js";
 import type {
   AlertAggregation,
   AlertComparator,
@@ -680,6 +681,40 @@ export const workspaceSkillSecrets = pgTable(
   },
   (table) => [
     primaryKey({ columns: [table.skillId, table.workspaceSecretId] }),
+  ],
+);
+
+// Facts members saved for agents, in Claude Code's memory format. Every
+// automation run and tag mode thread reads them; runs cannot change them.
+export const workspaceMemories = pgTable(
+  "workspace_memories",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description").notNull(),
+    type: text("type").$type<MemoryType>().notNull(),
+    body: text("body").notNull(),
+    createdBy: uuid("created_by").references(() => user.id, {
+      onDelete: "set null",
+    }),
+    updatedBy: uuid("updated_by").references(() => user.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("workspace_memories_organization_name_idx").on(
+      table.organizationId,
+      table.name,
+    ),
   ],
 );
 

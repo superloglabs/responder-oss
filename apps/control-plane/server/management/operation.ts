@@ -35,6 +35,7 @@ export type ManagementTag =
   | "Dashboards"
   | "Errors"
   | "Integrations"
+  | "Memory"
   | "Models"
   | "Runs"
   | "Secrets"

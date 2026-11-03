@@ -128,6 +128,18 @@ types. `drizzle/` contains the ordered schema history.
   applies the list after every sandbox start and resume, so a change reaches
   a paused sandbox on its next turn. A run fails if the provider rejects the
   list.
+- Workspace memories are facts members save for agents, in Claude Code's
+  memory format: a name, one-line description, and type in front matter, and
+  a Markdown body. Every automation run and investigation, including tag mode
+  threads, writes them to `.responder/memory/<name>.md` with a `MEMORY.md`
+  index and lists them in the agent's prompt. The folder is rewritten each
+  turn and nothing the agent changes there is saved, so runs read memories
+  but cannot create or change them; untrusted input such as logs and Slack
+  messages therefore cannot plant instructions for later runs. Members add
+  memories on the Memory page or through the `import_memories` MCP tool,
+  usually by asking Claude Code or Codex to import their own memories. Saving
+  refuses text that looks like a credential, and a workspace keeps at most 200
+  memories because each run's prompt lists all of them.
 - Pull-request review follow-ups accept only new top-level bot comments on PRs
   created by Responder. Comment text is untrusted input, human comments are
   ignored, and the controlled publisher can only fast-forward the existing PR
