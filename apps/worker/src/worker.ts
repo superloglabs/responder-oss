@@ -658,10 +658,13 @@ boss.on("error", (error: unknown) => {
 async function shutdown(signal: string): Promise<void> {
   if (stopping) return;
   stopping = true;
-  // Stop taking automation runs before handing the active ones back, so this
-  // worker does not fetch them again.
-  await Promise.all([automationRunQueue, legacyAutomationRunQueue].map((queue) =>
-    boss.offWork(queue, { wait: false })));
+  // Stop taking automation runs and image builds before handing the active
+  // ones back, so this worker does not fetch them again.
+  await Promise.all([
+    automationRunQueue,
+    legacyAutomationRunQueue,
+    sandboxImageBuildQueue,
+  ].map((queue) => boss.offWork(queue, { wait: false })));
   automationRunShutdown.abort();
   sandboxImageShutdown.abort();
   if (pollers.sandboxImages) clearInterval(pollers.sandboxImages);
@@ -831,6 +834,15 @@ await boss.work(sandboxImageBuildQueue, { localConcurrency: 2 }, tracedJobHandle
     }).catch(() => undefined);
     throw error;
   });
+  if (outcome === "interrupted") {
+    // Hand the build to the next worker. If this fails, the next maintenance
+    // pass queues it instead.
+    await boss.send(
+      sandboxImageBuildQueue,
+      { organizationId: payload.organizationId },
+      sandboxImageBuildJobOptions(payload.organizationId),
+    ).catch(() => undefined);
+  }
   console.log(JSON.stringify({
     event: "sandbox_image_build_finished",
     organizationId: payload.organizationId,
