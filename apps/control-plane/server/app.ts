@@ -14,6 +14,12 @@ import { cellCallbackRouter } from "./cells/callback-router.js";
 import { legacyGitHubSetupRedirect } from "./cells/legacy-github-setup.js";
 import { legacyWebhookForwarder } from "./cells/legacy-webhook-forwarder.js";
 import {
+  memberWorkspaceSearchSchema,
+  workspacesInOtherCells,
+} from "./cells/member-workspaces.js";
+import { listVerifiedMemberWorkspaces } from "../../../packages/core/src/db/member-workspaces.js";
+import { createRateLimiter } from "./rate-limit.js";
+import {
   supportUserSearchSchema,
   supportUsers,
   supportUsersAcrossCells,
@@ -349,6 +355,10 @@ instrumentedApp.use("/api/webhooks/*", cellWebhookRouter());
 instrumentedApp.use("/api/integrations/github/callback", legacyGitHubSetupRedirect());
 instrumentedApp.use("/api/integrations/:provider/callback", cellCallbackRouter());
 
+// Each lookup asks every other cell, so one person may look a few times a
+// minute.
+const otherCellWorkspaceLookups = createRateLimiter({ limit: 6, windowMs: 60_000 });
+
 export const app = instrumentedApp
   .get("/api/health", (context) =>
     context.json({
@@ -396,6 +406,53 @@ export const app = instrumentedApp
     const records = await listSupportUsers(parsed.data.search || undefined);
     return context.json({
       users: supportUsers(records, configuredSuperuserEmails()),
+    });
+  })
+  // Another cell asks which of this cell's workspaces an address belongs to.
+  .post("/api/internal/cells/member-workspaces", async (context) => {
+    if (
+      !verifyBearerToken(
+        context.req.header("authorization") ?? null,
+        process.env.RESPONDER_CELL_TOKEN?.trim() ?? "",
+      )
+    ) {
+      return context.json({ error: "Unauthorized" }, 401);
+    }
+    const parsed = memberWorkspaceSearchSchema.safeParse(
+      await context.req.json().catch(() => null),
+    );
+    if (!parsed.success) return context.json({ error: "Invalid search" }, 400);
+    return context.json({ workspaces: await listVerifiedMemberWorkspaces(parsed.data.email) });
+  })
+  // The signed-in person's workspaces in other cells, for a person who has
+  // none here. An unverified account may not own its email, and an
+  // impersonating superuser stays in this cell, so neither learns of any.
+  .get("/api/cells/workspaces", async (context) => {
+    const session = await getAuth().api
+      .getSession({ headers: context.req.raw.headers })
+      .catch(() => null);
+    if (!session) return context.json({ error: "Unauthorized" }, 401);
+    const directory = cellDirectory();
+    const cookieDomain = directory?.cookieDomain ?? null;
+    if (!session.user.emailVerified || session.session.impersonatedBy) {
+      return context.json({ cookieDomain, workspaces: [] });
+    }
+    const limit = otherCellWorkspaceLookups.take(session.user.id);
+    if (!limit.allowed) {
+      // One line per person and window, however many lookups are refused.
+      if (limit.firstRefusal) {
+        console.warn(JSON.stringify({ event: "member_workspaces_rate_limited", userId: session.user.id }));
+      }
+      context.header("retry-after", String(limit.retryAfterSeconds));
+      return context.json({ error: "Too many requests" }, 429);
+    }
+    return context.json({
+      cookieDomain,
+      workspaces: await workspacesInOtherCells({
+        directory,
+        email: session.user.email,
+        token: process.env.RESPONDER_CELL_TOKEN?.trim() || undefined,
+      }),
     });
   })
   // Public: the sign-in page offers the other regional cells, if any.
