@@ -136,6 +136,8 @@ export type SandboxImageBuildOutcome =
   | "cleared"
   | "current"
   | "failed"
+  // The worker stopped before the build finished.
+  | "interrupted"
   | "unsupported";
 
 interface BuildDependencies {
@@ -179,7 +181,8 @@ function rebuildRequested(
 // Builds the workspace's snapshot from its current settings on the cell's base
 // snapshot: its packages, then its setup script, as the sandbox user with sudo.
 // A build stopped by `signal` stops its sandbox and leaves the image building,
-// so the next maintenance pass queues it again.
+// so the next maintenance pass queues it again. It resolves "interrupted"
+// rather than failing, since a deploy stopping the worker is not an error.
 export async function buildSandboxImage(
   organizationId: string,
   options: { signal?: AbortSignal } = {},
@@ -215,7 +218,7 @@ export async function buildSandboxImage(
     );
     return "current";
   }
-  options.signal?.throwIfAborted();
+  if (options.signal?.aborted) return "interrupted";
 
   await dependencies.start(organizationId, key);
   let log = "";
@@ -285,7 +288,7 @@ export async function buildSandboxImage(
       // The snapshot was not recorded, so nothing else would delete it.
       await dependencies.queueDeletion(builtSnapshotId).catch(() => undefined);
     }
-    if (options.signal?.aborted) throw error;
+    if (options.signal?.aborted) return "interrupted";
     const message = error instanceof SandboxImageStepError
       ? error.message
       : "The build stopped on a sandbox error";

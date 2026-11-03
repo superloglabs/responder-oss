@@ -182,9 +182,19 @@ describe("sandbox image build", () => {
     });
     const dependencies = buildDependencies({ sandbox });
     await expect(buildSandboxImage(organizationId, { signal: shutdown.signal }, environment, dependencies))
-      .rejects.toMatchObject({ name: "AbortError" });
+      .resolves.toBe("interrupted");
     expect(sandbox.stop).toHaveBeenCalled();
     expect(dependencies.fail).not.toHaveBeenCalled();
+  });
+
+  it("does not start a build once the worker is shutting down", async () => {
+    const shutdown = new AbortController();
+    shutdown.abort();
+    const dependencies = buildDependencies({});
+    await expect(buildSandboxImage(organizationId, { signal: shutdown.signal }, environment, dependencies))
+      .resolves.toBe("interrupted");
+    expect(dependencies.start).not.toHaveBeenCalled();
+    expect(dependencies.createSandbox).not.toHaveBeenCalled();
   });
 
   it("does not rebuild a snapshot that matches the settings", async () => {

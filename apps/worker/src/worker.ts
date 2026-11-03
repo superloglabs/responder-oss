@@ -825,13 +825,10 @@ await boss.work(sandboxImageBuildQueue, { localConcurrency: 2 }, tracedJobHandle
   const outcome = await buildSandboxImage(payload.organizationId, {
     signal: sandboxImageShutdown.signal,
   }).catch(async (error: unknown) => {
-    // A build cut off by shutdown is queued again by the next maintenance pass.
-    if (!stopping) {
-      await reportWorkerException(error, {
-        operation: "sandbox_image",
-        organizationId: payload.organizationId,
-      }).catch(() => undefined);
-    }
+    await reportWorkerException(error, {
+      operation: "sandbox_image",
+      organizationId: payload.organizationId,
+    }).catch(() => undefined);
     throw error;
   });
   console.log(JSON.stringify({
