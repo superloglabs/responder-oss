@@ -34,11 +34,16 @@ describe("createSubscriptionUsageStore", () => {
     expect(store.current()).toEqual([entry("new")]);
   });
 
-  it("keeps the last limits when a refresh fails", async () => {
-    const responses: Array<SubscriptionUsageEntry[] | null> = [[entry("a")], null];
+  it("marks known subscriptions unavailable when a refresh fails", async () => {
+    const loaded = { id: "a", label: "a", usage: { planType: "pro", windows: [] } };
+    const responses: Array<SubscriptionUsageEntry[] | null> = [null, [loaded], null];
     const store = createSubscriptionUsageStore(() => Promise.resolve(responses.shift()!));
+    // Whether a subscription exists is unknown until a request succeeds.
     await store.refresh();
+    expect(store.current()).toEqual([]);
     await store.refresh();
-    expect(store.current()).toEqual([entry("a")]);
+    expect(store.current()).toEqual([loaded]);
+    await store.refresh();
+    expect(store.current()).toEqual([{ ...loaded, usage: null }]);
   });
 });

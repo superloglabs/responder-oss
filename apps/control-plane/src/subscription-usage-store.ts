@@ -1,7 +1,8 @@
 import type { SubscriptionUsageEntry } from "./subscription-usage-presentation";
 
 // Holds the last loaded limits across page changes, since each page renders
-// its own sidebar. Only the newest request may replace them.
+// its own sidebar. Only the newest request may replace them. When it fails,
+// known subscriptions show as unavailable rather than keep old numbers.
 export function createSubscriptionUsageStore(
   load: () => Promise<SubscriptionUsageEntry[] | null>,
 ) {
@@ -12,7 +13,9 @@ export function createSubscriptionUsageStore(
     async refresh(): Promise<SubscriptionUsageEntry[]> {
       const request = ++latest;
       const loaded = await load();
-      if (loaded && request === latest) subscriptions = loaded;
+      if (request === latest) {
+        subscriptions = loaded ?? subscriptions.map((subscription) => ({ ...subscription, usage: null }));
+      }
       return subscriptions;
     },
   };
