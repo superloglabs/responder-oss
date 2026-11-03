@@ -117,6 +117,7 @@ function dependencies() {
     getWorkspaceSecrets: vi.fn().mockResolvedValue([]),
     getSandboxNetwork: vi.fn().mockResolvedValue(null),
     getSkills: vi.fn<AutomationRunDependencies["getSkills"]>().mockResolvedValue([]),
+    getMemories: vi.fn<AutomationRunDependencies["getMemories"]>().mockResolvedValue([]),
     grantAllowanceExhausted: vi.fn().mockResolvedValue(false),
     hasNewMessages: vi.fn().mockResolvedValue(false),
     heartbeatRun: vi.fn().mockResolvedValue(true),
@@ -288,6 +289,54 @@ describe("automation run processor", () => {
     expect(deps.session.execCommand.mock.invocationCallOrder[0]).toBeLessThan(
       deps.session.materializeEntry.mock.invocationCallOrder.at(-1)!,
     );
+  });
+
+  it("writes the workspace's memories to the sandbox and lists them in the prompt", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    deps.getMemories.mockResolvedValue([{
+      body: "The EU cell runs in eu-west-3.",
+      description: "Where production runs",
+      name: "production-regions",
+      type: "project",
+    }]);
+
+    await processAutomationRun("job-1", {
+      kind: "automation_run",
+      queuedAt: "2026-09-22T19:00:00.000Z",
+      runId,
+    }, process.env, deps);
+
+    expect(deps.getMemories).toHaveBeenCalledWith(organizationId);
+    const written = Object.fromEntries(deps.session.materializeEntry.mock.calls.map(([call]) => [call.path, call.entry.content]));
+    expect(written["/home/daytona/workspace/.responder/memory/MEMORY.md"]).toBe(
+      "- [production-regions](production-regions.md) — Where production runs\n",
+    );
+    expect(written["/home/daytona/workspace/.responder/memory/production-regions.md"]).toBe(
+      "---\nname: \"production-regions\"\ndescription: \"Where production runs\"\nmetadata:\n  type: project\n---\n\nThe EU cell runs in eu-west-3.\n",
+    );
+    const prompt = deps.runCodex.mock.calls[0]![1].prompt;
+    expect(prompt).toContain("Each memory is a file in /home/daytona/workspace/.responder/memory:\n- production-regions: Where production runs (production-regions.md)");
+    expect(prompt).toContain("Changes to these files are not saved.");
+    // Memories deleted since an earlier turn are removed from the sandbox.
+    expect(deps.session.execCommand.mock.calls.map(([call]) => call.cmd).join("\n"))
+      .toContain("rm -rf -- '/home/daytona/workspace/.responder/memory'");
+  });
+
+  it("leaves memory out of the prompt when the workspace has none", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+
+    await processAutomationRun("job-1", {
+      kind: "automation_run",
+      queuedAt: "2026-09-22T19:00:00.000Z",
+      runId,
+    }, process.env, deps);
+
+    expect(deps.runCodex.mock.calls[0]![1].prompt).not.toContain("Workspace memory");
+    expect(deps.session.materializeEntry.mock.calls.some(([call]) => call.path.includes("/.responder/memory/"))).toBe(false);
   });
 
   it("serves each Google Cloud context connection as one server per Google service", async () => {

@@ -62,6 +62,8 @@ import {
 import { SettingsPage } from "./pages/settings";
 import { SkillEditorPage } from "./pages/skill-editor";
 import { SkillsPage } from "./pages/skills";
+import { MemoriesPage } from "./pages/memories";
+import { MemoryEditorPage } from "./pages/memory-editor";
 import { SuggestionsPage } from "./pages/suggestions";
 import { SuperuserUsersPage } from "./pages/superuser-users";
 import { WorkspaceSettingsPage } from "./pages/workspace-settings";
@@ -173,6 +175,9 @@ export function App() {
         <Route element={<SkillsPage />} path="/skills" />
         <Route element={<SkillEditorPage />} path="/skills/new" />
         <Route element={<SkillEditorPage />} path="/skills/:skillId" />
+        <Route element={<MemoriesPage />} path="/memory" />
+        <Route element={<MemoryEditorPage />} path="/memory/new" />
+        <Route element={<MemoryEditorPage />} path="/memory/:memoryId" />
         <Route element={<IssuesPage />} path="/issues" />
         <Route element={<LogsPage />} path="/logs" />
         <Route element={<TracesOverviewPage />} path="/traces" />

@@ -77,6 +77,7 @@ import { listEnabledOrganizationCapabilities } from "../../../packages/core/src/
 import { apiKeyRoutes } from "./management/api-key-routes.js";
 import { terraformRoutes } from "./terraform/routes.js";
 import { skillRoutes } from "./skills/routes.js";
+import { memoryRoutes } from "./memories/routes.js";
 import { managementMcpRoutes } from "./management/mcp.js";
 import { managementApiRoutes } from "./management/routes.js";
 import { sourceMapRoutes } from "./source-maps/routes.js";
@@ -538,6 +539,7 @@ export const app = instrumentedApp
   .route("/api/pull-requests", pullRequestRoutes)
   .route("/api/agents", agentRoutes)
   .route("/api/skills", skillRoutes)
+  .route("/api/memories", memoryRoutes)
   .route("/api/billing", billingRoutes)
   .route("/api/issues", issueRoutes)
   .route("/api/scans", scanRoutes)

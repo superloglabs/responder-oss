@@ -1,6 +1,7 @@
 import {
   IconAdjustmentsHorizontalFilled,
   IconBellFilled,
+  IconBookmarkFilled,
   IconBoltFilled,
   IconBookFilled,
   IconBugFilled,
@@ -34,6 +35,7 @@ const navigationIcons: Record<NavigationSection, typeof GearIcon | typeof IconBo
   integrations: IconPuzzleFilled,
   issues: ListBulletsIcon,
   logs: IconFileTextFilled,
+  memory: IconBookmarkFilled,
   metrics: IconChartAreaLineFilled,
   "pull-requests": IconFileDiffFilled,
   scans: ScanIcon,
