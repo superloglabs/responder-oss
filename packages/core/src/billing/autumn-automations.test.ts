@@ -422,8 +422,9 @@ describe("automation billing", () => {
     const account = {
       customerId: "earlier-customer",
       featureId: "investigations",
-      model: "claude-sonnet-5.5",
-      modelName: "Per-run model",
+      harness: "claude_agent_sdk",
+      model: "model-a",
+      modelName: "Plan model",
       modelProvider: "anthropic",
     };
 
@@ -484,7 +485,7 @@ describe("automation billing", () => {
       await expect(checkUsageAllowance("organization-run-usage")).resolves.toEqual({ allowed: true, nextResetAt: null });
       await trackAutomationInferenceUsage({
         costMicros: 1_000_000,
-        model: "claude-sonnet-5.5",
+        model: "model-a",
         organizationId: "organization-run-usage",
         runId: "run-1",
         usageId: "usage-1",
@@ -521,17 +522,28 @@ describe("automation billing", () => {
       }
     });
 
-    it("refuses other models while paying per run", async () => {
+    it("accepts only the plan's model while paying per run", async () => {
       runBilled("organization-run-models");
 
       await expect(automationModelRefusal("organization-run-models", {
-        model: "claude-sonnet-5.5",
-        modelProvider: "anthropic",
+        model: "default",
+        modelProvider: "plan",
       })).resolves.toBeNull();
       await expect(automationModelRefusal("organization-run-models", {
-        model: "claude-opus-5.5",
+        model: "model-a",
         modelProvider: "anthropic",
-      })).resolves.toContain("Per-run model");
+      })).resolves.toContain("Plan model");
+    });
+
+    it("refuses the plan's model in a workspace whose plan provides none", async () => {
+      await expect(automationModelRefusal("organization-run-none", {
+        model: "default",
+        modelProvider: "plan",
+      })).resolves.toContain("does not provide a model");
+      await expect(automationModelRefusal("organization-run-none", {
+        model: "model-b",
+        modelProvider: "anthropic",
+      })).resolves.toBeNull();
     });
 
     it("summarizes per-run billing without limits or a seat cap", () => {
@@ -546,7 +558,7 @@ describe("automation billing", () => {
         creditUnlimited: true,
         includesTeammates: true,
         machineHours: { unlimited: true },
-        runBilling: { modelName: "Per-run model" },
+        runBilling: { modelName: "Plan model" },
       });
     });
   });

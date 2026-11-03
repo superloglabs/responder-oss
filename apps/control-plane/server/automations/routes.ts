@@ -210,15 +210,14 @@ async function modelRefusal(
 }
 
 export const automationRoutes = new Hono()
-  // The one model a workspace that pays per run may use, or null.
+  // The name of the one model a workspace that pays per run may use, or
+  // null. Automations name it only as the plan's model.
   .get("/plan-model", async (context) => {
     const access = await getAutomationTenant(context.req.raw.headers);
     if (!access.ok) return context.json({ error: access.error }, access.status);
     try {
       const account = await organizationRunBilling(access.tenant.organizationId);
-      return context.json({
-        model: account && { id: account.model, name: account.modelName, provider: account.modelProvider },
-      });
+      return context.json({ model: account && { name: account.modelName } });
     } catch {
       return context.json({ error: "Unable to load models. Please retry." }, 502);
     }

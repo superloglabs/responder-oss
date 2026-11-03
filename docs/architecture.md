@@ -244,14 +244,20 @@ investigation credits.
 - The app shows a banner from the same balances while new work is paused.
 - An operator can give a workspace a `run_billing_accounts` row instead, to
   bill a price per run. Until the workspace moves to a paid plan, its
-  automations run only on the row's model, on Responder-funded inference;
+  automations run only on the plan's model, on Responder-funded inference;
   each run whose first turn succeeds is tracked once, with the run ID as the
   idempotency key, against the row's Autumn customer and feature; and model
-  and sandbox usage are recorded but not charged. The model picker and
-  `list_included_models` offer only that model. Saving or enabling an
-  automation on another model is refused, and so is any save while the plan
-  cannot be read. The run is counted before it is marked succeeded, with
-  retries; a count that still fails is reported and not charged.
+  and sandbox usage are recorded but not charged.
+- An automation names the plan's model as provider `plan`, harness `plan`,
+  and model `default`. The row's provider, model, and harness are read only
+  when a run starts, so automations, run events, and the app show only the
+  row's `model_name`. The model picker offers only that name, and
+  `list_included_models` lists no models. Saving or enabling an automation on
+  another model is refused, and so is any save while the plan cannot be read.
+  A workspace whose plan provides no model cannot save or run the alias; the
+  model picker clears it so another model can be chosen.
+  The run is counted before it is marked succeeded, with retries; a count
+  that still fails is reported and not charged.
 - Suggested automation templates are paid by Responder and do not use the
   usage credit. From 05:00 UTC each day, the worker asks a model through
   Responder's AI Gateway key for templates for each organization with

@@ -53,7 +53,8 @@ import type {
   ErrorIssueStatus,
 } from "../telemetry/error-issues.js";
 import type {
-  AutomationHarnessKind,
+  AutomationConfigurationHarness,
+  AutomationConfigurationModelProvider,
   AutomationInferenceSource,
   AutomationModelProvider,
   AutomationNotification,
@@ -766,7 +767,8 @@ export const telemetryNotificationPauses = pgTable("telemetry_notification_pause
 });
 
 // A workspace that pays a price per run instead of a usage plan. Until it
-// moves to a paid plan, its automations run only on this model, each
+// moves to a paid plan, its automations run only on this model and harness,
+// which they name only as the plan's model; each
 // successful run counts once against `feature_id` for the Autumn customer
 // `customer_id`, and model and sandbox usage are not charged. Operators set
 // these rows; there is no app setting for them.
@@ -776,6 +778,7 @@ export const runBillingAccounts = pgTable("run_billing_accounts", {
     .references(() => organization.id, { onDelete: "cascade" }),
   customerId: text("customer_id").notNull(),
   featureId: text("feature_id").notNull(),
+  harness: text("harness").notNull(),
   modelProvider: text("model_provider").notNull(),
   model: text("model").notNull(),
   // The name the model picker shows for the model.
@@ -1350,9 +1353,9 @@ export const automationVersions = pgTable(
       .references(() => automations.id, { onDelete: "cascade" }),
     version: integer("version").notNull(),
     prompt: text("prompt").notNull(),
-    harness: text("harness").$type<AutomationHarnessKind>().notNull(),
+    harness: text("harness").$type<AutomationConfigurationHarness>().notNull(),
     modelProvider: text("model_provider")
-      .$type<AutomationModelProvider>()
+      .$type<AutomationConfigurationModelProvider>()
       .notNull(),
     model: text("model").notNull(),
     // No longer read or written: each run picks its model access from the

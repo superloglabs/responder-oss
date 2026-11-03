@@ -11,6 +11,20 @@ export const automationHarnessSchema = z.enum([
 
 export const automationModelProviderSchema = z.enum(automationModelProviders.map(provider => provider.id));
 
+// An automation on the model its workspace's plan provides names neither the
+// model nor its harness. A run reads them from the plan when it starts.
+export const PLAN_MODEL_PROVIDER = "plan";
+export const PLAN_HARNESS = "plan";
+export const PLAN_MODEL = "default";
+export const automationConfigurationHarnessSchema = z.enum([...automationHarnessSchema.options, PLAN_HARNESS]);
+export const automationConfigurationModelProviderSchema = z
+  .enum([...automationModelProviderSchema.options, PLAN_MODEL_PROVIDER])
+  .describe(`The model provider, or "${PLAN_MODEL_PROVIDER}" for the model the workspace's plan provides, with harness "${PLAN_HARNESS}" and model "${PLAN_MODEL}".`);
+
+export function usesPlanModel(configuration: { modelProvider: string }): boolean {
+  return configuration.modelProvider === PLAN_MODEL_PROVIDER;
+}
+
 // Responder-funded inference is the default. An organization API key or a
 // ChatGPT subscription replaces it and does not draw on the usage allowance.
 export const automationInferenceSourceSchema = z.enum([
@@ -177,7 +191,7 @@ export const automationConfigurationSchema = z
   .object({
     contextAccountIds: z.array(z.uuid()).max(50).default([])
       .refine(uniqueIds, "Context account IDs must be unique"),
-    harness: automationHarnessSchema,
+    harness: automationConfigurationHarnessSchema,
     maxModelRequests: z.number().int().min(1).max(1_000),
     maxOutputTokensPerRequest: z.number().int().min(256).max(100_000),
     maxRuntimeSeconds: z.number().int().min(60).max(3_600),
@@ -186,7 +200,7 @@ export const automationConfigurationSchema = z
       .min(1)
       .max(255)
       .regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]*$/u),
-    modelProvider: automationModelProviderSchema,
+    modelProvider: automationConfigurationModelProviderSchema,
     notifications: z.array(automationNotificationSchema).max(10).default([])
       .refine(
         (notifications) => uniqueIds(notifications.map((notification) =>
@@ -206,7 +220,18 @@ export const automationConfigurationSchema = z
       .refine(uniqueIds, "Workspace secret IDs must be unique"),
   })
   .superRefine((configuration, context) => {
-    if (
+    if (usesPlanModel(configuration) || configuration.harness === PLAN_HARNESS || configuration.model === PLAN_MODEL) {
+      if (
+        !usesPlanModel(configuration) || configuration.harness !== PLAN_HARNESS ||
+        configuration.model !== PLAN_MODEL
+      ) {
+        context.addIssue({
+          code: "custom",
+          message: `The plan's model uses provider "${PLAN_MODEL_PROVIDER}", harness "${PLAN_HARNESS}", and model "${PLAN_MODEL}"`,
+          path: ["modelProvider"],
+        });
+      }
+    } else if (
       !supportsAutomationHarness(configuration.modelProvider, configuration.harness)
     ) {
       context.addIssue({
@@ -265,5 +290,8 @@ export type AutomationInput = z.infer<typeof automationInputSchema>;
 export type AutomationModelProvider = z.infer<
   typeof automationModelProviderSchema
 >;
+// What an automation stores, which may be the plan's model.
+export type AutomationConfigurationHarness = z.infer<typeof automationConfigurationHarnessSchema>;
+export type AutomationConfigurationModelProvider = z.infer<typeof automationConfigurationModelProviderSchema>;
 export type AutomationNotification = z.infer<typeof automationNotificationSchema>;
 export type AutomationTrigger = z.infer<typeof automationTriggerSchema>;

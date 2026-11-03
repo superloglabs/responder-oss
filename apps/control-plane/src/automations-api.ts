@@ -1,6 +1,9 @@
 import { apiErrorMessage, type AgentOptions } from "./agents-api";
 
-export type AutomationHarness = "codex" | "claude_agent_sdk" | "opencode";
+// "plan" is the harness and provider of the model a workspace's plan provides.
+export type AutomationHarness = "codex" | "claude_agent_sdk" | "opencode" | "plan";
+export type { AutomationConfigurationModelProvider } from "../../../packages/core/src/automations/config";
+import type { AutomationConfigurationModelProvider } from "../../../packages/core/src/automations/config";
 export type { ModelProviderId as AutomationModelProvider, AvailableAutomationModel } from "../../../packages/core/src/automations/model-providers";
 import type { ModelProviderId as AutomationModelProvider, AvailableAutomationModel } from "../../../packages/core/src/automations/model-providers";
 import type { AutomationScheduleFrequency } from "../../../packages/core/src/automations/schedule";
@@ -103,7 +106,7 @@ export interface AutomationConfiguration {
   maxOutputTokensPerRequest: number;
   maxRuntimeSeconds: number;
   model: string;
-  modelProvider: AutomationModelProvider;
+  modelProvider: AutomationConfigurationModelProvider;
   notifications: AutomationNotification[];
   prompt: string;
   repositoryIds: string[];
@@ -129,7 +132,7 @@ export interface AutomationListItem {
   id: string;
   lastRun: { createdAt: string; status: AutomationRunStatus } | null;
   model: string;
-  modelProvider: AutomationModelProvider;
+  modelProvider: AutomationConfigurationModelProvider;
   name: string;
   triggers: AutomationTrigger[];
   updatedAt: string;
@@ -431,7 +434,7 @@ export function cancelAutomationSubscription(id: string) { return automationJson
 export function fetchAutomationModels(credentialId: string, refresh = false) { return automationJson<{ models: AvailableAutomationModel[] }>(`/api/automations/credentials/${encodeURIComponent(credentialId)}/models${refresh ? "?refresh=true" : ""}`); }
 
 // Models available with included usage, served through AI Gateway.
-export interface PlanAutomationModel { id: string; name: string; provider: AutomationModelProvider }
+export interface PlanAutomationModel { name: string }
 // The one model a workspace that pays per run may use, or null.
 export function fetchPlanAutomationModel() { return automationJson<{ model: PlanAutomationModel | null }>("/api/automations/plan-model"); }
 export function fetchIncludedAutomationModels(provider: AutomationModelProvider) { return automationJson<{ models: AvailableAutomationModel[] }>(`/api/automations/included-models/${encodeURIComponent(provider)}`); }

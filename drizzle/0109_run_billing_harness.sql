@@ -1,0 +1,1 @@
+ALTER TABLE "run_billing_accounts" ADD COLUMN "harness" text NOT NULL;

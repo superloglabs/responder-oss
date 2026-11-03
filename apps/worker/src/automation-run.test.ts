@@ -1918,42 +1918,48 @@ describe("automation run processor", () => {
     const runBilling = {
       customerId: "earlier-customer",
       featureId: "investigations",
-      model: "claude-sonnet-5.5",
-      modelName: "Per-run model",
+      harness: "claude_agent_sdk",
+      model: "model-a",
+      modelName: "Plan model",
       modelProvider: "anthropic",
     };
+    const planModel = { harness: "plan", model: "default", modelProvider: "plan" };
 
-    function runBilledDependencies(model: string) {
+    function runBilledDependencies(configuration: { harness: string; model: string; modelProvider: string } = planModel, account: typeof runBilling | null = runBilling) {
       vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
       vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
       const deps = dependencies();
-      deps.claimRun.mockResolvedValue({
-        ...claimedRun(),
-        harness: "claude_agent_sdk",
-        model,
-        modelProvider: "anthropic",
-      } as never);
+      deps.claimRun.mockResolvedValue({ ...claimedRun(), ...configuration } as never);
       deps.checkAllowance.mockResolvedValue({
         allowed: true,
         exhausted: null,
         machinesUseCredit: false,
         nextResetAt: null,
-        runBilling,
+        ...(account ? { runBilling: account } : {}),
       });
       deps.runClaude.mockResolvedValue({ eventStream: "" });
       return deps;
     }
 
-    it("runs its model on Responder inference and counts the run once", async () => {
-      const deps = runBilledDependencies("claude-sonnet-5.5");
-      deps.selectCredential.mockResolvedValue("81818181-8181-4181-8181-818181818181");
+    it("runs the plan's model and harness on Responder inference and counts the run once", async () => {
+      const deps = runBilledDependencies();
 
       await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
 
-      expect(deps.getCredential).not.toHaveBeenCalled();
+      expect(deps.selectCredential).not.toHaveBeenCalled();
+      expect(deps.checkAllowance).toHaveBeenCalledWith(organizationId, { responderModels: true });
       expect(deps.createGrant).toHaveBeenCalledWith(expect.objectContaining({
         credential: { inferenceSource: "responder" },
-        model: "claude-sonnet-5.5",
+        model: "model-a",
+        provider: "anthropic",
+      }));
+      expect(deps.runClaude).toHaveBeenCalledOnce();
+      expect(deps.runClaude).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+        model: expect.objectContaining({ model: "model-a", provider: "anthropic" }),
+      }));
+      expect(deps.appendEvent).toHaveBeenCalledWith(expect.objectContaining({
+        data: { harness: "plan", model: "default", provider: "plan" },
+        type: "run_started",
       }));
       expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({ status: "succeeded" }));
       expect(deps.trackBilledRun).toHaveBeenCalledOnce();
@@ -1961,7 +1967,7 @@ describe("automation run processor", () => {
     });
 
     it("counts the run before marking it succeeded, retrying a failed count", async () => {
-      const deps = runBilledDependencies("claude-sonnet-5.5");
+      const deps = runBilledDependencies();
       const order: string[] = [];
       deps.trackBilledRun
         .mockRejectedValueOnce(new Error("Autumn unavailable"))
@@ -1980,8 +1986,8 @@ describe("automation run processor", () => {
       expect(order.indexOf("counted")).toBeLessThan(order.indexOf("succeeded"));
     });
 
-    it("refuses another model before a sandbox starts", async () => {
-      const deps = runBilledDependencies("claude-opus-5.5");
+    it("refuses an automation that names its own model before a sandbox starts", async () => {
+      const deps = runBilledDependencies({ harness: "claude_agent_sdk", model: "model-a", modelProvider: "anthropic" });
 
       await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
 
@@ -1989,13 +1995,25 @@ describe("automation run processor", () => {
       expect(deps.runInSandbox).not.toHaveBeenCalled();
       expect(deps.trackBilledRun).not.toHaveBeenCalled();
       expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({
-        failureMessage: expect.stringContaining("Per-run model"),
+        failureMessage: expect.stringContaining("Plan model"),
+        status: "failed",
+      }));
+    });
+
+    it("refuses the plan's model in a workspace whose plan provides none", async () => {
+      const deps = runBilledDependencies(planModel, null);
+
+      await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
+
+      expect(deps.createGrant).not.toHaveBeenCalled();
+      expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({
+        failureMessage: expect.stringContaining("plan no longer provides"),
         status: "failed",
       }));
     });
 
     it("does not count a run that fails", async () => {
-      const deps = runBilledDependencies("claude-sonnet-5.5");
+      const deps = runBilledDependencies();
       deps.runClaude.mockRejectedValue(new Error("harness failed"));
 
       await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
