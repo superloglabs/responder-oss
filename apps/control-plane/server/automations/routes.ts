@@ -1,4 +1,5 @@
 import { listSubscriptionModels } from "./subscription-models.js";
+import { readSubscriptionUsage } from "./subscription-usage.js";
 import { automationModelRefusal, organizationRunBilling } from "../../../../packages/core/src/billing/autumn.js";
 import { listIncludedModels } from "../../../../packages/core/src/billing/included-models.js";
 import { listProviderModels, ModelCatalogError } from "../../../../packages/core/src/automations/model-catalog.js";
@@ -249,6 +250,33 @@ export const automationRoutes = new Hono()
     } catch (error) {
       return context.json({ error: error instanceof ModelCatalogError ? error.message : "Unable to load models. Please retry when this connection is idle." }, error instanceof ModelCatalogError && error.authenticationFailed ? 400 : 502);
     }
+  })
+  // Rate limits of each connected ChatGPT subscription. A subscription whose
+  // limits cannot be read is listed as unavailable.
+  .get("/subscriptions/usage", async (context) => {
+    const access = await getAutomationTenant(context.req.raw.headers);
+    if (!access.ok) return context.json({ error: access.error }, access.status);
+    context.header("Cache-Control", "no-store");
+    const organizationId = access.tenant.organizationId;
+    const subscriptions = (await listOrganizationModelCredentials(organizationId))
+      .filter((credential) => credential.authType === "chatgpt_subscription" && credential.status === "active");
+    const usage = await Promise.allSettled(
+      subscriptions.map((credential) => readSubscriptionUsage({ credentialId: credential.id, organizationId })),
+    );
+    return context.json({
+      subscriptions: subscriptions.map((credential, index) => {
+        const result = usage[index]!;
+        if (result.status === "rejected") {
+          // Never log the error itself: it may contain credentials.
+          console.error(JSON.stringify({ event: "subscription_usage_failed", credentialId: credential.id, organizationId }));
+        }
+        return {
+          id: credential.id,
+          label: credential.label,
+          usage: result.status === "fulfilled" ? result.value : null,
+        };
+      }),
+    });
   })
   .post("/subscriptions/openai", async (context) => {
     const access = await getAutomationTenant(context.req.raw.headers);

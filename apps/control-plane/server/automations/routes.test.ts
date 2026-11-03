@@ -34,6 +34,7 @@ const mocks = vi.hoisted(() => ({
   finishSuggestionRefill: vi.fn(),
   latestSuggestions: vi.fn(),
   removeSuggestions: vi.fn(),
+  subscriptionUsage: vi.fn(),
   modelRefusal: vi.fn().mockResolvedValue(null),
   tenant: vi.fn().mockResolvedValue({
     ok: true,
@@ -126,6 +127,8 @@ vi.mock(
     listProviderModels: mocks.modelCatalog,
   }),
 );
+
+vi.mock("./subscription-usage.js", () => ({ readSubscriptionUsage: mocks.subscriptionUsage }));
 
 vi.mock("../../../../packages/core/src/billing/autumn.js", async (original) => ({
   ...(await original<typeof import("../../../../packages/core/src/billing/autumn.js")>()),
@@ -526,6 +529,35 @@ describe("automation control-plane routes", () => {
       expect(response.status).toBe(status);
     },
   );
+
+  it("reads usage for active ChatGPT subscriptions and lists unreadable ones as unavailable", async () => {
+    const pro = "44444444-4444-4444-8444-444444444444";
+    const team = "55555555-5555-4555-8555-555555555555";
+    mocks.listCredentials.mockResolvedValueOnce([
+      { authType: "chatgpt_subscription", id: pro, label: "ChatGPT subscription 1", status: "active" },
+      { authType: "chatgpt_subscription", id: team, label: "ChatGPT subscription 2", status: "active" },
+      { authType: "chatgpt_subscription", id: "66666666-6666-4666-8666-666666666666", label: "Expired", status: "invalid" },
+      { authType: "api_key", id: "77777777-7777-4777-8777-777777777777", label: "Key", status: "active" },
+    ]);
+    const usage = { planType: "pro", windows: [{ resetsAt: 1, usedPercent: 42, windowMinutes: 300 }] };
+    mocks.subscriptionUsage.mockImplementation(({ credentialId }: { credentialId: string }) =>
+      credentialId === pro ? Promise.resolve(usage) : Promise.reject(new Error("token secret")));
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const response = await app.request("/api/automations/subscriptions/usage");
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      subscriptions: [
+        { id: pro, label: "ChatGPT subscription 1", usage },
+        { id: team, label: "ChatGPT subscription 2", usage: null },
+      ],
+    });
+    expect(mocks.subscriptionUsage).toHaveBeenCalledTimes(2);
+    expect(mocks.subscriptionUsage).toHaveBeenCalledWith({ credentialId: pro, organizationId });
+    expect(JSON.stringify(logged.mock.calls)).not.toContain("token secret");
+    logged.mockRestore();
+  });
 
   it("reports an invalid saved model key as a credential error", async () => {
     mocks.credential.mockResolvedValue({ provider: "openai", apiKey: "invalid" });
