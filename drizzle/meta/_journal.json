@@ -729,6 +729,20 @@
       "when": 1793288632947,
       "tag": "0103_error_issue_claims",
       "breakpoints": true
+    },
+    {
+      "idx": 104,
+      "version": "7",
+      "when": 1793655539681,
+      "tag": "0104_workspace_secret_values",
+      "breakpoints": true
+    },
+    {
+      "idx": 105,
+      "version": "7",
+      "when": 1793698694316,
+      "tag": "0105_sandbox_network_settings",
+      "breakpoints": true
     }
   ]
 }

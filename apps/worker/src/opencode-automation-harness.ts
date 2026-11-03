@@ -1,4 +1,4 @@
-import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
+import type { SandboxSession } from "./sandbox-session.js";
 import {
   AutomationHarnessError,
   assertAutomationHarnessModelCompatibility,
@@ -73,7 +73,7 @@ export function openCodeHarnessFailure(output: string): string | null {
 // Returns the executable to run: the snapshot's prebuilt copy when it has the
 // pinned version, otherwise a copy installed now.
 export async function prepareOpenCodeAutomationHarness(
-  session: DaytonaSandboxSession,
+  session: SandboxSession,
 ): Promise<string> {
   const output = await session.execCommand({
     cmd: [
@@ -180,7 +180,7 @@ export function buildOpenCodeAutomationCommand(
 }
 
 export async function runOpenCodeAutomation(
-  session: DaytonaSandboxSession,
+  session: SandboxSession,
   input: AutomationHarnessInput,
 ): Promise<AutomationHarnessResult> {
   await assertAutomationWorkspaceHasNoSymlinkRedirects(

@@ -14,7 +14,9 @@ import {
   SubscriptionCredentialUnavailableError,
 } from "@responder/core/db/automation-model-credentials";
 import { daytonaClientOptions, isDaytonaNotFound, requireDaytonaClientConfig } from "@responder/core/daytona-config";
+import { sandboxProvider } from "@responder/core/sandbox-config";
 import { prebuiltHarnessRoot } from "./automation-harness.js";
+import { vercelSecretPlaceholder } from "./vercel-sandbox.js";
 
 interface SubscriptionOwner {
   credentialId: string;
@@ -144,6 +146,8 @@ export interface SubscriptionRunSecret {
   id: string;
   name: string;
   placeholder: string;
+  // Set on Vercel, where the worker hands the token to the sandbox's firewall.
+  value?: string;
 }
 
 // Keeps the access token out of the run sandbox. The sandbox sees only the
@@ -153,6 +157,9 @@ export async function createSubscriptionRunSecret(
   input: { accessToken: string; runId: string },
   environment: NodeJS.ProcessEnv = process.env,
 ): Promise<SubscriptionRunSecret> {
+  if (sandboxProvider(environment) === "vercel") {
+    return { id: "", name: "", placeholder: vercelSecretPlaceholder(), value: input.accessToken };
+  }
   const client = new Daytona(daytonaClientOptions(requireDaytonaClientConfig(environment)));
   try {
     const secret = await client.secret.create({
@@ -171,6 +178,7 @@ export async function deleteSubscriptionRunSecret(
   secretId: string,
   environment: NodeJS.ProcessEnv = process.env,
 ): Promise<void> {
+  if (!secretId) return;
   const client = new Daytona(daytonaClientOptions(requireDaytonaClientConfig(environment)));
   try {
     let lastError: unknown;

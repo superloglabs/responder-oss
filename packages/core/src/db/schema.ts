@@ -562,8 +562,12 @@ export const workspaceSecrets = pgTable(
       .notNull()
       .references(() => organization.id, { onDelete: "restrict" }),
     name: text("name").notNull(),
-    daytonaSecretId: text("daytona_secret_id").notNull(),
-    daytonaSecretName: text("daytona_secret_name").notNull(),
+    // Set when Daytona is configured. Daytona never returns a value.
+    daytonaSecretId: text("daytona_secret_id"),
+    daytonaSecretName: text("daytona_secret_name"),
+    // AES-256-GCM, as for other stored credentials. Vercel takes the value at
+    // each sandbox start. Empty for secrets saved before this column existed.
+    encryptedValue: text("encrypted_value"),
     allowedHosts: jsonb("allowed_hosts").$type<string[]>().notNull(),
     createdBy: uuid("created_by").references(() => user.id, {
       onDelete: "set null",
@@ -583,6 +587,19 @@ export const workspaceSecrets = pgTable(
     ),
   ],
 );
+
+// No row means sandboxes have open outbound access. A restricted workspace's
+// sandboxes reach only the listed domains, Superlog, and each secret's hosts.
+export const sandboxNetworkSettings = pgTable("sandbox_network_settings", {
+  organizationId: uuid("organization_id")
+    .primaryKey()
+    .references(() => organization.id, { onDelete: "cascade" }),
+  restricted: boolean("restricted").notNull().default(false),
+  // Kept while unrestricted, so turning the restriction back on restores it.
+  allowedDomains: jsonb("allowed_domains").$type<string[]>().notNull().default([]),
+  updatedBy: uuid("updated_by").references(() => user.id, { onDelete: "set null" }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
 export const agentVersionSecrets = pgTable(
   "agent_version_secrets",

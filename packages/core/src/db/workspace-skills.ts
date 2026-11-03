@@ -381,6 +381,7 @@ export async function getAutomationRuntimeSkills(
         skillId: workspaceSkillSecrets.skillId,
         environmentVariable: workspaceSecrets.name,
         daytonaSecretName: workspaceSecrets.daytonaSecretName,
+        encryptedValue: workspaceSecrets.encryptedValue,
         allowedHosts: workspaceSecrets.allowedHosts,
       })
       .from(workspaceSkillSecrets)
@@ -405,9 +406,10 @@ export async function getAutomationRuntimeSkills(
       .map(({ path, content }) => ({ path, content })),
     secrets: secrets
       .filter((secret) => secret.skillId === id)
-      .map(({ environmentVariable, daytonaSecretName, allowedHosts }) => ({
+      .map(({ environmentVariable, daytonaSecretName, encryptedValue, allowedHosts }) => ({
         environmentVariable,
         daytonaSecretName,
+        encryptedValue,
         allowedHosts,
       })),
   }));

@@ -1,7 +1,3 @@
-import {
-  DaytonaSandboxClient,
-  type DaytonaSandboxSession,
-} from "@openai/agents-extensions/sandbox/daytona";
 import { captureAnalyticsEvent } from "@responder/core/analytics";
 import {
   getRuntimeRepositories,
@@ -17,10 +13,7 @@ import {
   markSuggestionPullRequestCreated,
   markSuggestionPullRequestStarted,
 } from "@responder/core/db/suggestion-pull-requests";
-import {
-  daytonaClientOptions,
-  requireDaytonaClientConfig,
-} from "@responder/core/daytona-config";
+import { requireSandboxConfig, sandboxWorkspaceRoot } from "@responder/core/sandbox-config";
 import type { RemediationJob } from "@responder/core/jobs";
 import type { IssueRemediationSubmission } from "@responder/core/investigations/report";
 import { refreshIssuePullRequestSlackMessages } from "@responder/core/integrations/slack-remediations";
@@ -30,14 +23,19 @@ import {
   checkoutRuntimeRepositoryAtRef,
 } from "./repositories.js";
 import {
-  closeDaytonaSandbox,
-  configureDaytonaSandboxLifecycle,
-  createDaytonaSandboxSession,
   prepareDaytonaPatchSandbox,
 } from "./sandbox.js";
+import {
+  closeSandbox,
+  configureSandbox,
+  createSandboxClient,
+  createSandboxSession,
+} from "./sandbox-runtime.js";
+import type { SandboxSession } from "./sandbox-session.js";
 import { assertNoDaytonaSecretPlaceholders } from "./secret-safety.js";
 import { agentUsageIsBillable, requireUsageAllowance } from "./agent-usage.js";
 import { startSandboxMeter, type SandboxMeter } from "./sandbox-metering.js";
+import { workspaceSandboxNetwork } from "./sandbox-network.js";
 
 type CodeChangeRemediation = Extract<
   IssueRemediationSubmission,
@@ -124,12 +122,12 @@ function commandSucceeded(output: string): boolean {
 }
 
 export async function applyProposedDiff(
-  session: DaytonaSandboxSession,
+  session: SandboxSession,
   repositoryPath: string,
   diff: string,
 ): Promise<void> {
   assertNoDaytonaSecretPlaceholders(diff, "Proposed diff");
-  const patchPath = "/home/daytona/workspace/.responder/proposed.patch";
+  const patchPath = `${sandboxWorkspaceRoot}/.responder/proposed.patch`;
   await session.materializeEntry({
     entry: { type: "file", content: `${diff.trim()}\n` },
     path: patchPath,
@@ -185,18 +183,17 @@ export async function runProposedRemediation(
     await refreshIssuePullRequestSlackMessages(request.requestId);
   }
 
-  const config = requireDaytonaClientConfig(environment);
+  const config = requireSandboxConfig(environment);
   const sandboxName = `responder-remediation-${job.remediationRequestId}`;
-  const client = new DaytonaSandboxClient({
-    ...daytonaClientOptions(config),
+  const client = createSandboxClient(config, {
     name: sandboxName,
     pauseOnExit: false,
   });
-  let session: DaytonaSandboxSession | null = null;
+  let session: SandboxSession | null = null;
   let meter: SandboxMeter | null = null;
 
   try {
-    session = await createDaytonaSandboxSession(client, config, sandboxName);
+    session = await createSandboxSession(client, config, sandboxName);
     meter = startSandboxMeter({
       billable: usageBillable,
       organizationId: job.config.organizationId,
@@ -204,7 +201,13 @@ export async function runProposedRemediation(
       workload: "remediation",
       workloadId: job.remediationRequestId,
     });
-    await configureDaytonaSandboxLifecycle(session, config);
+    await configureSandbox(
+      session,
+      config,
+      [],
+      0,
+      await workspaceSandboxNetwork(job.config.organizationId, environment),
+    );
     await prepareDaytonaPatchSandbox(session);
     const checkout = selected.base
       ? await checkoutRuntimeRepositoryAtRef(
@@ -278,7 +281,7 @@ export async function runProposedRemediation(
     return result.url;
   } finally {
     if (session) {
-      await closeDaytonaSandbox(session, config, {
+      await closeSandbox(session, config, {
         investigationId: job.investigationId,
         organizationId: job.config.organizationId,
         requestId: job.remediationRequestId,

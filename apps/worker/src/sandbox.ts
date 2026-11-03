@@ -13,7 +13,10 @@ import {
   isDaytonaNotFound,
   type DaytonaClientConfig,
 } from "@responder/core/daytona-config";
+import { sandboxWorkspaceRoot } from "@responder/core/sandbox-config";
+import { sandboxAllowedDomains, type SandboxNetwork } from "@responder/core/sandbox-network";
 import { reportWorkerException, type WorkerErrorContext } from "./monitoring.js";
+import type { SandboxSession } from "./sandbox-session.js";
 
 type DaytonaCleanupConfig = DaytonaClientConfig;
 
@@ -47,6 +50,8 @@ const defaultCleanupDependencies: DaytonaCleanupDependencies = {
 };
 
 const daytonaRetryDelaysMs = [0, 500, 1_500] as const;
+// Daytona's limit for a domain allowlist.
+const maxDaytonaAllowedDomains = 100;
 const daytonaAppearanceRetryDelaysMs = [
   0,
   500,
@@ -585,6 +590,38 @@ export async function replaceDaytonaSandboxSecrets(
   }
 }
 
+// Daytona keeps the allowlist across a stop and start, but it is applied on
+// every resume too, so a change to the workspace's list reaches a paused
+// sandbox. Open access leaves the sandbox's settings alone.
+export async function applyDaytonaSandboxNetwork(
+  session: DaytonaSandboxSession,
+  config: DaytonaCleanupConfig,
+  network: SandboxNetwork | null,
+  secrets: ReadonlyArray<{ allowedHosts?: string[] }>,
+  dependencies: DaytonaCleanupDependencies = defaultCleanupDependencies,
+): Promise<void> {
+  if (!network) return;
+  const domains = sandboxAllowedDomains(network, secrets);
+  if (domains.length > maxDaytonaAllowedDomains) {
+    throw new Error(
+      `Daytona sandboxes allow at most ${maxDaytonaAllowedDomains} domains, and this run needs ${domains.length}`,
+    );
+  }
+  const client = dependencies.createClient(config);
+  try {
+    const sandbox = await retryTransientDaytonaOperation(
+      () => client.get(session.state.sandboxId),
+      dependencies,
+    );
+    await retryTransientDaytonaOperation(
+      () => sandbox.updateNetworkSettings({ domainAllowList: domains.join(",") }),
+      dependencies,
+    );
+  } finally {
+    await client[Symbol.asyncDispose]().catch(() => undefined);
+  }
+}
+
 // A paused sandbox's saved state leaves out the API key. The resumed
 // session gets it back, because its file transfers read it from the state.
 export async function resumeDaytonaSandbox(
@@ -610,7 +647,7 @@ export function resumedSameDaytonaSandbox(
 // auto-stop, and the next turn resumes or replaces it. The failure is
 // reported without failing the turn that already has its answer.
 export async function pauseDaytonaSandbox(
-  session: DaytonaSandboxSession,
+  session: SandboxSession,
   context: Omit<WorkerErrorContext, "operation" | "sandboxId">,
   dependencies: Pick<DaytonaCleanupDependencies, "reportException"> =
     defaultCleanupDependencies,
@@ -714,7 +751,7 @@ function execSucceeded(output: string): boolean {
  * is configured. Named snapshots already contain these tools and skip this.
  */
 export async function prepareDaytonaSandbox(
-  session: DaytonaSandboxSession,
+  session: SandboxSession,
 ): Promise<void> {
   const output = await session.execCommand({
     cmd: [
@@ -743,7 +780,7 @@ export async function prepareDaytonaSandbox(
       "command -v bun >/dev/null",
     ].join("\n"),
     maxOutputTokens: 2_000,
-    workdir: "/home/daytona/workspace",
+    workdir: sandboxWorkspaceRoot,
   });
   if (!execSucceeded(output)) {
     const detail = output.split("\nOutput:\n", 2)[1]?.trim();
@@ -755,7 +792,7 @@ export async function prepareDaytonaSandbox(
 
 /** Prepare only the tools needed to apply and publish a proposed diff. */
 export async function prepareDaytonaPatchSandbox(
-  session: DaytonaSandboxSession,
+  session: SandboxSession,
 ): Promise<void> {
   const output = await session.execCommand({
     cmd: [
@@ -776,7 +813,7 @@ export async function prepareDaytonaPatchSandbox(
       "command -v tar >/dev/null",
     ].join("\n"),
     maxOutputTokens: 2_000,
-    workdir: "/home/daytona/workspace",
+    workdir: sandboxWorkspaceRoot,
   });
   if (!execSucceeded(output)) {
     const detail = output.split("\nOutput:\n", 2)[1]?.trim();

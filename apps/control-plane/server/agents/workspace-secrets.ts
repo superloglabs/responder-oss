@@ -1,7 +1,9 @@
 import { z } from "zod";
+import { encryptCredentials } from "../../../../packages/core/src/credentials/encryption.js";
 import {
   createWorkspaceSecretRecord,
   findWorkspaceSecretByName,
+  storeWorkspaceSecretValue,
   type WorkspaceSecretSummary,
 } from "../../../../packages/core/src/db/workspace-secrets.js";
 import { workspaceSecretEnvironmentVariableNameReservation } from "../../../../packages/core/src/workspace-secret-names.js";
@@ -59,8 +61,10 @@ function isWorkspaceSecretNameConflict(error: unknown): boolean {
   );
 }
 
-// Stores the value in Daytona and records only its metadata. The Daytona
-// secret is removed again if the record cannot be saved.
+// Stores the value encrypted, and in Daytona when it is configured, so either
+// sandbox provider can use the secret. The Daytona secret is removed again if
+// the record cannot be saved. Saving a secret that has no stored value fills
+// it in, because Daytona cannot return the one it holds.
 export async function storeWorkspaceSecret(input: {
   organizationId: string;
   secret: WorkspaceSecretInput;
@@ -79,18 +83,38 @@ export async function storeWorkspaceSecret(input: {
     organizationId: input.organizationId,
     name,
   });
-  if (existing) return conflict;
+  if (existing?.hasValue) return conflict;
+  const encryptedValue = encryptCredentials({ value });
+  if (existing) {
+    try {
+      await storeWorkspaceSecretValue({ id: existing.id, encryptedValue });
+    } catch {
+      return { error: "Unable to store workspace secret", ok: false, status: 502 };
+    }
+    return {
+      ok: true,
+      secret: {
+        allowedHosts: existing.allowedHosts,
+        createdAt: existing.createdAt,
+        id: existing.id,
+        name: existing.name,
+      },
+    };
+  }
 
   let daytonaSecret: { id: string; name: string } | null = null;
   try {
-    daytonaSecret = await createDaytonaWorkspaceSecret({ value, allowedHosts });
+    if (process.env.DAYTONA_API_KEY) {
+      daytonaSecret = await createDaytonaWorkspaceSecret({ value, allowedHosts });
+    }
     const secret = await createWorkspaceSecretRecord({
       organizationId: input.organizationId,
       userId: input.userId,
       name,
       allowedHosts,
-      daytonaSecretId: daytonaSecret.id,
-      daytonaSecretName: daytonaSecret.name,
+      daytonaSecretId: daytonaSecret?.id ?? null,
+      daytonaSecretName: daytonaSecret?.name ?? null,
+      encryptedValue,
     });
     return { ok: true, secret };
   } catch (error) {

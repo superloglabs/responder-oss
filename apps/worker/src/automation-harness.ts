@@ -1,8 +1,9 @@
 import { supportsAutomationHarness } from "../../../packages/core/src/automations/model-providers.js";
 import path from "node:path";
-import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
+import { sandboxWorkspaceRoot } from "@responder/core/sandbox-config";
+import type { SandboxSession } from "./sandbox-session.js";
 
-export const automationWorkspaceRoot = "/home/daytona/workspace";
+export const automationWorkspaceRoot = sandboxWorkspaceRoot;
 export const modelBrokerTokenEnvironmentVariable =
   "RESPONDER_MODEL_BROKER_TOKEN";
 
@@ -90,7 +91,7 @@ export class AutomationHarnessError extends Error {
 export interface AutomationHarness {
   readonly kind: AutomationHarnessKind;
   run(
-    session: DaytonaSandboxSession,
+    session: SandboxSession,
     input: AutomationHarnessInput,
   ): Promise<AutomationHarnessResult>;
 }
@@ -155,7 +156,7 @@ export function harnessInvocation(command: string, eventsPath?: string): string 
 }
 
 export async function assertAutomationWorkspaceHasNoSymlinkRedirects(
-  session: DaytonaSandboxSession,
+  session: SandboxSession,
   workspacePath: string,
 ): Promise<void> {
   const resolvedWorkspacePath = resolveAutomationWorkspacePath(workspacePath);

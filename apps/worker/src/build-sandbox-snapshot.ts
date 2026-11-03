@@ -1,14 +1,27 @@
-// Builds the Daytona snapshot that sandboxes start from, then prints the value
-// for DAYTONA_SANDBOX_SNAPSHOT_NAME. Uses DAYTONA_API_KEY, and DAYTONA_API_URL
-// and DAYTONA_TARGET when set. Does nothing when the snapshot already exists.
+// Builds the snapshot that sandboxes start from for the configured provider.
+//
+// For Daytona, prints the value for DAYTONA_SANDBOX_SNAPSHOT_NAME. Uses
+// DAYTONA_API_KEY, and DAYTONA_API_URL and DAYTONA_TARGET when set. Does nothing
+// when the snapshot already exists.
+//
+// For Vercel, prints the value for VERCEL_SANDBOX_SNAPSHOT_ID. Uses
+// VERCEL_PROJECT_ID, VERCEL_SANDBOX_REGION, VERCEL_TEAM_ID and VERCEL_TOKEN.
+// Snapshots stay in their region and never expire, so run this once per cell.
 import { Daytona, Image } from "@daytonaio/sdk";
 import { isDaytonaNotFound, requireDaytonaClientConfig } from "@responder/core/daytona-config";
+import { sandboxProvider } from "@responder/core/sandbox-config";
+import { buildVercelSandboxSnapshot } from "./build-vercel-sandbox-snapshot.js";
 import {
   sandboxSnapshotBaseImage,
   sandboxSnapshotCommands,
   sandboxSnapshotName,
   sandboxSnapshotResources,
 } from "./sandbox-snapshot.js";
+
+if (sandboxProvider() === "vercel") {
+  console.log(`VERCEL_SANDBOX_SNAPSHOT_ID=${await buildVercelSandboxSnapshot()}`);
+  process.exit(0);
+}
 
 const config = requireDaytonaClientConfig();
 const daytona = new Daytona({

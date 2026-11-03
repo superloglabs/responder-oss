@@ -6,7 +6,7 @@ import { authClient } from "../auth-client";
 import { AppShell } from "../components/app-shell";
 import { SettingsHeading } from "../components/settings-heading";
 import { MemberListSkeleton } from "../components/screen-skeletons";
-import { SelectField, type SelectOption } from "../design-system";
+import { SelectField, Switch, TextAreaField, type SelectOption } from "../design-system";
 import { useDocumentTitle } from "../use-document-title";
 import {
   teamPlanDescription,
@@ -491,6 +491,7 @@ export function WorkspaceSettingsPage() {
         ) : null}
 
         <PullRequestAuthorSection currentUserId={session.data?.user.id} />
+        <SandboxNetworkSection />
       </section>
     </AppShell>
   );
@@ -616,5 +617,131 @@ function PullRequestAuthorSection({ currentUserId }: { currentUserId: string | u
         </div>
       ) : null}
     </div>
+  );
+}
+
+interface SandboxNetworkState {
+  alwaysAllowed: string[];
+  canEdit: boolean;
+  settings: { allowedDomains: string[]; restricted: boolean };
+}
+
+function domainList(text: string): string[] {
+  return text.split(/[\s,]+/u).map((domain) => domain.trim()).filter(Boolean);
+}
+
+// Limits where the workspace's agents can send data from their sandbox.
+// Superlog's host and each secret's hosts stay reachable, so runs keep
+// working with an empty list.
+function SandboxNetworkSection() {
+  const [state, setState] = useState<SandboxNetworkState | null>(null);
+  const [restricted, setRestricted] = useState(false);
+  const [domains, setDomains] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  function show(next: SandboxNetworkState) {
+    setState(next);
+    setRestricted(next.settings.restricted);
+    setDomains(next.settings.allowedDomains.join("\n"));
+  }
+
+  useEffect(() => {
+    fetch("/api/sandbox-network")
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Could not load the sandbox network settings");
+        show((await response.json()) as SandboxNetworkState);
+      })
+      .catch((cause: unknown) => {
+        setError(cause instanceof Error ? cause.message : "Could not load the sandbox network settings");
+      });
+  }, []);
+
+  async function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    setNotice(null);
+    setSaving(true);
+    try {
+      const response = await fetch("/api/sandbox-network", {
+        body: JSON.stringify({ allowedDomains: domainList(domains), restricted }),
+        headers: { "content-type": "application/json" },
+        method: "PUT",
+      });
+      const body = (await response.json().catch(() => null)) as
+        | (SandboxNetworkState & { error?: string })
+        | null;
+      if (!response.ok || !body) {
+        throw new Error(body?.error ?? "Could not save the sandbox network settings");
+      }
+      show(body);
+      setNotice(
+        restricted
+          ? "Sandboxes now reach only the listed domains. Runs already in progress keep their current access until their next turn."
+          : "Sandboxes now have open internet access.",
+      );
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not save the sandbox network settings");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const canEdit = state?.canEdit ?? false;
+  const changed = state !== null && (
+    restricted !== state.settings.restricted ||
+    domainList(domains).join("\n") !== state.settings.allowedDomains.join("\n")
+  );
+  const alwaysAllowed = state?.alwaysAllowed.join(", ") ?? "Superlog";
+
+  return (
+    <form className="memberSection" onSubmit={(event) => void save(event)}>
+      <div className="memberSection__heading">
+        <h3>Sandbox network</h3>
+      </div>
+      <p className="memberAccessNote">
+        Agents run commands in a sandbox. By default it can reach any address
+        on the internet. Restrict it to the domains below to stop an agent
+        sending data anywhere else. {alwaysAllowed} and the hosts of each
+        secret a run uses stay reachable.
+        {canEdit ? null : " Admins can change this."}
+      </p>
+      {error ? <p className="settingsNotice settingsNotice--error">{error}</p> : null}
+      {notice ? <p className="settingsNotice settingsNotice--success">{notice}</p> : null}
+      {state ? (
+        <>
+          <Switch
+            checked={restricted}
+            description="Applies to each automation turn, investigation, and pull request that starts after you save."
+            disabled={!canEdit || saving}
+            label="Only allow listed domains"
+            onCheckedChange={setRestricted}
+          />
+          {restricted ? (
+            <TextAreaField
+              disabled={!canEdit || saving}
+              hint="One domain per line. *.example.com covers example.com and its subdomains. Add package registries, such as registry.npmjs.org or pypi.org, if agents install dependencies."
+              label="Allowed domains"
+              onChange={(event) => setDomains(event.target.value)}
+              placeholder={"registry.npmjs.org\n*.example.com"}
+              rows={5}
+              value={domains}
+            />
+          ) : null}
+          {canEdit ? (
+            <div>
+              <button
+                className="button button--primary"
+                disabled={!changed || saving}
+                type="submit"
+              >
+                {saving ? "Saving…" : "Save"}
+              </button>
+            </div>
+          ) : null}
+        </>
+      ) : null}
+    </form>
   );
 }

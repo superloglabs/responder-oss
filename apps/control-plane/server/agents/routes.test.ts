@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { decryptCredentials } from "../../../../packages/core/src/credentials/encryption.js";
 import {
   createAgent,
@@ -25,6 +25,7 @@ import {
 import {
   createWorkspaceSecretRecord,
   findWorkspaceSecretByName,
+  storeWorkspaceSecretValue,
 } from "../../../../packages/core/src/db/workspace-secrets.js";
 import { getActiveTenant } from "../tenant.js";
 import { queueInvestigationRetry } from "../investigations/queue.js";
@@ -40,6 +41,7 @@ import { workspaceSecretInputSchema } from "./workspace-secrets.js";
 
 vi.mock("../../../../packages/core/src/credentials/encryption.js", () => ({
   decryptCredentials: vi.fn(),
+  encryptCredentials: vi.fn(() => "encrypted-value"),
 }));
 vi.mock("../../../../packages/core/src/db/agents.js", () => ({
   createAgent: vi.fn(),
@@ -68,6 +70,7 @@ vi.mock("../../../../packages/core/src/db/investigations.js", () => ({
 }));
 vi.mock("../../../../packages/core/src/db/workspace-secrets.js", () => ({
   createWorkspaceSecretRecord: vi.fn(),
+  storeWorkspaceSecretValue: vi.fn(),
   findWorkspaceSecretByName: vi.fn(),
 }));
 vi.mock("../integrations/slack.js", () => ({
@@ -372,12 +375,17 @@ describe("investigation reruns", () => {
 });
 
 describe("workspace secrets", () => {
+  beforeEach(() => {
+    vi.stubEnv("DAYTONA_API_KEY", "daytona-key");
+  });
+
   afterEach(() => {
+    vi.unstubAllEnvs();
     vi.clearAllMocks();
     vi.restoreAllMocks();
   });
 
-  it("stores plaintext only in Daytona and returns metadata", async () => {
+  it("stores the value in Daytona and encrypted, and returns metadata", async () => {
     vi.mocked(getActiveTenant).mockResolvedValue(tenant);
     vi.mocked(findWorkspaceSecretByName).mockResolvedValue(null);
     vi.mocked(createDaytonaWorkspaceSecret).mockResolvedValue({
@@ -415,6 +423,7 @@ describe("workspace secrets", () => {
       allowedHosts: ["api.example.com"],
       daytonaSecretId: "daytona-secret-1",
       daytonaSecretName: "responder_external_1",
+      encryptedValue: "encrypted-value",
     });
     expect(
       vi.mocked(createWorkspaceSecretRecord).mock.calls[0]?.[0],
@@ -469,6 +478,64 @@ describe("workspace secrets", () => {
     },
   );
 
+  it("stores only the encrypted value when Daytona is not configured", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "");
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    vi.mocked(findWorkspaceSecretByName).mockResolvedValue(null);
+    vi.mocked(createWorkspaceSecretRecord).mockResolvedValue({
+      id: "30000000-0000-4000-8000-000000000000",
+      name: "SERVICE_API_KEY",
+      allowedHosts: ["api.example.com"],
+      createdAt: new Date("2026-11-02T00:00:00.000Z"),
+    });
+
+    const response = await app.request("/api/agents/secrets", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: "SERVICE_API_KEY",
+        value: "new-secret-value",
+        allowedHosts: ["api.example.com"],
+      }),
+    });
+
+    expect(response.status).toBe(201);
+    expect(createDaytonaWorkspaceSecret).not.toHaveBeenCalled();
+    expect(createWorkspaceSecretRecord).toHaveBeenCalledWith(expect.objectContaining({
+      daytonaSecretId: null,
+      daytonaSecretName: null,
+      encryptedValue: "encrypted-value",
+    }));
+  });
+
+  it("fills in the value of a secret saved before values were stored", async () => {
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    vi.mocked(findWorkspaceSecretByName).mockResolvedValue({
+      id: "30000000-0000-4000-8000-000000000000",
+      name: "SERVICE_API_KEY",
+      allowedHosts: ["api.example.com"],
+      createdAt: new Date("2026-11-02T00:00:00.000Z"),
+      hasValue: false,
+    });
+
+    const response = await app.request("/api/agents/secrets", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: "SERVICE_API_KEY",
+        value: "new-secret-value",
+        allowedHosts: ["api.example.com"],
+      }),
+    });
+
+    expect(response.status).toBe(201);
+    expect(storeWorkspaceSecretValue).toHaveBeenCalledWith({
+      id: "30000000-0000-4000-8000-000000000000",
+      encryptedValue: expect.any(String),
+    });
+    expect(createWorkspaceSecretRecord).not.toHaveBeenCalled();
+  });
+
   it("does not overwrite a workspace secret or send its new value", async () => {
     vi.mocked(getActiveTenant).mockResolvedValue(tenant);
     vi.mocked(findWorkspaceSecretByName).mockResolvedValue({
@@ -476,6 +543,7 @@ describe("workspace secrets", () => {
       name: "SERVICE_API_KEY",
       allowedHosts: ["api.example.com"],
       createdAt: new Date(),
+      hasValue: true,
     });
 
     const response = await app.request("/api/agents/secrets", {

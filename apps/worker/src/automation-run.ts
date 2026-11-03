@@ -46,13 +46,14 @@ import { usageWaiverStart, waiveAutomationRunUsage } from "@responder/core/billi
 import { getOrganizationModelCredential, selectOrganizationModelCredential } from "@responder/core/db/automation-model-credentials";
 import { listProviderModels, matchProviderModel, ModelCatalogError } from "@responder/core/automations/model-catalog";
 import { modelProvider, type ModelProviderId } from "@responder/core/automations/model-providers";
-import { parseSubscriptionAuth, subscriptionAuthForSandbox } from "@responder/core/automations/chatgpt-subscription";
+import { workspaceSandboxNetwork } from "./sandbox-network.js";
+import { subscriptionSecretHosts, parseSubscriptionAuth, subscriptionAuthForSandbox } from "@responder/core/automations/chatgpt-subscription";
 import { getAutomationRuntimeWorkspaceSecrets, type RuntimeWorkspaceSecret } from "@responder/core/db/workspace-secrets";
 import { getAutomationRuntimeSkills, type RuntimeWorkspaceSkill } from "@responder/core/db/workspace-skills";
 import { organizationHasCapability } from "@responder/core/db/organization-capabilities";
-import { requireDaytonaClientConfig } from "@responder/core/daytona-config";
+import { requireSandboxConfig } from "@responder/core/sandbox-config";
 import type { AutomationRunJob } from "@responder/core/jobs";
-import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
+import type { SandboxSession } from "./sandbox-session.js";
 import {
   AutomationHarnessError,
   automationWorkspaceRoot,
@@ -160,6 +161,7 @@ export interface AutomationRunDependencies {
   getRunActor: typeof getAutomationRunActor;
   getSlackAccount: typeof getAutomationNotificationAccount;
   getWorkspaceSecrets: typeof getAutomationRuntimeWorkspaceSecrets;
+  getSandboxNetwork: typeof workspaceSandboxNetwork;
   getSkills: typeof getAutomationRuntimeSkills;
   grantAllowanceExhausted: typeof automationModelBrokerGrantAllowanceExhausted;
   hasCapability: typeof organizationHasCapability;
@@ -218,6 +220,7 @@ export const defaultAutomationRunDependencies: AutomationRunDependencies = {
   getRunActor: getAutomationRunActor,
   getSlackAccount: getAutomationNotificationAccount,
   getWorkspaceSecrets: getAutomationRuntimeWorkspaceSecrets,
+  getSandboxNetwork: workspaceSandboxNetwork,
   getSkills: getAutomationRuntimeSkills,
   grantAllowanceExhausted: automationModelBrokerGrantAllowanceExhausted,
   hasCapability: organizationHasCapability,
@@ -627,7 +630,7 @@ function resultSummary(
 
 async function runHarness(
   run: ClaimedAutomationRun,
-  session: DaytonaSandboxSession,
+  session: SandboxSession,
   input: AutomationHarnessInput,
   dependencies: AutomationRunDependencies,
 ): Promise<AutomationHarnessResult> {
@@ -958,11 +961,12 @@ export async function processAutomationRun(
       runId: run.runId,
     });
     grantId = grant.id;
-    const [daytonaConfig, automationSecrets, skills, connections] = await Promise.all([
-      Promise.resolve(requireDaytonaClientConfig(environment)),
+    const [sandboxConfig, automationSecrets, skills, connections, sandboxNetwork] = await Promise.all([
+      Promise.resolve(requireSandboxConfig(environment)),
       dependencies.getWorkspaceSecrets(run.automationVersionId),
       dependencies.getSkills(run.automationVersionId),
       dependencies.getConnections(run.automationVersionId),
+      dependencies.getSandboxNetwork(run.organizationId, environment),
     ]);
     const workspaceSecrets = automationRunSecrets(automationSecrets, skills);
     const contextServers = automationContextServers(environment, connections, run.triggerInput);
@@ -1018,8 +1022,9 @@ export async function processAutomationRun(
     let pausedSandbox: PausedAutomationSandbox | null = null;
     const runTurn = () => dependencies.runInSandbox({
       brokerToken: grant.token,
-      config: daytonaConfig,
+      config: sandboxConfig,
       keepPaused,
+      network: sandboxNetwork,
       onPaused: (sandbox) => { pausedSandbox = sandbox; },
       organizationId: run.organizationId,
       ...(keepPaused && run.sandboxSessionState ? { resumeState: run.sandboxSessionState } : {}),
@@ -1196,7 +1201,17 @@ export async function processAutomationRun(
       },
       runId: run.runId,
       secrets: subscriptionSecret
-        ? [...workspaceSecrets, { daytonaSecretName: subscriptionSecret.name, environmentVariable: subscriptionSecretEnvironmentVariable }]
+        ? [...workspaceSecrets, {
+          allowedHosts: subscriptionSecretHosts,
+          daytonaSecretName: subscriptionSecret.name,
+          environmentVariable: subscriptionSecretEnvironmentVariable,
+          ...(subscriptionSecret.value
+            ? {
+              placeholder: subscriptionSecret.placeholder,
+              value: subscriptionSecret.value,
+            }
+            : {}),
+        }]
         : workspaceSecrets,
       signal: runAbort.signal,
     });

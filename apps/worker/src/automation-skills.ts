@@ -1,5 +1,5 @@
 import path from "node:path";
-import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
+import type { SandboxSession } from "./sandbox-session.js";
 import type { RuntimeWorkspaceSecret } from "@responder/core/db/workspace-secrets";
 import type { RuntimeWorkspaceSkill } from "@responder/core/db/workspace-skills";
 import { renderSkillMarkdown, skillInstructionsFileName } from "@responder/core/skills/config";
@@ -29,7 +29,7 @@ export function automationRunSecrets(
 // The agent controls the sandbox between turns, so `.responder` must resolve
 // to itself before anything under it is removed.
 export async function materializeAutomationSkills(
-  session: DaytonaSandboxSession,
+  session: SandboxSession,
   skills: RuntimeWorkspaceSkill[],
 ): Promise<void> {
   const parent = path.posix.dirname(automationSkillsRoot);

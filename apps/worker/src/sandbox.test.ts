@@ -4,6 +4,7 @@ import type {
 } from "@openai/agents-extensions/sandbox/daytona";
 import { describe, expect, it, vi } from "vitest";
 import {
+  applyDaytonaSandboxNetwork,
   closeDaytonaSandbox,
   configureDaytonaSandboxLifecycle,
   createDaytonaSandboxSession,
@@ -680,6 +681,50 @@ describe("Daytona sandbox cleanup", () => {
     expect(sandbox.stop).toHaveBeenCalledTimes(2);
     expect(sandbox.start).toHaveBeenCalledTimes(2);
     expect(harness.dispose).toHaveBeenCalledTimes(2);
+  });
+
+  it("limits a restricted sandbox to its workspace's domains and its secrets' hosts", async () => {
+    const harness = cleanupHarness();
+    const sandbox = { id: "sandbox-1", updateNetworkSettings: vi.fn().mockResolvedValue(undefined) };
+    harness.get.mockResolvedValue(sandbox);
+
+    await applyDaytonaSandboxNetwork(
+      harness.session,
+      { daytonaApiKey: "daytona-test" },
+      { allowedDomains: ["superlog.sh", "registry.npmjs.org"] },
+      [{ allowedHosts: ["api.example.com", "superlog.sh"] }],
+      harness.dependencies,
+    );
+
+    expect(sandbox.updateNetworkSettings).toHaveBeenCalledWith({
+      domainAllowList: "superlog.sh,registry.npmjs.org,api.example.com",
+    });
+    expect(harness.dispose).toHaveBeenCalledOnce();
+  });
+
+  it("leaves an open sandbox's network alone", async () => {
+    const harness = cleanupHarness();
+    await applyDaytonaSandboxNetwork(
+      harness.session,
+      { daytonaApiKey: "daytona-test" },
+      null,
+      [{ allowedHosts: ["api.example.com"] }],
+      harness.dependencies,
+    );
+    expect(harness.dependencies.createClient).not.toHaveBeenCalled();
+  });
+
+  it("refuses an allowlist longer than Daytona accepts", async () => {
+    const harness = cleanupHarness();
+    const allowedDomains = Array.from({ length: 101 }, (_, index) => `host${index}.example.com`);
+    await expect(applyDaytonaSandboxNetwork(
+      harness.session,
+      { daytonaApiKey: "daytona-test" },
+      { allowedDomains },
+      [],
+      harness.dependencies,
+    )).rejects.toThrow("at most 100 domains, and this run needs 101");
+    expect(harness.dependencies.createClient).not.toHaveBeenCalled();
   });
 
   it("keeps a thread sandbox after it pauses", async () => {

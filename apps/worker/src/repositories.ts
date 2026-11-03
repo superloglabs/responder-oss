@@ -1,5 +1,7 @@
 import { Daytona } from "@daytona/sdk";
-import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
+import { sandboxWorkspaceRoot } from "@responder/core/sandbox-config";
+import { isVercelSandboxSession, type SandboxSession } from "./sandbox-session.js";
+import { downloadVercelSandboxFile, uploadVercelSandboxFile } from "./vercel-sandbox.js";
 import { execFile, spawn } from "node:child_process";
 import { createWriteStream } from "node:fs";
 import { mkdtemp, mkdir, rm } from "node:fs/promises";
@@ -22,7 +24,7 @@ const defaultMaxArchiveBytes = 5 * 1024 * 1024 * 1024;
 const repositoryDownloadTimeoutMs = 10 * 60_000;
 const repositoryUploadTimeoutSeconds = 30 * 60;
 const repositoryFileDownloadTimeoutSeconds = 30 * 60;
-const workspaceRoot = "/home/daytona/workspace";
+const workspaceRoot = sandboxWorkspaceRoot;
 const execFileAsync = promisify(execFile);
 
 class RepositoryArchiveLimitError extends Error {
@@ -103,7 +105,7 @@ const checkedOutRepositoriesSchema = z.object({
 });
 
 export async function loadCheckedOutRepositories(
-  session: DaytonaSandboxSession,
+  session: SandboxSession,
 ): Promise<CheckedOutRepository[]> {
   const manifestPath = `${workspaceRoot}/.responder/repositories.json`;
   if (!(await session.pathExists(manifestPath))) return [];
@@ -118,7 +120,7 @@ export async function loadCheckedOutRepositories(
 
 // Records the checkouts that later turns and tools load.
 export async function saveCheckedOutRepositories(
-  session: DaytonaSandboxSession,
+  session: SandboxSession,
   repositories: CheckedOutRepository[],
 ): Promise<void> {
   await session.materializeEntry({
@@ -149,7 +151,7 @@ export interface RepositoryCheckoutDependencies {
   maxArchiveBytes?: number;
   temporaryDirectory?: string;
   uploadArchive?: (
-    session: DaytonaSandboxSession,
+    session: SandboxSession,
     localPath: string,
     remotePath: string,
   ) => Promise<void>;
@@ -330,10 +332,14 @@ async function downloadRepositorySnapshotWithGit(
 }
 
 async function uploadRepositoryArchive(
-  session: DaytonaSandboxSession,
+  session: SandboxSession,
   localPath: string,
   remotePath: string,
 ): Promise<void> {
+  if (isVercelSandboxSession(session)) {
+    await uploadVercelSandboxFile(session, localPath, remotePath);
+    return;
+  }
   const { apiKey, apiUrl, sandboxId, target } = session.state;
   if (!apiKey) throw new Error("Daytona API key is unavailable for file upload");
 
@@ -354,9 +360,12 @@ async function uploadRepositoryArchive(
  * buffer, which is unsuitable for arbitrarily-sized repository files.
  */
 export async function downloadRepositoryFile(
-  session: DaytonaSandboxSession,
+  session: SandboxSession,
   remotePath: string,
 ): Promise<Uint8Array> {
+  if (isVercelSandboxSession(session)) {
+    return downloadVercelSandboxFile(session, remotePath);
+  }
   const { apiKey, apiUrl, sandboxId, target } = session.state;
   if (!apiKey) throw new Error("Daytona API key is unavailable for file download");
 
@@ -404,7 +413,7 @@ function execSucceeded(output: string): boolean {
 }
 
 async function runSandboxCommand(
-  session: DaytonaSandboxSession,
+  session: SandboxSession,
   command: string,
   label: string,
 ): Promise<string> {
@@ -631,7 +640,7 @@ async function fetchRepositorySnapshot(
 // as a commit on localRef, without history, so the agent can diff against it.
 // The GitHub token stays in the worker.
 export async function importRuntimeRepositoryCommit(
-  session: DaytonaSandboxSession,
+  session: SandboxSession,
   input: {
     checkout: CheckedOutRepository;
     localRef: string;
@@ -704,7 +713,7 @@ export async function importRuntimeRepositoryCommit(
 }
 
 export async function checkoutRuntimeRepositories(
-  session: DaytonaSandboxSession,
+  session: SandboxSession,
   versionId: string,
   dependencies: RepositoryCheckoutDependencies = defaultDependencies,
 ): Promise<CheckedOutRepository[]> {
@@ -717,7 +726,7 @@ export async function checkoutRuntimeRepositories(
 }
 
 export async function checkoutAutomationRuntimeRepositories(
-  session: DaytonaSandboxSession,
+  session: SandboxSession,
   automationVersionId: string,
   dependencies: RepositoryCheckoutDependencies = {
     ...defaultDependencies,
@@ -733,7 +742,7 @@ export async function checkoutAutomationRuntimeRepositories(
 }
 
 export async function checkoutRuntimeRepository(
-  session: DaytonaSandboxSession,
+  session: SandboxSession,
   versionId: string,
   repositoryFullName: string,
   dependencies: RepositoryCheckoutDependencies = defaultDependencies,
@@ -748,7 +757,7 @@ export async function checkoutRuntimeRepository(
 }
 
 export async function checkoutRuntimeRepositoryAtRef(
-  session: DaytonaSandboxSession,
+  session: SandboxSession,
   versionId: string,
   repositoryFullName: string,
   reference: RuntimeRepositoryReference,
@@ -764,7 +773,7 @@ export async function checkoutRuntimeRepositoryAtRef(
 }
 
 export async function checkoutAutomationRuntimeRepositoryAtRef(
-  session: DaytonaSandboxSession,
+  session: SandboxSession,
   automationVersionId: string,
   repositoryFullName: string,
   reference: RuntimeRepositoryReference,
@@ -783,7 +792,7 @@ export async function checkoutAutomationRuntimeRepositoryAtRef(
 }
 
 async function checkoutRuntimeRepositoryWithRef(
-  session: DaytonaSandboxSession,
+  session: SandboxSession,
   versionId: string,
   repositoryFullName: string,
   reference: RuntimeRepositoryReference | undefined,
@@ -814,7 +823,7 @@ async function checkoutRuntimeRepositoryWithRef(
 }
 
 export async function refreshRuntimeRepositories(
-  session: DaytonaSandboxSession,
+  session: SandboxSession,
   versionId: string,
   dependencies: RepositoryCheckoutDependencies = defaultDependencies,
 ): Promise<CheckedOutRepository[]> {
@@ -846,7 +855,7 @@ export async function refreshRuntimeRepositories(
 }
 
 export async function checkoutRuntimeRepositoriesAtRefs(
-  session: DaytonaSandboxSession,
+  session: SandboxSession,
   versionId: string,
   references: ReadonlyMap<string, RuntimeRepositoryReference>,
   dependencies: RepositoryCheckoutDependencies = defaultDependencies,
@@ -860,7 +869,7 @@ export async function checkoutRuntimeRepositoriesAtRefs(
 }
 
 async function checkoutRuntimeRepositoriesWithRefs(
-  session: DaytonaSandboxSession,
+  session: SandboxSession,
   versionId: string,
   references: ReadonlyMap<string, RuntimeRepositoryReference>,
   dependencies: RepositoryCheckoutDependencies,

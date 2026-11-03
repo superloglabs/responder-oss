@@ -119,6 +119,15 @@ types. `drizzle/` contains the ordered schema history.
   like the automation's own secrets, as Daytona placeholders that work only
   for their allowed hosts. Skill files are stored in the database, not
   encrypted, so they must not hold credentials.
+- Sandboxes have open outbound access unless a workspace owner or admin
+  restricts them in workspace settings. A restricted sandbox reaches only the
+  listed domains, the public application host (model broker and context
+  servers), and the allowed hosts of the secrets it mounts. Vercel enforces
+  this with a custom firewall policy; Daytona with a domain allowlist, which
+  needs Daytona Tier 3 or higher and holds at most 100 domains. The worker
+  applies the list after every sandbox start and resume, so a change reaches
+  a paused sandbox on its next turn. A run fails if the provider rejects the
+  list.
 - Pull-request review follow-ups accept only new top-level bot comments on PRs
   created by Responder. Comment text is untrusted input, human comments are
   ignored, and the controlled publisher can only fast-forward the existing PR
@@ -318,6 +327,13 @@ stages the copy there as root and moves it before Codex starts. The CLI uses
 managed ChatGPT authentication and makes inference requests directly. It
 receives no custom model-provider override or API key. The existing temporary
 broker token is context-only for these runs and cannot authorize model inference.
+
+On Vercel, the sandbox gets the same kind of placeholder and the worker gives
+the value to the sandbox's firewall, which replaces the placeholder in
+`authorization` and common API key headers on requests to the allowed hosts.
+The firewall matches whole headers, and each request gets one replacement, so
+other headers keep the placeholder. The rules are removed when a sandbox stops,
+so the worker applies them after every start and never saves them.
 
 The run sandbox holds no real token:
 

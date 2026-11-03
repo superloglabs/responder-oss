@@ -4,7 +4,8 @@ import {
   runOnlyRefreshToken,
   subscriptionCliVersion,
 } from "@responder/core/automations/chatgpt-subscription";
-import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
+import { sandboxHome } from "@responder/core/sandbox-config";
+import { isVercelSandboxSession, type SandboxSession } from "./sandbox-session.js";
 import {
   AutomationHarnessError,
   assertAutomationHarnessModelCompatibility,
@@ -25,7 +26,7 @@ import {
 } from "./automation-harness.js";
 
 export const codexCliVersion = subscriptionCliVersion;
-const subscriptionHome = "/home/daytona/.responder-subscription-auth";
+const subscriptionHome = `${sandboxHome}/.responder-subscription-auth`;
 // Native authentication stays in the trusted parent; all model tools use this
 // OS-enforced profile. Never fall back to an unsandboxed subscription run.
 export const subscriptionPermissionConfig = [
@@ -216,7 +217,7 @@ export function buildCodexAutomationCommand(
 // Returns the executable to run: the snapshot's prebuilt copy when it has the
 // pinned version, otherwise a copy installed now.
 export async function prepareCodexAutomationHarness(
-  session: DaytonaSandboxSession,
+  session: SandboxSession,
   subscription = false,
 ): Promise<string> {
   const installRoot = subscription ? subscriptionInstallRoot : codexInstallRoot;
@@ -244,7 +245,7 @@ export async function prepareCodexAutomationHarness(
 }
 
 export async function runCodexAutomation(
-  session: DaytonaSandboxSession,
+  session: SandboxSession,
   input: AutomationHarnessInput,
 ): Promise<AutomationHarnessResult> {
   await assertAutomationWorkspaceHasNoSymlinkRedirects(
@@ -266,18 +267,31 @@ export async function runCodexAutomation(
         // The trusted launcher needs host root to create the nested user namespace.
         // Tools run with dropped capabilities and the native filesystem policy.
         cmd: subscriptionRootCommand(
-          `set -eu; chmod 755 /home/daytona; chown -R 0:0 ${automationWorkspaceRoot}; umask 077; test ! -L ${subscriptionHome}; mkdir -p ${subscriptionHome}; chmod 700 ${subscriptionHome}`,
+          `set -eu; chmod 755 ${sandboxHome}; chown -R 0:0 ${automationWorkspaceRoot}; umask 077; test ! -L ${subscriptionHome}; mkdir -p ${subscriptionHome}; chmod 700 ${subscriptionHome}`,
         ),
         maxOutputTokens: 1000,
         workdir: automationWorkspaceRoot,
       });
       if (!commandSucceeded(prepared))
         throw new Error("Unable to prepare subscription credentials");
-      await session.materializeEntry({
-        entry: { type: "file", content: input.model.subscription.authJson },
-        path: stagedSubscriptionAuthPath,
-        runAs: "root",
-      });
+      if (isVercelSandboxSession(session)) {
+        // The workspace is now root's, and Vercel writes files as its own user.
+        const staged = await session.execCommand({
+          cmd: subscriptionRootCommand(
+            `umask 077; printf %s ${shellQuote(Buffer.from(input.model.subscription.authJson).toString("base64"))} | base64 -d > ${stagedSubscriptionAuthPath}`,
+          ),
+          maxOutputTokens: 1000,
+          workdir: automationWorkspaceRoot,
+        });
+        if (!commandSucceeded(staged))
+          throw new Error("Unable to prepare subscription credentials");
+      } else {
+        await session.materializeEntry({
+          entry: { type: "file", content: input.model.subscription.authJson },
+          path: stagedSubscriptionAuthPath,
+          runAs: "root",
+        });
+      }
       const moved = await session.execCommand({
         cmd: subscriptionRootCommand(
           `set -eu; umask 077; test ! -L ${stagedSubscriptionAuthPath}; mv -f ${stagedSubscriptionAuthPath} ${subscriptionHome}/auth.json; chmod 600 ${subscriptionHome}/auth.json`,

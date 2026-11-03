@@ -20,7 +20,8 @@ export interface WorkspaceSecretSummary {
 
 export interface RuntimeWorkspaceSecret {
   environmentVariable: string;
-  daytonaSecretName: string;
+  daytonaSecretName: string | null;
+  encryptedValue: string | null;
   allowedHosts: string[];
 }
 
@@ -42,13 +43,14 @@ export async function listWorkspaceSecrets(
 export async function findWorkspaceSecretByName(input: {
   organizationId: string;
   name: string;
-}): Promise<WorkspaceSecretSummary | null> {
+}): Promise<(WorkspaceSecretSummary & { hasValue: boolean }) | null> {
   const rows = await getDatabase()
     .select({
       id: workspaceSecrets.id,
       name: workspaceSecrets.name,
       allowedHosts: workspaceSecrets.allowedHosts,
       createdAt: workspaceSecrets.createdAt,
+      encryptedValue: workspaceSecrets.encryptedValue,
     })
     .from(workspaceSecrets)
     .where(
@@ -58,7 +60,21 @@ export async function findWorkspaceSecretByName(input: {
       ),
     )
     .limit(1);
-  return rows[0] ?? null;
+  const row = rows[0];
+  if (!row) return null;
+  const { encryptedValue, ...secret } = row;
+  return { ...secret, hasValue: encryptedValue !== null };
+}
+
+// Fills in the value of a secret saved before values were stored.
+export async function storeWorkspaceSecretValue(input: {
+  id: string;
+  encryptedValue: string;
+}): Promise<void> {
+  await getDatabase()
+    .update(workspaceSecrets)
+    .set({ encryptedValue: input.encryptedValue })
+    .where(eq(workspaceSecrets.id, input.id));
 }
 
 export async function createWorkspaceSecretRecord(input: {
@@ -66,8 +82,9 @@ export async function createWorkspaceSecretRecord(input: {
   userId: string;
   name: string;
   allowedHosts: string[];
-  daytonaSecretId: string;
-  daytonaSecretName: string;
+  daytonaSecretId: string | null;
+  daytonaSecretName: string | null;
+  encryptedValue: string;
 }): Promise<WorkspaceSecretSummary> {
   if (!isWorkspaceSecretEnvironmentVariableName(input.name)) {
     throw new Error("Invalid workspace secret environment variable name");
@@ -84,6 +101,7 @@ export async function createWorkspaceSecretRecord(input: {
       allowedHosts: input.allowedHosts,
       daytonaSecretId: input.daytonaSecretId,
       daytonaSecretName: input.daytonaSecretName,
+      encryptedValue: input.encryptedValue,
     })
     .returning({
       id: workspaceSecrets.id,
@@ -103,6 +121,7 @@ export async function getRuntimeWorkspaceSecrets(
     .select({
       environmentVariable: workspaceSecrets.name,
       daytonaSecretName: workspaceSecrets.daytonaSecretName,
+      encryptedValue: workspaceSecrets.encryptedValue,
       allowedHosts: workspaceSecrets.allowedHosts,
     })
     .from(agentVersionSecrets)
@@ -129,6 +148,7 @@ export async function getAutomationRuntimeWorkspaceSecrets(
     .select({
       environmentVariable: workspaceSecrets.name,
       daytonaSecretName: workspaceSecrets.daytonaSecretName,
+      encryptedValue: workspaceSecrets.encryptedValue,
       allowedHosts: workspaceSecrets.allowedHosts,
     })
     .from(automationVersionSecrets)

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
+import type { SandboxSession } from "./sandbox-session.js";
 import {
   beginAutomationActionAttempt,
   completeAutomationActionAttempt,
@@ -189,7 +189,7 @@ export function createAutomationToolHandler(input: {
   onAction(action: AutomationActionResult): Promise<void>;
   organizationId: string;
   runId: string;
-  session: DaytonaSandboxSession;
+  session: SandboxSession;
   signal?: AbortSignal;
   // The repository of the pull request that started the run. The read tools
   // reach it even when the automation does not check it out.
