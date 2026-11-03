@@ -1103,8 +1103,16 @@ Before grouping, the worker rewrites each frame whose file has a map to its
 original file, line, and function. The function is the one around the
 original position in the source the map embeds; without embedded source it is
 the name the caller called. The browser's stack stays on the sample as
-`exception.stacktrace.minified`. Maps that have not matched an error for 30
-days are deleted every hour.
+`exception.stacktrace.minified`. The React component stack that
+`@superlog/react` attaches as `react.component_stack` is rewritten the same
+way, with the original in `react.component_stack.minified`. Maps that have not
+matched an error for 30 days are deleted every hour.
+
+Production React throws its errors as a code and a link, such as
+`Minified React error #418; visit https://react.dev/errors/418?args[]=HTML`.
+Before grouping, the message is replaced by React's text for that code with
+the link's arguments filled in, so the issue's title says what failed. The
+original stays on the sample as `exception.message.minified`.
 
 Every ten seconds the worker reads exceptions from ClickHouse's
 `otel_issue_candidates` table in arrival order, 30 seconds behind the present,

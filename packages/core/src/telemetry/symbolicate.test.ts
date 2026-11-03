@@ -108,6 +108,27 @@ describe("symbolicateCandidates", () => {
     expect(webkit?.exception_stacktrace.split("\n").slice(1)).toEqual(["renderTotal@src/cart.js:2:10", "onPay@src/cart.js:12:3"]);
   });
 
+  it("maps the React component stack the browser SDK attached", async () => {
+    const componentStack = [
+      "",
+      "    at style (<anonymous>)",
+      "    at o (https://app.test/assets/app-7D4HJW6Y.js:1:24)",
+      "    at e (https://app.test/assets/app-7D4HJW6Y.js:1:62)",
+    ].join("\n");
+    const [react] = await symbolicateCandidates(
+      [candidate({ attrs: { ...candidate().attrs, "react.component_stack": componentStack } })],
+      load,
+    );
+
+    expect(react?.attrs["react.component_stack"]).toBe([
+      "",
+      "    at style (<anonymous>)",
+      "    at renderTotal (src/cart.js:2:15)",
+      "    at loadCart (src/cart.js:7:17)",
+    ].join("\n"));
+    expect(react?.attrs["react.component_stack.minified"]).toBe(componentStack);
+  });
+
   it("leaves candidates without debug IDs or maps as they were", async () => {
     const plain = candidate({ attrs: {} });
     const unknown = candidate({ attrs: { "app.debug_ids": JSON.stringify({ "https://app.test/assets/app.js": "5c3e1f0a-8b7d-4e6c-a1f2-9d8e7c6b5a40" }) } });

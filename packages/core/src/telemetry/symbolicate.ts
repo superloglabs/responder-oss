@@ -11,6 +11,10 @@ import type { ErrorCandidate } from "./error-issues.js";
 export const debugIdsAttribute = "app.debug_ids";
 // The stack as the browser reported it, kept on the sample.
 export const minifiedStacktraceAttribute = "exception.stacktrace.minified";
+// The components that rendered the failing one, which @superlog/react
+// attaches in the same frame format as the stack.
+export const componentStackAttribute = "react.component_stack";
+export const minifiedComponentStackAttribute = "react.component_stack.minified";
 
 // Loads a workspace's maps, as JSON text by debug ID.
 export type SourceMapLoader = (organizationId: string, debugIds: string[]) => Promise<Map<string, string>>;
@@ -176,11 +180,17 @@ export async function symbolicateCandidates(candidates: ErrorCandidate[], load: 
     if (!ids || !workspaceMaps || workspaceMaps.size === 0) return candidate;
     const lowered = Object.fromEntries(Object.entries(ids).map(([url, id]) => [url, id.toLowerCase()]));
     const symbolicated = symbolicateStack(candidate.exception_stacktrace, lowered, workspaceMaps);
-    if (!symbolicated) return candidate;
+    const componentStack = candidate.attrs[componentStackAttribute];
+    const components = componentStack ? symbolicateStack(componentStack, lowered, workspaceMaps) : null;
+    if (!symbolicated && !components) return candidate;
     return {
       ...candidate,
-      attrs: { ...candidate.attrs, [minifiedStacktraceAttribute]: candidate.exception_stacktrace },
-      exception_stacktrace: symbolicated,
+      attrs: {
+        ...candidate.attrs,
+        ...(symbolicated ? { [minifiedStacktraceAttribute]: candidate.exception_stacktrace } : {}),
+        ...(components ? { [componentStackAttribute]: components, [minifiedComponentStackAttribute]: componentStack! } : {}),
+      },
+      exception_stacktrace: symbolicated ?? candidate.exception_stacktrace,
     };
   });
 }

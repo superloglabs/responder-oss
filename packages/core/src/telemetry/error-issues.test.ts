@@ -43,6 +43,17 @@ function candidate(overrides: Partial<ErrorCandidate> = {}): ErrorCandidate {
 }
 
 describe("groupErrorCandidates", () => {
+  it("titles a production React error by its message and keeps the minified one on the sample", () => {
+    const minified =
+      "Minified React error #418; visit https://react.dev/errors/418?args[]=HTML&args[]= for the full message or use the non-minified dev environment for full errors and additional helpful warnings.";
+    const [issue] = groupErrorCandidates([
+      candidate({ body: minified, exception_message: minified, exception_type: "Error", kind: "log" }),
+    ]);
+
+    expect(issue?.title).toMatch(/^Error: Hydration failed because the server rendered HTML didn't match the client\./u);
+    expect(issue?.sample.attributes["exception.message.minified"]).toBe(minified);
+  });
+
   it("collapses occurrences of one fingerprint and keeps the newest as the sample", () => {
     const [issue, ...rest] = groupErrorCandidates([
       candidate({ seen_ms: "1793000000000", trace_id: "first" }),
