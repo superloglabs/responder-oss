@@ -62,6 +62,11 @@ describe("alert rules", () => {
     expect(alertCreateSchema.safeParse(rule).success).toBe(true);
     expect(alertCreateSchema.safeParse({ ...rule, aggregation: "p99", field: "duration" }).success).toBe(true);
     expect(alertCreateSchema.parse({ comparator: "gt", aggregation: "count", name: "x", source: "logs", threshold: 1 }).field).toBeNull();
+    const base = { comparator: "gt", aggregation: "count", name: "x", source: "logs", threshold: 1 };
+    expect(alertCreateSchema.parse(base).description).toBeNull();
+    expect(alertCreateSchema.parse({ ...base, description: "   " }).description).toBeNull();
+    expect(alertCreateSchema.parse({ ...base, description: " See the runbook. " }).description).toBe("See the runbook.");
+    expect(alertCreateSchema.safeParse({ ...base, description: "x".repeat(2_001) }).success).toBe(false);
   });
 });
 
@@ -193,6 +198,23 @@ describe("alert messages", () => {
     expect(firing.markdown).toContain("https:\u200b//evil.\u200bexample");
     // The app's own link is not altered.
     expect(firing.markdown).toContain("[View alert](https://us.superlog.sh/alerts/1)");
+  });
+
+  it("posts the description with its links, but without mentions", () => {
+    const firing = alertFiringMessage({
+      alertDescription: "Check the [runbook](https://docs.example.com/checkout) <!channel> & <@U123>",
+      alertName: "Checkout errors",
+      alertUrl: "https://us.superlog.sh/alerts/1",
+      groupBy: null,
+      groupKey: "",
+      rule: errorLogs,
+      value: 51,
+    });
+    expect(firing.markdown).toContain(
+      "above 50.\n\nCheck the [runbook](https://docs.example.com/checkout) &lt;!channel&gt; &amp; &lt;@U123&gt;\n\n[View alert]",
+    );
+    expect(alertFiringMessage({ alertName: "x", alertUrl: null, groupBy: null, groupKey: "", rule: errorLogs, value: 51 }).markdown)
+      .toMatch(/above 50\.$/u);
   });
 
   it("says how long the alert fired", () => {

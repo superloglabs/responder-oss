@@ -1,4 +1,4 @@
-import { describeAlertRule, formatAlertValue, alertValueUnit, slackText, type AlertMessageInput } from "@responder/core/telemetry/alert-text";
+import { alertDescriptionText, describeAlertRule, formatAlertValue, alertValueUnit, slackText, type AlertMessageInput } from "@responder/core/telemetry/alert-text";
 
 // Native Slack text surrounds the image. The sender/avatar are provided by Slack.
 export function alertImageLayout(input: AlertMessageInput): { before: unknown[]; after: unknown[] } {
@@ -10,7 +10,7 @@ export function alertImageLayout(input: AlertMessageInput): { before: unknown[];
   return {
     before: [
       { type: "context", elements: [{ type: "mrkdwn", text: `:red_circle: *Firing*${input.groupBy ? `   ${slackText(input.groupBy)}: ${slackText(input.groupKey || "(none)")}` : ""}` }] },
-      { type: "markdown", text: `**${slackText(input.alertName)}**\n\n${summary}` },
+      { type: "markdown", text: `**${slackText(input.alertName)}**\n\n${summary}${input.alertDescription ? `\n\n${alertDescriptionText(input.alertDescription)}` : ""}` },
     ],
     after: input.alertUrl ? [{ type: "markdown", text: `[View alert](${input.alertUrl})` }] : [],
   };

@@ -10,6 +10,7 @@ const alert: DueTelemetryAlert = {
   comparator: "gt",
   field: null,
   createdAt: now.toISOString(),
+  description: null,
   enabled: true,
   evaluationIntervalSeconds: 60,
   filter: { severity: "error" },
@@ -91,6 +92,16 @@ describe("checkTelemetryAlert", () => {
     expect(vi.mocked(deps.post).mock.calls[0]![0].markdown).toContain("https://us.superlog.sh/alerts/alert-1");
     expect(deps.setMessage).toHaveBeenCalledWith("episode-1", "1700000000.000200");
     expect(deps.recordCheck).toHaveBeenCalledWith("alert-1", null);
+  });
+
+  it("posts the alert's description when it fires", async () => {
+    const deps = dependencies();
+
+    await checkTelemetryAlert({ ...alert, description: "Check the payment provider first." }, {} as never, deps);
+
+    const posted = vi.mocked(deps.post).mock.calls[0]![0];
+    expect(posted.markdown).toContain("Check the payment provider first.");
+    expect(JSON.stringify(posted.imageLayout)).toContain("Check the payment provider first.");
   });
 
   it("starts the channel's automations on the posted alert", async () => {

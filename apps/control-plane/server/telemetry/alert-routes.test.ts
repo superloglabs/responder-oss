@@ -20,6 +20,7 @@ const alert: TelemetryAlert = {
   comparator: "gt",
   field: null,
   createdAt: now.toISOString(),
+  description: null,
   enabled: true,
   evaluationIntervalSeconds: 60,
   filter: {},

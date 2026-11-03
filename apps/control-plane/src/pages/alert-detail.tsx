@@ -331,6 +331,7 @@ function AlertDetail({
             {describeAlertCondition(alert.comparator, alert.threshold, unit)}
             {alert.slack ? ` and notifies ${channel ? `#${channel.name}` : `Slack ${alert.slack.channelId}`}` : ""}.
           </p>
+          {alert.description ? <p className="alertOverview__description">{alert.description}</p> : null}
           <section>
             <h2>Current evaluation</h2>
             <p>

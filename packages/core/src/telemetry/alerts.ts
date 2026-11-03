@@ -88,6 +88,14 @@ const refinedRule = <T extends z.ZodType<AlertRule>>(schema: T) =>
   });
 
 const alertSettingsSchema = z.object({
+  // Posted with the firing message. Blank is none.
+  description: z
+    .string()
+    .trim()
+    .max(2_000)
+    .nullable()
+    .default(null)
+    .transform((value) => value || null),
   enabled: z.boolean().default(true),
   // How often the rule is checked. Superlog allowed 15 seconds; checks here
   // share a read-only store, so one minute is the shortest.

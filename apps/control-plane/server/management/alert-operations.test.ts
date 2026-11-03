@@ -90,6 +90,7 @@ const alert = {
   aggregation: "count",
   comparator: "gt",
   createdAt: "2026-10-20T10:00:00.000Z",
+  description: "See the API runbook.",
   enabled: true,
   evaluationIntervalSeconds: 60,
   field: null,
@@ -193,6 +194,7 @@ describe("alert operations", () => {
       aggregation: "count",
       comparator: "gt",
       createdBy: userId,
+      description: null,
       enabled: true,
       evaluationIntervalSeconds: 60,
       field: null,
@@ -246,6 +248,7 @@ describe("alert operations", () => {
     expect(mocks.updateAlert).toHaveBeenCalledWith(organizationId, alertId, {
       aggregation: "count",
       comparator: "gt",
+      description: "See the API runbook.",
       enabled: true,
       evaluationIntervalSeconds: 60,
       field: null,
