@@ -4,8 +4,8 @@ import {
   usagePlanLabel,
   usageResetLabel,
   usageWindowLabel,
-  type SubscriptionUsageEntry,
 } from "../subscription-usage-presentation";
+import { subscriptionUsageStore } from "../subscription-usage-store";
 
 // The server reads limits at most every five minutes.
 const REFRESH_INTERVAL_MS = 5 * 60_000;
@@ -14,22 +14,18 @@ const NEAR_LIMIT_PERCENT = 90;
 
 // Rate limits of the workspace's connected ChatGPT subscriptions.
 export function SidebarUsageCard({ enabled }: { enabled: boolean }) {
-  const [subscriptions, setSubscriptions] = useState<SubscriptionUsageEntry[]>([]);
+  const [subscriptions, setSubscriptions] = useState(subscriptionUsageStore.current);
 
   useEffect(() => {
     if (!enabled) return;
     let active = true;
-    async function refresh() {
-      const response = await fetch("/api/automations/subscriptions/usage").catch(() => null);
-      if (!response?.ok) return;
-      const body = (await response.json().catch(() => null)) as
-        | { subscriptions?: SubscriptionUsageEntry[] }
-        | null;
-      if (active && body?.subscriptions) setSubscriptions(body.subscriptions);
-    }
+    const refresh = () =>
+      void subscriptionUsageStore.refresh().then((loaded) => {
+        if (active) setSubscriptions(loaded);
+      });
 
-    void refresh();
-    const interval = window.setInterval(() => void refresh(), REFRESH_INTERVAL_MS);
+    refresh();
+    const interval = window.setInterval(refresh, REFRESH_INTERVAL_MS);
     return () => {
       active = false;
       window.clearInterval(interval);
