@@ -226,17 +226,22 @@ export async function buildSandboxImage(
     log = `${log}${text}`.slice(-buildLogLimit);
     await dependencies.recordLog(organizationId, key, log);
   };
-  const sandbox = await dependencies.createSandbox({
-    ...config.vercel,
-    persistent: false,
-    region: config.region,
-    resources: { vcpus: settings.vcpus },
-    source: { snapshotId: base.snapshotId, type: "snapshot" },
-    timeout: buildTimeoutMs,
-  }).catch(async (error: unknown) => {
+  let sandbox: Sandbox;
+  try {
+    sandbox = await dependencies.createSandbox({
+      ...config.vercel,
+      persistent: false,
+      region: config.region,
+      resources: { vcpus: settings.vcpus },
+      source: { snapshotId: base.snapshotId, type: "snapshot" },
+      timeout: buildTimeoutMs,
+    });
+  } catch (error) {
+    // The next worker tries again, and records the failure if it repeats.
+    if (options.signal?.aborted) return "interrupted";
     await dependencies.fail(organizationId, key, "Could not start a sandbox to build in", log);
     throw error;
-  });
+  }
   // Stopping the sandbox ends the command it is running.
   const stop = () => void sandbox.stop().catch(() => undefined);
   options.signal?.addEventListener("abort", stop, { once: true });
