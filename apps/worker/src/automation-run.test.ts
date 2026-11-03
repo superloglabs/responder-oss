@@ -1924,7 +1924,10 @@ describe("automation run processor", () => {
 
       await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
 
-      expect(deps.trackBilledRun).toHaveBeenCalledTimes(2);
+      expect(deps.trackBilledRun.mock.calls).toEqual([
+        [{ account: runBilling, organizationId, runId }],
+        [{ account: runBilling, organizationId, runId }],
+      ]);
       expect(order.indexOf("counted")).toBeLessThan(order.indexOf("succeeded"));
     });
 

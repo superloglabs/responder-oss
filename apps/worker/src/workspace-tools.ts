@@ -21,6 +21,7 @@ import {
   setAutomationEnabled,
   updateAutomation,
 } from "@responder/core/db/automations";
+import { automationModelRefusal } from "@responder/core/billing/autumn";
 import { z } from "zod";
 import type { AutomationToolResult } from "./automation-tools.js";
 
@@ -34,6 +35,7 @@ export interface WorkspaceToolDependencies {
   getTagMode: typeof getSlackThreadModeConfiguration;
   listAgentOptions: typeof listAgentOptions;
   listAutomations: typeof listAutomations;
+  modelRefusal: typeof automationModelRefusal;
   saveTagMode: typeof saveSlackThreadModeConfiguration;
   setAutomationEnabled: typeof setAutomationEnabled;
   updateAutomation: typeof updateAutomation;
@@ -46,6 +48,7 @@ const defaultDependencies: WorkspaceToolDependencies = {
   getTagMode: getSlackThreadModeConfiguration,
   listAgentOptions,
   listAutomations,
+  modelRefusal: automationModelRefusal,
   saveTagMode: saveSlackThreadModeConfiguration,
   setAutomationEnabled,
   updateAutomation,
@@ -132,6 +135,13 @@ export function workspaceToolSpecs(
       throw new Error("Automations are not available in this workspace.");
     }
   };
+  // A workspace that pays per run may not save or enable another model.
+  const requireModelOnPlan = async (configuration: { model: string; modelProvider: string }) => {
+    const refusal = await dependencies.modelRefusal(organizationId, configuration).catch(() => {
+      throw new Error("Unable to check the workspace's plan. Retry the change.");
+    });
+    if (refusal) throw new Error(refusal);
+  };
 
   async function saveAutomation(
     automationId: string | null,
@@ -141,6 +151,7 @@ export function workspaceToolSpecs(
     if (!parsed.success) {
       throw new Error(`Invalid automation: ${validationMessage(parsed.error)}`);
     }
+    await requireModelOnPlan(parsed.data.configuration);
     try {
       if (automationId) {
         const updated = await dependencies.updateAutomation(
@@ -316,6 +327,10 @@ export function workspaceToolSpecs(
         request.name === null
       ) {
         if (request.enabled === null) throw new Error("Nothing to change");
+        if (request.enabled) {
+          const current = await dependencies.getAutomation(organizationId, request.automationId);
+          if (current) await requireModelOnPlan(current.configuration);
+        }
         const updated = await dependencies.setAutomationEnabled({
           automationId: request.automationId,
           enabled: request.enabled,
