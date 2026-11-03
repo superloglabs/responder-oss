@@ -59,6 +59,7 @@
   },
   "devDependencies": {
     "@sentry/vite-plugin": "5.4.0",
+    "@superlog/sourcemaps": "0.1.0",
     "@tailwindcss/vite": "^4.3.3",
     "@vitejs/plugin-react": "6.0.4",
     "tailwindcss": "^4.3.3",
