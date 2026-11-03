@@ -37,9 +37,12 @@ function isWorkspaceAdmin(role: string): boolean {
   return role.split(",").some((value) => ["owner", "admin"].includes(value.trim()));
 }
 
+// A start command goes with the workspace's snapshot, so a new one waits for
+// the worker to record it there. Without a snapshot it applies right away.
 function imageChanged(previous: SandboxImageSettings, next: SandboxImageSettings): boolean {
   return previous.setupScript !== next.setupScript ||
-    [...previous.packages].sort().join("\n") !== [...next.packages].sort().join("\n");
+    [...previous.packages].sort().join("\n") !== [...next.packages].sort().join("\n") ||
+    (sandboxImageRequired(next) && previous.startCommand !== next.startCommand);
 }
 
 type ImageState = "building" | "failed" | "none" | "queued" | "ready";

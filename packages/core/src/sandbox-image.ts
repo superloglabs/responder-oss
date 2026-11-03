@@ -5,7 +5,9 @@ import { z } from "zod";
 // They are built once into a snapshot of the workspace's own, on top of the
 // cell's base snapshot, so a run starts with them already installed. A start
 // command runs in every sandbox as it starts or resumes, for processes a
-// snapshot cannot keep, such as the Docker daemon.
+// snapshot cannot keep, such as the Docker daemon. With a snapshot, the start
+// command is recorded with it and changes when the snapshot does, so a run
+// never runs a start command its snapshot was not built for.
 
 export interface SandboxImageSettings {
   packages: string[];
@@ -104,6 +106,8 @@ export interface SandboxImageRecord {
   snapshotBaseId: string | null;
   snapshotRegion: string | null;
   snapshotBuiltAt: Date | null;
+  // The start command saved with the settings the snapshot was built from.
+  snapshotStartCommand: string | null;
 }
 
 // The snapshot a run starts from. An exact build is best. While a changed
@@ -120,4 +124,17 @@ export function sandboxImageSnapshotFor(
   return image.snapshotBaseId === base.snapshotId && image.snapshotRegion === base.region
     ? image.snapshotId
     : null;
+}
+
+// The start command for a run: the one recorded with the snapshot it starts
+// from, none when it starts from the base snapshot without the workspace's
+// packages, and the saved one when the workspace needs no snapshot.
+export function sandboxImageStartCommand(
+  settings: SandboxImageSettings,
+  image: Pick<SandboxImageRecord, "snapshotId" | "snapshotStartCommand"> | null,
+  snapshotId: string | null,
+): string {
+  if (!sandboxImageRequired(settings)) return settings.startCommand;
+  if (!snapshotId || image?.snapshotId !== snapshotId) return "";
+  return image.snapshotStartCommand ?? "";
 }

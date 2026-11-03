@@ -658,9 +658,10 @@ function sandboxImageStatus(image: SandboxImageState["image"]): {
   text: string;
   tone: "error" | "success" | "warning" | null;
 } | null {
-  const meanwhile = image.builtAt
-    ? "Until it finishes, runs use the last image that built, or the default image if Superlog has updated it since."
-    : "Until it finishes, runs use the default image.";
+  const fallback = image.builtAt
+    ? "runs use the last image that built and its start command, or the default image without a start command if Superlog has updated it since."
+    : "runs use the default image without a start command.";
+  const meanwhile = `Until it finishes, ${fallback}`;
   switch (image.state) {
     case "none":
       return null;
@@ -673,7 +674,7 @@ function sandboxImageStatus(image: SandboxImageState["image"]): {
       };
     case "failed":
       return {
-        text: `Build failed: ${image.error ?? "unknown error"}. ${image.builtAt ? "Runs use the last image that built, or the default image if Superlog has updated it since." : "Runs use the default image."}`,
+        text: `Build failed: ${image.error ?? "unknown error"}. Until a build succeeds, ${fallback}`,
         tone: "error",
       };
     case "ready":
@@ -788,7 +789,8 @@ function SandboxImageSection() {
         Agents run commands in a sandbox on Amazon Linux 2023 with Node.js,
         Python, git, and the agent tools. Add what your repositories need to
         build and test, such as browsers or databases. Packages and the setup
-        script are built into an image once, so runs start with them.
+        script are built into an image once, so runs start with them. Changes
+        to them apply to new runs when the image is ready.
         {state && !state.supported
           ? " These settings need the Vercel sandbox provider."
           : state && !state.canEdit ? " Admins can change this." : null}
@@ -826,7 +828,7 @@ function SandboxImageSection() {
           <TextAreaField
             className="sandboxSettings__code"
             disabled={!canEdit || saving}
-            hint="Runs with bash each time a sandbox starts or resumes, before the agent. Use it for services, such as sudo dockerd &. A failure stops the run."
+            hint="Runs with bash each time a sandbox starts or resumes, before the agent. Use it for services, such as sudo dockerd &. With packages or a setup script, it is part of the image and changes when the image is ready. Without them, it applies right away. A failure stops the run."
             label="Start command"
             onChange={(event) => setStartCommand(event.target.value)}
             placeholder="sudo dockerd >/tmp/dockerd.log 2>&1 &"

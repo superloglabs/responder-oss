@@ -89,6 +89,7 @@ const imageSelection = {
   snapshotId: sandboxImages.snapshotId,
   snapshotKey: sandboxImages.snapshotKey,
   snapshotRegion: sandboxImages.snapshotRegion,
+  snapshotStartCommand: sandboxImages.snapshotStartCommand,
   startedAt: sandboxImages.startedAt,
   status: sandboxImages.status,
 };
@@ -184,13 +185,14 @@ export async function recordSandboxImageBuildLog(
     .where(and(eq(sandboxImages.organizationId, organizationId), eq(sandboxImages.key, key)));
 }
 
-// Records the snapshot a build of `key` made. The snapshot it replaces is
-// queued for deletion by the trigger on sandbox_images. A build whose key a
-// newer build has replaced is not recorded, and its snapshot is deleted.
+// Records the snapshot a build of `key` made and the start command that goes
+// with it. The snapshot it replaces is queued for deletion by the trigger on
+// sandbox_images. A build whose key a newer build has replaced is not
+// recorded, and its snapshot is deleted.
 export async function completeSandboxImageBuild(
   organizationId: string,
   key: string,
-  snapshot: SandboxImageBase & { builtSnapshotId: string },
+  snapshot: SandboxImageBase & { builtSnapshotId: string; startCommand: string },
   log: string,
   now: Date = new Date(),
 ): Promise<void> {
@@ -207,6 +209,7 @@ export async function completeSandboxImageBuild(
       snapshotId: snapshot.builtSnapshotId,
       snapshotKey: key,
       snapshotRegion: snapshot.region,
+      snapshotStartCommand: snapshot.startCommand,
       status: "ready",
     })
     .where(and(eq(sandboxImages.organizationId, organizationId), eq(sandboxImages.key, key)))

@@ -48,6 +48,7 @@ function image(overrides: Partial<SandboxImageRecord> = {}): SandboxImageRecord 
     snapshotId: "snap_workspace",
     snapshotKey: key,
     snapshotRegion: base.region,
+    snapshotStartCommand: settings.startCommand,
     startedAt: new Date("2026-11-03T11:55:00Z"),
     status: "ready",
     ...overrides,
@@ -71,6 +72,25 @@ describe("workspace sandbox", () => {
       getSettings: vi.fn(async () => settings),
     });
     expect(sandbox.config.sandboxSnapshotName).toBe("snap_base");
+    expect(sandbox.startCommand).toBe("");
+  });
+
+  it("keeps the previous snapshot's start command until the new one is recorded", async () => {
+    const sandbox = await workspaceSandbox(organizationId, vercelConfig, {
+      getImage: vi.fn(async () => image({ snapshotStartCommand: "echo previous" })),
+      getSettings: vi.fn(async () => settings),
+    });
+    expect(sandbox.config.sandboxSnapshotName).toBe("snap_workspace");
+    expect(sandbox.startCommand).toBe("echo previous");
+  });
+
+  it("runs the start command when the workspace needs no snapshot", async () => {
+    const startOnly = { ...defaultSandboxImageSettings, startCommand: "echo up" };
+    const sandbox = await workspaceSandbox(organizationId, vercelConfig, {
+      getImage: vi.fn(async () => null),
+      getSettings: vi.fn(async () => startOnly),
+    });
+    expect(sandbox.startCommand).toBe("echo up");
   });
 
   it("leaves Daytona sandboxes unchanged", async () => {
@@ -144,7 +164,7 @@ describe("sandbox image build", () => {
     expect(dependencies.complete).toHaveBeenCalledWith(
       organizationId,
       key,
-      { ...base, builtSnapshotId: "snap_new" },
+      { ...base, builtSnapshotId: "snap_new", startCommand: settings.startCommand },
       expect.stringContaining("Built snapshot snap_new."),
     );
   });
@@ -192,6 +212,19 @@ describe("sandbox image build", () => {
     await expect(buildSandboxImage(organizationId, {}, environment, dependencies))
       .resolves.toBe("current");
     expect(dependencies.createSandbox).not.toHaveBeenCalled();
+  });
+
+  it("records a new start command with the snapshot without rebuilding", async () => {
+    const dependencies = buildDependencies({ image: image({ snapshotStartCommand: "echo previous" }) });
+    await expect(buildSandboxImage(organizationId, {}, environment, dependencies))
+      .resolves.toBe("current");
+    expect(dependencies.createSandbox).not.toHaveBeenCalled();
+    expect(dependencies.complete).toHaveBeenCalledWith(
+      organizationId,
+      sandboxImageKey(settings, base),
+      { ...base, builtSnapshotId: "snap_workspace", startCommand: settings.startCommand },
+      "",
+    );
   });
 
   it("rebuilds a matching snapshot when an admin asked after it last built", async () => {
@@ -248,13 +281,18 @@ describe("sandbox image maintenance", () => {
     };
   }
 
-  it("queues workspaces whose image is out of date, cut off, asked for, or left behind", async () => {
+  it("queues workspaces whose image is out of date, cut off, asked for, has a new start command, or is left behind", async () => {
     const queue = vi.fn<(organizationId: string) => Promise<boolean>>(async () => true);
     const dependencies = maintenanceDependencies([
       { image: image(), organizationId: "current", settings },
       { image: image({ key: "old-base" }), organizationId: "outdated", settings },
       { image: null, organizationId: "new", settings },
       { image: image({ status: "building" }), organizationId: "cut-off", settings },
+      {
+        image: image({ snapshotStartCommand: "echo previous" }),
+        organizationId: "start-command",
+        settings,
+      },
       {
         image: image(),
         organizationId: "rebuild",
@@ -265,11 +303,12 @@ describe("sandbox image maintenance", () => {
       { image: null, organizationId: "unused", settings: defaultSandboxImageSettings },
     ]);
     const result = await maintainSandboxImages(queue, environment, dependencies);
-    expect(result.queued).toBe(5);
+    expect(result.queued).toBe(6);
     expect(queue.mock.calls.map(([id]) => id)).toEqual([
       "outdated",
       "new",
       "cut-off",
+      "start-command",
       "rebuild",
       "cleared",
     ]);
