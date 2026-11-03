@@ -8,6 +8,10 @@ const client = vi.hoisted(() => ({
   track: vi.fn(),
 }));
 
+const runBillingAccounts = vi.hoisted(() => ({ getRunBillingAccount: vi.fn() }));
+
+vi.mock("../db/run-billing-accounts.js", () => runBillingAccounts);
+
 vi.mock("autumn-js", () => ({
   Autumn: vi.fn(function Autumn() {
     return client;
@@ -15,6 +19,7 @@ vi.mock("autumn-js", () => ({
 }));
 
 const {
+  automationModelRefusal,
   checkUsageAllowance,
   checkWorkAllowance,
   creditMachineHours,
@@ -22,6 +27,7 @@ const {
   organizationUsesMachineHours,
   summarizeAutomationBillingCustomer,
   trackAutomationInferenceUsage,
+  trackBilledRun,
   trackMachineHours,
 } = await import("./autumn.js");
 
@@ -50,6 +56,7 @@ describe("automation billing", () => {
   beforeEach(() => {
     vi.stubEnv("BILLING_ENABLED", "true");
     vi.stubEnv("AUTUMN_SECRET_KEY", "autumn-secret");
+    runBillingAccounts.getRunBillingAccount.mockResolvedValue(null);
   });
 
   afterEach(() => {
@@ -61,6 +68,7 @@ describe("automation billing", () => {
       client.check,
       client.customers.getOrCreate,
       client.track,
+      runBillingAccounts.getRunBillingAccount,
     ]) {
       mock.mockReset();
     }
@@ -408,6 +416,138 @@ describe("automation billing", () => {
       scheduledPlanId: "responder_automations_100",
       scheduledPlanName: "$100 / month",
       usage: 201,
+    });
+  });
+  describe("per-run billing", () => {
+    const account = {
+      customerId: "earlier-customer",
+      featureId: "investigations",
+      model: "claude-sonnet-5.5",
+      modelName: "Per-run model",
+      modelProvider: "anthropic",
+    };
+
+    function runBilled(organizationId: string, subscriptions = freePlan) {
+      runBillingAccounts.getRunBillingAccount.mockResolvedValue(account);
+      client.customers.getOrCreate.mockResolvedValue({
+        ...customer(subscriptions, { responder_automation_inference: balance({ remaining: 0 }) }),
+        id: organizationId,
+      });
+    }
+
+    it("lets a run start on the per-run account, not the used-up credit", async () => {
+      runBilled("organization-run-start");
+      client.check.mockResolvedValueOnce({ allowed: true, balance: null });
+
+      await expect(checkWorkAllowance("organization-run-start", { responderModels: true })).resolves.toEqual({
+        allowed: true,
+        exhausted: null,
+        machinesUseCredit: false,
+        nextResetAt: null,
+        runBilling: account,
+      });
+      expect(client.check).toHaveBeenCalledWith({ customerId: "earlier-customer", featureId: "investigations" });
+    });
+
+    it("stops a run the per-run account does not allow", async () => {
+      runBilled("organization-run-refused");
+      client.check.mockResolvedValueOnce({ allowed: false, balance: { nextResetAt: 9 } });
+
+      await expect(checkWorkAllowance("organization-run-refused", { responderModels: true })).resolves.toMatchObject({
+        allowed: false,
+        exhausted: "usage_credit",
+        nextResetAt: 9,
+      });
+    });
+
+    it("bills usage as before once the workspace moves to a paid plan", async () => {
+      runBilled("organization-run-paid", [{ planId: "responder_plan_pro", status: "active" }]);
+      client.check.mockResolvedValueOnce({ allowed: true, balance: { nextResetAt: 1 } });
+
+      await checkUsageAllowance("organization-run-paid");
+      expect(client.check).toHaveBeenCalledWith(expect.objectContaining({
+        customerId: "organization-run-paid",
+        featureId: "responder_automation_inference",
+      }));
+      await trackMachineHours({
+        hours: 1,
+        idempotencyKey: "sandbox-1",
+        organizationId: "organization-run-paid",
+        properties: {},
+      });
+      expect(client.track).toHaveBeenCalledOnce();
+    });
+
+    it("does not charge model or sandbox usage while paying per run", async () => {
+      runBilled("organization-run-usage");
+
+      await expect(checkUsageAllowance("organization-run-usage")).resolves.toEqual({ allowed: true, nextResetAt: null });
+      await trackAutomationInferenceUsage({
+        costMicros: 1_000_000,
+        model: "claude-sonnet-5.5",
+        organizationId: "organization-run-usage",
+        runId: "run-1",
+        usageId: "usage-1",
+      });
+      await trackMachineHours({
+        hours: 1,
+        idempotencyKey: "sandbox-1",
+        organizationId: "organization-run-usage",
+        properties: {},
+      });
+      expect(client.check).not.toHaveBeenCalled();
+      expect(client.track).not.toHaveBeenCalled();
+    });
+
+    it("counts a run once against the per-run account", async () => {
+      client.track
+        .mockResolvedValueOnce({})
+        .mockRejectedValueOnce(Object.assign(new Error("Duplicate"), { statusCode: 409 }));
+
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        await trackBilledRun({ account, organizationId: "organization-run-count", runId: "run-1" });
+      }
+      expect(client.track).toHaveBeenCalledTimes(2);
+      for (const call of client.track.mock.calls) {
+        expect(call).toEqual([
+          {
+            customerId: "earlier-customer",
+            featureId: "investigations",
+            properties: { organizationId: "organization-run-count", runId: "run-1" },
+            value: 1,
+          },
+          expect.objectContaining({ headers: { "Idempotency-Key": "billed-run:run-1" } }),
+        ]);
+      }
+    });
+
+    it("refuses other models while paying per run", async () => {
+      runBilled("organization-run-models");
+
+      await expect(automationModelRefusal("organization-run-models", {
+        model: "claude-sonnet-5.5",
+        modelProvider: "anthropic",
+      })).resolves.toBeNull();
+      await expect(automationModelRefusal("organization-run-models", {
+        model: "claude-opus-5.5",
+        modelProvider: "anthropic",
+      })).resolves.toContain("Per-run model");
+    });
+
+    it("summarizes per-run billing without limits or a seat cap", () => {
+      const summary = summarizeAutomationBillingCustomer(
+        customer(freePlan, {
+          responder_automation_inference: balance({ remaining: 0 }),
+          responder_machine_hours: balance({ remaining: 0 }),
+        }),
+        account,
+      );
+      expect(summary).toMatchObject({
+        creditUnlimited: true,
+        includesTeammates: true,
+        machineHours: { unlimited: true },
+        runBilling: { modelName: "Per-run model" },
+      });
     });
   });
 });

@@ -34,6 +34,7 @@ const mocks = vi.hoisted(() => ({
   finishSuggestionRefill: vi.fn(),
   latestSuggestions: vi.fn(),
   removeSuggestions: vi.fn(),
+  modelRefusal: vi.fn().mockResolvedValue(null),
   tenant: vi.fn().mockResolvedValue({
     ok: true,
     organizationId: "15151515-1515-4515-8515-151515151515",
@@ -126,6 +127,11 @@ vi.mock(
   }),
 );
 
+vi.mock("../../../../packages/core/src/billing/autumn.js", async (original) => ({
+  ...(await original<typeof import("../../../../packages/core/src/billing/autumn.js")>()),
+  automationModelRefusal: mocks.modelRefusal,
+}));
+
 const app = new Hono().route("/api/automations", automationRoutes);
 
 describe("automation control-plane routes", () => {
@@ -140,6 +146,35 @@ describe("automation control-plane routes", () => {
       organizationId,
       user: { id: userId, name: "Ash" },
     });
+  });
+
+  it("refuses to enable an automation on a model the plan does not cover", async () => {
+    const automationId = "31313131-3131-4131-8131-313131313131";
+    mocks.getAutomation.mockResolvedValue({ configuration: { model: "claude-opus-5.5", modelProvider: "anthropic" } });
+    mocks.modelRefusal.mockResolvedValueOnce("This workspace's plan runs automations on the Per-run model.");
+
+    const response = await app.request(`/api/automations/${automationId}`, {
+      body: JSON.stringify({ enabled: true }),
+      headers: { "content-type": "application/json" },
+      method: "PATCH",
+    });
+
+    expect(response.status).toBe(422);
+    expect(mocks.modelRefusal).toHaveBeenCalledWith(organizationId, { model: "claude-opus-5.5", modelProvider: "anthropic" });
+  });
+
+  it("refuses to enable an automation when the workspace's plan cannot be read", async () => {
+    const automationId = "31313131-3131-4131-8131-313131313131";
+    mocks.getAutomation.mockResolvedValue({ configuration: { model: "claude-opus-5.5", modelProvider: "anthropic" } });
+    mocks.modelRefusal.mockRejectedValueOnce(new Error("Autumn unavailable"));
+
+    const response = await app.request(`/api/automations/${automationId}`, {
+      body: JSON.stringify({ enabled: true }),
+      headers: { "content-type": "application/json" },
+      method: "PATCH",
+    });
+
+    expect(response.status).toBe(502);
   });
 
   it("returns not found when the organization capability is disabled", async () => {

@@ -38,12 +38,13 @@ import {
   revokeAutomationModelBrokerGrant,
   type AutomationModelBrokerGrantCredential,
 } from "@responder/core/db/automation-model-broker";
-import { checkWorkAllowance } from "@responder/core/billing/autumn";
+import { checkWorkAllowance, trackBilledRun } from "@responder/core/billing/autumn";
 import { notifyBillingLimitReached } from "@responder/core/billing/notifications";
 import { usageLimitFromAllowance } from "@responder/core/billing/usage-limit";
 import { refreshSlackChannelResources } from "@responder/core/integrations/slack-channels";
 import { usageWaiverStart, waiveAutomationRunUsage } from "@responder/core/billing/usage-waivers";
 import { getOrganizationModelCredential, selectOrganizationModelCredential } from "@responder/core/db/automation-model-credentials";
+import type { RunBillingAccount } from "@responder/core/db/run-billing-accounts";
 import { listProviderModels, matchProviderModel, ModelCatalogError } from "@responder/core/automations/model-catalog";
 import { modelProvider, type ModelProviderId } from "@responder/core/automations/model-providers";
 import { publicApplicationUrl } from "@responder/core/sandbox-network";
@@ -147,6 +148,7 @@ type ClaimedAutomationRun = NonNullable<Awaited<ReturnType<typeof claimAutomatio
 
 export interface AutomationRunDependencies {
   checkAllowance: typeof checkWorkAllowance;
+  trackBilledRun: typeof trackBilledRun;
   appendEvent: typeof appendAutomationRunEvent;
   cancellationRequested: typeof automationRunCancellationRequested;
   checkoutRepositories: typeof checkoutAutomationRuntimeRepositories;
@@ -207,6 +209,7 @@ export interface AutomationRunDependencies {
 
 export const defaultAutomationRunDependencies: AutomationRunDependencies = {
   checkAllowance: checkWorkAllowance,
+  trackBilledRun,
   appendEvent: appendAutomationRunEvent,
   cancellationRequested: automationRunCancellationRequested,
   checkoutRepositories: checkoutAutomationRuntimeRepositories,
@@ -814,6 +817,7 @@ export async function processAutomationRun(
   let turnEnded = false;
   // A scheduled automation reports each run once, when its first turn ends.
   let firstTurn = false;
+  let runBilling: RunBillingAccount | null = null;
   // The button pressed on one of the run's messages that this turn answers,
   // and the notification channel of that message, if it is one.
   let button: AutomationSlackButtonPress | null = null;
@@ -929,7 +933,17 @@ export async function processAutomationRun(
       });
       throw new AutomationAllowanceExhaustedError(access.exhausted, machinesUseCredit);
     }
-    if (!credentialId) {
+    // A workspace that pays per run runs only the model its price covers, on
+    // Responder-funded inference.
+    runBilling = access.runBilling ?? null;
+    if (runBilling && (run.modelProvider !== runBilling.modelProvider || run.model !== runBilling.model)) {
+      throw new AutomationHarnessError(
+        `This workspace's plan runs automations on the ${runBilling.modelName} model. Choose it in the automation, or move to Pro or Team in billing settings to use other models.`,
+        "",
+        true,
+      );
+    }
+    if (!credentialId || runBilling) {
       grantCredential = { inferenceSource: "responder" };
     } else {
       const credential = await dependencies.getCredential({
@@ -1253,6 +1267,24 @@ export async function processAutomationRun(
       await slackCard?.finish("error", "Automation run was cancelled", result.transcript.items);
       return { runId: run.runId };
     }
+    // A run is counted once, when its first turn succeeds, before the run is
+    // marked finished so a worker exit cannot skip the count. The run ID keys
+    // the count, so a retried turn is not counted twice. A count that still
+    // fails after retries is reported and the run is not charged.
+    if (runBilling && firstTurn) {
+      const account = runBilling;
+      await withRetries(() => dependencies.trackBilledRun({
+        account,
+        organizationId: run.organizationId,
+        runId: run.runId,
+      }), billedRunRetryDelaysMs).catch((error: unknown) =>
+        dependencies.reportException(error, {
+          jobId,
+          operation: "automation",
+          organizationId: run.organizationId,
+          requestId: run.runId,
+        }).catch(() => undefined));
+    }
     if (!(await dependencies.setStatus({
       leaseId: run.leaseId,
       resultSummary: resultSummary(result.transcript, result.actions),
@@ -1267,6 +1299,7 @@ export async function processAutomationRun(
     }
     await recordEvent(dependencies, run.runId, "run_succeeded");
     turnEnded = true;
+
     const reply = result.transcript.items.filter((item) => !item.subagentId).findLast((item) => item.kind === "message");
     outcome = { message: reply?.kind === "message" ? reply.text : null, status: "succeeded" };
     await slackCard?.finish("complete", undefined, result.transcript.items);
@@ -1508,6 +1541,19 @@ async function answerNewMessages(
       requestId: run.runId,
     }).catch(() => undefined);
   }
+}
+
+const billedRunRetryDelaysMs = [1_000, 5_000, 15_000];
+
+async function withRetries<T>(attempt: () => Promise<T>, delaysMs: number[]): Promise<T> {
+  for (const delayMs of delaysMs) {
+    try {
+      return await attempt();
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+  return attempt();
 }
 
 class AutomationAllowanceExhaustedError extends Error {

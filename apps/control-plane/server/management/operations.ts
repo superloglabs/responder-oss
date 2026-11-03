@@ -27,7 +27,8 @@ import {
   listProviderModels,
   ModelCatalogError,
 } from "../../../../packages/core/src/automations/model-catalog.js";
-import { listAIGatewayModels } from "../../../../packages/core/src/automations/model-pricing.js";
+import { automationModelRefusal } from "../../../../packages/core/src/billing/autumn.js";
+import { listIncludedModels } from "../../../../packages/core/src/billing/included-models.js";
 import { automationUserMessageMaxLength } from "../../../../packages/core/src/automations/transcript.js";
 import {
   AgentConfigurationError,
@@ -186,6 +187,17 @@ async function requireAutomation(context: ManagementContext, id: string) {
   return automation;
 }
 
+// A workspace that pays per run may not save or enable another model.
+async function requireModelOnPlan(
+  context: ManagementContext,
+  configuration: { model: string; modelProvider: string },
+): Promise<void> {
+  const refusal = await automationModelRefusal(context.organizationId, configuration).catch(() => {
+    throw new ManagementError(502, "Unable to check the workspace's plan. Please retry.", "billing_unavailable");
+  });
+  if (refusal) throw new ManagementError(422, refusal, "model_not_on_plan");
+}
+
 async function saveAutomation(
   context: ManagementContext,
   id: string | null,
@@ -194,6 +206,7 @@ async function saveAutomation(
   const parsed = automationInputSchema.safeParse(candidate);
   if (!parsed.success) throw invalid("Invalid automation", parsed.error);
   const input: AutomationInput = parsed.data;
+  await requireModelOnPlan(context, input.configuration);
   let savedId = id;
   try {
     if (id) {
@@ -522,6 +535,9 @@ export const managementOperations: ManagementOperation[] = [
         if (input.enabled === undefined) {
           throw new ManagementError(400, "Nothing to change", "invalid_request");
         }
+        if (input.enabled) {
+          await requireModelOnPlan(context, (await requireAutomation(context, input.automationId)).configuration);
+        }
         const updated = await setAutomationEnabled({
           automationId: input.automationId,
           enabled: input.enabled,
@@ -806,9 +822,9 @@ export const managementOperations: ManagementOperation[] = [
     requiresAutomations: true,
     summary: "List included models",
     tag: "Models",
-    async run(_context, input) {
+    async run(context, input) {
       try {
-        return { models: await listAIGatewayModels(input.provider) };
+        return { models: await listIncludedModels(context.organizationId, input.provider) };
       } catch (error) {
         throw modelCatalogFailure(error);
       }
