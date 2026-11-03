@@ -80,6 +80,7 @@ function dependencies() {
       nextResetAt: null,
     }),
     notifyLimitReached: vi.fn().mockResolvedValue(undefined),
+    trackBilledRun: vi.fn().mockResolvedValue(undefined),
     checkoutRepositories: vi.fn().mockResolvedValue([{
       branch: "main",
       path: "/home/daytona/workspace/repositories/acme/app",
@@ -1862,6 +1863,77 @@ describe("automation run processor", () => {
     expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({
       status: "succeeded",
     }));
+  });
+
+  describe("a workspace that pays per run", () => {
+    const runBilling = {
+      customerId: "earlier-customer",
+      featureId: "investigations",
+      model: "claude-sonnet-5.5",
+      modelName: "Per-run model",
+      modelProvider: "anthropic",
+    };
+
+    function runBilledDependencies(model: string) {
+      vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+      vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+      const deps = dependencies();
+      deps.claimRun.mockResolvedValue({
+        ...claimedRun(),
+        harness: "claude_agent_sdk",
+        model,
+        modelProvider: "anthropic",
+      } as never);
+      deps.checkAllowance.mockResolvedValue({
+        allowed: true,
+        exhausted: null,
+        machinesUseCredit: false,
+        nextResetAt: null,
+        runBilling,
+      });
+      deps.runClaude.mockResolvedValue({ eventStream: "" });
+      return deps;
+    }
+
+    it("runs its model on Responder inference and counts the run once", async () => {
+      const deps = runBilledDependencies("claude-sonnet-5.5");
+      deps.selectCredential.mockResolvedValue("81818181-8181-4181-8181-818181818181");
+
+      await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
+
+      expect(deps.getCredential).not.toHaveBeenCalled();
+      expect(deps.createGrant).toHaveBeenCalledWith(expect.objectContaining({
+        credential: { inferenceSource: "responder" },
+        model: "claude-sonnet-5.5",
+      }));
+      expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({ status: "succeeded" }));
+      expect(deps.trackBilledRun).toHaveBeenCalledOnce();
+      expect(deps.trackBilledRun).toHaveBeenCalledWith({ account: runBilling, organizationId, runId });
+    });
+
+    it("refuses another model before a sandbox starts", async () => {
+      const deps = runBilledDependencies("claude-opus-5.5");
+
+      await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
+
+      expect(deps.createGrant).not.toHaveBeenCalled();
+      expect(deps.runInSandbox).not.toHaveBeenCalled();
+      expect(deps.trackBilledRun).not.toHaveBeenCalled();
+      expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({
+        failureMessage: expect.stringContaining("Per-run model"),
+        status: "failed",
+      }));
+    });
+
+    it("does not count a run that fails", async () => {
+      const deps = runBilledDependencies("claude-sonnet-5.5");
+      deps.runClaude.mockRejectedValue(new Error("harness failed"));
+
+      await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
+
+      expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({ status: "failed" }));
+      expect(deps.trackBilledRun).not.toHaveBeenCalled();
+    });
   });
 
   it("uses the organization's key instead of Responder inference when one is connected", async () => {

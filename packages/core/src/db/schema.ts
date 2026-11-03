@@ -730,6 +730,26 @@ export const telemetryNotificationPauses = pgTable("telemetry_notification_pause
     .defaultNow(),
 });
 
+// A workspace that pays a price per run instead of a usage plan. Until it
+// moves to a paid plan, its automations run only on this model, each
+// successful run counts once against `feature_id` for the Autumn customer
+// `customer_id`, and model and sandbox usage are not charged. Operators set
+// these rows; there is no app setting for them.
+export const runBillingAccounts = pgTable("run_billing_accounts", {
+  organizationId: uuid("organization_id")
+    .primaryKey()
+    .references(() => organization.id, { onDelete: "cascade" }),
+  customerId: text("customer_id").notNull(),
+  featureId: text("feature_id").notNull(),
+  modelProvider: text("model_provider").notNull(),
+  model: text("model").notNull(),
+  // The name the model picker shows for the model.
+  modelName: text("model_name").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
 // A key an application sends telemetry with. The ingest endpoint tags what it
 // receives with the key's workspace. Only its digest is stored.
 export const telemetryIngestKeys = pgTable(

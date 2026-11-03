@@ -230,6 +230,14 @@ investigation credits.
   fails, the cached membership is used. Usage past a balance that the plan
   bills for is expected and sends nothing.
 - The app shows a banner from the same balances while new work is paused.
+- An operator can give a workspace a `run_billing_accounts` row instead, to
+  bill a price per run. Until the workspace moves to a paid plan, its
+  automations run only on the row's model, on Responder-funded inference;
+  each run whose first turn succeeds is tracked once, with the run ID as the
+  idempotency key, against the row's Autumn customer and feature; and model
+  and sandbox usage are recorded but not charged. The model picker and
+  `list_included_models` offer only that model, and saving an automation on
+  another model is refused.
 - Suggested automation templates are paid by Responder and do not use the
   usage credit. From 05:00 UTC each day, the worker asks a model through
   Responder's AI Gateway key for templates for each organization with

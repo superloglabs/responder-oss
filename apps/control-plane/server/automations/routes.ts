@@ -1,5 +1,6 @@
 import { listSubscriptionModels } from "./subscription-models.js";
-import { listAIGatewayModels } from "../../../../packages/core/src/automations/model-pricing.js";
+import { automationModelRefusal, organizationRunBilling } from "../../../../packages/core/src/billing/autumn.js";
+import { listIncludedModels } from "../../../../packages/core/src/billing/included-models.js";
 import { listProviderModels, ModelCatalogError } from "../../../../packages/core/src/automations/model-catalog.js";
 import { getOrganizationModelCredential } from "../../../../packages/core/src/db/automation-model-credentials.js";
 import type { AutomationModelProvider } from "../../../../packages/core/src/automations/config.js";
@@ -195,13 +196,26 @@ async function testProviderCredential(input: {
 }
 
 export const automationRoutes = new Hono()
+  // The one model a workspace that pays per run may use, or null.
+  .get("/plan-model", async (context) => {
+    const access = await getAutomationTenant(context.req.raw.headers);
+    if (!access.ok) return context.json({ error: access.error }, access.status);
+    try {
+      const account = await organizationRunBilling(access.tenant.organizationId);
+      return context.json({
+        model: account && { id: account.model, name: account.modelName, provider: account.modelProvider },
+      });
+    } catch {
+      return context.json({ error: "Unable to load models. Please retry." }, 502);
+    }
+  })
   .get("/included-models/:provider", async (context) => {
     const access = await getAutomationTenant(context.req.raw.headers);
     if (!access.ok) return context.json({ error: access.error }, access.status);
     const provider = automationModelProviderSchema.safeParse(context.req.param("provider"));
     if (!provider.success) return context.json({ error: "Unsupported provider" }, 400);
     try {
-      return context.json({ models: await listAIGatewayModels(provider.data) });
+      return context.json({ models: await listIncludedModels(access.tenant.organizationId, provider.data) });
     } catch {
       return context.json({ error: "Unable to load models. Please retry." }, 502);
     }
@@ -494,6 +508,8 @@ export const automationRoutes = new Hono()
     const suggestedTemplate = z.uuid().safeParse(
       (body as { suggestedTemplate?: unknown }).suggestedTemplate,
     );
+    const refusal = await automationModelRefusal(access.tenant.organizationId, parsed.data.configuration);
+    if (refusal) return context.json({ error: refusal }, 422);
     try {
       const automation = await createAutomation(
         access.tenant.organizationId,
@@ -606,6 +622,8 @@ export const automationRoutes = new Hono()
         400,
       );
     }
+    const refusal = await automationModelRefusal(access.tenant.organizationId, parsed.data.configuration);
+    if (refusal) return context.json({ error: refusal }, 422);
     try {
       const updated = await updateAutomation(
         access.tenant.organizationId,

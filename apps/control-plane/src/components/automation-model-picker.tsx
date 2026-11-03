@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { CaretDownIcon, CheckIcon } from "@phosphor-icons/react";
-import { fetchAutomationCredentials, fetchAutomationModels, fetchIncludedAutomationModels, type AvailableAutomationModel, type AutomationConfiguration, type AutomationModelProvider } from "../automations-api";
+import { fetchAutomationCredentials, fetchAutomationModels, fetchIncludedAutomationModels, fetchPlanAutomationModel, type AvailableAutomationModel, type AutomationConfiguration, type AutomationModelProvider, type PlanAutomationModel } from "../automations-api";
 import { chatGPTSubscription } from "../chatgpt-subscription";
 import { automationModelProviders, supportsAutomationHarness } from "../../../../packages/core/src/automations/model-providers";
 import { cn } from "@/lib/utils";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "./ui/command";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuPortal, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "./ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuPortal, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "./ui/dropdown-menu";
 import { searchInputProps } from "./search-input-props";
 import "./automation-model-picker.css";
 
@@ -24,7 +24,8 @@ async function loadCatalog(provider: AutomationModelProvider): Promise<Catalog> 
 // Choosing a model needs no connection: runs use the organization's own key or
 // subscription for the provider when one is connected, and included usage
 // otherwise. With a ChatGPT subscription, OpenAI lists the models it serves.
-// Each provider's models open in a submenu beside it.
+// Each provider's models open in a submenu beside it. A workspace that pays
+// per run sees only the model its plan covers.
 export function AutomationModelPicker({ configuration, onChange, requestedOpen }: {
   configuration: AutomationConfiguration;
   onChange: (patch: Partial<AutomationConfiguration>) => void;
@@ -32,12 +33,27 @@ export function AutomationModelPicker({ configuration, onChange, requestedOpen }
 }) {
   const [open, setOpen] = useState(false);
   const [catalogs, setCatalogs] = useState<Partial<Record<AutomationModelProvider, Catalog>>>({});
+  const [planModel, setPlanModel] = useState<PlanAutomationModel | null>(null);
   // Radix keeps focus on menu rows, so typing and pointing are sent to the
   // open submenu's search field.
   const searchInputs = useRef(new Map<AutomationModelProvider, HTMLInputElement>());
   const focusSearch = (provider: AutomationModelProvider) => searchInputs.current.get(provider)?.focus();
   const [lastRequestedOpen, setLastRequestedOpen] = useState(requestedOpen);
   if (lastRequestedOpen !== requestedOpen) { setLastRequestedOpen(requestedOpen); setOpen(true); }
+  useEffect(() => {
+    let active = true;
+    fetchPlanAutomationModel()
+      .then(({ model }) => { if (active) setPlanModel(model); })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, []);
+  // Another model would not run, so the plan's model replaces it.
+  const planModelMissing = planModel !== null &&
+    (configuration.modelProvider !== planModel.provider || configuration.model !== planModel.id);
+  useEffect(() => {
+    if (planModel && planModelMissing) chooseModel(planModel.provider, planModel);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- runs when the plan model loads or the choice drifts from it
+  }, [planModel, planModelMissing]);
   // Load every provider's models up front so submenus open populated.
   useEffect(() => {
     let active = true;
@@ -68,9 +84,12 @@ export function AutomationModelPicker({ configuration, onChange, requestedOpen }
   const subscriptionModels = providerCatalog?.status === "ready" && providerCatalog.subscription === true;
   return <div className="automationModel">
     <DropdownMenu open={open} onOpenChange={setOpen}>
-      <DropdownMenuTrigger asChild><button className="automationModel__toggle" type="button">{configuration.model ? `Model: ${configuration.model}` : "Choose model"}<CaretDownIcon size={12} /></button></DropdownMenuTrigger>
+      <DropdownMenuTrigger asChild><button className="automationModel__toggle" type="button">{configuration.model ? `Model: ${planModel && !planModelMissing ? planModel.name : configuration.model}` : "Choose model"}<CaretDownIcon size={12} /></button></DropdownMenuTrigger>
       <DropdownMenuContent align="start">
-        {automationModelProviders.map(provider => {
+        {planModel ? <DropdownMenuItem onSelect={() => chooseModel(planModel.provider, planModel)}>
+          {planModel.name}
+          <CheckIcon className={cn("ml-auto", planModelMissing ? "opacity-0" : "opacity-100")} />
+        </DropdownMenuItem> : automationModelProviders.map(provider => {
           const catalog = catalogs[provider.id];
           return <DropdownMenuSub key={provider.id}>
             <DropdownMenuSubTrigger onKeyDown={event => {

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Autumn, type Customer } from "autumn-js";
+import { getRunBillingAccount, type RunBillingAccount } from "../db/run-billing-accounts.js";
 import { sandboxTimeIsBilled } from "./usage-charges.js";
 
 export const INVESTIGATIONS_FEATURE_ID = "responder_investigations";
@@ -395,6 +396,9 @@ export interface AutomationBillingSummary {
     price: number;
   }>;
   remaining: number;
+  // Set when the workspace pays per run on one model instead of from the
+  // usage credit.
+  runBilling: { modelName: string } | null;
   scheduledPlanId: AutomationPlanId | null;
   scheduledPlanName: string | null;
   usage: number;
@@ -411,6 +415,8 @@ export interface WorkAllowance extends AutomationInferenceAccess {
   // Sandbox time is paid from the usage credit, as on plans without machine
   // hours.
   machinesUseCredit: boolean;
+  // Set when the workspace pays per run instead.
+  runBilling?: RunBillingAccount;
 }
 
 function automationPlanFromCustomer(customer: Customer): {
@@ -493,6 +499,7 @@ function disabledAutomationSummary(configured: boolean, enabled: boolean): Autom
     planPrice: 0,
     plans: paidPlanSummaries(),
     remaining: AUTOMATION_FREE_ALLOWANCE_DOLLARS,
+    runBilling: null,
     scheduledPlanId: null,
     scheduledPlanName: null,
     usage: 0,
@@ -512,23 +519,30 @@ function balanceSummary(balance: NonNullable<Customer["balances"][string]>): Usa
 
 export function summarizeAutomationBillingCustomer(
   customer: Customer,
+  runBillingAccount: RunBillingAccount | null = null,
 ): AutomationBillingSummary {
   const balance = customer.balances[AUTOMATION_INFERENCE_FEATURE_ID];
   const machineHours = customer.balances[MACHINE_HOURS_FEATURE_ID];
   const plan = automationPlanFromCustomer(customer);
   const current = automationPlan(plan.active ?? AUTOMATION_FREE_PLAN_ID);
   const allowance = balance?.granted ?? current.included;
+  const runBilling = activeRunBilling(runBillingAccount, customer);
   return {
     allowance,
     cancelsAtPeriodEnd: plan.cancelsAtPeriodEnd,
     configured: true,
     creditOverageAllowed: balance?.overageAllowed ?? false,
-    creditUnlimited: balance?.unlimited ?? false,
+    // Paying per run, neither balance stops work, so no notice or banner
+    // reports them.
+    creditUnlimited: runBilling !== null || (balance?.unlimited ?? false),
     enabled: true,
     // Autumn returns no customer during an outage. Seats are not limited
-    // then, as usage is not.
-    includesTeammates: customer.id === null || automationPlanIncludesTeammates(current.id),
-    machineHours: machineHours ? balanceSummary(machineHours) : null,
+    // then, as usage is not. Paying per run does not limit seats either.
+    includesTeammates: customer.id === null || runBilling !== null ||
+      automationPlanIncludesTeammates(current.id),
+    machineHours: machineHours
+      ? { ...balanceSummary(machineHours), unlimited: runBilling !== null || machineHours.unlimited }
+      : null,
     nextResetAt: balance?.nextResetAt ?? null,
     paid: current.price > 0,
     periodStart: plan.periodStart,
@@ -537,6 +551,7 @@ export function summarizeAutomationBillingCustomer(
     planPrice: current.price,
     plans: paidPlanSummaries(),
     remaining: Math.max(0, balance?.remaining ?? allowance),
+    runBilling: runBilling && { modelName: runBilling.modelName },
     scheduledPlanId: plan.scheduled,
     scheduledPlanName: plan.scheduled ? automationPlan(plan.scheduled).name : null,
     usage: Math.max(0, balance?.usage ?? 0),
@@ -550,9 +565,11 @@ export async function getAutomationBillingSummary(
   if (!billingIsEnabled()) return disabledAutomationSummary(false, false);
   const client = getAutomationClientOrNull();
   if (!client) return disabledAutomationSummary(false, true);
-  return summarizeAutomationBillingCustomer(
-    await ensureAutomationPlan(client, organizationId, data),
-  );
+  const [customer, runBillingAccount] = await Promise.all([
+    ensureAutomationPlan(client, organizationId, data),
+    getRunBillingAccount(organizationId),
+  ]);
+  return summarizeAutomationBillingCustomer(customer, runBillingAccount);
 }
 
 function getAutomationClientOrNull(): Autumn | null {
@@ -572,6 +589,8 @@ export async function checkUsageAllowance(
   if (!billingIsEnabled()) return { allowed: true, nextResetAt: null };
   const client = getAutomationClientOrNull();
   if (!client) return { allowed: true, nextResetAt: null };
+  // A workspace that pays per run does not use the usage credit.
+  if (await organizationRunBilling(organizationId)) return { allowed: true, nextResetAt: null };
 
   const check = () =>
     client.check({
@@ -620,7 +639,26 @@ export async function checkWorkAllowance(
   if (!billingIsEnabled()) return open;
   const client = getAutomationClientOrNull();
   if (!client) return open;
-  const customer = await ensureAutomationPlan(client, organizationId);
+  const [customer, runBillingAccount] = await Promise.all([
+    ensureAutomationPlan(client, organizationId),
+    getRunBillingAccount(organizationId),
+  ]);
+  const runBilling = activeRunBilling(runBillingAccount, customer);
+  if (runBilling) {
+    // The run's price is charged to the per-run account, so only that
+    // account decides whether it may start.
+    const result = await client.check({
+      customerId: runBilling.customerId,
+      featureId: runBilling.featureId,
+    });
+    return {
+      allowed: result.allowed,
+      exhausted: result.allowed ? null : "usage_credit",
+      machinesUseCredit: false,
+      nextResetAt: result.balance?.nextResetAt ?? null,
+      runBilling,
+    };
+  }
   if (customer.id === null) return open;
 
   const credit = customer.balances[AUTOMATION_INFERENCE_FEATURE_ID];
@@ -674,6 +712,76 @@ export async function organizationUsesMachineHours(organizationId: string): Prom
   return value;
 }
 
+// A per-run account applies until the workspace moves to a paid plan. During
+// an Autumn outage the plan is unknown and the account still applies.
+function activeRunBilling(
+  account: RunBillingAccount | null,
+  customer: Customer,
+): RunBillingAccount | null {
+  if (!account) return null;
+  const plan = automationPlanFromCustomer(customer).active;
+  return plan && automationPlan(plan).price > 0 ? null : account;
+}
+
+const runBillingLookups = new Map<string, { expiresAt: number; value: RunBillingAccount | null }>();
+
+// The workspace's per-run account while it applies. Brokered requests and
+// usage reports read it, so it is cached as briefly as the machine hours
+// lookup. Throws when Autumn cannot answer.
+export async function organizationRunBilling(organizationId: string): Promise<RunBillingAccount | null> {
+  if (!billingIsEnabled()) return null;
+  const now = Date.now();
+  const cached = runBillingLookups.get(organizationId);
+  if (cached && cached.expiresAt > now) return cached.value;
+  for (const [key, entry] of runBillingLookups) {
+    if (entry.expiresAt <= now) runBillingLookups.delete(key);
+  }
+  const account = await getRunBillingAccount(organizationId);
+  const value = account
+    ? activeRunBilling(account, await getOrCreateCustomer(requireAutumnClient(), organizationId))
+    : null;
+  runBillingLookups.set(organizationId, { expiresAt: now + machineHoursLookupLifetimeMs, value });
+  return value;
+}
+
+// Why the workspace may not save an automation on this model, or null when it
+// may. A lookup failure does not stop the save; the run checks again.
+export async function automationModelRefusal(
+  organizationId: string,
+  configuration: { model: string; modelProvider: string },
+): Promise<string | null> {
+  const account = await organizationRunBilling(organizationId).catch(() => null);
+  if (!account) return null;
+  if (configuration.modelProvider === account.modelProvider && configuration.model === account.model) return null;
+  return `This workspace's plan runs automations on the ${account.modelName} model. Move to Pro or Team in billing settings to use other models.`;
+}
+
+// Counts one run against the per-run account. The run ID is the idempotency
+// key, so a retry cannot count it twice.
+export async function trackBilledRun(input: {
+  account: RunBillingAccount;
+  organizationId: string;
+  runId: string;
+}): Promise<void> {
+  if (!billingIsEnabled()) return;
+  try {
+    await requireAutumnClient().track(
+      {
+        customerId: input.account.customerId,
+        featureId: input.account.featureId,
+        properties: { organizationId: input.organizationId, runId: input.runId },
+        value: 1,
+      },
+      {
+        headers: { "Idempotency-Key": `billed-run:${input.runId}` },
+        timeoutMs: usageTrackTimeoutMs,
+      },
+    );
+  } catch (error) {
+    if (!hasStatus(error, 409)) throw error;
+  }
+}
+
 function hasStatus(error: unknown, status: number): boolean {
   return (
     typeof error === "object" &&
@@ -693,6 +801,8 @@ async function trackUsage(input: {
   if (!billingIsEnabled()) return;
   const client = requireAutumnClient();
   if (input.value === 0) return;
+  // A workspace that pays per run is not charged for model or sandbox usage.
+  if (await organizationRunBilling(input.organizationId)) return;
   try {
     await client.track(
       {

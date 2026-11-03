@@ -26,7 +26,8 @@ import {
   listProviderModels,
   ModelCatalogError,
 } from "../../../../packages/core/src/automations/model-catalog.js";
-import { listAIGatewayModels } from "../../../../packages/core/src/automations/model-pricing.js";
+import { automationModelRefusal } from "../../../../packages/core/src/billing/autumn.js";
+import { listIncludedModels } from "../../../../packages/core/src/billing/included-models.js";
 import { automationUserMessageMaxLength } from "../../../../packages/core/src/automations/transcript.js";
 import {
   AgentConfigurationError,
@@ -193,6 +194,8 @@ async function saveAutomation(
   const parsed = automationInputSchema.safeParse(candidate);
   if (!parsed.success) throw invalid("Invalid automation", parsed.error);
   const input: AutomationInput = parsed.data;
+  const refusal = await automationModelRefusal(context.organizationId, input.configuration);
+  if (refusal) throw new ManagementError(422, refusal, "model_not_on_plan");
   let savedId = id;
   try {
     if (id) {
@@ -805,9 +808,9 @@ export const managementOperations: ManagementOperation[] = [
     requiresAutomations: true,
     summary: "List included models",
     tag: "Models",
-    async run(_context, input) {
+    async run(context, input) {
       try {
-        return { models: await listAIGatewayModels(input.provider) };
+        return { models: await listIncludedModels(context.organizationId, input.provider) };
       } catch (error) {
         throw modelCatalogFailure(error);
       }

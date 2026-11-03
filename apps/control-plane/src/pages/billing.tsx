@@ -54,6 +54,9 @@ interface AutomationBillingSummary {
     price: number;
   }>;
   remaining: number;
+  // Set when the workspace pays per run on one model instead of from the
+  // usage credit.
+  runBilling?: { modelName: string } | null;
   // The usage credit also pays for sandbox time.
   sandboxTimeBilled: boolean;
   scheduledPlanId: AutomationPlanId | null;
@@ -202,6 +205,7 @@ function AutomationBilling({
   const used = Math.min(summary.usage, summary.allowance);
   const percent = summary.allowance > 0 ? Math.min(100, (used / summary.allowance) * 100) : 0;
   const paid = summary.paid;
+  const runBilling = summary.runBilling ?? null;
   const usageKind = summary.sandboxTimeBilled ? "usage" : "model usage";
   const breakdown = summary.sandboxTimeBilled ? summary.breakdown ?? null : null;
   const segments = breakdown ? usageSegments(breakdown, percent) : null;
@@ -233,7 +237,16 @@ function AutomationBilling({
     <>
       <h2 className="billingSectionTitle">{usageBased ? "Usage" : "Automations"}</h2>
       <section className="billingGrid">
-        {summary.machineHours ? (
+        {runBilling ? (
+          <article className="billingUsageCard">
+            <header>
+              <span>Price per run</span>
+            </header>
+            <p>
+              {`Automations run on the ${runBilling.modelName} model. Each successful run is billed at your plan's price per run, with model usage and sandbox time included. To use other models, move to Pro or Team.`}
+            </p>
+          </article>
+        ) : summary.machineHours ? (
           <PlanUsage machineHours={summary.machineHours} summary={summary} />
         ) : (
         <article className="billingUsageCard">
@@ -304,9 +317,11 @@ function AutomationBilling({
           <span className="billingPlanCard__eyebrow">
             {usageBased ? "Current plan" : "Automation plan"}
           </span>
-          <h2>{summary.planName}</h2>
+          <h2>{runBilling ? "Pay per run" : summary.planName}</h2>
           <p>
-            {currentPlan
+            {runBilling
+              ? "Billed for each successful run."
+              : currentPlan
               ? `Includes ${planIncludes(currentPlan)}.`
               : summary.machineHours
                 ? `Includes ${dollars(summary.allowance)} of usage credit once and ${summary.machineHours.granted} machine hours each month.`
