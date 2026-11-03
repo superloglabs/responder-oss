@@ -809,7 +809,7 @@ export const managementOperations: ManagementOperation[] = [
   }),
   defineOperation({
     description:
-      "Lists the models of one provider that automations can use with the usage included in your plan.",
+      "Lists the models of one provider that automations can use with the usage included in your plan. Lists none when the workspace's plan provides the model; automations then use model provider \"plan\", harness \"plan\", and model \"default\".",
     effect: "read",
     input: z.object({
       provider: automationModelProviderSchema.describe("The model provider."),

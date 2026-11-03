@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Autumn, type Customer } from "autumn-js";
+import { usesPlanModel } from "../automations/config.js";
 import { getRunBillingAccount, type RunBillingAccount } from "../db/run-billing-accounts.js";
 import { sandboxTimeIsBilled } from "./usage-charges.js";
 
@@ -752,9 +753,12 @@ export async function automationModelRefusal(
   configuration: { model: string; modelProvider: string },
 ): Promise<string | null> {
   const account = await organizationRunBilling(organizationId);
-  if (!account) return null;
-  if (configuration.modelProvider === account.modelProvider && configuration.model === account.model) return null;
-  return `This workspace's plan runs automations on the ${account.modelName} model. Move to Pro or Team in billing settings to use other models.`;
+  const planModel = usesPlanModel(configuration);
+  if (!account) {
+    return planModel ? "This workspace's plan does not provide a model. Choose a model." : null;
+  }
+  if (planModel) return null;
+  return `This workspace's plan runs automations on the ${account.modelName} model. Choose it, or move to Pro or Team in billing settings to use other models.`;
 }
 
 // Counts one run against the per-run account. The run ID is the idempotency

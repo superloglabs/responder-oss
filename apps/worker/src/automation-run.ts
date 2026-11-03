@@ -1,5 +1,12 @@
 import { randomUUID } from "node:crypto";
-import type { AutomationNotification } from "@responder/core/automations/config";
+import {
+  automationHarnessSchema,
+  automationModelProviderSchema,
+  PLAN_HARNESS,
+  PLAN_MODEL_PROVIDER,
+  type AutomationHarnessKind,
+  type AutomationNotification,
+} from "@responder/core/automations/config";
 import { isAutomationContextProvider } from "@responder/core/automations/context-providers";
 import { gcpMcpServices } from "@responder/core/integrations/gcp";
 import { cloudflareAccountList, cloudflareAccountsSchema } from "@responder/core/integrations/cloudflare";
@@ -603,9 +610,35 @@ function automationPrompt(
   ].join("\n");
 }
 
+// A run with the model and harness it runs on: its own, or the plan's.
+type RunnableAutomationRun = Omit<ClaimedAutomationRun, "harness" | "modelProvider"> & {
+  harness: AutomationHarnessKind;
+  modelProvider: ModelProviderId;
+};
+
+interface RunModel {
+  harness: AutomationHarnessKind;
+  model: string;
+  modelProvider: ModelProviderId;
+}
+
+// The model the automation names, or null when it runs on its plan's model.
+function storedRunModel(run: ClaimedAutomationRun): RunModel | null {
+  if (run.harness === PLAN_HARNESS || run.modelProvider === PLAN_MODEL_PROVIDER) return null;
+  return { harness: run.harness, model: run.model, modelProvider: run.modelProvider };
+}
+
+function planRunModel(account: RunBillingAccount | null): RunModel | null {
+  if (!account) return null;
+  const harness = automationHarnessSchema.safeParse(account.harness);
+  const provider = automationModelProviderSchema.safeParse(account.modelProvider);
+  if (!harness.success || !provider.success) return null;
+  return { harness: harness.data, model: account.model, modelProvider: provider.data };
+}
+
 function transcriptRecorder(
   dependencies: AutomationRunDependencies,
-  run: ClaimedAutomationRun,
+  run: RunnableAutomationRun,
 ) {
   return createTranscriptRecorder({
     harness: run.harness,
@@ -904,14 +937,17 @@ export async function processAutomationRun(
 
     let grantCredential: AutomationModelBrokerGrantCredential;
     let nativeSubscription: AutomationHarnessInput["model"]["subscription"];
-    let model = run.model;
+    const stored = storedRunModel(run);
     // The organization's own key or subscription for the provider, when it
-    // has one, replaces Responder-funded inference.
-    const credentialId = await dependencies.selectCredential({
-      harness: run.harness,
-      organizationId: run.organizationId,
-      provider: run.modelProvider,
-    });
+    // has one, replaces Responder-funded inference. The plan's model always
+    // runs on Responder-funded inference.
+    const credentialId = stored
+      ? await dependencies.selectCredential({
+          harness: stored.harness,
+          organizationId: run.organizationId,
+          provider: stored.modelProvider,
+        })
+      : null;
     // Runs stop here, before a sandbox starts, when the usage credit for
     // Responder-funded models or the machine time is used up. A turn that has
     // started finishes.
@@ -933,27 +969,38 @@ export async function processAutomationRun(
       });
       throw new AutomationAllowanceExhaustedError(access.exhausted, machinesUseCredit);
     }
-    // A workspace that pays per run runs only the model its price covers, on
-    // Responder-funded inference.
+    // A workspace that pays per run runs only the model its plan provides.
+    // The automation names the plan's model, and the plan names the model and
+    // harness the run uses.
     runBilling = access.runBilling ?? null;
-    if (runBilling && (run.modelProvider !== runBilling.modelProvider || run.model !== runBilling.model)) {
+    if (runBilling && stored) {
       throw new AutomationHarnessError(
         `This workspace's plan runs automations on the ${runBilling.modelName} model. Choose it in the automation, or move to Pro or Team in billing settings to use other models.`,
         "",
         true,
       );
     }
-    if (!credentialId || runBilling) {
+    const target = stored ?? planRunModel(runBilling);
+    if (!target) {
+      throw new AutomationHarnessError(
+        "This automation runs on its plan's model, which this workspace's plan no longer provides. Choose a model in the automation.",
+        "",
+        true,
+      );
+    }
+    const runnable: RunnableAutomationRun = { ...run, ...target };
+    let model = target.model;
+    if (!credentialId) {
       grantCredential = { inferenceSource: "responder" };
     } else {
       const credential = await dependencies.getCredential({
         credentialId,
         organizationId: run.organizationId,
-        provider: run.modelProvider,
+        provider: target.modelProvider,
       });
       if (!credential) throw new Error("The configured model credential is unavailable");
 
-      if (credential.subscription && run.harness !== "codex") throw new Error("ChatGPT subscriptions require the Codex harness");
+      if (credential.subscription && target.harness !== "codex") throw new Error("ChatGPT subscriptions require the Codex harness");
       if (credential.subscription) {
         // Leaves time for sandbox setup before the runtime limit starts to matter.
         const validUntil = new Date(dependencies.now().getTime() + (run.maxRuntimeSeconds + 1_800) * 1_000);
@@ -965,7 +1012,7 @@ export async function processAutomationRun(
         nativeSubscription = { authJson: subscriptionAuthForSandbox(authJson, subscriptionSecret.placeholder) };
         grantCredential = { inferenceSource: "byos" };
       } else {
-        model = await providerModelForKey(dependencies, run, credential.apiKey);
+        model = await providerModelForKey(dependencies, target, credential.apiKey);
         grantCredential = { apiKey: credential.apiKey, inferenceSource: "byok" };
       }
     }
@@ -979,7 +1026,7 @@ export async function processAutomationRun(
       model,
       leaseId: run.leaseId,
       organizationId: run.organizationId,
-      provider: run.modelProvider,
+      provider: target.modelProvider,
       runId: run.runId,
     });
     grantId = grant.id;
@@ -1079,7 +1126,7 @@ export async function processAutomationRun(
           throw new AutomationRunCancelledError();
         }
         const eventsPath = `${automationWorkspaceRoot}/.responder/harness-events-${randomUUID()}.jsonl`;
-        const recorder = transcriptRecorder(dependencies, run);
+        const recorder = transcriptRecorder(dependencies, runnable);
         // Pull requests open while the agent works, so it can link them.
         const actions: AutomationActionResult[] = [];
         await installAutomationToolServer(
@@ -1165,7 +1212,7 @@ export async function processAutomationRun(
         try {
           harnessResult = await withModelBroker(() =>
             runHarness(
-              run,
+              runnable,
               session,
               {
                 contextServers,

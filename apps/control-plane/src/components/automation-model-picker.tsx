@@ -21,6 +21,10 @@ async function loadCatalog(provider: AutomationModelProvider): Promise<Catalog> 
   if (subscription) return { status: "ready", models: (await fetchAutomationModels(subscription.id)).models, subscription: true };
   return { status: "ready", models: (await fetchIncludedAutomationModels(provider)).models };
 }
+// The plan's model, which the automation names without its provider, model,
+// or harness.
+const planConfiguration = { harness: "plan", model: "default", modelProvider: "plan" } as const satisfies Partial<AutomationConfiguration>;
+
 // Choosing a model needs no connection: runs use the organization's own key or
 // subscription for the provider when one is connected, and included usage
 // otherwise. With a ChatGPT subscription, OpenAI lists the models it serves.
@@ -55,13 +59,13 @@ export function AutomationModelPicker({ configuration, onChange, requestedOpen }
     return () => { active = false; };
   }, []);
   const plan = typeof planModel === "object" ? planModel : null;
+  const usesPlan = configuration.modelProvider === planConfiguration.modelProvider;
   // Another model would not run, so the plan's model replaces it.
-  const planModelMissing = plan !== null &&
-    (configuration.modelProvider !== plan.provider || configuration.model !== plan.id);
+  const planModelMissing = plan !== null && !usesPlan;
   useEffect(() => {
-    if (plan && planModelMissing) chooseModel(plan.provider, plan);
+    if (planModelMissing) onChange(planConfiguration);
   // eslint-disable-next-line react-hooks/exhaustive-deps -- runs when the plan model loads or the choice drifts from it
-  }, [plan, planModelMissing]);
+  }, [planModelMissing]);
   // Load every provider's models up front so submenus open populated.
   useEffect(() => {
     let active = true;
@@ -88,18 +92,18 @@ export function AutomationModelPicker({ configuration, onChange, requestedOpen }
   }
   const selectedModel = configuration.model ? `${configuration.modelProvider}/${configuration.model}` : "";
   // The subscription's models run only on Codex, so the other harnesses are hidden.
-  const providerCatalog = catalogs[configuration.modelProvider];
+  const providerCatalog = usesPlan ? undefined : catalogs[configuration.modelProvider as AutomationModelProvider];
   const subscriptionModels = providerCatalog?.status === "ready" && providerCatalog.subscription === true;
   return <div className="automationModel">
     <DropdownMenu open={open} onOpenChange={setOpen}>
-      <DropdownMenuTrigger asChild><button className="automationModel__toggle" type="button">{configuration.model ? `Model: ${plan && !planModelMissing ? plan.name : configuration.model}` : "Choose model"}<CaretDownIcon size={12} /></button></DropdownMenuTrigger>
+      <DropdownMenuTrigger asChild><button className="automationModel__toggle" type="button">{configuration.model ? `Model: ${usesPlan ? plan?.name ?? "Plan model" : configuration.model}` : "Choose model"}<CaretDownIcon size={12} /></button></DropdownMenuTrigger>
       <DropdownMenuContent align="start">
         {planModel === undefined ? <p className="px-2 py-1.5 text-sm text-muted-foreground">Loading models…</p>
         : planModel === "error" ? <>
           <p className="px-2 py-1.5 text-sm text-muted-foreground">Unable to load models.</p>
           <DropdownMenuItem onSelect={event => { event.preventDefault(); loadPlanModel(); }}>Retry</DropdownMenuItem>
         </>
-        : planModel ? <DropdownMenuItem onSelect={() => chooseModel(planModel.provider, planModel)}>
+        : planModel ? <DropdownMenuItem onSelect={() => onChange(planConfiguration)}>
           {planModel.name}
           <CheckIcon className={cn("ml-auto", planModelMissing ? "opacity-0" : "opacity-100")} />
         </DropdownMenuItem> : automationModelProviders.map(provider => {
@@ -137,6 +141,7 @@ export function AutomationModelPicker({ configuration, onChange, requestedOpen }
         })}
       </DropdownMenuContent>
     </DropdownMenu>
+    {usesPlan ? null : <>
     <span className="automationCreate__divider" />
     <DropdownMenu>
       <DropdownMenuTrigger asChild><button className="automationModel__toggle" type="button" disabled={!configuration.model}>Harness: {harnesses.find(item => item.id === configuration.harness)?.name}<CaretDownIcon size={12} /></button></DropdownMenuTrigger>
@@ -150,5 +155,6 @@ export function AutomationModelPicker({ configuration, onChange, requestedOpen }
         </DropdownMenuRadioGroup>
       </DropdownMenuContent>
     </DropdownMenu>
+    </>}
   </div>;
 }

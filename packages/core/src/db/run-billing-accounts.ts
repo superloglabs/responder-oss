@@ -5,6 +5,7 @@ import { runBillingAccounts } from "./schema.js";
 export interface RunBillingAccount {
   customerId: string;
   featureId: string;
+  harness: string;
   model: string;
   modelName: string;
   modelProvider: string;
@@ -16,6 +17,7 @@ export async function getRunBillingAccount(organizationId: string): Promise<RunB
     .select({
       customerId: runBillingAccounts.customerId,
       featureId: runBillingAccounts.featureId,
+      harness: runBillingAccounts.harness,
       model: runBillingAccounts.model,
       modelName: runBillingAccounts.modelName,
       modelProvider: runBillingAccounts.modelProvider,

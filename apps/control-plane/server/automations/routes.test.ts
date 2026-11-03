@@ -150,8 +150,8 @@ describe("automation control-plane routes", () => {
 
   it("refuses to enable an automation on a model the plan does not cover", async () => {
     const automationId = "31313131-3131-4131-8131-313131313131";
-    mocks.getAutomation.mockResolvedValue({ configuration: { model: "claude-opus-5.5", modelProvider: "anthropic" } });
-    mocks.modelRefusal.mockResolvedValueOnce("This workspace's plan runs automations on the Per-run model.");
+    mocks.getAutomation.mockResolvedValue({ configuration: { model: "model-b", modelProvider: "anthropic" } });
+    mocks.modelRefusal.mockResolvedValueOnce("This workspace's plan runs automations on the Plan model.");
 
     const response = await app.request(`/api/automations/${automationId}`, {
       body: JSON.stringify({ enabled: true }),
@@ -160,12 +160,12 @@ describe("automation control-plane routes", () => {
     });
 
     expect(response.status).toBe(422);
-    expect(mocks.modelRefusal).toHaveBeenCalledWith(organizationId, { model: "claude-opus-5.5", modelProvider: "anthropic" });
+    expect(mocks.modelRefusal).toHaveBeenCalledWith(organizationId, { model: "model-b", modelProvider: "anthropic" });
   });
 
   it("refuses to enable an automation when the workspace's plan cannot be read", async () => {
     const automationId = "31313131-3131-4131-8131-313131313131";
-    mocks.getAutomation.mockResolvedValue({ configuration: { model: "claude-opus-5.5", modelProvider: "anthropic" } });
+    mocks.getAutomation.mockResolvedValue({ configuration: { model: "model-b", modelProvider: "anthropic" } });
     mocks.modelRefusal.mockRejectedValueOnce(new Error("Autumn unavailable"));
 
     const response = await app.request(`/api/automations/${automationId}`, {
