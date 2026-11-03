@@ -254,6 +254,8 @@ investigation credits.
   row's `model_name`. The model picker offers only that name, and
   `list_included_models` lists no models. Saving or enabling an automation on
   another model is refused, and so is any save while the plan cannot be read.
+  A workspace whose plan provides no model cannot save or run the alias; the
+  model picker clears it so another model can be chosen.
   The run is counted before it is marked succeeded, with retries; a count
   that still fails is reported and not charged.
 - Suggested automation templates are paid by Responder and do not use the

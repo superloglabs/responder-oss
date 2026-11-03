@@ -209,6 +209,7 @@ describe("automation configuration", () => {
       { harness: "codex", model: "default", modelProvider: "plan" },
       { harness: "plan", model: "gpt-5.4", modelProvider: "plan" },
       { harness: "plan", model: "gpt-5.4", modelProvider: "openai" },
+      { harness: "codex", model: "default", modelProvider: "openai" },
     ]) {
       expect(() => automationConfigurationSchema.parse({ ...baseConfiguration, ...configuration }))
         .toThrow("The plan's model uses provider");

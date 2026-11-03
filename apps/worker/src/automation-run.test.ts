@@ -1954,6 +1954,9 @@ describe("automation run processor", () => {
         provider: "anthropic",
       }));
       expect(deps.runClaude).toHaveBeenCalledOnce();
+      expect(deps.runClaude).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+        model: expect.objectContaining({ model: "model-a", provider: "anthropic" }),
+      }));
       expect(deps.appendEvent).toHaveBeenCalledWith(expect.objectContaining({
         data: { harness: "plan", model: "default", provider: "plan" },
         type: "run_started",

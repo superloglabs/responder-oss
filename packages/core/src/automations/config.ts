@@ -220,7 +220,7 @@ export const automationConfigurationSchema = z
       .refine(uniqueIds, "Workspace secret IDs must be unique"),
   })
   .superRefine((configuration, context) => {
-    if (usesPlanModel(configuration) || configuration.harness === PLAN_HARNESS) {
+    if (usesPlanModel(configuration) || configuration.harness === PLAN_HARNESS || configuration.model === PLAN_MODEL) {
       if (
         !usesPlanModel(configuration) || configuration.harness !== PLAN_HARNESS ||
         configuration.model !== PLAN_MODEL

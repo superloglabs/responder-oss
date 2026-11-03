@@ -2,7 +2,8 @@ import { apiErrorMessage, type AgentOptions } from "./agents-api";
 
 // "plan" is the harness and provider of the model a workspace's plan provides.
 export type AutomationHarness = "codex" | "claude_agent_sdk" | "opencode" | "plan";
-export type AutomationConfigurationModelProvider = AutomationModelProvider | "plan";
+export type { AutomationConfigurationModelProvider } from "../../../packages/core/src/automations/config";
+import type { AutomationConfigurationModelProvider } from "../../../packages/core/src/automations/config";
 export type { ModelProviderId as AutomationModelProvider, AvailableAutomationModel } from "../../../packages/core/src/automations/model-providers";
 import type { ModelProviderId as AutomationModelProvider, AvailableAutomationModel } from "../../../packages/core/src/automations/model-providers";
 import type { AutomationScheduleFrequency } from "../../../packages/core/src/automations/schedule";

@@ -62,10 +62,14 @@ export function AutomationModelPicker({ configuration, onChange, requestedOpen }
   const usesPlan = configuration.modelProvider === planConfiguration.modelProvider;
   // Another model would not run, so the plan's model replaces it.
   const planModelMissing = plan !== null && !usesPlan;
+  // A workspace without a plan model cannot run the plan's model, so the
+  // choice is cleared for another model.
+  const planModelGone = planModel === null && usesPlan;
   useEffect(() => {
     if (planModelMissing) onChange(planConfiguration);
+    if (planModelGone) onChange({ harness: "codex", model: "", modelProvider: "openai" });
   // eslint-disable-next-line react-hooks/exhaustive-deps -- runs when the plan model loads or the choice drifts from it
-  }, [planModelMissing]);
+  }, [planModelMissing, planModelGone]);
   // Load every provider's models up front so submenus open populated.
   useEffect(() => {
     let active = true;

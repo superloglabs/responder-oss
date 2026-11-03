@@ -673,7 +673,7 @@ function resultSummary(
 }
 
 async function runHarness(
-  run: ClaimedAutomationRun,
+  run: RunnableAutomationRun,
   session: SandboxSession,
   input: AutomationHarnessInput,
   dependencies: AutomationRunDependencies,
@@ -1221,7 +1221,7 @@ export async function processAutomationRun(
                   brokerBaseUrl: automationBrokerBaseUrl(environment),
                   maxOutputTokensPerRequest: run.maxOutputTokensPerRequest,
                   model,
-                  provider: run.modelProvider,
+                  provider: target.modelProvider,
                   ...(nativeSubscription ? { subscription: nativeSubscription } : {}),
                 },
                 prompt: automationPrompt(
