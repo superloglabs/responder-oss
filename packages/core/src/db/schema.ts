@@ -595,8 +595,9 @@ export const workspaceSecrets = pgTable(
   ],
 );
 
-// No row means sandboxes have open outbound access. A restricted workspace's
-// sandboxes reach only the listed domains, Superlog, and each secret's hosts.
+// No row means the default settings: restricted to the starting list in
+// sandbox-network.ts. A restricted workspace's sandboxes reach only the listed
+// domains, Superlog, and each secret's hosts.
 export const sandboxNetworkSettings = pgTable("sandbox_network_settings", {
   organizationId: uuid("organization_id")
     .primaryKey()

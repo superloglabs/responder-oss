@@ -11,9 +11,10 @@ export interface SandboxNetworkSettings {
 }
 
 // The list a workspace starts with: package registries, their installers and
-// CDNs, and GitHub, so agents can install tools and dependencies and read
-// public code. OpenCode also installs its model provider package from npm
-// when a run starts.
+// CDNs, Debian's package mirrors, and GitHub, so agents can install tools and
+// dependencies and read public code. OpenCode also installs its model
+// provider package from npm when a run starts, and a Daytona sandbox without a
+// snapshot installs its tools with apt and Bun's installer.
 export const defaultSandboxAllowedDomains = [
   "registry.npmjs.org",
   "registry.yarnpkg.com",
@@ -24,6 +25,7 @@ export const defaultSandboxAllowedDomains = [
   "files.pythonhosted.org",
   "bootstrap.pypa.io",
   "astral.sh",
+  "bun.sh",
   "proxy.golang.org",
   "sum.golang.org",
   "crates.io",
@@ -33,6 +35,8 @@ export const defaultSandboxAllowedDomains = [
   "repo.maven.apache.org",
   "repo1.maven.org",
   "jsr.io",
+  "deb.debian.org",
+  "security.debian.org",
   "github.com",
   "api.github.com",
   "codeload.github.com",

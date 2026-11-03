@@ -38,7 +38,33 @@ describe("defaultSandboxNetworkSettings", () => {
   it("restricts a workspace that never saved settings to a list it could save", () => {
     expect(defaultSandboxNetworkSettings.restricted).toBe(true);
     expect(sandboxNetworkSettingsSchema.parse(defaultSandboxNetworkSettings)).toEqual(defaultSandboxNetworkSettings);
-    expect(defaultSandboxNetworkSettings.allowedDomains).toContain("registry.npmjs.org");
+    expect(defaultSandboxNetworkSettings.allowedDomains).toEqual([
+      "registry.npmjs.org",
+      "registry.yarnpkg.com",
+      "nodejs.org",
+      "unpkg.com",
+      "cdn.jsdelivr.net",
+      "pypi.org",
+      "files.pythonhosted.org",
+      "bootstrap.pypa.io",
+      "astral.sh",
+      "bun.sh",
+      "proxy.golang.org",
+      "sum.golang.org",
+      "crates.io",
+      "index.crates.io",
+      "static.crates.io",
+      "rubygems.org",
+      "repo.maven.apache.org",
+      "repo1.maven.org",
+      "jsr.io",
+      "deb.debian.org",
+      "security.debian.org",
+      "github.com",
+      "api.github.com",
+      "codeload.github.com",
+      "*.githubusercontent.com",
+    ]);
   });
 });
 

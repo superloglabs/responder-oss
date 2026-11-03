@@ -701,10 +701,12 @@ function SandboxNetworkSection() {
         <h3>Sandbox network</h3>
       </div>
       <p className="memberAccessNote">
-        Agents run commands in a sandbox. By default it reaches only the
-        domains below, so an agent cannot send data anywhere else.
+        Agents run commands in a sandbox.
+        {state?.settings.restricted === false
+          ? " It can reach any address on the internet. Restrict it to a list of domains to stop an agent sending data anywhere else."
+          : " It reaches only the listed domains, so an agent cannot send data anywhere else. Turn this off to give it open internet access."}
         {" "}{alwaysAllowed} and the hosts of each secret a run uses stay
-        reachable. Turn this off to give sandboxes open internet access.
+        reachable.
         {canEdit ? null : " Admins can change this."}
       </p>
       {error ? <p className="settingsNotice settingsNotice--error">{error}</p> : null}
