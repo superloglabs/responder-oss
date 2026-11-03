@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { Hono } from "hono";
 import { z } from "zod";
 import {
@@ -28,6 +29,7 @@ import {
 import { parsePostHogCredentials } from "../../../../packages/core/src/integrations/posthog.js";
 import { parseSignozCredentials } from "../../../../packages/core/src/integrations/signoz.js";
 import {
+  customMcpAllowedTools,
   McpOAuthRefreshError,
   oauthConnectionRefreshMessage,
   parseCustomMcpCredentials,
@@ -128,6 +130,7 @@ type ResolveGrant = typeof resolveAutomationContextBrokerGrant;
 interface ContextBrokerDependencies {
   aws: AwsContextDependencies;
   cloudflare: { now: () => number };
+  customMcp: { now: () => number };
   freshSentryCredentials: typeof freshSentryCredentials;
   gcp: Pick<GcpContextDependencies, "authHeaders" | "now">;
   grafana: SelfHostedGrafanaDependencies;
@@ -147,6 +150,7 @@ interface ContextBrokerDependencies {
 const defaultDependencies: ContextBrokerDependencies = {
   aws: { credentials: awsContextCredentials, fetch: awsContextFetch, now: Date.now },
   cloudflare: { now: Date.now },
+  customMcp: { now: Date.now },
   freshSentryCredentials,
   gcp: { authHeaders: gcpAuthHeaders, now: Date.now },
   grafana: defaultSelfHostedGrafanaDependencies,
@@ -290,32 +294,9 @@ async function providerTarget(
     };
   }
   if (claim.account.provider === "custom_mcp") {
-    const parsed = await dependencies.withCredentialLease<CustomMcpCredentials>({
-      allowedStatuses: ["connected"],
-      integrationAccountId: claim.account.id,
-      operation: async (encryptedCredentials) => {
-        const current = parseCustomMcpCredentials(
-          decryptCredentials<Record<string, unknown>>(encryptedCredentials),
-        );
-        if (current.authType === "api_token") return { value: current };
-        const oauth = await dependencies.refreshCustomMcp({
-          mcpUrl: current.mcpUrl,
-          oauth: current.oauth,
-          redirectUrl: integrationCallbackUrl("custom_mcp"),
-        });
-        const updated = { ...current, oauth };
-        return {
-          encryptedCredentials: encryptCredentials(updated),
-          value: updated,
-        };
-      },
-      organizationId: claim.organizationId,
-      provider: "custom_mcp",
-    });
+    const parsed = await customMcpCredentials(claim, dependencies);
     if (!parsed) return null;
-    const accessToken = parsed.authType === "api_token"
-      ? parsed.apiToken
-      : parsed.oauth.tokens?.access_token;
+    const accessToken = customMcpAccessToken(parsed);
     if (!accessToken) return null;
     return {
       headers: new Headers({ authorization: `Bearer ${accessToken}` }),
@@ -323,6 +304,71 @@ async function providerTarget(
     };
   }
   return null;
+}
+
+function customMcpAccessToken(credentials: CustomMcpCredentials): string | undefined {
+  return credentials.authType === "api_token"
+    ? credentials.apiToken
+    : credentials.oauth.tokens?.access_token;
+}
+
+async function customMcpCredentials(
+  claim: AutomationContextBrokerClaim,
+  dependencies: ContextBrokerDependencies,
+): Promise<CustomMcpCredentials | null> {
+  return await dependencies.withCredentialLease<CustomMcpCredentials>({
+    allowedStatuses: ["connected"],
+    integrationAccountId: claim.account.id,
+    operation: async (encryptedCredentials) => {
+      const current = parseCustomMcpCredentials(
+        decryptCredentials<Record<string, unknown>>(encryptedCredentials),
+      );
+      if (current.authType === "api_token") return { value: current };
+      const oauth = await dependencies.refreshCustomMcp({
+        mcpUrl: current.mcpUrl,
+        oauth: current.oauth,
+        redirectUrl: integrationCallbackUrl("custom_mcp"),
+      });
+      const updated = { ...current, oauth };
+      return {
+        encryptedCredentials: encryptCredentials(updated),
+        value: updated,
+      };
+    },
+    organizationId: claim.organizationId,
+    provider: "custom_mcp",
+  });
+}
+
+// A custom MCP connection limited to some of its tools is served like a
+// managed server, so a run can neither list nor call the others.
+function customMcpContextServer(
+  claim: AutomationContextBrokerClaim,
+  allowedTools: string[],
+  dependencies: ContextBrokerDependencies,
+): ManagedMcpServer | null {
+  if (!claim.account.encryptedCredentials) return null;
+  const { mcpUrl } = parseCustomMcpCredentials(
+    decryptCredentials<Record<string, unknown>>(claim.account.encryptedCredentials),
+  );
+  const allowed = new Set(allowedTools);
+  return {
+    cacheKey: `custom_mcp:${claim.account.id}:${createHash("sha256")
+      .update(JSON.stringify([...allowed].sort()))
+      .digest("hex")}`,
+    fetch: dependencies.providerFetch,
+    headers: async () => {
+      const credentials = await customMcpCredentials(claim, dependencies);
+      const accessToken = credentials ? customMcpAccessToken(credentials) : undefined;
+      if (!accessToken) throw new McpOAuthRefreshError(true);
+      return new Headers({ authorization: `Bearer ${accessToken}` });
+    },
+    isAllowed: (tool) => allowed.has(tool.name),
+    label: "Custom MCP",
+    now: dependencies.customMcp.now,
+    unavailableToolMessage: "Unknown tool or tool not allowed on this connection",
+    url: mcpUrl,
+  };
 }
 
 // AWS and Google Cloud are reached through their managed MCP servers, which
@@ -1078,6 +1124,22 @@ export function createAutomationContextBrokerRoutes(
           rawBody,
           request: context.req.raw,
           rpc: parsed.data,
+        });
+      }
+      const customMcpTools = claim.account.provider === "custom_mcp"
+        ? customMcpAllowedTools(claim.account.metadata)
+        : null;
+      if (customMcpTools) {
+        const server = customMcpContextServer(claim, customMcpTools, dependencies);
+        if (!server) {
+          return context.json(rpcError(parsed.data.id, -32601, "Connection does not expose context tools"), 404);
+        }
+        return await managedServerResponse({
+          dependencies,
+          rawBody,
+          request: context.req.raw,
+          rpc: parsed.data,
+          server,
         });
       }
       const target = await providerTarget(claim, dependencies);

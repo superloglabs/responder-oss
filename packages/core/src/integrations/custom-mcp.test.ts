@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  customMcpAllowedTools,
   CustomMcpOAuthProvider,
   parseCustomMcpCredentials,
   validateCustomMcpUrl,
@@ -81,5 +82,23 @@ describe("custom MCP security", () => {
         mcpUrl: "https://mcp.example.com/mcp",
       }),
     ).toThrow();
+  });
+});
+
+describe("customMcpAllowedTools", () => {
+  it("allows every tool when the connection has no tool list", () => {
+    expect(customMcpAllowedTools({})).toBeNull();
+    expect(customMcpAllowedTools(null)).toBeNull();
+  });
+
+  it("reads the connection's tool list", () => {
+    expect(customMcpAllowedTools({ allowedTools: ["search", "search", "list"] }))
+      .toEqual(["search", "list"]);
+    expect(customMcpAllowedTools({ allowedTools: [] })).toEqual([]);
+  });
+
+  it("allows no tools when the tool list cannot be read", () => {
+    expect(customMcpAllowedTools({ allowedTools: "search" })).toEqual([]);
+    expect(customMcpAllowedTools({ allowedTools: null })).toEqual([]);
   });
 });

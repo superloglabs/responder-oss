@@ -12,6 +12,7 @@ import { GcpConnectionDialog } from "../components/gcp-connection-dialog";
 import { GcpSetupStepper } from "../components/gcp-setup-progress";
 import { gcpSetupProgressLabel, type GcpSetupStatus } from "../gcp-setup-status";
 import { CustomMcpConnectionDialog } from "../components/custom-mcp-dialog";
+import { CustomMcpToolsDialog } from "../components/custom-mcp-tools-dialog";
 import { UpstashConnectionDialog } from "../components/upstash-connection-dialog";
 import { LangfuseConnectionDialog } from "../components/langfuse-connection-dialog";
 import { DevRevConnectionDialog } from "../components/devrev-connection-dialog";
@@ -72,6 +73,7 @@ interface IntegrationSummary {
   accountCount: number;
   resourceCount: number;
   accounts: Array<{
+    allowedTools?: string[] | null;
     id: string;
     displayName: string;
     status: "connected" | "error" | "pending";
@@ -385,6 +387,9 @@ function IntegrationCard({
   if (integration.id === "gcp") {
     return <GcpIntegrationCard integration={integration} />;
   }
+  if (integration.id === "custom_mcp" && integration.accountCount > 0) {
+    return <CustomMcpIntegrationCard integration={integration} />;
+  }
   return <DefaultIntegrationCard integration={integration} sentryHealth={sentryHealth} />;
 }
 
@@ -627,6 +632,129 @@ function DefaultIntegrationCard({
         returnTo="/settings"
       />
     </>
+  );
+}
+
+function customMcpToolAccessLabel(allowedTools: string[] | null | undefined): string {
+  if (!allowedTools) return "All tools";
+  if (allowedTools.length === 0) return "No tools";
+  return `${allowedTools.length} tool${allowedTools.length === 1 ? "" : "s"}`;
+}
+
+function CustomMcpIntegrationCard({
+  integration,
+}: {
+  integration: IntegrationSummary;
+}) {
+  const [showAccounts, setShowAccounts] = useState(
+    new URLSearchParams(window.location.search).get("integration") === "custom_mcp",
+  );
+  const [adding, setAdding] = useState(false);
+  const [editingAccountId, setEditingAccountId] = useState<string | null>(null);
+  const [allowedTools, setAllowedTools] = useState<Record<string, string[] | null>>({});
+  const canConnect = Boolean(integration.connectUrl);
+  const accounts = integration.accounts.map((account) => ({
+    ...account,
+    allowedTools: account.id in allowedTools
+      ? allowedTools[account.id]
+      : account.allowedTools ?? null,
+  }));
+  const editing = accounts.find((account) => account.id === editingAccountId);
+
+  return (
+    <article
+      className="integrationCard integrationCard--managed"
+      id={`integration-${integration.id}`}
+    >
+      <ProviderGlyph
+        className="integrationLogo integrationLogo--mcp"
+        decorative
+        provider="custom_mcp"
+      />
+      <div className="integrationCard__body">
+        <strong>{integration.name}</strong>
+        <small>
+          {integration.accountCount} server{integration.accountCount === 1 ? "" : "s"}
+        </small>
+      </div>
+      {accounts.some((account) => account.status === "error") ? (
+        <span className="connectedBadge connectedBadge--warning">Action needed</span>
+      ) : integration.state === "connected" ? (
+        <span className="connectedBadge">Connected</span>
+      ) : null}
+      <div className="integrationCard__actions">
+        <button
+          aria-expanded={showAccounts}
+          className="button button--secondary button--small"
+          onClick={() => setShowAccounts((value) => !value)}
+          type="button"
+        >
+          Manage
+        </button>
+      </div>
+      {showAccounts ? (
+        <ul className="integrationCard__accounts" aria-label="Connected MCP servers">
+          {accounts.map((account) => (
+            <li key={account.id}>
+              <span>
+                <strong>{account.displayName}</strong>
+                <small>{customMcpToolAccessLabel(account.allowedTools)}</small>
+              </span>
+              <span
+                className={`integrationCard__accountStatus${
+                  account.status === "error" ? " integrationCard__accountStatus--error" : ""
+                }`}
+              >
+                {account.status === "connected"
+                  ? "Connected"
+                  : account.status === "pending"
+                    ? "Pending"
+                    : "Error"}
+              </span>
+              <span className="integrationCard__accountActions">
+                <button
+                  className="button button--secondary button--small"
+                  disabled={account.status !== "connected"}
+                  onClick={() => setEditingAccountId(account.id)}
+                  type="button"
+                >
+                  Tools
+                </button>
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {showAccounts && canConnect ? (
+        <div className="integrationCard__actions integrationCard__manageActions">
+          <button
+            className="button button--primary button--small"
+            onClick={() => setAdding(true)}
+            type="button"
+          >
+            Add server
+          </button>
+        </div>
+      ) : null}
+      <CustomMcpConnectionDialog
+        connectUrl={integration.connectUrl ?? ""}
+        onCancel={() => setAdding(false)}
+        open={adding && canConnect}
+        returnTo="/settings"
+      />
+      {editing ? (
+        <CustomMcpToolsDialog
+          accountId={editing.id}
+          displayName={editing.displayName}
+          key={editing.id}
+          onClose={() => setEditingAccountId(null)}
+          onSaved={(saved) => {
+            setAllowedTools((current) => ({ ...current, [editing.id]: saved }));
+            setEditingAccountId(null);
+          }}
+        />
+      ) : null}
+    </article>
   );
 }
 

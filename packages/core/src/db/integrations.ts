@@ -714,6 +714,34 @@ export async function getOrganizationIntegrationAccount(input: {
   return rows[0] ?? null;
 }
 
+/**
+ * Limits a custom MCP connection to a list of tools, or with null lets agents
+ * use every tool its server offers.
+ */
+export async function setCustomMcpAllowedTools(input: {
+  allowedTools: string[] | null;
+  integrationAccountId: string;
+  organizationId: string;
+}): Promise<boolean> {
+  const updated = await getDatabase()
+    .update(integrationAccounts)
+    .set({
+      metadata: input.allowedTools
+        ? sql`jsonb_set(${integrationAccounts.metadata}, '{allowedTools}', ${JSON.stringify(input.allowedTools)}::jsonb)`
+        : sql`${integrationAccounts.metadata} - 'allowedTools'`,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(integrationAccounts.id, input.integrationAccountId),
+        eq(integrationAccounts.organizationId, input.organizationId),
+        eq(integrationAccounts.provider, "custom_mcp"),
+      ),
+    )
+    .returning({ id: integrationAccounts.id });
+  return updated.length > 0;
+}
+
 export async function getConnectedIntegrationAccountCredential(input: {
   integrationAccountId: string;
   provider: IntegrationProvider;

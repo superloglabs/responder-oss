@@ -106,6 +106,23 @@ export function oauthConnectionRefreshMessage(
     : `The ${label} could not renew its access. Try again later, or reconnect it in Settings if this continues.`;
 }
 
+// A connection's metadata may limit agents to a list of the server's tools.
+// Without a list, agents can use every tool the server offers.
+export const MAX_CUSTOM_MCP_ALLOWED_TOOLS = 2_000;
+export const customMcpAllowedToolsSchema = z
+  .array(z.string().min(1).max(256))
+  .max(MAX_CUSTOM_MCP_ALLOWED_TOOLS);
+
+/** The tools agents may use on a connection, or null when every tool is allowed. */
+export function customMcpAllowedTools(
+  metadata: Record<string, unknown> | null | undefined,
+): string[] | null {
+  if (!metadata || !("allowedTools" in metadata)) return null;
+  const parsed = customMcpAllowedToolsSchema.safeParse(metadata.allowedTools);
+  // A list that cannot be read allows nothing rather than everything.
+  return parsed.success ? [...new Set(parsed.data)] : [];
+}
+
 export function parseCustomMcpCredentials(
   input: unknown,
 ): CustomMcpCredentials {
@@ -574,10 +591,26 @@ export async function refreshCustomMcpOAuth(input: {
   return provider.snapshot();
 }
 
+export interface CustomMcpToolSummary {
+  description?: string;
+  name: string;
+  /** The server marks the tool as one that does not change anything. */
+  readOnly: boolean;
+}
+
 export async function listCustomMcpTools(input: {
   accessToken: string;
   mcpUrl: string;
 }): Promise<string[]> {
+  return (await listCustomMcpToolSummaries(input)).map((tool) => tool.name);
+}
+
+const MAX_TOOL_PAGES = 10;
+
+export async function listCustomMcpToolSummaries(input: {
+  accessToken: string;
+  mcpUrl: string;
+}): Promise<CustomMcpToolSummary[]> {
   const url = await validateCustomMcpUrl(input.mcpUrl, {
     allowLocal: process.env.NODE_ENV !== "production",
   });
@@ -590,8 +623,25 @@ export async function listCustomMcpTools(input: {
   const client = new Client({ name: "responder-connection-check", version: "1" });
   try {
     await client.connect(transport);
-    const tools = await client.listTools();
-    return tools.tools.map((tool) => tool.name);
+    const tools: CustomMcpToolSummary[] = [];
+    let cursor: string | undefined;
+    for (let page = 0; ; page += 1) {
+      // A cut-off listing would hide tools, so it fails instead.
+      if (page === MAX_TOOL_PAGES) {
+        throw new Error(`The MCP server listed tools on more than ${MAX_TOOL_PAGES} pages`);
+      }
+      const listed = await client.listTools(cursor ? { cursor } : undefined);
+      for (const tool of listed.tools) {
+        tools.push({
+          ...(tool.description ? { description: tool.description } : {}),
+          name: tool.name,
+          readOnly: tool.annotations?.readOnlyHint === true,
+        });
+      }
+      cursor = listed.nextCursor || undefined;
+      if (!cursor) break;
+    }
+    return tools;
   } finally {
     await client.close().catch(() => undefined);
   }

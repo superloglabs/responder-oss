@@ -1407,6 +1407,71 @@ describe("automation context broker", () => {
     );
   });
 
+  it("serves only a custom MCP connection's allowed tools", async () => {
+    vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 4).toString("base64"));
+    const limited = claim("custom_mcp", {
+      apiToken: "custom-api-token",
+      authType: "api_token",
+      mcpUrl: "https://mcp.example.test/api",
+    });
+    limited.account.metadata = { allowedTools: ["list_orders"] };
+    const { app, dependencies } = appFor(limited);
+    dependencies.providerFetch.mockImplementation(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body)) as { id?: string; method: string };
+      if (body.method === "notifications/initialized") {
+        return new Response(null, { status: 202 });
+      }
+      const result = body.method === "initialize"
+        ? { capabilities: { tools: {} }, protocolVersion: "2025-06-18" }
+        : body.method === "tools/list"
+          ? {
+              tools: [
+                { inputSchema: { type: "object" }, name: "list_orders" },
+                { inputSchema: { type: "object" }, name: "refund_order" },
+              ],
+            }
+          : { content: [{ text: "{\"ok\":true}", type: "text" }] };
+      return Response.json({ id: body.id, jsonrpc: "2.0", result });
+    });
+
+    const listed = await app.request(
+      `/api/automation-context-broker/v1/${accountId}`,
+      rpcRequest({ id: 1, jsonrpc: "2.0", method: "tools/list" }),
+    );
+    expect(listed.status).toBe(200);
+    const body = await listed.json() as { result: { tools: Array<{ name: string }> } };
+    expect(body.result.tools.map((tool) => tool.name)).toEqual(["list_orders"]);
+
+    const refused = await app.request(
+      `/api/automation-context-broker/v1/${accountId}`,
+      rpcRequest({
+        id: 2,
+        jsonrpc: "2.0",
+        method: "tools/call",
+        params: { arguments: {}, name: "refund_order" },
+      }),
+    );
+    expect(refused.status).toBe(400);
+    expect(await refused.json()).toMatchObject({
+      error: { message: "Unknown tool or tool not allowed on this connection" },
+    });
+
+    const allowed = await app.request(
+      `/api/automation-context-broker/v1/${accountId}`,
+      rpcRequest({
+        id: 3,
+        jsonrpc: "2.0",
+        method: "tools/call",
+        params: { arguments: {}, name: "list_orders" },
+      }),
+    );
+    expect(allowed.status).toBe(200);
+    expect(await allowed.text()).toContain("ok");
+    const calls = dependencies.providerFetch.mock.calls as Array<[string, RequestInit]>;
+    expect(new Headers(calls.at(-1)![1].headers).get("authorization"))
+      .toBe("Bearer custom-api-token");
+  });
+
   it("names the connection to reconnect when its OAuth grant is rejected", async () => {
     vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 4).toString("base64"));
     const { app, dependencies } = appFor(claim("custom_mcp", {
