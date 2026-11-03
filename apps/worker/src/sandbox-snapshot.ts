@@ -66,7 +66,7 @@ export function sandboxSnapshotCommands(): string[] {
 // and the commands run as its unprivileged user.
 export function vercelSandboxSnapshotCommands(): string[] {
   return [
-    "sudo dnf install -y -q gcc gcc-c++ make tar xz",
+    "sudo dnf install -y -q gcc gcc-c++ git make python3 tar unzip xz",
     [
       `curl -fsSLo /tmp/${ripgrepArchive} https://github.com/BurntSushi/ripgrep/releases/download/${ripgrepVersion}/${ripgrepArchive}`,
       `echo "${ripgrepArchiveSha256}  /tmp/${ripgrepArchive}" | sha256sum -c -`,

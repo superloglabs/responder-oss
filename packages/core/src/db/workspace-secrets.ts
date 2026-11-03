@@ -1,4 +1,4 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 import { getDatabase } from "./client.js";
 import {
   agentConfigVersions,
@@ -43,13 +43,22 @@ export async function listWorkspaceSecrets(
 export async function findWorkspaceSecretByName(input: {
   organizationId: string;
   name: string;
-}): Promise<(WorkspaceSecretSummary & { hasValue: boolean }) | null> {
+}): Promise<
+  | (WorkspaceSecretSummary & {
+    daytonaSecretId: string | null;
+    daytonaSecretName: string | null;
+    hasValue: boolean;
+  })
+  | null
+> {
   const rows = await getDatabase()
     .select({
       id: workspaceSecrets.id,
       name: workspaceSecrets.name,
       allowedHosts: workspaceSecrets.allowedHosts,
       createdAt: workspaceSecrets.createdAt,
+      daytonaSecretId: workspaceSecrets.daytonaSecretId,
+      daytonaSecretName: workspaceSecrets.daytonaSecretName,
       encryptedValue: workspaceSecrets.encryptedValue,
     })
     .from(workspaceSecrets)
@@ -66,15 +75,27 @@ export async function findWorkspaceSecretByName(input: {
   return { ...secret, hasValue: encryptedValue !== null };
 }
 
-// Fills in the value of a secret saved before values were stored.
+// Fills in the value of a secret saved before values were stored, with the
+// hosts and Daytona copy saved alongside it. Returns false when another save
+// filled it in first.
 export async function storeWorkspaceSecretValue(input: {
   id: string;
+  allowedHosts: string[];
+  daytonaSecretId: string | null;
+  daytonaSecretName: string | null;
   encryptedValue: string;
-}): Promise<void> {
-  await getDatabase()
+}): Promise<boolean> {
+  const rows = await getDatabase()
     .update(workspaceSecrets)
-    .set({ encryptedValue: input.encryptedValue })
-    .where(eq(workspaceSecrets.id, input.id));
+    .set({
+      allowedHosts: input.allowedHosts,
+      daytonaSecretId: input.daytonaSecretId,
+      daytonaSecretName: input.daytonaSecretName,
+      encryptedValue: input.encryptedValue,
+    })
+    .where(and(eq(workspaceSecrets.id, input.id), isNull(workspaceSecrets.encryptedValue)))
+    .returning({ id: workspaceSecrets.id });
+  return rows.length > 0;
 }
 
 export async function createWorkspaceSecretRecord(input: {

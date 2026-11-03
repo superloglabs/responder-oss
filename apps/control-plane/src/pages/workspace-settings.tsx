@@ -721,7 +721,7 @@ function SandboxNetworkSection() {
           {restricted ? (
             <TextAreaField
               disabled={!canEdit || saving}
-              hint="One domain per line. *.example.com covers example.com and its subdomains. Add package registries, such as registry.npmjs.org or pypi.org, if agents install dependencies."
+              hint="One domain per line. *.example.com covers example.com and its subdomains. Add package registries, such as registry.npmjs.org, or pypi.org and files.pythonhosted.org, if agents install dependencies."
               label="Allowed domains"
               onChange={(event) => setDomains(event.target.value)}
               placeholder={"registry.npmjs.org\n*.example.com"}

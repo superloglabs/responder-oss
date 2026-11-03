@@ -585,6 +585,11 @@ export const workspaceSecrets = pgTable(
     uniqueIndex("workspace_secrets_daytona_name_idx").on(
       table.daytonaSecretName,
     ),
+    // A secret with neither copy could not reach a sandbox on any provider.
+    check(
+      "workspace_secrets_value_present",
+      sql`${table.encryptedValue} is not null or ${table.daytonaSecretId} is not null`,
+    ),
   ],
 );
 

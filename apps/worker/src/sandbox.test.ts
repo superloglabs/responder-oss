@@ -704,6 +704,8 @@ describe("Daytona sandbox cleanup", () => {
 
   it("leaves an open sandbox's network alone", async () => {
     const harness = cleanupHarness();
+    const sandbox = { id: "sandbox-1", updateNetworkSettings: vi.fn() };
+    harness.get.mockResolvedValue(sandbox);
     await applyDaytonaSandboxNetwork(
       harness.session,
       { daytonaApiKey: "daytona-test" },
@@ -711,7 +713,25 @@ describe("Daytona sandbox cleanup", () => {
       [{ allowedHosts: ["api.example.com"] }],
       harness.dependencies,
     );
-    expect(harness.dependencies.createClient).not.toHaveBeenCalled();
+    expect(sandbox.updateNetworkSettings).not.toHaveBeenCalled();
+  });
+
+  it("opens a sandbox again after its workspace lifts the restriction", async () => {
+    const harness = cleanupHarness();
+    const sandbox = {
+      domainAllowList: "superlog.sh",
+      id: "sandbox-1",
+      updateNetworkSettings: vi.fn().mockResolvedValue(undefined),
+    };
+    harness.get.mockResolvedValue(sandbox);
+    await applyDaytonaSandboxNetwork(
+      harness.session,
+      { daytonaApiKey: "daytona-test" },
+      null,
+      [],
+      harness.dependencies,
+    );
+    expect(sandbox.updateNetworkSettings).toHaveBeenCalledWith({ domainAllowList: "" });
   });
 
   it("refuses an allowlist longer than Daytona accepts", async () => {

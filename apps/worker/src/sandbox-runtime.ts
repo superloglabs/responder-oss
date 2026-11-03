@@ -10,7 +10,7 @@ import type {
 import { daytonaClientOptions } from "@responder/core/daytona-config";
 import type { SandboxConfig } from "@responder/core/sandbox-config";
 import type { SandboxNetwork } from "@responder/core/sandbox-network";
-import type { WorkerErrorContext } from "./monitoring.js";
+import { reportWorkerException, type WorkerErrorContext } from "./monitoring.js";
 import {
   applyDaytonaSandboxNetwork,
   closeDaytonaSandbox,
@@ -165,9 +165,22 @@ export async function serializeSandboxSession(
   client: SandboxClient,
   session: SandboxSession,
   config: SandboxConfig,
+  reportException: typeof reportWorkerException = reportWorkerException,
 ): Promise<Record<string, unknown>> {
   if (config.vercel) {
-    await captureVercelSandboxSnapshot(session as VercelSandboxSession, config);
+    try {
+      await captureVercelSandboxSnapshot(session as VercelSandboxSession, config);
+    } catch (error) {
+      // The turn's result stands. Without a new snapshot the saved state does
+      // not match the sandbox, so the next turn starts in a fresh one.
+      const sandboxId = (session as VercelSandboxSession).state.sandboxId;
+      console.error(JSON.stringify({
+        error: error instanceof Error ? error.message : String(error),
+        event: "vercel_sandbox_snapshot_failed",
+        sandboxId,
+      }));
+      await reportException(error, { operation: "sandbox_cleanup", sandboxId });
+    }
   }
   const state = config.vercel
     ? await (client as VercelSandboxClient).serializeSessionState(

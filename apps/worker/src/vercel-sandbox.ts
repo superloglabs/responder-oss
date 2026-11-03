@@ -190,7 +190,9 @@ export function secretNetworkPolicy(
   }
   for (const secret of secrets) {
     for (const host of secret.allowedHosts) {
-      (allow[host] ??= []).push(...secretRules(secret.placeholder, secret.value));
+      const rules = secretRules(secret.placeholder, secret.value);
+      (allow[host] ??= []).push(...rules);
+      if (host.startsWith("*.")) (allow[host.slice(2)] ??= []).push(...rules);
     }
   }
   return { allow } as NetworkPolicy;

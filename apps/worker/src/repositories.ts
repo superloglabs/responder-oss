@@ -355,9 +355,10 @@ async function uploadRepositoryArchive(
 }
 
 /**
- * Download repository content through Daytona's filesystem API. The sandbox
- * editor's readFile implementation streams a file through a command output
- * buffer, which is unsuitable for arbitrarily-sized repository files.
+ * Download repository content through the provider's file API (Daytona's
+ * filesystem API or Vercel's file read). The sandbox editor's readFile
+ * implementation streams a file through a command output buffer, which is
+ * unsuitable for arbitrarily-sized repository files.
  */
 export async function downloadRepositoryFile(
   session: SandboxSession,

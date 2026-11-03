@@ -15,8 +15,9 @@ export const defaultSandboxNetworkSettings: SandboxNetworkSettings = {
   allowedDomains: [],
 };
 
-// Daytona accepts up to 100 domains in all, and the rest of the list holds
-// Superlog's host and the secrets' hosts.
+// Daytona accepts up to 100 domains in all, Superlog's host and the secrets'
+// hosts included. Nothing limits the secrets' hosts, so a run whose list grows
+// past that fails on Daytona and says so.
 export const maxSandboxAllowedDomains = 50;
 
 export const sandboxDomainSchema = z
@@ -34,9 +35,24 @@ export const sandboxNetworkSettingsSchema = z.object({
   restricted: z.boolean(),
   allowedDomains: z
     .array(sandboxDomainSchema)
-    .max(maxSandboxAllowedDomains, `Add at most ${maxSandboxAllowedDomains} domains`)
-    .transform((domains) => [...new Set(domains)]),
+    .transform((domains) => [...new Set(domains)])
+    .refine(
+      (domains) => domains.length <= maxSandboxAllowedDomains,
+      `Add at most ${maxSandboxAllowedDomains} domains`,
+    ),
 });
+
+// The public application URL, which serves the model broker and context
+// servers. A blank setting counts as unset.
+export function publicApplicationUrl(
+  environment: NodeJS.ProcessEnv = process.env,
+): string | undefined {
+  return [
+    environment.RESPONDER_PUBLIC_URL,
+    environment.RESPONDER_APP_URL,
+    environment.BETTER_AUTH_URL,
+  ].map((value) => value?.trim()).find(Boolean);
+}
 
 // The domains a restricted sandbox reaches, or null for open access.
 // `*.example.com` covers example.com and every subdomain.

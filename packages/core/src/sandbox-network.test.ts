@@ -21,6 +21,12 @@ describe("sandboxNetworkSettingsSchema", () => {
     },
   );
 
+  it("counts a repeated domain once", () => {
+    const allowedDomains = Array.from({ length: 60 }, () => "registry.npmjs.org");
+    expect(sandboxNetworkSettingsSchema.parse({ allowedDomains, restricted: true }).allowedDomains)
+      .toEqual(["registry.npmjs.org"]);
+  });
+
   it("rejects more than 50 domains", () => {
     const allowedDomains = Array.from({ length: 51 }, (_, index) => `host${index}.example.com`);
     expect(sandboxNetworkSettingsSchema.safeParse({ allowedDomains, restricted: true }).success).toBe(false);

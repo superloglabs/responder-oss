@@ -3,7 +3,7 @@ import type {
   VercelSandboxSession,
 } from "@openai/agents-extensions/sandbox/vercel";
 import { Sandbox } from "@vercel/sandbox";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { encryptCredentials } from "@responder/core/credentials/encryption";
 import type { VercelSandboxConfig } from "@responder/core/sandbox-config";
 import { resumeSandbox, serializeSandboxSession } from "./sandbox-runtime.js";
@@ -73,6 +73,15 @@ describe("secretNetworkPolicy for a restricted workspace", () => {
   it("still swaps a secret's placeholder on its hosts", () => {
     expect(JSON.stringify(policy.allow["api.example.com"])).toContain("real-1");
   });
+
+  it("swaps a wildcard secret's placeholder on the apex host too", () => {
+    const wildcard = secretNetworkPolicy(
+      [{ allowedHosts: ["*.example.com"], placeholder: "ph-1", value: "real-1" }],
+      { allowedDomains: ["superlog.sh"] },
+    ) as { allow: Record<string, unknown[]> };
+    expect(JSON.stringify(wildcard.allow["*.example.com"])).toContain("real-1");
+    expect(JSON.stringify(wildcard.allow["example.com"])).toContain("real-1");
+  });
 });
 
 describe("vercelSecretPlaceholder", () => {
@@ -91,6 +100,10 @@ describe("applyVercelSandboxSecrets", () => {
     vi.mocked(Sandbox.get).mockReset();
     vi.mocked(Sandbox.get).mockResolvedValue({ updateNetworkPolicy } as unknown as Awaited<ReturnType<typeof Sandbox.get>>);
     vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 1).toString("base64"));
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it("puts the placeholder in the sandbox and the value in the firewall", async () => {
@@ -223,6 +236,25 @@ describe("pausing and resuming", () => {
       workspacePersistence: "snapshot",
     });
     expect(session.state).toMatchObject({ snapshotId: "snap_1", snapshotSandboxId: "sbx_1" });
+  });
+
+  it("keeps the turn when the snapshot fails, and the next turn starts fresh", async () => {
+    const snapshot = vi.fn().mockRejectedValue(new Error("snapshot failed"));
+    vi.mocked(Sandbox.get).mockResolvedValue({ snapshot } as unknown as Awaited<ReturnType<typeof Sandbox.get>>);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const session = sessionWith({});
+    const client = {
+      serializeSessionState: vi.fn(async (state: Record<string, unknown>) => ({ ...state })),
+    } as unknown as VercelSandboxClient;
+    const reportException = vi.fn().mockResolvedValue(undefined);
+
+    const state = await serializeSandboxSession(client, session, config, reportException);
+
+    expect(reportException).toHaveBeenCalledWith(expect.any(Error), {
+      operation: "sandbox_cleanup",
+      sandboxId: "sbx_1",
+    });
+    expect(resumedSameVercelSandbox(state)).toBe(false);
   });
 
   it("refuses state saved by another provider so the run starts fresh", async () => {

@@ -3,15 +3,17 @@ import {
   getSandboxNetworkSettings,
   saveSandboxNetworkSettings,
 } from "../../../../packages/core/src/db/sandbox-network.js";
-import { sandboxNetworkSettingsSchema } from "../../../../packages/core/src/sandbox-network.js";
+import {
+  publicApplicationUrl,
+  sandboxNetworkSettingsSchema,
+} from "../../../../packages/core/src/sandbox-network.js";
 import { getActiveTenant } from "../tenant.js";
 
 // Members can see what a workspace's sandboxes reach. Only owners and admins
 // change it, because the list decides where an agent can send data.
 
 const defaults = {
-  applicationUrl: () =>
-    process.env.RESPONDER_PUBLIC_URL ?? process.env.RESPONDER_APP_URL ?? process.env.BETTER_AUTH_URL,
+  applicationUrl: () => publicApplicationUrl(),
   get: getSandboxNetworkSettings,
   save: saveSandboxNetworkSettings,
   tenant: getActiveTenant,

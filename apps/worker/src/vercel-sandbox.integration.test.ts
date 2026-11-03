@@ -85,6 +85,8 @@ it.skipIf(process.env.LIVE_VERCEL_SANDBOX_TEST !== "1")("pauses, resumes, and ke
       const injected = await exec(`curl -sS -m 20 -H "Authorization: Bearer $SERVICE_KEY" https://${echoHost}/headers`);
       expect(injected).toContain(secretValue);
       const elsewhere = await exec(`curl -sS -m 20 -H "Authorization: Bearer $SERVICE_KEY" https://httpbingo.org/headers`);
+      // The echo service answered, so the placeholder left the sandbox as is.
+      expect(elsewhere).toMatch(/authorization/i);
       expect(elsewhere).not.toContain(secretValue);
 
       // Agents run commands that outlast a single HTTP request.

@@ -591,8 +591,9 @@ export async function replaceDaytonaSandboxSecrets(
 }
 
 // Daytona keeps the allowlist across a stop and start, but it is applied on
-// every resume too, so a change to the workspace's list reaches a paused
-// sandbox. Open access leaves the sandbox's settings alone.
+// every start and resume too, so a change to the workspace's list reaches a
+// paused sandbox. A sandbox whose workspace lifted the restriction gets open
+// access back.
 export async function applyDaytonaSandboxNetwork(
   session: DaytonaSandboxSession,
   config: DaytonaCleanupConfig,
@@ -600,8 +601,7 @@ export async function applyDaytonaSandboxNetwork(
   secrets: ReadonlyArray<{ allowedHosts?: string[] }>,
   dependencies: DaytonaCleanupDependencies = defaultCleanupDependencies,
 ): Promise<void> {
-  if (!network) return;
-  const domains = sandboxAllowedDomains(network, secrets);
+  const domains = network ? sandboxAllowedDomains(network, secrets) : [];
   if (domains.length > maxDaytonaAllowedDomains) {
     throw new Error(
       `Daytona sandboxes allow at most ${maxDaytonaAllowedDomains} domains, and this run needs ${domains.length}`,
@@ -613,6 +613,7 @@ export async function applyDaytonaSandboxNetwork(
       () => client.get(session.state.sandboxId),
       dependencies,
     );
+    if (!network && !sandbox.domainAllowList) return;
     await retryTransientDaytonaOperation(
       () => sandbox.updateNetworkSettings({ domainAllowList: domains.join(",") }),
       dependencies,

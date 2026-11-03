@@ -278,7 +278,10 @@ export async function runCodexAutomation(
         // The workspace is now root's, and Vercel writes files as its own user.
         const staged = await session.execCommand({
           cmd: subscriptionRootCommand(
-            `umask 077; printf %s ${shellQuote(Buffer.from(input.model.subscription.authJson).toString("base64"))} | base64 -d > ${stagedSubscriptionAuthPath}`,
+            // The agent controlled the workspace in earlier turns. Removing the path
+            // first, and refusing to write over anything that reappears, keeps a
+            // planted link from redirecting root's write.
+            `set -euC; umask 077; rm -f ${stagedSubscriptionAuthPath}; printf %s ${shellQuote(Buffer.from(input.model.subscription.authJson).toString("base64"))} | base64 -d > ${stagedSubscriptionAuthPath}`,
           ),
           maxOutputTokens: 1000,
           workdir: automationWorkspaceRoot,

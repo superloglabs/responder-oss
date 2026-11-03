@@ -743,6 +743,13 @@
       "when": 1793698694316,
       "tag": "0105_sandbox_network_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 106,
+      "version": "7",
+      "when": 1793700009977,
+      "tag": "0106_workspace_secret_value_present",
+      "breakpoints": true
     }
   ]
 }
