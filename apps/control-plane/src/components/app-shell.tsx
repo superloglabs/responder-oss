@@ -24,7 +24,9 @@ import {
   UserCircleIcon,
   XIcon,
 } from "@phosphor-icons/react";
+import { useBillingSummary } from "../use-billing-summary";
 import { ColorThemeToggle } from "./color-theme-toggle";
+import { SidebarUsageCard } from "./sidebar-usage-card";
 import { TelemetryCallCard } from "./telemetry-call-card";
 import "./workspace.css";
 
@@ -69,6 +71,7 @@ export function AppShell({
   const [switchingTo, setSwitchingTo] = useState<string | null>(null);
   const [menuError, setMenuError] = useState<string | null>(null);
   const capabilities = useOrganizationCapabilities(!guest);
+  const billing = useBillingSummary(!guest);
   const options = navigationOptions(capabilities);
   const navigation = primaryNavigation({
     ...options,
@@ -314,6 +317,7 @@ export function AppShell({
         <div className="globalHeader__right" ref={menuRef}>
           {!workspace ? <ColorThemeToggle className="globalThemeToggle" /> : null}
           {workspace && !guest ? <TelemetryCallCard /> : null}
+          {workspace && !guest ? <SidebarUsageCard summary={billing} /> : null}
           {guest ?? <div className="accountMenu">
             <button
               aria-expanded={isMenuOpen}
@@ -429,9 +433,9 @@ export function AppShell({
               <ListIcon aria-hidden="true" size={20} />
             </button>
           </div>
-          {guest ? null : <BillingBanner />}<div className={wide ? "workspaceContent workspaceContent--wide" : "workspaceContent"}>{children}</div>
+          {guest ? null : <BillingBanner summary={billing} />}<div className={wide ? "workspaceContent workspaceContent--wide" : "workspaceContent"}>{children}</div>
         </div>
-      ) : <>{guest ? null : <BillingBanner />}{children}</>}
+      ) : <>{guest ? null : <BillingBanner summary={billing} />}{children}</>}
     </main>
   );
 }
