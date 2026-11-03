@@ -73,7 +73,10 @@
 .sidebarUsage:focus-visible { outline: 2px solid #4e58f9; outline-offset: 2px; }
 .sidebarUsage__header { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: #202020; font-size: 12px; font-weight: 600; line-height: 16px; }
 .sidebarUsage__plan { padding: 1px 8px; border: 1px solid #e3e3e3; border-radius: 999px; background: #fafafa; color: #5d5d5d; font-size: 11px; font-weight: 500; line-height: 16px; }
+.sidebarUsage__subscription { display: flex; flex-direction: column; gap: 10px; }
+.sidebarUsage__subscription + .sidebarUsage__subscription { padding-top: 10px; border-top: 1px solid #ededed; }
 .sidebarUsage__meter { display: flex; flex-direction: column; gap: 6px; }
+.sidebarUsage__note { color: #8a8a8a; font-size: 11px; line-height: 14px; }
 .sidebarUsage__row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; color: #666; font-size: 12px; line-height: 16px; }
 .sidebarUsage__amount { color: #202020; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .sidebarUsage__bar { display: block; height: 4px; overflow: hidden; border-radius: 999px; background: #ededed; }

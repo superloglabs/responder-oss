@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   billingBanner,
@@ -5,6 +6,8 @@ import {
   type BillingBannerSummary,
 } from "../billing-banner-state";
 import { Alert } from "../design-system";
+
+const REFRESH_INTERVAL_MS = 60_000;
 
 // Upgrade actions open the plan comparison on the billing page.
 const bannerCopy: Record<BillingBannerKind, { action: string; body: string; path: string; title: string }> = {
@@ -28,8 +31,29 @@ const bannerCopy: Record<BillingBannerKind, { action: string; body: string; path
   },
 };
 
-export function BillingBanner({ summary }: { summary: BillingBannerSummary | null }) {
-  const banner = summary ? billingBanner(summary) : null;
+export function BillingBanner() {
+  const [banner, setBanner] = useState<BillingBannerKind | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    async function refresh() {
+      const response = await fetch("/api/billing").catch(() => null);
+      if (!response?.ok) return;
+      const summary = (await response.json()) as BillingBannerSummary;
+      if (active) setBanner(billingBanner(summary));
+    }
+
+    void refresh();
+    const interval = window.setInterval(() => void refresh(), REFRESH_INTERVAL_MS);
+    const onFocus = () => void refresh();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, []);
+
   if (!banner) return null;
   const copy = bannerCopy[banner];
   return (
