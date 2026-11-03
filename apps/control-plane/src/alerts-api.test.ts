@@ -26,6 +26,7 @@ describe("alertRequest", () => {
       body: {
         aggregation: "count",
         comparator: "gt",
+        description: null,
         enabled: true,
         evaluationIntervalSeconds: 60,
         field: null,
@@ -69,6 +70,8 @@ describe("alertRequest", () => {
   });
 
   it("says what to fix first", () => {
+    expect(alertRequest({ ...emptyAlertForm(), description: " See the runbook. ", name: "x", threshold: "1" }))
+      .toMatchObject({ body: { description: "See the runbook." } });
     expect(alertRequest({ ...emptyAlertForm(), threshold: "1" })).toEqual({ error: "Name the alert." });
     expect(alertRequest({ ...emptyAlertForm(), name: "x", threshold: "" })).toEqual({ error: "Set a threshold." });
     expect(alertRequest({ ...emptyAlertForm(), name: "x", threshold: "abc" })).toEqual({ error: "Set a threshold." });
@@ -126,6 +129,7 @@ describe("alertForm", () => {
       comparator: "lt",
       field: null,
       createdAt: "",
+      description: "Check the orders database first.",
       enabled: false,
       evaluationIntervalSeconds: 300,
       filter: { minDurationMs: 500, service: "api", spanName: "GET /orders", statusCode: "STATUS_CODE_ERROR" },
@@ -147,6 +151,7 @@ describe("alertForm", () => {
       body: {
         aggregation: "count",
         comparator: "lt",
+        description: "Check the orders database first.",
         enabled: false,
         evaluationIntervalSeconds: 300,
         field: null,

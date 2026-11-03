@@ -938,6 +938,8 @@ export const telemetryAlerts = pgTable(
       .notNull()
       .references(() => organization.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
+    // Posted with the firing message, such as what to check or a runbook link.
+    description: text("description"),
     enabled: boolean("enabled").notNull().default(true),
     source: text("source").$type<AlertSource>().notNull(),
     metricName: text("metric_name"),

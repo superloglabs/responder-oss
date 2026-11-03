@@ -91,6 +91,7 @@ export async function checkTelemetryAlert(
 ): Promise<void> {
   const now = dependencies.now();
   const message = (groupKey: string, value: number) => ({
+    alertDescription: alert.description,
     alertName: alert.name,
     alertUrl: dependencies.origin ? responderAlertUrl(alert.id, dependencies.origin) : null,
     groupBy: alert.groupMode === "per_group" ? alert.groupBy : null,
