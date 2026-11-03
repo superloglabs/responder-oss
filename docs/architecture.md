@@ -293,6 +293,22 @@ Production operators are responsible for TLS termination, network isolation,
 database backups, secret injection, observability, scaling, and rollbacks. The
 application does not depend on one infrastructure provider.
 
+### Regional cells
+
+A hosted deployment can run several cells, each a complete copy of the
+application with its own data, listed in `RESPONDER_CELLS`. Cells ask each
+other over `/api/internal/cells/*` with the shared `RESPONDER_CELL_TOKEN`;
+an empty token refuses every request.
+
+- A provider webhook for a tenant this cell does not hold is forwarded to the
+  cells that hold it. OAuth callbacks return to the cell named in their state.
+- The user support page lists the users of every cell.
+- A person signed in to a cell where they belong to no workspace is told which
+  workspaces their address belongs to in other cells, and can switch there
+  instead of creating one. Only a verified, unbanned account on both sides
+  counts, an impersonating superuser is told nothing, each person may look six
+  times a minute, and a cell that does not answer is left out.
+
 ### Telemetry of the application
 
 The API and worker send their own traces, metrics, and logs over OTLP/HTTP

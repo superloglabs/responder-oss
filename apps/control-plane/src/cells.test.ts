@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cellCookie, cellSwitchUrl } from "./cells";
+import { cellCookie, cellSwitchUrl, workspacesByCell } from "./cells";
 
 describe("cell cookie", () => {
   it("remembers the cell on the shared parent domain for a year", () => {
@@ -32,5 +32,21 @@ describe("cell switch URL", () => {
         new URL("https://us.superlog.sh/app?signup=1&error=access_denied&error_description=x"),
       ),
     ).toBe("https://superlog.sh/app?signup=1");
+  });
+});
+
+describe("workspaces by cell", () => {
+  it("names each cell's workspaces together, in the order the cells answered", () => {
+    const unitedStates = { id: "us", label: "United States", url: "https://us.example.com" };
+    const asia = { id: "ap", label: "Asia", url: "https://ap.example.com" };
+
+    expect(workspacesByCell([
+      { cell: unitedStates, name: "Acme", slug: "acme" },
+      { cell: asia, name: "Beta", slug: "beta" },
+      { cell: unitedStates, name: "Gamma", slug: "gamma" },
+    ])).toEqual([
+      { cell: unitedStates, names: ["Acme", "Gamma"] },
+      { cell: asia, names: ["Beta"] },
+    ]);
   });
 });
