@@ -1,6 +1,7 @@
 import * as Sentry from "@sentry/react";
 import { setAttributes, setUser } from "@superlog/browser/api";
 import { sentrySampleRate } from "@responder/core/observability/sentry";
+import { startBrowserTelemetry } from "./browser-telemetry";
 
 export interface BrowserMonitoringConfig {
   dsn?: string;
@@ -36,11 +37,6 @@ export function initializeBrowserMonitoring(
   return true;
 }
 
-type BrowserTelemetryModule = Pick<
-  typeof import("./browser-telemetry"),
-  "startBrowserTelemetry"
->;
-
 export interface BrowserTelemetryEnvironment {
   environment?: string;
   ingestEndpoint?: string;
@@ -58,30 +54,24 @@ const defaultTelemetryConfig: BrowserTelemetryEnvironment = {
 };
 
 // Browser telemetry starts on page load for every visitor, signed in or not,
-// when an ingest endpoint and key are configured. @superlog/browser and
-// OpenTelemetry are a separate chunk; the identity calls below are part of the
-// main bundle and apply once it starts.
+// when an ingest endpoint and key are configured. It starts before the app
+// renders, as Sentry does, so errors in the first render are sent.
 export function initializeBrowserTelemetry(
   config: BrowserTelemetryEnvironment = defaultTelemetryConfig,
-  load: () => Promise<BrowserTelemetryModule> = () => import("./browser-telemetry"),
-): Promise<boolean> {
+): boolean {
   const endpoint = config.ingestEndpoint?.trim();
   const ingestKey = config.ingestKey?.trim();
-  if (!endpoint || !ingestKey) return Promise.resolve(false);
-  return load()
-    .then(({ startBrowserTelemetry }) => {
-      const started = startBrowserTelemetry({
-        endpoint,
-        environment: config.environment?.trim() || undefined,
-        ingestKey,
-        origin: window.location.origin,
-        release: config.release?.trim() || undefined,
-        sampleRate: sentrySampleRate(config.tracesSampleRate),
-      });
-      if (started) applyTelemetryIdentity();
-      return started;
-    })
-    .catch(() => false);
+  if (!endpoint || !ingestKey) return false;
+  const started = startBrowserTelemetry({
+    endpoint,
+    environment: config.environment?.trim() || undefined,
+    ingestKey,
+    origin: window.location.origin,
+    release: config.release?.trim() || undefined,
+    sampleRate: sentrySampleRate(config.tracesSampleRate),
+  });
+  if (started) applyTelemetryIdentity();
+  return started;
 }
 
 let identity: { organizationId?: string | null; organizationName?: string | null; userId?: string; userName?: string } = {};

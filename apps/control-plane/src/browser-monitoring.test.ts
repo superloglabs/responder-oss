@@ -13,6 +13,9 @@ vi.mock("@sentry/react", () => sentryMocks);
 const telemetryMocks = vi.hoisted(() => ({ setAttributes: vi.fn(), setUser: vi.fn() }));
 vi.mock("@superlog/browser/api", () => telemetryMocks);
 
+const starterMocks = vi.hoisted(() => ({ startBrowserTelemetry: vi.fn().mockReturnValue(true) }));
+vi.mock("./browser-telemetry", () => starterMocks);
+
 import {
   initializeBrowserMonitoring,
   initializeBrowserTelemetry,
@@ -81,29 +84,25 @@ describe("browser error monitoring", () => {
     expect(telemetryMocks.setAttributes).toHaveBeenLastCalledWith({ "organization.id": undefined, "organization.name": undefined });
   });
 
-  it("starts browser telemetry on page load when an ingest endpoint and key are set", async () => {
+  it("starts browser telemetry before the app renders when an ingest endpoint and key are set", () => {
     vi.stubGlobal("window", { location: { origin: "https://superlog.sh" } });
-    const startBrowserTelemetry = vi.fn().mockReturnValue(true);
-    const load = vi.fn().mockResolvedValue({ startBrowserTelemetry });
+    starterMocks.startBrowserTelemetry.mockClear();
 
-    await expect(initializeBrowserTelemetry({}, load)).resolves.toBe(false);
-    await expect(initializeBrowserTelemetry({ ingestEndpoint: "https://superlog.sh/api/ingest" }, load)).resolves.toBe(false);
-    await expect(initializeBrowserTelemetry({ ingestKey: " " }, load)).resolves.toBe(false);
-    expect(load).not.toHaveBeenCalled();
+    expect(initializeBrowserTelemetry({})).toBe(false);
+    expect(initializeBrowserTelemetry({ ingestEndpoint: "https://superlog.sh/api/ingest" })).toBe(false);
+    expect(initializeBrowserTelemetry({ ingestKey: " " })).toBe(false);
+    expect(starterMocks.startBrowserTelemetry).not.toHaveBeenCalled();
 
-    await expect(
-      initializeBrowserTelemetry(
-        {
-          environment: " production ",
-          ingestEndpoint: " https://superlog.sh/api/ingest ",
-          ingestKey: "sl_ingest_key",
-          release: "web-1",
-          tracesSampleRate: "0.5",
-        },
-        load,
-      ),
-    ).resolves.toBe(true);
-    expect(startBrowserTelemetry).toHaveBeenCalledWith({
+    expect(
+      initializeBrowserTelemetry({
+        environment: " production ",
+        ingestEndpoint: " https://superlog.sh/api/ingest ",
+        ingestKey: "sl_ingest_key",
+        release: "web-1",
+        tracesSampleRate: "0.5",
+      }),
+    ).toBe(true);
+    expect(starterMocks.startBrowserTelemetry).toHaveBeenCalledWith({
       endpoint: "https://superlog.sh/api/ingest",
       environment: "production",
       ingestKey: "sl_ingest_key",
@@ -112,24 +111,8 @@ describe("browser error monitoring", () => {
       sampleRate: 0.5,
     });
 
-    await expect(
-      initializeBrowserTelemetry(
-        { ingestEndpoint: "https://superlog.sh/api/ingest", ingestKey: "sl_ingest_key" },
-        vi.fn().mockRejectedValue(new Error("chunk failed")),
-      ),
-    ).resolves.toBe(false);
-    vi.unstubAllGlobals();
-  });
-
-  it("sends errors without traces when the trace sample rate is unset", async () => {
-    vi.stubGlobal("window", { location: { origin: "https://superlog.sh" } });
-    const startBrowserTelemetry = vi.fn().mockReturnValue(true);
-
-    await initializeBrowserTelemetry(
-      { ingestEndpoint: "https://superlog.sh/api/ingest", ingestKey: "sl_ingest_key" },
-      vi.fn().mockResolvedValue({ startBrowserTelemetry }),
-    );
-    expect(startBrowserTelemetry).toHaveBeenCalledWith(expect.objectContaining({ sampleRate: 0 }));
+    initializeBrowserTelemetry({ ingestEndpoint: "https://superlog.sh/api/ingest", ingestKey: "sl_ingest_key" });
+    expect(starterMocks.startBrowserTelemetry).toHaveBeenLastCalledWith(expect.objectContaining({ sampleRate: 0 }));
     vi.unstubAllGlobals();
   });
 });

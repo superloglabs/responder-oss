@@ -17,7 +17,7 @@ import "./design-system/design-library.css";
 import "@c15t/react/styles.css";
 
 initializeBrowserMonitoring();
-void initializeBrowserTelemetry();
+initializeBrowserTelemetry();
 // Ad click ids arrive in the landing URL; they are stored only after consent.
 const landingSearch = window.location.search;
 
