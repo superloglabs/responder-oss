@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 const sdkMocks = vi.hoisted(() => ({ init: vi.fn().mockReturnValue({}) }));
 vi.mock("@superlog/browser", () => sdkMocks);
 
-import { ignoredUrls, SentryTraceHeaderPropagator, startBrowserTelemetry } from "./browser-telemetry";
+import { ignoredErrors, ignoredUrls, SentryTraceHeaderPropagator, startBrowserTelemetry } from "./browser-telemetry";
 
 const setter = { set: (carrier: Record<string, string>, key: string, value: string) => { carrier[key] = value; } };
 
@@ -34,6 +34,14 @@ describe("browser telemetry", () => {
     expect(isIgnored("https://superlog.sh.example.com/api")).toBe(true);
   });
 
+  it("ignores errors from wallet scripts the browser injects", () => {
+    const isIgnored = (message: string) => ignoredErrors.some((pattern) => pattern.test(message));
+
+    expect(isIgnored("undefined is not an object (evaluating 'window.ethereum.selectedAddress = undefined')")).toBe(true);
+    expect(isIgnored("Cannot read properties of undefined (reading 'selectedAddress')")).toBe(false);
+    expect(isIgnored("undefined is not an object (evaluating 'window.ethereumConfig.x')")).toBe(false);
+  });
+
   it("starts error and page-load capture with traces off at a zero sample rate", () => {
     const started = startBrowserTelemetry({
       endpoint: "https://superlog.sh/api/ingest",
@@ -47,6 +55,7 @@ describe("browser telemetry", () => {
     expect(started).toBe(true);
     expect(sdkMocks.init).toHaveBeenCalledWith(expect.objectContaining({
       endpoint: "https://superlog.sh/api/ingest",
+      ignoreErrors: ignoredErrors,
       ingestKey: "sl_ingest_key",
       service: "responder-web",
       tracesSampleRate: 0,

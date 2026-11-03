@@ -47,6 +47,11 @@ export function ignoredUrls(origin: string): RegExp[] {
   return [new RegExp(`^(?!${escapeRegExp(origin)}/)`, "u")];
 }
 
+// Errors from scripts the browser injects into the page, not from the
+// application. Brave on iOS runs `window.ethereum.selectedAddress = undefined`
+// on page load, which throws when its wallet is off.
+export const ignoredErrors: RegExp[] = [/\bwindow\.ethereum\b/u];
+
 // Sends the application's errors, page loads, Web Vitals, and API request
 // traces to a Superlog ingest endpoint with @superlog/browser. The ingest key
 // only adds telemetry to its workspace, so the page can hold it.
@@ -54,6 +59,7 @@ export function startBrowserTelemetry(config: BrowserTelemetryConfig): boolean {
   const client = init({
     endpoint: config.endpoint,
     environment: config.environment,
+    ignoreErrors: ignoredErrors,
     ignoreUrls: ignoredUrls(config.origin),
     ingestKey: config.ingestKey,
     propagators: [new W3CTraceContextPropagator(), new SentryTraceHeaderPropagator()],
