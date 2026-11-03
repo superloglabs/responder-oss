@@ -75,16 +75,24 @@ export async function findWorkspaceSecretByName(input: {
   return { ...secret, hasValue: encryptedValue !== null };
 }
 
-// Fills in the value of a secret saved before values were stored, with the
-// hosts and Daytona copy saved alongside it. Returns false when another save
-// filled it in first.
+// Fills in what a secret is missing: its stored value, for a secret saved
+// before values were stored, or its Daytona copy, for one saved while Daytona
+// was not in use. The hosts and both copies are written together. Returns
+// false when another save filled it in first.
 export async function storeWorkspaceSecretValue(input: {
   id: string;
   allowedHosts: string[];
   daytonaSecretId: string | null;
   daytonaSecretName: string | null;
   encryptedValue: string;
+  missing: "daytonaCopy" | "value";
 }): Promise<boolean> {
+  if (input.allowedHosts.length === 0) {
+    throw new Error("Workspace secrets require at least one allowed host");
+  }
+  const missing = input.missing === "value"
+    ? isNull(workspaceSecrets.encryptedValue)
+    : isNull(workspaceSecrets.daytonaSecretId);
   const rows = await getDatabase()
     .update(workspaceSecrets)
     .set({
@@ -93,7 +101,7 @@ export async function storeWorkspaceSecretValue(input: {
       daytonaSecretName: input.daytonaSecretName,
       encryptedValue: input.encryptedValue,
     })
-    .where(and(eq(workspaceSecrets.id, input.id), isNull(workspaceSecrets.encryptedValue)))
+    .where(and(eq(workspaceSecrets.id, input.id), missing))
     .returning({ id: workspaceSecrets.id });
   return rows.length > 0;
 }

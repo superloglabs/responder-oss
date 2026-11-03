@@ -165,6 +165,7 @@ export async function serializeSandboxSession(
   client: SandboxClient,
   session: SandboxSession,
   config: SandboxConfig,
+  context: Omit<WorkerErrorContext, "operation" | "sandboxId"> = {},
   reportException: typeof reportWorkerException = reportWorkerException,
 ): Promise<Record<string, unknown>> {
   if (config.vercel) {
@@ -178,8 +179,9 @@ export async function serializeSandboxSession(
         error: error instanceof Error ? error.message : String(error),
         event: "vercel_sandbox_snapshot_failed",
         sandboxId,
+        ...context,
       }));
-      await reportException(error, { operation: "sandbox_cleanup", sandboxId });
+      await reportException(error, { operation: "sandbox_cleanup", sandboxId, ...context });
     }
   }
   const state = config.vercel

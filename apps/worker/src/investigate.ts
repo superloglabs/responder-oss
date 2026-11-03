@@ -1318,7 +1318,10 @@ export async function runInvestigationAgent(
     const report = redactDaytonaSecretPlaceholders(result.finalOutput.trim());
     await writeTrace(traceEvent("session.completed"));
     if (threadMode) {
-      const sandboxSessionState = await serializeSandboxSession(client, session, config);
+      const sandboxSessionState = await serializeSandboxSession(client, session, config, {
+        investigationId: job.investigationId,
+        organizationId: job.config.organizationId,
+      });
       return {
         report,
         sandboxSessionState,

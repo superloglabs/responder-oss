@@ -46,6 +46,7 @@ import { usageWaiverStart, waiveAutomationRunUsage } from "@responder/core/billi
 import { getOrganizationModelCredential, selectOrganizationModelCredential } from "@responder/core/db/automation-model-credentials";
 import { listProviderModels, matchProviderModel, ModelCatalogError } from "@responder/core/automations/model-catalog";
 import { modelProvider, type ModelProviderId } from "@responder/core/automations/model-providers";
+import { publicApplicationUrl } from "@responder/core/sandbox-network";
 import { workspaceSandboxNetwork } from "./sandbox-network.js";
 import { subscriptionSecretHosts, parseSubscriptionAuth, subscriptionAuthForSandbox } from "@responder/core/automations/chatgpt-subscription";
 import { getAutomationRuntimeWorkspaceSecrets, type RuntimeWorkspaceSecret } from "@responder/core/db/workspace-secrets";
@@ -259,10 +260,7 @@ export const defaultAutomationRunDependencies: AutomationRunDependencies = {
 };
 
 function automationBrokerBaseUrl(environment: NodeJS.ProcessEnv): string {
-  const configured =
-    environment.RESPONDER_PUBLIC_URL ??
-    environment.RESPONDER_APP_URL ??
-    environment.BETTER_AUTH_URL;
+  const configured = publicApplicationUrl(environment);
   if (!configured) {
     throw new Error("A public application URL is required for automation runs");
   }

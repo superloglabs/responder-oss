@@ -551,6 +551,7 @@ describe("workspace secrets", () => {
       daytonaSecretName: "responder_new",
       encryptedValue: expect.any(String),
       id: legacySecret.id,
+      missing: "value",
     });
     expect(deleteDaytonaWorkspaceSecret).toHaveBeenCalledWith("dtn-old-id");
     expect(createWorkspaceSecretRecord).not.toHaveBeenCalled();
@@ -570,6 +571,35 @@ describe("workspace secrets", () => {
       daytonaSecretName: "responder_old",
     }));
     expect(deleteDaytonaWorkspaceSecret).not.toHaveBeenCalled();
+  });
+
+  it("adds a Daytona copy to a secret saved while Daytona was not in use", async () => {
+    vi.stubEnv("SANDBOX_PROVIDER", "daytona");
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    vi.mocked(findWorkspaceSecretByName).mockResolvedValue({
+      ...legacySecret,
+      daytonaSecretId: null,
+      daytonaSecretName: null,
+      hasValue: true,
+    });
+    vi.mocked(createDaytonaWorkspaceSecret).mockResolvedValue({ id: "dtn-new-id", name: "responder_new" });
+    vi.mocked(storeWorkspaceSecretValue).mockResolvedValue(true);
+
+    expect((await resave(["api.example.com"])).status).toBe(201);
+    expect(storeWorkspaceSecretValue).toHaveBeenCalledWith(expect.objectContaining({
+      daytonaSecretId: "dtn-new-id",
+      missing: "daytonaCopy",
+    }));
+    expect(deleteDaytonaWorkspaceSecret).not.toHaveBeenCalled();
+  });
+
+  it("keeps a secret that has both copies", async () => {
+    vi.stubEnv("SANDBOX_PROVIDER", "vercel");
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    vi.mocked(findWorkspaceSecretByName).mockResolvedValue({ ...legacySecret, hasValue: true });
+
+    expect((await resave(["api.example.com"])).status).toBe(409);
+    expect(storeWorkspaceSecretValue).not.toHaveBeenCalled();
   });
 
   it("reports a conflict when another save filled the value in first", async () => {

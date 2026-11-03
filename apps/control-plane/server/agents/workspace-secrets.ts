@@ -91,9 +91,10 @@ async function deleteUnsavedDaytonaSecret(
 
 // Stores the value encrypted, and in Daytona when it is in use, so either
 // sandbox provider can use the secret. The Daytona secret is removed again if
-// the record cannot be saved. Saving a secret that has no stored value fills
-// it in with the submitted hosts, because Daytona cannot return the value it
-// holds; its Daytona copy is replaced, so both copies hold the same value.
+// the record cannot be saved. Saving a secret again fills in what it lacks:
+// a stored value, because Daytona cannot return the one it holds, or a
+// Daytona copy, once Daytona is in use. Both copies then hold the submitted
+// value and hosts, and an older Daytona copy is replaced.
 export async function storeWorkspaceSecret(input: {
   organizationId: string;
   secret: WorkspaceSecretInput;
@@ -112,13 +113,14 @@ export async function storeWorkspaceSecret(input: {
     organizationId: input.organizationId,
     name,
   });
-  if (existing?.hasValue) return conflict;
+  const daytonaInUse = usesDaytonaSecrets();
+  if (existing?.hasValue && (existing.daytonaSecretId || !daytonaInUse)) return conflict;
   const encryptedValue = encryptCredentials({ value });
 
   let daytonaSecret: { id: string; name: string } | null = null;
   if (existing) {
     try {
-      if (usesDaytonaSecrets()) {
+      if (daytonaInUse) {
         daytonaSecret = await createDaytonaWorkspaceSecret({ value, allowedHosts });
       }
       const stored = await storeWorkspaceSecretValue({
@@ -127,6 +129,7 @@ export async function storeWorkspaceSecret(input: {
         daytonaSecretName: daytonaSecret?.name ?? existing.daytonaSecretName,
         encryptedValue,
         id: existing.id,
+        missing: existing.hasValue ? "daytonaCopy" : "value",
       });
       if (!stored) return (await deleteUnsavedDaytonaSecret(daytonaSecret)) ?? conflict;
     } catch {
@@ -154,7 +157,7 @@ export async function storeWorkspaceSecret(input: {
   }
 
   try {
-    if (usesDaytonaSecrets()) {
+    if (daytonaInUse) {
       daytonaSecret = await createDaytonaWorkspaceSecret({ value, allowedHosts });
     }
     const secret = await createWorkspaceSecretRecord({

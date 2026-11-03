@@ -248,10 +248,18 @@ describe("pausing and resuming", () => {
     } as unknown as VercelSandboxClient;
     const reportException = vi.fn().mockResolvedValue(undefined);
 
-    const state = await serializeSandboxSession(client, session, config, reportException);
+    const state = await serializeSandboxSession(
+      client,
+      session,
+      config,
+      { jobId: "run-1", organizationId: "org-1" },
+      reportException,
+    );
 
     expect(reportException).toHaveBeenCalledWith(expect.any(Error), {
+      jobId: "run-1",
       operation: "sandbox_cleanup",
+      organizationId: "org-1",
       sandboxId: "sbx_1",
     });
     expect(resumedSameVercelSandbox(state)).toBe(false);

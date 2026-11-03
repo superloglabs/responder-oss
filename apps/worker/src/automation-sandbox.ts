@@ -247,10 +247,13 @@ function serializedModelBrokerAccess(
 async function pauseSandbox(
   client: SandboxClient,
   session: SandboxSession,
-  input: Pick<FreshAutomationSandboxInput<unknown>, "config" | "onPaused" | "runId">,
+  input: Pick<FreshAutomationSandboxInput<unknown>, "config" | "onPaused" | "organizationId" | "runId">,
 ): Promise<boolean> {
   try {
-    const sessionState = await serializeSandboxSession(client, session, input.config);
+    const sessionState = await serializeSandboxSession(client, session, input.config, {
+      jobId: input.runId,
+      organizationId: input.organizationId,
+    });
     const environment = sessionState.environment;
     if (typeof environment === "object" && environment !== null) {
       delete (environment as Record<string, unknown>)[modelBrokerTokenEnvironmentVariable];
