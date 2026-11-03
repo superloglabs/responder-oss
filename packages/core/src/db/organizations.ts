@@ -2,6 +2,15 @@ import { and, asc, eq, gt } from "drizzle-orm";
 import { invitation, member, organization, user } from "./auth-schema.js";
 import { getDatabase } from "./client.js";
 
+export async function getOrganizationMembership(userId: string, organizationId: string) {
+  const rows = await getDatabase()
+    .select({ userId: member.userId, organizationId: member.organizationId, role: member.role })
+    .from(member)
+    .where(and(eq(member.userId, userId), eq(member.organizationId, organizationId)))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
 export async function getOrganizationName(
   organizationId: string,
 ): Promise<string | null> {

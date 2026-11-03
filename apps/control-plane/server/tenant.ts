@@ -1,4 +1,5 @@
 import * as Sentry from "@sentry/hono/node";
+import { getOrganizationMembership } from "@responder/core/db/organizations";
 import { getAuth } from "./auth.js";
 
 export type ActiveTenantResult =
@@ -32,9 +33,9 @@ export async function getActiveTenant(headers: Headers): Promise<ActiveTenantRes
     return { ok: false, error: "No active organization", status: 409 };
   }
 
-  const activeMember = await auth.api
-    .getActiveMember({ headers })
-    .catch(() => null);
+  // A session can outlive its workspace or membership. Read that expected
+  // absence directly: the auth endpoint records an exception before throwing.
+  const activeMember = await getOrganizationMembership(authSession.user.id, organizationId);
   if (
     !activeMember ||
     activeMember.organizationId !== organizationId ||
