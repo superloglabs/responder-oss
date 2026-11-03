@@ -4,6 +4,7 @@ import {
   sandboxImageKey,
   sandboxImageSettingsSchema,
   sandboxImageSnapshotFor,
+  sandboxImageStartCommand,
   type SandboxImageRecord,
 } from "./sandbox-image.js";
 
@@ -25,6 +26,7 @@ function image(overrides: Partial<SandboxImageRecord> = {}): SandboxImageRecord 
     snapshotId: "snap_workspace",
     snapshotKey: sandboxImageKey(settings, base),
     snapshotRegion: base.region,
+    snapshotStartCommand: "sudo dockerd &",
     startedAt: new Date("2026-11-03T11:55:00Z"),
     status: "ready",
     ...overrides,
@@ -84,5 +86,23 @@ describe("sandbox image snapshot", () => {
 
   it("uses the base when the workspace adds nothing", () => {
     expect(sandboxImageSnapshotFor(defaultSandboxImageSettings, image(), base)).toBeNull();
+  });
+});
+
+describe("sandbox start command", () => {
+  const saved = { ...settings, startCommand: "sudo dockerd & sleep 1" };
+
+  it("uses the start command recorded with the snapshot", () => {
+    expect(sandboxImageStartCommand(saved, image(), "snap_workspace")).toBe("sudo dockerd &");
+  });
+
+  it("runs none on the base snapshot while the workspace snapshot builds", () => {
+    expect(sandboxImageStartCommand(saved, image({ snapshotId: null }), null)).toBe("");
+    expect(sandboxImageStartCommand(saved, null, null)).toBe("");
+  });
+
+  it("uses the saved start command when the workspace needs no snapshot", () => {
+    const startOnly = { ...defaultSandboxImageSettings, startCommand: "echo up" };
+    expect(sandboxImageStartCommand(startOnly, null, null)).toBe("echo up");
   });
 });

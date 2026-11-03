@@ -653,6 +653,8 @@ export const sandboxImages = pgTable(
     snapshotBaseId: text("snapshot_base_id"),
     snapshotRegion: text("snapshot_region"),
     snapshotBuiltAt: timestamp("snapshot_built_at", { withTimezone: true }),
+    // The start command runs on this snapshot use, recorded when it is.
+    snapshotStartCommand: text("snapshot_start_command"),
   },
   (table) => [
     check(

@@ -25,6 +25,7 @@ import {
   sandboxImageKey,
   sandboxImageRequired,
   sandboxImageSnapshotFor,
+  sandboxImageStartCommand,
   sandboxMemoryGiBPerVcpu,
   type SandboxImageBase,
   type SandboxImageRecord,
@@ -34,7 +35,7 @@ import type { SandboxSession } from "./sandbox-session.js";
 import { sandboxSnapshotResources } from "./sandbox-snapshot.js";
 
 // The sandbox a workspace's run starts with: its snapshot when one has built,
-// its size, and the command to run once the sandbox is up. Workspace sandbox
+// its size, and the start command that goes with the snapshot. Workspace sandbox
 // settings apply on Vercel only, so Daytona sandboxes have no size here and
 // are metered as before.
 export interface WorkspaceSandbox<Config extends SandboxConfig = SandboxConfig> {
@@ -71,7 +72,8 @@ export async function workspaceSandbox<Config extends SandboxConfig>(
     : null;
   const snapshotId = sandboxImageSnapshotFor(settings, image, sandboxImageBase(config));
   if (sandboxImageRequired(settings) && !snapshotId) {
-    // The run starts without the workspace's packages until its snapshot builds.
+    // The run starts without the workspace's packages or start command until
+    // its snapshot builds.
     console.error(JSON.stringify({
       event: "sandbox_image_unavailable",
       imageStatus: image?.status ?? null,
@@ -89,7 +91,7 @@ export async function workspaceSandbox<Config extends SandboxConfig>(
       cpu: settings.vcpus,
       memory: settings.vcpus * sandboxMemoryGiBPerVcpu,
     },
-    startCommand: settings.startCommand,
+    startCommand: sandboxImageStartCommand(settings, image, snapshotId),
   };
 }
 
@@ -204,13 +206,14 @@ export async function buildSandboxImage(
     image?.snapshotKey === key &&
     image.snapshotId
   ) {
-    // Nothing changed, or the settings went back to ones that already built.
-    // Recording it again shows the request as handled.
+    // Only the start command changed, nothing did, or the settings went back
+    // to ones that already built. Recording it again with the saved start
+    // command applies that and shows the request as handled.
     await dependencies.start(organizationId, key);
     await dependencies.complete(
       organizationId,
       key,
-      { ...base, builtSnapshotId: image.snapshotId },
+      { ...base, builtSnapshotId: image.snapshotId, startCommand: settings.startCommand },
       image.log,
     );
     return "current";
@@ -275,7 +278,7 @@ export async function buildSandboxImage(
     await dependencies.complete(
       organizationId,
       key,
-      { ...base, builtSnapshotId: snapshot.snapshotId },
+      { ...base, builtSnapshotId: snapshot.snapshotId, startCommand: settings.startCommand },
       log,
     );
     return "built";
@@ -298,7 +301,8 @@ export async function buildSandboxImage(
 }
 
 // Whether a workspace's image needs a build job: its settings or the base
-// snapshot changed, an admin asked for a rebuild, a build was cut off, or
+// snapshot changed, an admin asked for a rebuild, a build was cut off, the
+// start command changed and is not yet recorded with the snapshot, or
 // settings that no longer need an image left one behind. A job for a build
 // already running waits behind it and finds nothing to do.
 export function sandboxImageNeedsBuild(
@@ -307,8 +311,10 @@ export function sandboxImageNeedsBuild(
 ): boolean {
   const { image, settings } = workspace;
   if (!sandboxImageRequired(settings)) return image !== null;
-  return image?.key !== sandboxImageKey(settings, base) ||
+  const key = sandboxImageKey(settings, base);
+  return image?.key !== key ||
     image.status === "building" ||
+    (image.snapshotKey === key && image.snapshotStartCommand !== settings.startCommand) ||
     rebuildRequested(workspace.rebuildRequestedAt, image);
 }
 

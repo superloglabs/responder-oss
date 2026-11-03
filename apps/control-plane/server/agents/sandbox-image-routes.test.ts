@@ -72,9 +72,17 @@ describe("sandbox settings", () => {
     expect(deps.queueBuild).not.toHaveBeenCalled();
   });
 
-  it("changes the start command without a build", async () => {
+  it("queues the image job to record a new start command with the snapshot", async () => {
     const { app, deps } = setup({ settings: playwright });
     const next = { ...playwright, startCommand: "sudo dockerd >/tmp/dockerd.log 2>&1 &" };
+    await put(app, next);
+    expect(deps.save).toHaveBeenCalledWith(organizationId, next, userId, true);
+    expect(deps.queueBuild).toHaveBeenCalledWith(organizationId);
+  });
+
+  it("changes the start command right away when there is no image", async () => {
+    const { app, deps } = setup();
+    const next = { ...defaultSandboxImageSettings, startCommand: "echo up" };
     await put(app, next);
     expect(deps.save).toHaveBeenCalledWith(organizationId, next, userId, false);
     expect(deps.queueBuild).not.toHaveBeenCalled();
@@ -104,6 +112,7 @@ describe("sandbox settings", () => {
         snapshotId: "snap_workspace",
         snapshotKey: "k",
         snapshotRegion: "cdg1",
+        snapshotStartCommand: "",
         startedAt: new Date("2026-11-03T11:55:00Z"),
         status: "ready",
       },
