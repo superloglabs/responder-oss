@@ -1259,6 +1259,14 @@ OAuth servers must support authorization-server discovery, PKCE, dynamic client
 registration, and that redirect URL. Non-local servers must use HTTPS and
 resolve only to public network addresses.
 
+By default, agents can use every tool a server offers. In Settings, **Custom
+MCP → Manage → Tools** limits a connection to selected tools. **Read-only
+only** selects the tools the server marks with `readOnlyHint`. The list is
+stored as `allowedTools` in the connection's metadata and survives
+reconnecting. Investigations and automation runs list only the selected tools
+and refuse calls to any other tool. Tools the server adds later stay off until
+someone selects them.
+
 ## Local callbacks
 
 Provider consoles generally require public HTTPS callbacks. Put a stable ngrok

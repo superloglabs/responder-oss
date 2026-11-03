@@ -17,6 +17,7 @@ import {
   listOrganizationIntegrationAccounts,
   replaceIntegrationResources,
   replaceIntegrationResourcesIfCredentialsMatch,
+  setCustomMcpAllowedTools,
   setIntegrationAccountStatus,
   setIntegrationAccountStatusIfCredentialsMatch,
   updateIntegrationAccountCredentials,
@@ -42,6 +43,7 @@ import {
   beginCustomMcpOAuth,
   callCustomMcpTool,
   finishCustomMcpOAuth,
+  listCustomMcpToolSummaries,
   listCustomMcpTools,
   parseCustomMcpCredentials,
   validateCustomMcpUrl,
@@ -100,6 +102,7 @@ vi.mock("../../../../packages/core/src/db/integrations.js", () => ({
   replaceIntegrationResources: vi.fn(),
   replaceIntegrationResourcesIfCredentialsMatch: vi.fn(),
   replaceRepositories: vi.fn(),
+  setCustomMcpAllowedTools: vi.fn(),
   setIntegrationAccountStatus: vi.fn(),
   setIntegrationAccountStatusIfCredentialsMatch: vi.fn(),
   updateIntegrationAccountCredentials: vi.fn(),
@@ -146,21 +149,29 @@ vi.mock("../../../../packages/core/src/integrations/gcp-setup.js", async (import
   };
 });
 
-vi.mock("../../../../packages/core/src/integrations/custom-mcp.js", async (importOriginal) => ({
-  CustomMcpOAuthProvider: (
-    await importOriginal<typeof import("../../../../packages/core/src/integrations/custom-mcp.js")>()
-  ).CustomMcpOAuthProvider,
-  beginCustomMcpOAuth: vi.fn(),
-  callCustomMcpTool: vi.fn(),
-  finishCustomMcpOAuth: vi.fn(),
-  listCustomMcpTools: vi.fn(),
-  parseCustomMcpCredentials: vi.fn(),
-  safeCustomMcpFetch: vi.fn((input: RequestInfo | URL, init?: RequestInit) =>
-    fetch(input, init)
-  ),
-  validateCustomMcpUrl: vi.fn(),
-  verifyCustomMcpConnection: vi.fn(),
-}));
+vi.mock("../../../../packages/core/src/integrations/custom-mcp.js", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("../../../../packages/core/src/integrations/custom-mcp.js")
+  >();
+  return {
+    CustomMcpOAuthProvider: actual.CustomMcpOAuthProvider,
+    McpOAuthRefreshError: actual.McpOAuthRefreshError,
+    beginCustomMcpOAuth: vi.fn(),
+    callCustomMcpTool: vi.fn(),
+    customMcpAllowedTools: actual.customMcpAllowedTools,
+    customMcpAllowedToolsSchema: actual.customMcpAllowedToolsSchema,
+    finishCustomMcpOAuth: vi.fn(),
+    listCustomMcpToolSummaries: vi.fn(),
+    listCustomMcpTools: vi.fn(),
+    parseCustomMcpCredentials: vi.fn(),
+    refreshCustomMcpOAuth: vi.fn(),
+    safeCustomMcpFetch: vi.fn((input: RequestInfo | URL, init?: RequestInit) =>
+      fetch(input, init)
+    ),
+    validateCustomMcpUrl: vi.fn(),
+    verifyCustomMcpConnection: vi.fn(),
+  };
+});
 
 vi.mock("../../../../packages/core/src/integrations/dash0.js", async (importOriginal) => {
   const actual = await importOriginal<
@@ -2356,6 +2367,121 @@ describe("integration callback routing", () => {
     expect(metricLog.mock.calls.flat().join(" ")).toContain(
       '"outcome":"connected"',
     );
+  });
+
+  it("keeps a custom MCP server's tool list when it is reconnected", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(validateCustomMcpUrl).mockResolvedValue(
+      new URL("https://mcp.example.com/mcp"),
+    );
+    vi.mocked(getOrganizationIntegrationAccountByExternalId).mockResolvedValue({
+      encryptedCredentials: "encrypted-credentials",
+      id: "30000000-0000-4000-8000-000000000000",
+      metadata: { allowedTools: ["list_orders"], authType: "api_token" },
+      status: "connected",
+    });
+    vi.mocked(verifyCustomMcpConnection).mockResolvedValue(2);
+    vi.mocked(encryptCredentials).mockReturnValue("encrypted-credentials");
+    vi.mocked(upsertIntegrationAccount).mockResolvedValue(
+      "30000000-0000-4000-8000-000000000000",
+    );
+    vi.spyOn(console, "info").mockImplementation(() => {});
+
+    const response = await app.request("/api/integrations/custom-mcp/connect", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        apiToken: "new-token",
+        authType: "api_token",
+        displayName: "Production metrics",
+        mcpUrl: "https://mcp.example.com/mcp",
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(upsertIntegrationAccount).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: {
+          allowedTools: ["list_orders"],
+          authType: "api_token",
+          mcpUrl: "https://mcp.example.com/mcp",
+          toolCount: 2,
+        },
+      }),
+    );
+  });
+
+  it("lists a custom MCP server's tools with the connection's tool list", async () => {
+    vi.mocked(getOrganizationIntegrationAccount).mockResolvedValue({
+      encryptedCredentials: "encrypted-credentials",
+      id: "30000000-0000-4000-8000-000000000000",
+      metadata: { allowedTools: ["list_orders"] },
+      status: "connected",
+    });
+    vi.mocked(decryptCredentials).mockReturnValue({});
+    vi.mocked(parseCustomMcpCredentials).mockReturnValue({
+      apiToken: "secret-token",
+      authType: "api_token",
+      mcpUrl: "https://mcp.example.com/mcp",
+    });
+    vi.mocked(listCustomMcpToolSummaries).mockResolvedValue([
+      { name: "list_orders", readOnly: true },
+      { description: "Refunds an order", name: "refund_order", readOnly: false },
+    ]);
+
+    const response = await app.request(
+      "/api/integrations/custom-mcp/30000000-0000-4000-8000-000000000000/tools",
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      allowedTools: ["list_orders"],
+      tools: [
+        { name: "list_orders", readOnly: true },
+        { description: "Refunds an order", name: "refund_order", readOnly: false },
+      ],
+    });
+    expect(listCustomMcpToolSummaries).toHaveBeenCalledWith({
+      accessToken: "secret-token",
+      mcpUrl: "https://mcp.example.com/mcp",
+    });
+  });
+
+  it("saves or clears a custom MCP connection's tool list", async () => {
+    vi.mocked(setCustomMcpAllowedTools).mockResolvedValue(true);
+    const accountPath =
+      "/api/integrations/custom-mcp/30000000-0000-4000-8000-000000000000/tools";
+
+    const limited = await app.request(accountPath, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ allowedTools: ["search", "list_orders", "search"] }),
+    });
+    expect(limited.status).toBe(200);
+    expect(setCustomMcpAllowedTools).toHaveBeenLastCalledWith({
+      allowedTools: ["list_orders", "search"],
+      integrationAccountId: "30000000-0000-4000-8000-000000000000",
+      organizationId: tenant.organizationId,
+    });
+
+    const cleared = await app.request(accountPath, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ allowedTools: null }),
+    });
+    expect(cleared.status).toBe(200);
+    expect(setCustomMcpAllowedTools).toHaveBeenLastCalledWith({
+      allowedTools: null,
+      integrationAccountId: "30000000-0000-4000-8000-000000000000",
+      organizationId: tenant.organizationId,
+    });
+
+    const invalid = await app.request(accountPath, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ allowedTools: [""] }),
+    });
+    expect(invalid.status).toBe(400);
   });
 
   it("logs a useful custom MCP failure without echoing remote secrets", async () => {

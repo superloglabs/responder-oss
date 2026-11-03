@@ -12,6 +12,7 @@ import {
   type DatadogSiteId,
 } from "../integrations/datadog.js";
 import {
+  customMcpAllowedTools,
   McpOAuthRefreshError,
   oauthConnectionRefreshMessage,
   parseCustomMcpCredentials,
@@ -1399,6 +1400,8 @@ export type RuntimeGrafanaConnection =
 export interface RuntimeCustomMcpConnection {
   accessToken: string;
   accountId: string;
+  /** The tools agents may use, or null for every tool the server offers. */
+  allowedTools?: string[] | null;
   displayName: string;
   mcpUrl: string;
 }
@@ -2094,6 +2097,9 @@ async function getRuntimeMcpConnections(
     connections.push({
       accessToken,
       accountId: account.id,
+      ...(provider === "custom_mcp"
+        ? { allowedTools: customMcpAllowedTools(account.metadata) }
+        : {}),
       displayName: account.displayName,
       mcpUrl: credentials.mcpUrl,
     });

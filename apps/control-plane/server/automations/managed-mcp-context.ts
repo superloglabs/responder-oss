@@ -39,6 +39,8 @@ export interface ManagedMcpServer {
   // Names the provider in errors, for example "Google Cloud MCP".
   label: string;
   now: () => number;
+  // Answers a call to a tool the rule does not allow.
+  unavailableToolMessage?: string;
   url: string;
 }
 
@@ -199,7 +201,7 @@ export async function managedMcpDecision(input: {
       return {
         code: -32602,
         kind: "reject",
-        message: "Unknown or non-read-only tool",
+        message: input.server.unavailableToolMessage ?? "Unknown or non-read-only tool",
         status: 400,
       };
     }

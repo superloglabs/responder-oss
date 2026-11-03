@@ -1,4 +1,5 @@
 import { chatConnectionRoutes } from "./chat-connection.js";
+import { customMcpToolRoutes } from "./custom-mcp-tools.js";
 import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -37,6 +38,7 @@ import {
 import {
   beginCustomMcpOAuth,
   callCustomMcpTool,
+  customMcpAllowedTools,
   finishCustomMcpOAuth,
   listCustomMcpTools,
   parseCustomMcpCredentials,
@@ -1209,6 +1211,7 @@ export async function startIntegrationConnection(input: {
 
 export const integrationRoutes = new Hono()
   .route("/chat", chatConnectionRoutes)
+  .route("/custom-mcp", customMcpToolRoutes)
   .route("/github/pull-request-author", githubPullRequestAuthorRoutes)
   .get("/", async (context) => {
     const tenant = await getActiveTenant(context.req.raw.headers);
@@ -1272,6 +1275,9 @@ export const integrationRoutes = new Hono()
               (account.metadata.actor !== LINEAR_APP_ACTOR ||
                 account.metadata.mentionable !== true)
               ? { reconnectRecommended: true }
+              : {}),
+            ...(definition.id === "custom_mcp"
+              ? { allowedTools: customMcpAllowedTools(account.metadata) }
               : {}),
             ...(definition.id === "gcp"
               ? {
@@ -3576,6 +3582,15 @@ export const integrationRoutes = new Hono()
           allowLocal: process.env.NODE_ENV !== "production",
         })
       ).toString();
+      // Reconnecting a server keeps the tools its agents were limited to.
+      const existing = await getOrganizationIntegrationAccountByExternalId({
+        externalAccountId: mcpUrl,
+        organizationId: tenant.organizationId,
+        provider: "custom_mcp",
+      });
+      const preservedToolAccess = existing && "allowedTools" in existing.metadata
+        ? { allowedTools: customMcpAllowedTools(existing.metadata) }
+        : {};
 
       if (parsed.data.authType === "api_token") {
         failureOutcome = "verify_failed";
@@ -3594,7 +3609,7 @@ export const integrationRoutes = new Hono()
             mcpUrl,
           }),
           credentialKeyVersion: 1,
-          metadata: { authType: "api_token", mcpUrl, toolCount },
+          metadata: { authType: "api_token", mcpUrl, toolCount, ...preservedToolAccess },
         });
         await captureAnalyticsEvent({
           distinctId: tenant.user.id,
@@ -3631,7 +3646,7 @@ export const integrationRoutes = new Hono()
           oauth: {},
         }),
         credentialKeyVersion: 1,
-        metadata: { authType: "oauth", mcpUrl },
+        metadata: { authType: "oauth", mcpUrl, ...preservedToolAccess },
         status: "pending",
       });
       const connectionState = await createIntegrationConnectionState({
