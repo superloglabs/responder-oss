@@ -7,6 +7,8 @@ import {
   setSlackThreadStatus,
   stopSlackResponseStream,
   updateSlackMessage,
+  finishSlackFileUpload,
+  startSlackFileUpload,
   uploadSlackImage,
 } from "./slack.js";
 
@@ -368,6 +370,52 @@ describe("Slack image uploads", () => {
     expect(fetchMock.mock.calls[1]![1].headers).toEqual({ "content-type": "application/octet-stream" });
     expect(fetchMock.mock.calls[2]![1].headers["content-type"]).toBe("application/x-www-form-urlencoded");
     expect(JSON.parse(new URLSearchParams(fetchMock.mock.calls[2]![1].body).get("files")!)).toEqual([{ id: "F123", title: "Evaluation" }]);
+  });
+
+  it("starts an external upload for one file", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json({ ok: true, upload_url: "https://files.slack.com/upload/v1/abc", file_id: "F0FILE1" }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(startSlackFileUpload({ accessToken: "token", filename: "shot.png", length: 42 }))
+      .resolves.toEqual({ fileId: "F0FILE1", uploadUrl: "https://files.slack.com/upload/v1/abc" });
+    expect(fetchMock.mock.calls[0]![0]).toBe("https://slack.com/api/files.getUploadURLExternal");
+    expect(Object.fromEntries(new URLSearchParams(fetchMock.mock.calls[0]![1].body)))
+      .toEqual({ filename: "shot.png", length: "42" });
+  });
+
+  it("reports a malformed upload ticket as a Slack error", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ ok: true, file_id: "F0FILE1" })));
+    await expect(startSlackFileUpload({ accessToken: "token", filename: "shot.png", length: 42 }))
+      .rejects.toMatchObject({ code: "invalid_response", name: "SlackApiError" });
+  });
+
+  it("shares uploaded files in a thread with a comment", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: true, files: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    await finishSlackFileUpload({
+      accessToken: "token",
+      channelId: "C123",
+      files: [{ id: "F0FILE1", title: "Checkout" }, { id: "F0FILE2" }],
+      initialComment: "Evidence",
+      threadTimestamp: "1785500000.000100",
+    });
+    expect(fetchMock.mock.calls[0]![0]).toBe("https://slack.com/api/files.completeUploadExternal");
+    const body = Object.fromEntries(new URLSearchParams(fetchMock.mock.calls[0]![1].body));
+    expect(body).toEqual({
+      channel_id: "C123",
+      files: JSON.stringify([{ id: "F0FILE1", title: "Checkout" }, { id: "F0FILE2" }]),
+      initial_comment: "Evidence",
+      thread_ts: "1785500000.000100",
+    });
+  });
+
+  it("shares files in a channel without an empty comment or thread", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: true, files: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+    await finishSlackFileUpload({ accessToken: "token", channelId: "C123", files: [{ id: "F0FILE1" }] });
+    expect(Object.fromEntries(new URLSearchParams(fetchMock.mock.calls[0]![1].body)))
+      .toEqual({ channel_id: "C123", files: JSON.stringify([{ id: "F0FILE1" }]) });
   });
 
   it("does not finalize a failed byte upload", async () => {

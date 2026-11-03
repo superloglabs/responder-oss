@@ -186,6 +186,47 @@ export async function removeSlackReaction(input: {
   }
 }
 
+// The first step of Slack's external upload: an upload URL for one file,
+// which the caller posts the file's bytes to before finishing the upload.
+export async function startSlackFileUpload(input: {
+  accessToken: string;
+  filename: string;
+  length: number;
+  signal?: AbortSignal;
+}): Promise<{ fileId: string; uploadUrl: string }> {
+  const ticket = await callSlackApi(input.accessToken, "files.getUploadURLExternal", new URLSearchParams({
+    filename: input.filename,
+    length: String(input.length),
+  }), input.signal);
+  const parsed = z.object({
+    file_id: z.string().min(1),
+    upload_url: z.url(),
+  }).safeParse(ticket);
+  if (!parsed.success) {
+    throw new SlackApiError("files.getUploadURLExternal", "invalid_response", parsed.error.issues
+      .slice(0, 7)
+      .map((issue) => `Invalid field ${issue.path.join(".") || "response"} (${issue.code})`));
+  }
+  return { fileId: parsed.data.file_id, uploadUrl: parsed.data.upload_url };
+}
+
+// Shares uploaded files in a channel or thread, as one message.
+export async function finishSlackFileUpload(input: {
+  accessToken: string;
+  channelId: string;
+  files: Array<{ id: string; title?: string }>;
+  initialComment?: string;
+  signal?: AbortSignal;
+  threadTimestamp?: string;
+}): Promise<void> {
+  await callSlackApi(input.accessToken, "files.completeUploadExternal", new URLSearchParams({
+    channel_id: input.channelId,
+    files: JSON.stringify(input.files),
+    ...(input.initialComment ? { initial_comment: input.initialComment } : {}),
+    ...(input.threadTimestamp ? { thread_ts: input.threadTimestamp } : {}),
+  }), input.signal);
+}
+
 // Finalize privately; the image block shares the file with the alert message.
 export async function uploadSlackImage(input: {
   accessToken: string;
