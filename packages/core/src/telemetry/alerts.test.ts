@@ -9,7 +9,7 @@ import {
   formatAlertValue,
   worseValue,
 } from "./alerts.js";
-import { alertValueUnit } from "./alert-text.js";
+import { alertDescriptionText, alertValueUnit } from "./alert-text.js";
 
 const errorLogs = {
   aggregation: "count" as const,
@@ -215,6 +215,22 @@ describe("alert messages", () => {
     );
     expect(alertFiringMessage({ alertName: "x", alertUrl: null, groupBy: null, groupKey: "", rule: errorLogs, value: 51 }).markdown)
       .toMatch(/above 50\.$/u);
+  });
+
+  it("keeps an escaped description within Slack's block limit", () => {
+    const firing = alertFiringMessage({
+      alertDescription: "&".repeat(2_000),
+      alertName: "x".repeat(200),
+      alertUrl: "https://us.superlog.sh/alerts/1",
+      groupBy: "attr:http.route",
+      groupKey: "&".repeat(200),
+      rule: errorLogs,
+      value: 51,
+    });
+    expect(firing.markdown.length).toBeLessThanOrEqual(12_000);
+    // An entity is never cut in half.
+    expect(firing.markdown).toMatch(/(?:&amp;)+…\n\n\[View alert\]/u);
+    expect(alertDescriptionText("a&b")).toBe("a&amp;b");
   });
 
   it("says how long the alert fired", () => {

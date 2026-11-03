@@ -19,6 +19,7 @@
 .alertOverview__description > :last-child { margin-bottom: 0; }
 .alertOverview__description :is(p, ul, ol) { margin: 0 0 8px; }
 .alertOverview__description :is(ul, ol) { padding-left: 18px; }
+.alertOverview__description pre { overflow-x: auto; overflow-wrap: normal; }
 .alertOverview__description a { color: var(--ds-info); text-decoration: underline; text-underline-offset: 2px; }
 .alertOverview__copy section { display: flex; flex-direction: column; gap: 12px; }
 .alertProperties { flex: 0 0 242px; min-width: 0; }

@@ -124,6 +124,15 @@ describe("alert routes", () => {
     expect((await send(missing.app, "DELETE", `/${alertId}`)).status).toBe(404);
   });
 
+  it("keeps the description when a replacement leaves it out", async () => {
+    const { app, dependencies } = routes({ findAlert: vi.fn(async () => ({ ...alert, description: "See the runbook." })) });
+
+    expect((await send(app, "PUT", `/${alertId}`, rule)).status).toBe(200);
+    expect(dependencies.updateAlert).toHaveBeenLastCalledWith(organizationId, alertId, expect.objectContaining({ description: "See the runbook." }));
+    expect((await send(app, "PUT", `/${alertId}`, { ...rule, description: null })).status).toBe(200);
+    expect(dependencies.updateAlert).toHaveBeenLastCalledWith(organizationId, alertId, expect.objectContaining({ description: null }));
+  });
+
   it("previews the current value and a chart one window per bucket", async () => {
     const { app, dependencies } = routes();
 
