@@ -56,6 +56,7 @@ import { listProviderModels, matchProviderModel, ModelCatalogError } from "@resp
 import { modelProvider, type ModelProviderId } from "@responder/core/automations/model-providers";
 import { publicApplicationUrl } from "@responder/core/sandbox-network";
 import { workspaceSandboxNetwork } from "./sandbox-network.js";
+import { workspaceSandbox } from "./sandbox-image.js";
 import { subscriptionSecretHosts, parseSubscriptionAuth, subscriptionAuthForSandbox } from "@responder/core/automations/chatgpt-subscription";
 import { getAutomationRuntimeWorkspaceSecrets, type RuntimeWorkspaceSecret } from "@responder/core/db/workspace-secrets";
 import { getAutomationRuntimeSkills, type RuntimeWorkspaceSkill } from "@responder/core/db/workspace-skills";
@@ -174,6 +175,7 @@ export interface AutomationRunDependencies {
   getSlackAccount: typeof getAutomationNotificationAccount;
   getWorkspaceSecrets: typeof getAutomationRuntimeWorkspaceSecrets;
   getSandboxNetwork: typeof workspaceSandboxNetwork;
+  getWorkspaceSandbox: typeof workspaceSandbox;
   getSkills: typeof getAutomationRuntimeSkills;
   getMemories: typeof getRuntimeWorkspaceMemories;
   grantAllowanceExhausted: typeof automationModelBrokerGrantAllowanceExhausted;
@@ -235,6 +237,7 @@ export const defaultAutomationRunDependencies: AutomationRunDependencies = {
   getSlackAccount: getAutomationNotificationAccount,
   getWorkspaceSecrets: getAutomationRuntimeWorkspaceSecrets,
   getSandboxNetwork: workspaceSandboxNetwork,
+  getWorkspaceSandbox: workspaceSandbox,
   getSkills: getAutomationRuntimeSkills,
   getMemories: getRuntimeWorkspaceMemories,
   grantAllowanceExhausted: automationModelBrokerGrantAllowanceExhausted,
@@ -1050,8 +1053,8 @@ export async function processAutomationRun(
       runId: run.runId,
     });
     grantId = grant.id;
-    const [sandboxConfig, automationSecrets, skills, memories, connections, sandboxNetwork] = await Promise.all([
-      Promise.resolve(requireSandboxConfig(environment)),
+    const [sandbox, automationSecrets, skills, memories, connections, sandboxNetwork] = await Promise.all([
+      dependencies.getWorkspaceSandbox(run.organizationId, requireSandboxConfig(environment)),
       dependencies.getWorkspaceSecrets(run.automationVersionId),
       dependencies.getSkills(run.automationVersionId),
       dependencies.getMemories(run.organizationId),
@@ -1112,9 +1115,11 @@ export async function processAutomationRun(
     let pausedSandbox: PausedAutomationSandbox | null = null;
     const runTurn = () => dependencies.runInSandbox({
       brokerToken: grant.token,
-      config: sandboxConfig,
+      config: sandbox.config,
       keepPaused,
       network: sandboxNetwork,
+      resources: sandbox.resources,
+      startCommand: sandbox.startCommand,
       onPaused: (sandbox) => { pausedSandbox = sandbox; },
       organizationId: run.organizationId,
       ...(keepPaused && run.sandboxSessionState ? { resumeState: run.sandboxSessionState } : {}),

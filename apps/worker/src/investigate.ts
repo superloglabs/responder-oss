@@ -126,6 +126,7 @@ import {
 } from "./thread-pull-request.js";
 import { createWorkspaceTools } from "./workspace-tools.js";
 import { workspaceSandboxNetwork } from "./sandbox-network.js";
+import { runSandboxStartCommand, workspaceSandbox } from "./sandbox-image.js";
 import { materializeWorkspaceMemories, workspaceMemoryInstructions } from "./workspace-memories.js";
 import { createIssueRemediationUpdateTool } from "./issue-followup.js";
 import {
@@ -953,7 +954,8 @@ export async function runInvestigationAgent(
     .map((server) => new RecoverableMcpServer(server, describeConnectError));
 
   const sandboxName = `responder-investigation-${job.investigationId}`;
-  const client = createSandboxClient(config, {
+  const sandbox = await workspaceSandbox(job.config.organizationId, config);
+  const client = createSandboxClient(sandbox.config, {
     name: sandboxName,
     pauseOnExit: threadMode,
   });
@@ -1004,7 +1006,7 @@ export async function runInvestigationAgent(
     const persistedState = sessionRuntime?.sandboxSessionState;
     if (threadMode && persistedState) {
       try {
-        session = await resumeSandbox(client, persistedState, config);
+        session = await resumeSandbox(client, persistedState, sandbox.config);
       } catch (error) {
         // Daytona deletes a paused thread sandbox after a day; the thread
         // continues in a fresh one.
@@ -1017,7 +1019,7 @@ export async function runInvestigationAgent(
     }
     session ??= await createSandboxSession(
       client,
-      config,
+      sandbox.config,
       sandboxName,
       undefined,
       undefined,
@@ -1030,7 +1032,8 @@ export async function runInvestigationAgent(
     meter = startSandboxMeter({
       billable: usageBillable,
       organizationId: job.config.organizationId,
-      snapshot: Boolean(config.sandboxSnapshotName),
+      snapshot: Boolean(sandbox.config.sandboxSnapshotName),
+      resources: sandbox.resources,
       workload: "investigation",
       workloadId: job.investigationId,
     });
@@ -1038,28 +1041,29 @@ export async function runInvestigationAgent(
     // A sandbox Daytona recreated has the marker but not the repositories.
     const sessionReady = Boolean(
       persistedState &&
-        resumedSameSandbox(session, persistedState, config) &&
+        resumedSameSandbox(session, persistedState, sandbox.config) &&
         await session.pathExists(sessionMarker),
     );
     if (!sessionReady) {
       await configureSandbox(
         session,
-        config,
+        sandbox.config,
         workspaceSecrets,
         threadMode ? pausedThreadSandboxLifetimeMinutes : 0,
         sandboxNetwork,
       );
-      if (!config.sandboxSnapshotName) await prepareDaytonaSandbox(session);
+      if (!sandbox.config.sandboxSnapshotName) await prepareDaytonaSandbox(session);
     } else {
       // Thread sandboxes set up before the deletion interval existed never
       // expire; give them the same interval.
-      if (!config.vercel) {
-        await configureSandbox(session, config, [], pausedThreadSandboxLifetimeMinutes);
+      if (!sandbox.config.vercel) {
+        await configureSandbox(session, sandbox.config, [], pausedThreadSandboxLifetimeMinutes);
       }
       // Vercel drops the firewall rules when a sandbox stops, so this also
       // mounts its secrets again.
-      await applySandboxNetwork(session, config, workspaceSecrets, sandboxNetwork);
+      await applySandboxNetwork(session, sandbox.config, workspaceSecrets, sandboxNetwork);
     }
+    await runSandboxStartCommand(session, sandbox.startCommand);
     const repositories = sessionReady
       ? threadMode && job.refreshWorkspace
         ? await refreshRuntimeRepositories(session, job.config.id)
@@ -1326,7 +1330,7 @@ export async function runInvestigationAgent(
     const report = redactDaytonaSecretPlaceholders(result.finalOutput.trim());
     await writeTrace(traceEvent("session.completed"));
     if (threadMode) {
-      const sandboxSessionState = await serializeSandboxSession(client, session, config, {
+      const sandboxSessionState = await serializeSandboxSession(client, session, sandbox.config, {
         investigationId: job.investigationId,
         organizationId: job.config.organizationId,
       });
@@ -1362,7 +1366,7 @@ export async function runInvestigationAgent(
             organizationId: job.config.organizationId,
           });
         } else {
-          await closeSandbox(session, config, {
+          await closeSandbox(session, sandbox.config, {
             investigationId: job.investigationId,
             organizationId: job.config.organizationId,
           });

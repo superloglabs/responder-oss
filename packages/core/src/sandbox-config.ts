@@ -9,6 +9,9 @@ export interface VercelSandboxConfig {
   // Required, because Vercel otherwise runs sandboxes in the US.
   region: string;
   sandboxSnapshotName: string;
+  // Set from the workspace's settings. Unset means 2 vCPUs, the size of the
+  // snapshot this repository builds.
+  vcpus?: number;
   vercel: { projectId: string; teamId: string; token: string };
 }
 

@@ -75,7 +75,7 @@ async function startVercelSession(
     ...config.vercel,
     persistent: false,
     region: config.region,
-    resources: { vcpus: sandboxSnapshotResources.cpu },
+    resources: { vcpus: config.vcpus ?? sandboxSnapshotResources.cpu },
     source: { snapshotId, type: "snapshot" },
     timeout: vercelSandboxTimeoutMs,
   });
