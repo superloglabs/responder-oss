@@ -716,9 +716,14 @@ describe("automation context broker", () => {
       );
       expect(forwarded.status).toBe(200);
       expect(await forwarded.text()).toContain("checkout failed");
-      const calls = dependencies.providerFetch.mock.calls as Array<[string, RequestInit]>;
+      const calls = dependencies.providerFetch.mock.calls as Array<
+        [string, RequestInit, { timeoutMs?: number }?]
+      >;
       expect(calls.every(([url]) => url === "https://mcp.cloudflare.com/mcp")).toBe(true);
       expect(new Headers(calls.at(-1)![1].headers).get("authorization")).toBe("Bearer fresh-cloudflare-token");
+      // Only the forwarded tool call waits longer; listing keeps the default.
+      expect(calls.at(-1)![2]).toEqual({ timeoutMs: 120_000 });
+      expect(calls.slice(0, -1).every(([, , options]) => options === undefined)).toBe(true);
       expect(dependencies.refreshCustomMcp).toHaveBeenCalledWith(expect.objectContaining({
         redirectUrl: expect.stringMatching(/\/api\/integrations\/cloudflare\/callback$/u),
       }));
@@ -1357,9 +1362,11 @@ describe("automation context broker", () => {
       integrationAccountId: accountId,
       organizationId: activeClaim.organizationId,
     });
+    // Sentry's search tools can run past the default 30 second bound.
     expect(dependencies.providerFetch).toHaveBeenCalledWith(
       "https://mcp.sentry.dev/mcp/acme?skills=inspect",
       expect.anything(),
+      { timeoutMs: 120_000 },
     );
     const request = dependencies.providerFetch.mock.calls[0]![1] as RequestInit;
     expect(new Headers(request.headers).get("authorization")).toBe(

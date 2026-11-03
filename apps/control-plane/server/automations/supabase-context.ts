@@ -14,7 +14,7 @@ export function supabaseContextServer(input: {
   accessMode: SupabaseAccessMode;
   accessToken: () => Promise<string>;
   accountId: string;
-  fetch: (input: string, init: RequestInit) => Promise<Response>;
+  fetch: ManagedMcpServer["fetch"];
   mcpUrl: string;
   now: () => number;
 }): ManagedMcpServer {
