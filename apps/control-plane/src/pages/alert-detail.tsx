@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
+import Markdown from "react-markdown";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   alertForm,
@@ -331,7 +332,7 @@ function AlertDetail({
             {describeAlertCondition(alert.comparator, alert.threshold, unit)}
             {alert.slack ? ` and notifies ${channel ? `#${channel.name}` : `Slack ${alert.slack.channelId}`}` : ""}.
           </p>
-          {alert.description ? <p className="alertOverview__description">{alert.description}</p> : null}
+          {alert.description ? <div className="alertOverview__description"><Markdown>{alert.description}</Markdown></div> : null}
           <section>
             <h2>Current evaluation</h2>
             <p>

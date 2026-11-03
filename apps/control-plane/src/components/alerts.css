@@ -14,7 +14,12 @@
 .alertHeader > .alertMuted { font-size: 13px; line-height: 16px; }
 .alertOverview { display: flex; align-items: flex-start; gap: 71px; }
 .alertOverview__copy { display: flex; flex-direction: column; flex: 1; min-width: 0; gap: 22px; color: #444; line-height: 23px; }
-.alertOverview__description { white-space: pre-wrap; overflow-wrap: anywhere; }
+.alertOverview__description { overflow-wrap: anywhere; }
+.alertOverview__description > :first-child { margin-top: 0; }
+.alertOverview__description > :last-child { margin-bottom: 0; }
+.alertOverview__description :is(p, ul, ol) { margin: 0 0 8px; }
+.alertOverview__description :is(ul, ol) { padding-left: 18px; }
+.alertOverview__description a { color: var(--ds-info); text-decoration: underline; text-underline-offset: 2px; }
 .alertOverview__copy section { display: flex; flex-direction: column; gap: 12px; }
 .alertProperties { flex: 0 0 242px; min-width: 0; }
 .alertProperties dl { display: flex; flex-direction: column; gap: 10px; margin: 14px 0 0; }
@@ -98,6 +103,7 @@
   .alertChart { padding: 12px; }
 }
 .alertForm .dsSelect__trigger, .alertForm .dsField__control { min-height: 36px; height: 36px; padding: 7px 12px; font-size: 13px; border-radius: 6px; }
+.alertForm .dsField__control--textarea { height: auto; min-height: 96px; line-height: 20px; resize: vertical; }
 .alertForm .alertToolbar .dsSelect__trigger { min-height: 26px; height: 26px; padding: 3px 8px; }
 .alertForm .dsField__label { font-size: 13px; line-height: 16px; color: #202020; }
 .alertForm .alertToolbar .dsField__label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
