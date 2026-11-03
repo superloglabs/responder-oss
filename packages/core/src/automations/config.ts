@@ -75,6 +75,8 @@ export const automationTriggerSchema = z.discriminatedUnion("kind", [
     eventTypes: z.array(z.enum(["new_issue", "regression"])).min(1).max(2)
       .refine(uniqueIds, "Event types must be unique")
       .describe("Run on new error issues, issues that occur again after being resolved, or both."),
+    exceptionsOnly: z.boolean().optional()
+      .describe("Only exceptions start a run, not plain error log lines."),
     kind: z.literal("errors"),
     // Without services, issues from every service start a run.
     services: z.array(z.string().trim().min(1).max(200)).max(50)
@@ -158,6 +160,17 @@ export function automationTriggersNotify(triggers: Array<{ kind: AutomationTrigg
     trigger.kind === "signoz" || trigger.kind === "honeycomb" || trigger.kind === "betterstack" ||
     trigger.kind === "github" || trigger.kind === "webhook"
   );
+}
+
+// Whether an automation trigger starts a run for an error issue's change.
+export function errorTriggerMatches(
+  trigger: AutomationTrigger,
+  change: { eventType: "new_issue" | "regression"; exception: boolean; service: string | null },
+): boolean {
+  return trigger.kind === "errors" &&
+    trigger.eventTypes.includes(change.eventType) &&
+    (change.exception || !trigger.exceptionsOnly) &&
+    (!trigger.services?.length || (change.service !== null && trigger.services.includes(change.service)));
 }
 
 export const automationConfigurationSchema = z

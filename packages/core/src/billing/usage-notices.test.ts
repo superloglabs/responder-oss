@@ -27,6 +27,7 @@ function summary(overrides: Partial<AutomationBillingSummary> = {}): AutomationB
     planPrice: 0,
     plans: [],
     remaining: 3,
+    runBilling: null,
     scheduledPlanId: null,
     scheduledPlanName: null,
     usage: 2,

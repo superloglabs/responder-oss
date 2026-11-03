@@ -1,5 +1,6 @@
 import react from "@vitejs/plugin-react";
 import { sentryVitePlugin } from "@sentry/vite-plugin";
+import { superlogSourceMaps } from "@superlog/sourcemaps/vite";
 import tailwindcss from "@tailwindcss/vite";
 import { fileURLToPath, URL } from "node:url";
 import { defineConfig, type Plugin } from "vite";
@@ -20,7 +21,23 @@ const uploadsSentrySourceMaps = Boolean(
 );
 const buildsSentrySourceMaps =
   uploadsSentrySourceMaps || process.env.SENTRY_BUILD_SOURCEMAPS === "true";
+// With a Superlog API key, the build tags its scripts with debug IDs and
+// uploads their maps, so browser errors in Superlog show the original source.
+// SUPERLOG_URL is the instance to upload to and defaults to superlog.sh.
+const uploadsSuperlogSourceMaps = Boolean(process.env.SUPERLOG_API_KEY?.trim());
 const publicDocumentPaths: ReadonlySet<string> = new Set(publicDocumentPathnames);
+
+// Tags and uploads before any other plugin writes. When the build also makes
+// maps for Sentry, they stay for Sentry's upload, which deletes them after it.
+function superlogSourceMapUpload(): Plugin {
+  const plugin = superlogSourceMaps({
+    deleteAfterUpload: !buildsSentrySourceMaps,
+    release,
+    url: process.env.SUPERLOG_URL?.trim() || undefined,
+  }) as Plugin;
+  const writeBundle = plugin.writeBundle as Extract<Plugin["writeBundle"], (...args: never[]) => unknown>;
+  return { ...plugin, writeBundle: { handler: writeBundle, order: "pre", sequential: true } };
+}
 
 const previewDocumentRoutes: Plugin = {
   configurePreviewServer(server) {
@@ -54,7 +71,7 @@ const previewDocumentRoutes: Plugin = {
 
 export default defineConfig({
   build: {
-    sourcemap: buildsSentrySourceMaps ? "hidden" : false,
+    sourcemap: buildsSentrySourceMaps || uploadsSuperlogSourceMaps ? "hidden" : false,
   },
   plugins: [
     previewDocumentRoutes,
@@ -74,6 +91,7 @@ export default defineConfig({
           }),
         ]
       : []),
+    ...(uploadsSuperlogSourceMaps ? [superlogSourceMapUpload()] : []),
   ],
   preview: {
     proxy: {

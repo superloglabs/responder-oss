@@ -101,15 +101,23 @@ describe("error notification operations", () => {
   it("turns notifications on for an available channel", async () => {
     const { body } = await callTool("update_error_notifications", { enabled: true, slack });
 
-    expect(body).toEqual({ notifications: { enabled: true, slack } });
-    expect(mocks.save).toHaveBeenCalledWith(organizationId, { enabled: true, targets: [{ kind: "slack", ...slack }] });
+    expect(body).toEqual({ notifications: { enabled: true, exceptionsOnly: false, slack } });
+    expect(mocks.save).toHaveBeenCalledWith(organizationId, { enabled: true, exceptionsOnly: false, targets: [{ kind: "slack", ...slack }] });
+  });
+
+  it("posts only exceptions, and keeps that choice until it changes", async () => {
+    const { body } = await callTool("update_error_notifications", { enabled: true, exceptionsOnly: true, slack });
+    expect(body).toEqual({ notifications: { enabled: true, exceptionsOnly: true, slack } });
+
+    const { body: kept } = await callTool("update_error_notifications", { enabled: true });
+    expect(kept).toEqual({ notifications: { enabled: true, exceptionsOnly: true, slack } });
   });
 
   it("keeps the channel when turning notifications off", async () => {
     stored = { enabled: true, targets: [{ kind: "slack", ...slack }] };
     const { body } = await callTool("update_error_notifications", { enabled: false });
 
-    expect(body).toEqual({ notifications: { enabled: false, slack } });
+    expect(body).toEqual({ notifications: { enabled: false, exceptionsOnly: false, slack } });
   });
 
   it("turns notifications off after their channel became unavailable", async () => {
@@ -118,7 +126,7 @@ describe("error notification operations", () => {
     const { body, isError } = await callTool("update_error_notifications", { enabled: false });
 
     expect(isError).toBeFalsy();
-    expect(body).toEqual({ notifications: { enabled: false, slack } });
+    expect(body).toEqual({ notifications: { enabled: false, exceptionsOnly: false, slack } });
   });
 
   it("needs a channel to turn notifications on", async () => {

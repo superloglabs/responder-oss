@@ -11,6 +11,7 @@ const tagDescriptions: Record<ManagementTag, string> = {
   Dashboards: "Create and change dashboards over the workspace's telemetry.",
   Errors: "Exceptions in the workspace's telemetry, grouped into issues by fingerprint.",
   Integrations: "Connected integrations and the IDs automations and tag mode use.",
+  Memory: "Facts members save for agents. Every automation run and tag mode thread reads them.",
   Models: "Model API keys, subscriptions, and available models.",
   Runs: "Start, follow, and cancel automation runs.",
   Secrets: "Credentials agents can use without seeing them.",

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { tool } from "@openai/agents";
-import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
+import type { SandboxSession } from "./sandbox-session.js";
 import { captureAnalyticsEvent } from "@responder/core/analytics";
 import { getRuntimeRepositories } from "@responder/core/db/investigations";
 import {
@@ -52,7 +52,7 @@ export function createThreadPullRequestTool(input: {
   investigationId: string;
   organizationId: string;
   repositories: CheckedOutRepository[];
-  session: DaytonaSandboxSession;
+  session: SandboxSession;
   slackInvestigationSessionId: string;
 }, dependencies: ThreadPullRequestDependencies = defaultDependencies) {
   const repositoryNames = [
@@ -176,7 +176,7 @@ const defaultFollowUpDependencies: ThreadPullRequestFollowUpDependencies = {
 export function createThreadPullRequestFollowUpTools(input: {
   agentConfigVersionId: string;
   repositories: CheckedOutRepository[];
-  session: DaytonaSandboxSession;
+  session: SandboxSession;
   slackInvestigationSessionId: string;
 }, dependencies: ThreadPullRequestFollowUpDependencies = defaultFollowUpDependencies) {
   const pullRequestParameters = {

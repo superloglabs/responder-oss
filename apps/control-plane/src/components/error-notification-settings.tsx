@@ -105,6 +105,10 @@ export function ErrorNotificationSettingsDialog({ onClose }: { onClose: () => vo
         </div>}
         <p className="errorNotifications__hint">{settings.enabled ? "New and recurring errors will be sent to this channel." : "Notifications are paused. Your channel selection will be saved."}</p>
       </div>
+      <div className="errorNotifications__toggle">
+        <Switch label="Only exceptions" checked={settings.exceptionsOnly ?? false} onCheckedChange={(exceptionsOnly) => setSettings({ ...settings, exceptionsOnly })} />
+      </div>
+      <p className="errorNotifications__hint">Skips plain error log lines. They stay on the Errors page.</p>
     </fieldset> : null}
   </DashboardDialog>;
 }

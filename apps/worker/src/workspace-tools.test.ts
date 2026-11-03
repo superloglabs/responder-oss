@@ -62,6 +62,7 @@ function toolDependencies() {
       secrets: [],
     }),
     listAutomations: vi.fn().mockResolvedValue([]),
+    modelRefusal: vi.fn().mockResolvedValue(null),
     saveTagMode: vi.fn().mockResolvedValue(undefined),
     setAutomationEnabled: vi.fn().mockResolvedValue(true),
     updateAutomation: vi.fn().mockResolvedValue(true),
@@ -180,6 +181,29 @@ describe("Slack workspace tools", () => {
       enabled: false,
       organizationId: "organization-1",
     });
+    expect(dependencies.updateAutomation).not.toHaveBeenCalled();
+  });
+
+  it("refuses to save or enable a model the workspace's plan does not cover", async () => {
+    const { call, dependencies } = workspaceTools();
+    dependencies.modelRefusal.mockResolvedValue("This workspace's plan runs automations on the Per-run model.");
+
+    await expect(call("update_automation", {
+      automationId: ids.automation,
+      configuration: null,
+      description: null,
+      enabled: true,
+      name: null,
+    })).resolves.toContain("Per-run model");
+    await expect(call("update_automation", {
+      automationId: ids.automation,
+      configuration: JSON.stringify({ model: "claude-opus-5.5" }),
+      description: null,
+      enabled: null,
+      name: null,
+    })).resolves.toContain("Per-run model");
+    expect(dependencies.modelRefusal).toHaveBeenCalledWith("organization-1", automationConfiguration);
+    expect(dependencies.setAutomationEnabled).not.toHaveBeenCalled();
     expect(dependencies.updateAutomation).not.toHaveBeenCalled();
   });
 

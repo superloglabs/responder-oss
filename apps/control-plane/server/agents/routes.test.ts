@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { decryptCredentials } from "../../../../packages/core/src/credentials/encryption.js";
 import {
   createAgent,
@@ -25,6 +25,7 @@ import {
 import {
   createWorkspaceSecretRecord,
   findWorkspaceSecretByName,
+  storeWorkspaceSecretValue,
 } from "../../../../packages/core/src/db/workspace-secrets.js";
 import { getActiveTenant } from "../tenant.js";
 import { queueInvestigationRetry } from "../investigations/queue.js";
@@ -40,6 +41,7 @@ import { workspaceSecretInputSchema } from "./workspace-secrets.js";
 
 vi.mock("../../../../packages/core/src/credentials/encryption.js", () => ({
   decryptCredentials: vi.fn(),
+  encryptCredentials: vi.fn(() => "encrypted-value"),
 }));
 vi.mock("../../../../packages/core/src/db/agents.js", () => ({
   createAgent: vi.fn(),
@@ -68,6 +70,7 @@ vi.mock("../../../../packages/core/src/db/investigations.js", () => ({
 }));
 vi.mock("../../../../packages/core/src/db/workspace-secrets.js", () => ({
   createWorkspaceSecretRecord: vi.fn(),
+  storeWorkspaceSecretValue: vi.fn(),
   findWorkspaceSecretByName: vi.fn(),
 }));
 vi.mock("../integrations/slack.js", () => ({
@@ -372,12 +375,17 @@ describe("investigation reruns", () => {
 });
 
 describe("workspace secrets", () => {
+  beforeEach(() => {
+    vi.stubEnv("DAYTONA_API_KEY", "daytona-key");
+  });
+
   afterEach(() => {
+    vi.unstubAllEnvs();
     vi.clearAllMocks();
     vi.restoreAllMocks();
   });
 
-  it("stores plaintext only in Daytona and returns metadata", async () => {
+  it("stores the value in Daytona and encrypted, and returns metadata", async () => {
     vi.mocked(getActiveTenant).mockResolvedValue(tenant);
     vi.mocked(findWorkspaceSecretByName).mockResolvedValue(null);
     vi.mocked(createDaytonaWorkspaceSecret).mockResolvedValue({
@@ -415,6 +423,7 @@ describe("workspace secrets", () => {
       allowedHosts: ["api.example.com"],
       daytonaSecretId: "daytona-secret-1",
       daytonaSecretName: "responder_external_1",
+      encryptedValue: "encrypted-value",
     });
     expect(
       vi.mocked(createWorkspaceSecretRecord).mock.calls[0]?.[0],
@@ -469,6 +478,143 @@ describe("workspace secrets", () => {
     },
   );
 
+  it("stores only the encrypted value on Vercel when Daytona is not configured", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "");
+    vi.stubEnv("SANDBOX_PROVIDER", "vercel");
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    vi.mocked(findWorkspaceSecretByName).mockResolvedValue(null);
+    vi.mocked(createWorkspaceSecretRecord).mockResolvedValue({
+      id: "30000000-0000-4000-8000-000000000000",
+      name: "SERVICE_API_KEY",
+      allowedHosts: ["api.example.com"],
+      createdAt: new Date("2026-11-02T00:00:00.000Z"),
+    });
+
+    const response = await app.request("/api/agents/secrets", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: "SERVICE_API_KEY",
+        value: "new-secret-value",
+        allowedHosts: ["api.example.com"],
+      }),
+    });
+
+    expect(response.status).toBe(201);
+    expect(createDaytonaWorkspaceSecret).not.toHaveBeenCalled();
+    expect(createWorkspaceSecretRecord).toHaveBeenCalledWith(expect.objectContaining({
+      daytonaSecretId: null,
+      daytonaSecretName: null,
+      encryptedValue: "encrypted-value",
+    }));
+  });
+
+  const legacySecret = {
+    id: "30000000-0000-4000-8000-000000000000",
+    name: "SERVICE_API_KEY",
+    allowedHosts: ["api.example.com"],
+    createdAt: new Date("2026-11-02T00:00:00.000Z"),
+    daytonaSecretId: "dtn-old-id",
+    daytonaSecretName: "responder_old",
+    hasValue: false,
+  };
+
+  function resave(allowedHosts: string[]) {
+    return app.request("/api/agents/secrets", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "SERVICE_API_KEY", value: "new-secret-value", allowedHosts }),
+    });
+  }
+
+  it("fills in a secret saved before values were stored, with the submitted hosts and a new Daytona copy", async () => {
+    vi.stubEnv("SANDBOX_PROVIDER", "daytona");
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    vi.mocked(findWorkspaceSecretByName).mockResolvedValue(legacySecret);
+    vi.mocked(createDaytonaWorkspaceSecret).mockResolvedValue({ id: "dtn-new-id", name: "responder_new" });
+    vi.mocked(storeWorkspaceSecretValue).mockResolvedValue(true);
+    vi.mocked(deleteDaytonaWorkspaceSecret).mockResolvedValue(undefined);
+
+    const response = await resave(["api.example.com", "eu.api.example.com"]);
+
+    expect(response.status).toBe(201);
+    expect(await response.json()).toMatchObject({
+      secret: { allowedHosts: ["api.example.com", "eu.api.example.com"] },
+    });
+    expect(createDaytonaWorkspaceSecret).toHaveBeenCalledWith({
+      allowedHosts: ["api.example.com", "eu.api.example.com"],
+      value: "new-secret-value",
+    });
+    expect(storeWorkspaceSecretValue).toHaveBeenCalledWith({
+      allowedHosts: ["api.example.com", "eu.api.example.com"],
+      daytonaSecretId: "dtn-new-id",
+      daytonaSecretName: "responder_new",
+      encryptedValue: expect.any(String),
+      id: legacySecret.id,
+      missing: "value",
+    });
+    expect(deleteDaytonaWorkspaceSecret).toHaveBeenCalledWith("dtn-old-id");
+    expect(createWorkspaceSecretRecord).not.toHaveBeenCalled();
+  });
+
+  it("keeps the Daytona copy on Vercel when Daytona is not configured", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "");
+    vi.stubEnv("SANDBOX_PROVIDER", "vercel");
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    vi.mocked(findWorkspaceSecretByName).mockResolvedValue(legacySecret);
+    vi.mocked(storeWorkspaceSecretValue).mockResolvedValue(true);
+
+    expect((await resave(["api.example.com"])).status).toBe(201);
+    expect(createDaytonaWorkspaceSecret).not.toHaveBeenCalled();
+    expect(storeWorkspaceSecretValue).toHaveBeenCalledWith(expect.objectContaining({
+      daytonaSecretId: "dtn-old-id",
+      daytonaSecretName: "responder_old",
+    }));
+    expect(deleteDaytonaWorkspaceSecret).not.toHaveBeenCalled();
+  });
+
+  it("adds a Daytona copy to a secret saved while Daytona was not in use", async () => {
+    vi.stubEnv("SANDBOX_PROVIDER", "daytona");
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    vi.mocked(findWorkspaceSecretByName).mockResolvedValue({
+      ...legacySecret,
+      daytonaSecretId: null,
+      daytonaSecretName: null,
+      hasValue: true,
+    });
+    vi.mocked(createDaytonaWorkspaceSecret).mockResolvedValue({ id: "dtn-new-id", name: "responder_new" });
+    vi.mocked(storeWorkspaceSecretValue).mockResolvedValue(true);
+
+    expect((await resave(["api.example.com"])).status).toBe(201);
+    expect(storeWorkspaceSecretValue).toHaveBeenCalledWith(expect.objectContaining({
+      daytonaSecretId: "dtn-new-id",
+      missing: "daytonaCopy",
+    }));
+    expect(deleteDaytonaWorkspaceSecret).not.toHaveBeenCalled();
+  });
+
+  it("keeps a secret that has both copies", async () => {
+    vi.stubEnv("SANDBOX_PROVIDER", "vercel");
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    vi.mocked(findWorkspaceSecretByName).mockResolvedValue({ ...legacySecret, hasValue: true });
+
+    expect((await resave(["api.example.com"])).status).toBe(409);
+    expect(storeWorkspaceSecretValue).not.toHaveBeenCalled();
+  });
+
+  it("reports a conflict when another save filled the value in first", async () => {
+    vi.stubEnv("SANDBOX_PROVIDER", "daytona");
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    vi.mocked(findWorkspaceSecretByName).mockResolvedValue(legacySecret);
+    vi.mocked(createDaytonaWorkspaceSecret).mockResolvedValue({ id: "dtn-new-id", name: "responder_new" });
+    vi.mocked(storeWorkspaceSecretValue).mockResolvedValue(false);
+    vi.mocked(deleteDaytonaWorkspaceSecret).mockResolvedValue(undefined);
+
+    expect((await resave(["api.example.com"])).status).toBe(409);
+    expect(deleteDaytonaWorkspaceSecret).toHaveBeenCalledWith("dtn-new-id");
+    expect(deleteDaytonaWorkspaceSecret).not.toHaveBeenCalledWith("dtn-old-id");
+  });
+
   it("does not overwrite a workspace secret or send its new value", async () => {
     vi.mocked(getActiveTenant).mockResolvedValue(tenant);
     vi.mocked(findWorkspaceSecretByName).mockResolvedValue({
@@ -476,6 +622,9 @@ describe("workspace secrets", () => {
       name: "SERVICE_API_KEY",
       allowedHosts: ["api.example.com"],
       createdAt: new Date(),
+      daytonaSecretId: "dtn-id",
+      daytonaSecretName: "responder_secret",
+      hasValue: true,
     });
 
     const response = await app.request("/api/agents/secrets", {

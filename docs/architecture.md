@@ -119,6 +119,27 @@ types. `drizzle/` contains the ordered schema history.
   like the automation's own secrets, as Daytona placeholders that work only
   for their allowed hosts. Skill files are stored in the database, not
   encrypted, so they must not hold credentials.
+- Sandboxes have open outbound access unless a workspace owner or admin
+  restricts them in workspace settings. A restricted sandbox reaches only the
+  listed domains, the public application host (model broker and context
+  servers), and the allowed hosts of the secrets it mounts. Vercel enforces
+  this with a custom firewall policy; Daytona with a domain allowlist, which
+  needs Daytona Tier 3 or higher and holds at most 100 domains. The worker
+  applies the list after every sandbox start and resume, so a change reaches
+  a paused sandbox on its next turn. A run fails if the provider rejects the
+  list.
+- Workspace memories are facts members save for agents, in Claude Code's
+  memory format: a name, one-line description, and type in front matter, and
+  a Markdown body. Every automation run and investigation, including tag mode
+  threads, writes them to `.responder/memory/<name>.md` with a `MEMORY.md`
+  index and lists them in the agent's prompt. The folder is rewritten each
+  turn and nothing the agent changes there is saved, so runs read memories
+  but cannot create or change them; untrusted input such as logs and Slack
+  messages therefore cannot plant instructions for later runs. Members add
+  memories on the Memory page or through the `import_memories` MCP tool,
+  usually by asking Claude Code or Codex to import their own memories. Saving
+  refuses text that looks like a credential, and a workspace keeps at most 200
+  memories because each run's prompt lists all of them.
 - Pull-request review follow-ups accept only new top-level bot comments on PRs
   created by Responder. Comment text is untrusted input, human comments are
   ignored, and the controlled publisher can only fast-forward the existing PR
@@ -221,6 +242,16 @@ investigation credits.
   fails, the cached membership is used. Usage past a balance that the plan
   bills for is expected and sends nothing.
 - The app shows a banner from the same balances while new work is paused.
+- An operator can give a workspace a `run_billing_accounts` row instead, to
+  bill a price per run. Until the workspace moves to a paid plan, its
+  automations run only on the row's model, on Responder-funded inference;
+  each run whose first turn succeeds is tracked once, with the run ID as the
+  idempotency key, against the row's Autumn customer and feature; and model
+  and sandbox usage are recorded but not charged. The model picker and
+  `list_included_models` offer only that model. Saving or enabling an
+  automation on another model is refused, and so is any save while the plan
+  cannot be read. The run is counted before it is marked succeeded, with
+  retries; a count that still fails is reported and not charged.
 - Suggested automation templates are paid by Responder and do not use the
   usage credit. From 05:00 UTC each day, the worker asks a model through
   Responder's AI Gateway key for templates for each organization with
@@ -268,8 +299,8 @@ share and defaults to 1 while OTLP export is on.
 - Each worker job runs in a root span named for its queue. Database queries
   and middleware outside a traced request or job, such as queue polling, are
   not recorded.
-- Health checks, telemetry ingest, and the browser relay are not traced, so a
-  service that sends to its own ingest endpoint does not trace its exports.
+- Health checks and telemetry ingest are not traced, so a service that sends
+  to its own ingest endpoint does not trace its exports.
 - Every console line is also sent as a log record with the active trace. A
   JSON line's `event` becomes the body and its fields become attributes.
 - Model calls are spans in the GenAI conventions, with the model, provider,
@@ -279,12 +310,13 @@ share and defaults to 1 while OTLP export is on.
   outputs are not recorded.
 - Metrics are the Node.js runtime metrics and `http.server.request.duration`
   by route template, exported every 60 seconds.
-- With `VITE_OTEL_TRACES_SAMPLE_RATE` above 0, the browser traces page loads
-  and same-origin `fetch` calls for signed-in users. It posts OTLP JSON to
-  `/api/telemetry/browser/v1/traces`, and the API forwards the body to its own
-  traces endpoint with its own headers. The browser holds no ingest key.
-  Requests carry `traceparent` and `sentry-trace`, so API spans join the
-  browser's trace.
+- With `VITE_SUPERLOG_INGEST_ENDPOINT` and `VITE_SUPERLOG_INGEST_KEY`, every
+  page load starts `@superlog/browser`, for signed-out visitors too. It sends
+  errors, page loads, and Web Vitals straight to that ingest endpoint with the
+  key, which only adds telemetry to its workspace. Signed-in pages add the
+  user and organization. `VITE_OTEL_TRACES_SAMPLE_RATE` sets the share of
+  traces kept for page loads and same-origin `fetch` calls. Requests carry
+  `traceparent` and `sentry-trace`, so API spans join the browser's trace.
 
 The entry points of both services load secrets and start monitoring before
 they import the rest of the application, so instrumented libraries are
@@ -318,6 +350,13 @@ stages the copy there as root and moves it before Codex starts. The CLI uses
 managed ChatGPT authentication and makes inference requests directly. It
 receives no custom model-provider override or API key. The existing temporary
 broker token is context-only for these runs and cannot authorize model inference.
+
+On Vercel, the sandbox gets the same kind of placeholder and the worker gives
+the value to the sandbox's firewall, which replaces the placeholder in
+`authorization` and common API key headers on requests to the allowed hosts.
+The firewall matches whole headers, and each request gets one replacement, so
+other headers keep the placeholder. The rules are removed when a sandbox stops,
+so the worker applies them after every start and never saves them.
 
 The run sandbox holds no real token:
 

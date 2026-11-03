@@ -8,6 +8,12 @@ import {
 const accountId = "15151515-1515-4515-8515-151515151515";
 
 describe("shared automation templates", () => {
+  it("keeps an Errors trigger's exceptions-only choice and drops its services", () => {
+    expect(shareableAutomationTriggers([
+      { eventTypes: ["new_issue"], exceptionsOnly: true, kind: "errors", services: ["api"] },
+    ])).toEqual([{ eventTypes: ["new_issue"], exceptionsOnly: true, kind: "errors" }]);
+  });
+
   it("removes connections, channels, and projects from triggers", () => {
     expect(shareableAutomationTriggers([
       { channelIds: ["C123"], eventMode: "mentions", integrationAccountId: accountId, kind: "slack" },

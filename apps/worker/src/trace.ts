@@ -24,6 +24,7 @@ function redactText(
   for (const name of [
     "OPENAI_API_KEY",
     "DAYTONA_API_KEY",
+    "VERCEL_TOKEN",
     "AI_GATEWAY_API_KEY",
   ] as const) {
     const secret = environment[name];

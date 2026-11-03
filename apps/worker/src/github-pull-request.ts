@@ -1,4 +1,4 @@
-import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
+import type { SandboxSession } from "./sandbox-session.js";
 import {
   githubPullRequestAuthorToken,
   markGitHubPullRequestAuthorRejected,
@@ -120,7 +120,7 @@ function execResult(output: string): { exitCode: number; stdout: string } {
 }
 
 async function runCommand(
-  session: DaytonaSandboxSession,
+  session: SandboxSession,
   command: string,
   workdir: string,
 ) {
@@ -163,7 +163,7 @@ export async function githubJson(
 }
 
 export async function changedFiles(
-  session: DaytonaSandboxSession,
+  session: SandboxSession,
   repositoryPath: string,
   workspaceBaseSha: string,
   allowEmpty = false,
@@ -255,7 +255,7 @@ export async function createPullRequestFromSandbox(
     title: string;
     workspaceBaseSha: string;
   },
-  session: DaytonaSandboxSession,
+  session: SandboxSession,
   dependencies: PullRequestDependencies = defaultDependencies,
 ) {
   const files = await changedFiles(

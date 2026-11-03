@@ -18,6 +18,7 @@ function harness() {
   const client = { create: vi.fn() } as unknown as DaytonaSandboxClient;
   const meter = { stop: vi.fn().mockResolvedValue(undefined) };
   const dependencies = {
+    applyNetwork: vi.fn().mockResolvedValue(undefined),
     close: vi.fn().mockResolvedValue(undefined),
     closePending: vi.fn().mockResolvedValue(undefined),
     configure: vi.fn().mockResolvedValue(undefined),
@@ -98,6 +99,7 @@ describe("fresh automation sandbox", () => {
       "responder-automation-run-1",
       undefined,
       undefined,
+      { keepPaused: undefined },
     );
     expect(input.run).toHaveBeenCalledWith(
       session,
@@ -225,6 +227,7 @@ describe("fresh automation sandbox", () => {
       "responder-automation-run-1",
       undefined,
       controller.signal,
+      { keepPaused: undefined },
     );
   });
 
@@ -589,7 +592,7 @@ describe("fresh automation sandbox", () => {
     await expect(runInFreshAutomationSandbox({ ...input, keepPaused: true, onPaused }, dependencies)).resolves.toBe("completed");
 
     expect(dependencies.createClient).toHaveBeenCalledWith(expect.objectContaining({ pauseOnExit: true }));
-    expect(dependencies.configure).toHaveBeenCalledWith(session, input.config, [], 1_440);
+    expect(dependencies.configure).toHaveBeenCalledWith(session, input.config, [], 1_440, null);
     expect(session.close).toHaveBeenCalledOnce();
     expect(dependencies.close).not.toHaveBeenCalled();
     expect(onPaused).toHaveBeenCalledWith({ id: "sandbox-1", sessionState: { environment: {}, sandboxId: "sandbox-1" } });
@@ -630,7 +633,7 @@ describe("fresh automation sandbox", () => {
     await runInFreshAutomationSandbox({ ...input, keepPaused: true, resumeState: { sandboxId: "sandbox-1" } }, dependencies);
 
     expect(dependencies.createSession).not.toHaveBeenCalled();
-    expect(dependencies.configure).toHaveBeenCalledWith(session, input.config, [], 1_440);
+    expect(dependencies.configure).toHaveBeenCalledWith(session, input.config, [], 1_440, null);
     expect(dependencies.prepare).toHaveBeenCalledWith(session);
     // Not resumed, so the run checks out its repositories again.
     expect(input.run).toHaveBeenLastCalledWith(session, expect.any(Function), undefined, false);
@@ -660,9 +663,17 @@ describe("fresh automation sandbox", () => {
       serializeSessionState: vi.fn().mockResolvedValue({ sandboxId: "sandbox-1" }),
     });
 
-    await runInFreshAutomationSandbox({ ...input, keepPaused: true, resumeState: { sandboxId: "sandbox-1" }, secrets: [...secrets].reverse() }, resumed.dependencies);
+    const network = { allowedDomains: ["superlog.sh"] };
+    await runInFreshAutomationSandbox({ ...input, keepPaused: true, network, resumeState: { sandboxId: "sandbox-1" }, secrets: [...secrets].reverse() }, resumed.dependencies);
 
     expect(resumed.dependencies.replaceSecrets).not.toHaveBeenCalled();
+    // The workspace's current allowlist still reaches the resumed sandbox.
+    expect(resumed.dependencies.applyNetwork).toHaveBeenCalledWith(
+      resumed.session,
+      input.config,
+      [...secrets].reverse(),
+      network,
+    );
   });
 
   it("mounts the current secrets when a resumed turn needs different ones", async () => {
@@ -678,7 +689,7 @@ describe("fresh automation sandbox", () => {
 
     await runInFreshAutomationSandbox({ ...input, keepPaused: true, resumeState: { sandboxId: "sandbox-1" }, secrets }, dependencies);
 
-    expect(dependencies.replaceSecrets).toHaveBeenCalledWith(session, input.config, secrets);
+    expect(dependencies.replaceSecrets).toHaveBeenCalledWith(session, input.config, secrets, null);
     expect(dependencies.configure).not.toHaveBeenCalled();
     expect(session.materializeEntry).toHaveBeenCalledWith({
       entry: { type: "file", content: '[["STATUS_TOKEN","dtn_status"]]' },

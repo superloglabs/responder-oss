@@ -1,0 +1,1 @@
+ALTER TABLE "workspace_secrets" ADD CONSTRAINT "workspace_secrets_value_present" CHECK ("workspace_secrets"."encrypted_value" is not null or "workspace_secrets"."daytona_secret_id" is not null);

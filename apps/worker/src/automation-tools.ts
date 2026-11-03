@@ -1,4 +1,4 @@
-import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
+import type { SandboxSession } from "./sandbox-session.js";
 import { automationButtonsInputSchema } from "@responder/core/automations/slack-buttons";
 import { z } from "zod";
 import {
@@ -283,7 +283,7 @@ createInterface({ input: process.stdin }).on("line", async (line) => {
 
 // Writes the server and clears requests left by an earlier turn.
 export async function installAutomationToolServer(
-  session: Pick<DaytonaSandboxSession, "materializeEntry">,
+  session: Pick<SandboxSession, "materializeEntry">,
   notificationChannels: string[] = [],
   workspaceTools: AutomationToolDefinition[] = [],
   inThread = false,
@@ -319,7 +319,7 @@ export function serveAutomationTools(input: {
   handle(request: AutomationToolRequest): Promise<AutomationToolResult>;
   intervalMs?: number;
   onError(error: unknown): void;
-  session: Pick<DaytonaSandboxSession, "materializeEntry" | "readFile">;
+  session: Pick<SandboxSession, "materializeEntry" | "readFile">;
 }): { stop(): Promise<void> } {
   // The requests file only grows, so each read handles the lines after the
   // ones already seen.

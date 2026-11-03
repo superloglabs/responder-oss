@@ -1,51 +1,60 @@
 import {
   DaytonaSandboxClient,
   type DaytonaSandboxClientOptions,
-  type DaytonaSandboxSession,
 } from "@openai/agents-extensions/sandbox/daytona";
-import {
-  daytonaClientOptions,
-  type DaytonaClientConfig,
-} from "@responder/core/daytona-config";
+import { daytonaClientOptions } from "@responder/core/daytona-config";
+import type { SandboxConfig } from "@responder/core/sandbox-config";
+import type { SandboxNetwork } from "@responder/core/sandbox-network";
 import {
   automationWorkspaceRoot,
   modelBrokerTokenEnvironmentVariable,
 } from "./automation-harness.js";
 import {
-  closeDaytonaSandbox,
-  configureDaytonaSandboxLifecycle,
-  createDaytonaSandboxSession,
-  deleteDaytonaSandboxByName,
   maxDaytonaSandboxBaseNameLength,
   prepareDaytonaSandbox,
-  replaceDaytonaSandboxSecrets,
-  resumeDaytonaSandbox,
-  resumedSameDaytonaSandbox,
   sandboxesLeftAfterFailedCreation,
-  type DaytonaSandboxSecretMount,
 } from "./sandbox.js";
 import { startSandboxMeter, type SandboxMeter } from "./sandbox-metering.js";
+import {
+  applySandboxNetwork,
+  closeSandbox,
+  configureSandbox,
+  createSandboxClient,
+  createSandboxSession,
+  deleteSandboxByName,
+  replaceSandboxSecrets,
+  resumedSameSandbox,
+  resumeSandbox,
+  serializeSandboxSession,
+} from "./sandbox-runtime.js";
+import type {
+  SandboxClient,
+  SandboxSecretMount,
+  SandboxSession,
+} from "./sandbox-session.js";
 
 interface AutomationSandboxDependencies {
-  close: typeof closeDaytonaSandbox;
-  closePending: typeof deleteDaytonaSandboxByName;
-  configure: typeof configureDaytonaSandboxLifecycle;
+  applyNetwork: typeof applySandboxNetwork;
+  close: typeof closeSandbox;
+  closePending: typeof deleteSandboxByName;
+  configure: typeof configureSandbox;
   createClient(options: DaytonaSandboxClientOptions): DaytonaSandboxClient;
-  createSession: typeof createDaytonaSandboxSession;
+  createSession: typeof createSandboxSession;
   meter: typeof startSandboxMeter;
   prepare: typeof prepareDaytonaSandbox;
-  replaceSecrets: typeof replaceDaytonaSandboxSecrets;
+  replaceSecrets: typeof replaceSandboxSecrets;
 }
 
 const defaultDependencies: AutomationSandboxDependencies = {
-  close: closeDaytonaSandbox,
-  closePending: deleteDaytonaSandboxByName,
-  configure: configureDaytonaSandboxLifecycle,
+  applyNetwork: applySandboxNetwork,
+  close: closeSandbox,
+  closePending: deleteSandboxByName,
+  configure: configureSandbox,
   createClient: (options) => new DaytonaSandboxClient(options),
-  createSession: createDaytonaSandboxSession,
+  createSession: createSandboxSession,
   meter: startSandboxMeter,
   prepare: prepareDaytonaSandbox,
-  replaceSecrets: replaceDaytonaSandboxSecrets,
+  replaceSecrets: replaceSandboxSecrets,
 };
 
 // Written once a sandbox has its tools and repositories. A resumed sandbox
@@ -60,7 +69,7 @@ export const automationSandboxReadyMarker =
 export const automationSecretMountsPath =
   `${automationWorkspaceRoot}/.responder/secret-mounts.json`;
 
-function secretMountsRecord(secrets: DaytonaSandboxSecretMount[]): string {
+function secretMountsRecord(secrets: SandboxSecretMount[]): string {
   return JSON.stringify(secrets
     .map((secret) => [secret.environmentVariable, secret.daytonaSecretName])
     .sort(([left], [right]) => left!.localeCompare(right!)));
@@ -77,17 +86,19 @@ export interface PausedAutomationSandbox {
 export interface FreshAutomationSandboxInput<T> {
   brokerToken: string;
   onCleanupConfirmed?: () => void;
-  config: DaytonaClientConfig;
+  config: SandboxConfig;
   // Pause the sandbox after the run so a follow-up can resume it.
   keepPaused?: boolean;
+  // The workspace's outbound allowlist, or null for open access.
+  network?: SandboxNetwork | null;
   onPaused?: (sandbox: PausedAutomationSandbox) => void;
   organizationId: string;
   // A paused sandbox from an earlier turn of the run.
   resumeState?: Record<string, unknown>;
   signal?: AbortSignal;
-  secrets?: DaytonaSandboxSecretMount[];
+  secrets?: SandboxSecretMount[];
   run(
-    session: DaytonaSandboxSession,
+    session: SandboxSession,
     withModelBroker: <Result>(operation: () => Promise<Result>) => Promise<Result>,
     signal: AbortSignal | undefined,
     resumed: boolean,
@@ -107,7 +118,7 @@ function sandboxNameForRun(runId: string): string {
 }
 
 async function withRunScopedModelBroker<Result>(
-  session: DaytonaSandboxSession,
+  session: SandboxSession,
   brokerToken: string,
   operation: () => Promise<Result>,
 ): Promise<Result> {
@@ -181,7 +192,7 @@ async function settled(operation: Promise<unknown>, timeoutMs: number): Promise<
 }
 
 function serializedModelBrokerAccess(
-  session: DaytonaSandboxSession,
+  session: SandboxSession,
   brokerToken: string,
 ): SerializedModelBrokerAccess {
   let previous = Promise.resolve();
@@ -234,13 +245,15 @@ function serializedModelBrokerAccess(
 // Stops the sandbox and reports its state for the next turn. Returns false
 // when it could not be paused, so the caller deletes it instead.
 async function pauseSandbox(
-  client: DaytonaSandboxClient,
-  session: DaytonaSandboxSession,
-  input: Pick<FreshAutomationSandboxInput<unknown>, "onPaused" | "runId">,
+  client: SandboxClient,
+  session: SandboxSession,
+  input: Pick<FreshAutomationSandboxInput<unknown>, "config" | "onPaused" | "organizationId" | "runId">,
 ): Promise<boolean> {
   try {
-    const sessionState = await client.serializeSessionState(session.state);
-    delete sessionState.apiKey;
+    const sessionState = await serializeSandboxSession(client, session, input.config, {
+      jobId: input.runId,
+      organizationId: input.organizationId,
+    });
     const environment = sessionState.environment;
     if (typeof environment === "object" && environment !== null) {
       delete (environment as Record<string, unknown>)[modelBrokerTokenEnvironmentVariable];
@@ -266,12 +279,15 @@ export async function runInFreshAutomationSandbox<T>(
     throw new Error("A short-lived model broker token is required");
   }
   const sandboxName = sandboxNameForRun(input.runId);
-  const client = dependencies.createClient({
-    ...daytonaClientOptions(input.config),
-    name: sandboxName,
-    pauseOnExit: Boolean(input.keepPaused),
-  });
-  let session: DaytonaSandboxSession | null = null;
+  const pauseOnExit = Boolean(input.keepPaused);
+  const client = input.config.vercel
+    ? createSandboxClient(input.config, { name: sandboxName, pauseOnExit })
+    : dependencies.createClient({
+      ...daytonaClientOptions(input.config),
+      name: sandboxName,
+      pauseOnExit,
+    });
+  let session: SandboxSession | null = null;
   let meter: SandboxMeter | null = null;
   // Sandboxes that may exist while `session` does not hold one yet.
   let pendingSandboxNames: readonly string[] = [];
@@ -285,12 +301,12 @@ export async function runInFreshAutomationSandbox<T>(
     if (input.resumeState) {
       try {
         session = await abortable(
-          resumeDaytonaSandbox(client, input.resumeState, input.config),
+          resumeSandbox(client, input.resumeState, input.config),
           input.signal,
         );
         // A sandbox Daytona recreated has the marker but not the
         // repositories, so it is set up again.
-        resumed = resumedSameDaytonaSandbox(session, input.resumeState) &&
+        resumed = resumedSameSandbox(session, input.resumeState, input.config) &&
           await session.pathExists(automationSandboxReadyMarker);
       } catch (error) {
         input.signal?.throwIfAborted();
@@ -309,6 +325,7 @@ export async function runInFreshAutomationSandbox<T>(
         sandboxName,
         undefined,
         input.signal,
+        { keepPaused: input.keepPaused },
       );
       // Limit the cleanup below to the sandboxes a failed creation could not
       // confirm deleted. This handler runs before the rejection reaches it.
@@ -334,6 +351,7 @@ export async function runInFreshAutomationSandbox<T>(
           input.config,
           input.secrets ?? [],
           input.keepPaused ? pausedAutomationSandboxLifetimeMinutes : 0,
+          input.network ?? null,
         ),
         input.signal,
       );
@@ -345,12 +363,22 @@ export async function runInFreshAutomationSandbox<T>(
         .readFile({ maxBytes: 64_000, path: automationSecretMountsPath })
         .then((bytes) => new TextDecoder().decode(bytes))
         .catch(() => null);
-      if (mounted !== secretMountsRecord(input.secrets ?? [])) {
-        await abortable(
-          dependencies.replaceSecrets(session, input.config, input.secrets ?? []),
-          input.signal,
-        );
-      }
+      await abortable(
+        !input.config.vercel && mounted !== secretMountsRecord(input.secrets ?? [])
+          ? dependencies.replaceSecrets(
+            session,
+            input.config,
+            input.secrets ?? [],
+            input.network ?? null,
+          )
+          : dependencies.applyNetwork(
+            session,
+            input.config,
+            input.secrets ?? [],
+            input.network ?? null,
+          ),
+        input.signal,
+      );
     }
     if (input.keepPaused) {
       await session.materializeEntry({

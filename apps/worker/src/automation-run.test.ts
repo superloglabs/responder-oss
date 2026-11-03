@@ -80,6 +80,7 @@ function dependencies() {
       nextResetAt: null,
     }),
     notifyLimitReached: vi.fn().mockResolvedValue(undefined),
+    trackBilledRun: vi.fn().mockResolvedValue(undefined),
     checkoutRepositories: vi.fn().mockResolvedValue([{
       branch: "main",
       path: "/home/daytona/workspace/repositories/acme/app",
@@ -115,7 +116,9 @@ function dependencies() {
     hasCapability: vi.fn<AutomationRunDependencies["hasCapability"]>().mockResolvedValue(false),
     hasFinishedTurn: vi.fn(async () => false),
     getWorkspaceSecrets: vi.fn().mockResolvedValue([]),
+    getSandboxNetwork: vi.fn().mockResolvedValue(null),
     getSkills: vi.fn<AutomationRunDependencies["getSkills"]>().mockResolvedValue([]),
+    getMemories: vi.fn<AutomationRunDependencies["getMemories"]>().mockResolvedValue([]),
     grantAllowanceExhausted: vi.fn().mockResolvedValue(false),
     hasNewMessages: vi.fn().mockResolvedValue(false),
     heartbeatRun: vi.fn().mockResolvedValue(true),
@@ -249,7 +252,7 @@ describe("automation run processor", () => {
     vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
     vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
     const deps = dependencies();
-    const billingKey = { allowedHosts: ["api.billing.example"], daytonaSecretName: "dtn_billing", environmentVariable: "BILLING_API_KEY" };
+    const billingKey = { allowedHosts: ["api.billing.example"], daytonaSecretName: "dtn_billing", encryptedValue: null, environmentVariable: "BILLING_API_KEY" };
     deps.getWorkspaceSecrets.mockResolvedValue([billingKey]);
     deps.getSkills.mockResolvedValue([{
       description: "Look up invoices in the billing API.",
@@ -258,7 +261,7 @@ describe("automation run processor", () => {
       name: "billing-api",
       secrets: [
         billingKey,
-        { allowedHosts: ["status.billing.example"], daytonaSecretName: "dtn_status", environmentVariable: "BILLING_STATUS_TOKEN" },
+        { allowedHosts: ["status.billing.example"], daytonaSecretName: "dtn_status", encryptedValue: null, environmentVariable: "BILLING_STATUS_TOKEN" },
       ],
     }]);
 
@@ -276,7 +279,7 @@ describe("automation run processor", () => {
     expect(deps.runInSandbox).toHaveBeenCalledWith(expect.objectContaining({
       secrets: [
         billingKey,
-        { allowedHosts: ["status.billing.example"], daytonaSecretName: "dtn_status", environmentVariable: "BILLING_STATUS_TOKEN" },
+        { allowedHosts: ["status.billing.example"], daytonaSecretName: "dtn_status", encryptedValue: null, environmentVariable: "BILLING_STATUS_TOKEN" },
       ],
     }));
     const prompt = deps.runCodex.mock.calls[0]![1].prompt;
@@ -287,6 +290,54 @@ describe("automation run processor", () => {
     expect(deps.session.execCommand.mock.invocationCallOrder[0]).toBeLessThan(
       deps.session.materializeEntry.mock.invocationCallOrder.at(-1)!,
     );
+  });
+
+  it("writes the workspace's memories to the sandbox and lists them in the prompt", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    deps.getMemories.mockResolvedValue([{
+      body: "The EU cell runs in eu-west-3.",
+      description: "Where production runs",
+      name: "production-regions",
+      type: "project",
+    }]);
+
+    await processAutomationRun("job-1", {
+      kind: "automation_run",
+      queuedAt: "2026-09-22T19:00:00.000Z",
+      runId,
+    }, process.env, deps);
+
+    expect(deps.getMemories).toHaveBeenCalledWith(organizationId);
+    const written = Object.fromEntries(deps.session.materializeEntry.mock.calls.map(([call]) => [call.path, call.entry.content]));
+    expect(written["/home/daytona/workspace/.responder/memory/MEMORY.md"]).toBe(
+      "- [production-regions](production-regions.md) — Where production runs\n",
+    );
+    expect(written["/home/daytona/workspace/.responder/memory/production-regions.md"]).toBe(
+      "---\nname: \"production-regions\"\ndescription: \"Where production runs\"\nmetadata:\n  type: project\n---\n\nThe EU cell runs in eu-west-3.\n",
+    );
+    const prompt = deps.runCodex.mock.calls[0]![1].prompt;
+    expect(prompt).toContain("Each memory is a file in /home/daytona/workspace/.responder/memory:\n- production-regions: Where production runs (production-regions.md)");
+    expect(prompt).toContain("Changes to these files are not saved.");
+    // Memories deleted since an earlier turn are removed from the sandbox.
+    expect(deps.session.execCommand.mock.calls.map(([call]) => call.cmd).join("\n"))
+      .toContain("rm -rf -- '/home/daytona/workspace/.responder/memory'");
+  });
+
+  it("leaves memory out of the prompt when the workspace has none", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+
+    await processAutomationRun("job-1", {
+      kind: "automation_run",
+      queuedAt: "2026-09-22T19:00:00.000Z",
+      runId,
+    }, process.env, deps);
+
+    expect(deps.runCodex.mock.calls[0]![1].prompt).not.toContain("Workspace memory");
+    expect(deps.session.materializeEntry.mock.calls.some(([call]) => call.path.includes("/.responder/memory/"))).toBe(false);
   });
 
   it("serves each Google Cloud context connection as one server per Google service", async () => {
@@ -1799,7 +1850,7 @@ describe("automation run processor", () => {
     expect(deps.createSubscriptionSecret).toHaveBeenCalledWith({ accessToken: "native-access", runId });
     expect(deps.createGrant).toHaveBeenCalledWith(expect.objectContaining({ credential: { inferenceSource: "byos" } }));
     expect(deps.runInSandbox).toHaveBeenCalledWith(expect.objectContaining({
-      secrets: [{ daytonaSecretName: "responder_chatgpt_run", environmentVariable: "RESPONDER_CHATGPT_ACCESS_TOKEN" }],
+      secrets: [{ allowedHosts: ["chatgpt.com"], daytonaSecretName: "responder_chatgpt_run", environmentVariable: "RESPONDER_CHATGPT_ACCESS_TOKEN" }],
     }));
     const sandboxAuth = JSON.parse(deps.runCodex.mock.calls[0]![1].model.subscription!.authJson);
     expect(sandboxAuth.tokens.access_token).toBe("dtn_secret_run");
@@ -1861,6 +1912,97 @@ describe("automation run processor", () => {
     expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({
       status: "succeeded",
     }));
+  });
+
+  describe("a workspace that pays per run", () => {
+    const runBilling = {
+      customerId: "earlier-customer",
+      featureId: "investigations",
+      model: "claude-sonnet-5.5",
+      modelName: "Per-run model",
+      modelProvider: "anthropic",
+    };
+
+    function runBilledDependencies(model: string) {
+      vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+      vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+      const deps = dependencies();
+      deps.claimRun.mockResolvedValue({
+        ...claimedRun(),
+        harness: "claude_agent_sdk",
+        model,
+        modelProvider: "anthropic",
+      } as never);
+      deps.checkAllowance.mockResolvedValue({
+        allowed: true,
+        exhausted: null,
+        machinesUseCredit: false,
+        nextResetAt: null,
+        runBilling,
+      });
+      deps.runClaude.mockResolvedValue({ eventStream: "" });
+      return deps;
+    }
+
+    it("runs its model on Responder inference and counts the run once", async () => {
+      const deps = runBilledDependencies("claude-sonnet-5.5");
+      deps.selectCredential.mockResolvedValue("81818181-8181-4181-8181-818181818181");
+
+      await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
+
+      expect(deps.getCredential).not.toHaveBeenCalled();
+      expect(deps.createGrant).toHaveBeenCalledWith(expect.objectContaining({
+        credential: { inferenceSource: "responder" },
+        model: "claude-sonnet-5.5",
+      }));
+      expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({ status: "succeeded" }));
+      expect(deps.trackBilledRun).toHaveBeenCalledOnce();
+      expect(deps.trackBilledRun).toHaveBeenCalledWith({ account: runBilling, organizationId, runId });
+    });
+
+    it("counts the run before marking it succeeded, retrying a failed count", async () => {
+      const deps = runBilledDependencies("claude-sonnet-5.5");
+      const order: string[] = [];
+      deps.trackBilledRun
+        .mockRejectedValueOnce(new Error("Autumn unavailable"))
+        .mockImplementation(async () => { order.push("counted"); });
+      deps.setStatus.mockImplementation(async (input: { status: string }) => {
+        order.push(input.status);
+        return true;
+      });
+
+      await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
+
+      expect(deps.trackBilledRun.mock.calls).toEqual([
+        [{ account: runBilling, organizationId, runId }],
+        [{ account: runBilling, organizationId, runId }],
+      ]);
+      expect(order.indexOf("counted")).toBeLessThan(order.indexOf("succeeded"));
+    });
+
+    it("refuses another model before a sandbox starts", async () => {
+      const deps = runBilledDependencies("claude-opus-5.5");
+
+      await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
+
+      expect(deps.createGrant).not.toHaveBeenCalled();
+      expect(deps.runInSandbox).not.toHaveBeenCalled();
+      expect(deps.trackBilledRun).not.toHaveBeenCalled();
+      expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({
+        failureMessage: expect.stringContaining("Per-run model"),
+        status: "failed",
+      }));
+    });
+
+    it("does not count a run that fails", async () => {
+      const deps = runBilledDependencies("claude-sonnet-5.5");
+      deps.runClaude.mockRejectedValue(new Error("harness failed"));
+
+      await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
+
+      expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({ status: "failed" }));
+      expect(deps.trackBilledRun).not.toHaveBeenCalled();
+    });
   });
 
   it("uses the organization's key instead of Responder inference when one is connected", async () => {

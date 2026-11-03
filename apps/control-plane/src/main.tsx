@@ -4,19 +4,16 @@ import { StrictMode } from "react";
 import { createRoot, hydrateRoot } from "react-dom/client";
 import { reactErrorHandler } from "@superlog/react";
 import { BrowserRouter } from "react-router-dom";
-import { App } from "./app";
-import { initializeBrowserMonitoring } from "./browser-monitoring";
-import { BrowserAnalyticsIdentity } from "./components/browser-analytics-identity";
-import { BrowserAnalyticsPageviews } from "./components/browser-analytics-pageviews";
+import { Application } from "./application";
+import { initializeBrowserMonitoring, initializeBrowserTelemetry } from "./browser-monitoring";
 import { ApplicationError } from "./components/application-error";
-import { ConsentManager } from "./components/consent-manager";
-import { BrowserMonitoringIdentity } from "./components/browser-monitoring-identity";
 import "./styles.css";
 import "./design-system/design-system.css";
 import "./design-system/design-library.css";
 import "@c15t/react/styles.css";
 
 initializeBrowserMonitoring();
+initializeBrowserTelemetry();
 // Ad click ids arrive in the landing URL; they are stored only after consent.
 const landingSearch = window.location.search;
 
@@ -29,12 +26,7 @@ const application = (
       fallback={({ eventId }) => <ApplicationError eventId={eventId} />}
     >
       <BrowserRouter>
-        <ConsentManager landingSearch={landingSearch}>
-          <BrowserAnalyticsIdentity />
-          <BrowserAnalyticsPageviews />
-          <BrowserMonitoringIdentity />
-          <App />
-        </ConsentManager>
+        <Application landingSearch={landingSearch} />
       </BrowserRouter>
     </Sentry.ErrorBoundary>
   </StrictMode>

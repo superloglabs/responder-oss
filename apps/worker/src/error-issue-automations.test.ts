@@ -61,7 +61,7 @@ describe("startErrorIssueAutomations", () => {
     const deps = dependencies({ find: vi.fn(async () => [{ automationId: "automation-1" }, { automationId: "automation-2" }]) });
 
     expect(await startErrorIssueAutomations([{ issueId, notificationsPaused: false, organizationId, transition: "new" }], deps)).toBe(2);
-    expect(deps.find).toHaveBeenCalledWith({ eventType: "new_issue", organizationId, service: "api" });
+    expect(deps.find).toHaveBeenCalledWith({ eventType: "new_issue", exception: true, organizationId, service: "api" });
     expect(deps.begin).toHaveBeenCalledWith({
       automationId: "automation-1",
       trigger: expect.objectContaining({

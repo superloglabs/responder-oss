@@ -12,6 +12,7 @@ import {
   type ErrorOccurrences,
   errorIssueActorName,
   occurrenceTransition,
+  isExceptionIssue,
 } from "../telemetry/error-issues.js";
 import { enqueueErrorNotificationFollowups, enqueueErrorNotifications } from "./error-notifications.js";
 import { getDatabase } from "./client.js";
@@ -190,6 +191,7 @@ export async function recordErrorOccurrences(
       organizationId: occurrences.organizationId,
       issueId,
       eventKey: transition === "new" ? "new" : `regressed:${now.toISOString()}`,
+      exception: isExceptionIssue({ kind: occurrences.kind, stacktrace: occurrences.sample.stacktrace }),
       snapshot: { title: occurrences.title, service: occurrences.service, exceptionType: occurrences.exceptionType,
         seenAt: occurrences.lastSeenAt.toISOString(), transition },
     });

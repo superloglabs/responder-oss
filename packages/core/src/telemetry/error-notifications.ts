@@ -5,6 +5,8 @@ export const errorNotificationTargetSchema = z.object({
 });
 export const errorNotificationSettingsSchema = z.object({
   enabled: z.boolean(),
+  // Plain error log lines stay on the Errors page and post nothing.
+  exceptionsOnly: z.boolean().optional(),
   targets: z.array(errorNotificationTargetSchema).max(1),
 }).refine((value) => !value.enabled || value.targets.length === 1, {
   message: "Choose a Slack channel before enabling notifications",
@@ -26,4 +28,8 @@ export function errorNotificationTargetKey(target: ErrorNotificationTarget): str
 }
 export function matchesErrorNotification(settings: ErrorNotificationSettings): boolean {
   return settings.enabled;
+}
+// Whether settings post an issue that is, or is not, an exception.
+export function notifiesErrorIssue(settings: ErrorNotificationSettings, exception: boolean): boolean {
+  return matchesErrorNotification(settings) && (exception || !settings.exceptionsOnly);
 }

@@ -47,7 +47,14 @@ createInterface({ input: child.stdout }).on("line", line => {
 send({ id: 1, method: "initialize", params: { clientInfo: { name: "responder", version: "1.0.0" }, capabilities: {} } });
 `;
 const modelsSchema = z.array(z.object({ id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,254}$/u), name: z.string().min(1) })).max(10000);
-async function loadSubscriptionModels(owner: { organizationId: string; credentialId: string }) {
+// Runs a script against the managed client in a short-lived sandbox of its own
+// and returns the file it writes. The client may refresh the login on the way,
+// so the stored credential is updated from the sandbox afterwards.
+export async function runSubscriptionClient(
+  owner: { organizationId: string; credentialId: string },
+  task: { name: string; output: string; root: string; runner: string },
+): Promise<string> {
+  const { output, root } = task;
   const lease = { ...owner, leaseId: crypto.randomUUID() };
   const config = requireDaytonaClientConfig();
   const sdk = new Daytona(daytonaClientOptions(config));
@@ -56,18 +63,18 @@ async function loadSubscriptionModels(owner: { organizationId: string; credentia
   try {
     const authJson = await acquireSubscriptionCredential({ ...lease, expiresAt: new Date(Date.now() + 180_000) });
     originalAccountId = parseSubscriptionAuth(authJson).tokens.account_id;
-    sandbox = await sdk.create({ snapshot: config.sandboxSnapshotName, name: `responder-models-${crypto.randomUUID()}`, ephemeral: true, autoStopInterval: 5, autoDeleteInterval: 0 }, { timeout: 60 });
+    sandbox = await sdk.create({ snapshot: config.sandboxSnapshotName, name: `responder-${task.name}-${crypto.randomUUID()}`, ephemeral: true, autoStopInterval: 5, autoDeleteInterval: 0 }, { timeout: 60 });
     const setup = await sandbox.process.executeCommand(`umask 077; mkdir -p ${root}/auth; chmod 700 ${root}/auth; npm install --prefix ${root} --ignore-scripts --no-audit --no-fund --no-package-lock --no-save @openai/codex@${subscriptionCliVersion}`, undefined, undefined, 60);
-    if (setup.exitCode !== 0) throw new Error("Unable to prepare model discovery");
+    if (setup.exitCode !== 0) throw new Error("Unable to prepare the subscription client");
     await sandbox.fs.uploadFile(Buffer.from(authJson), `${root}/auth/auth.json`);
-    await sandbox.fs.uploadFile(Buffer.from(subscriptionModelsRunner), `${root}/models.mjs`);
-    const result = await sandbox.process.executeCommand(`chmod 600 ${root}/auth/auth.json; node ${root}/models.mjs`, undefined, undefined, 55);
-    if (result.exitCode !== 0) throw new Error("Unable to discover subscription models");
-    return modelsSchema.parse(JSON.parse((await sandbox.fs.downloadFile(`${root}/models.json`)).toString()));
+    await sandbox.fs.uploadFile(Buffer.from(task.runner), `${root}/run.mjs`);
+    const result = await sandbox.process.executeCommand(`chmod 600 ${root}/auth/auth.json; node ${root}/run.mjs`, undefined, undefined, 55);
+    if (result.exitCode !== 0) throw new Error("The subscription client failed");
+    return (await sandbox.fs.downloadFile(`${root}/${output}`)).toString();
   } finally {
     try {
       if (sandbox && originalAccountId) {
-        // Preserve managed refreshes even if model discovery itself failed.
+        // Preserve managed refreshes even if the script itself failed.
         const updated = await sandbox.fs.downloadFile(`${root}/auth/auth.json`).catch(() => null);
         if (updated) await persistSubscriptionCredential({ ...lease, authJson: updated.toString(), previousAccountId: originalAccountId });
       }
@@ -79,6 +86,11 @@ async function loadSubscriptionModels(owner: { organizationId: string; credentia
       } finally { await sdk[Symbol.asyncDispose](); }
     }
   }
+}
+
+async function loadSubscriptionModels(owner: { organizationId: string; credentialId: string }) {
+  const models = await runSubscriptionClient(owner, { name: "models", output: "models.json", root, runner: subscriptionModelsRunner });
+  return modelsSchema.parse(JSON.parse(models));
 }
 
 const catalogCache = createModelCatalogCache();

@@ -1,5 +1,5 @@
 import { tool } from "@openai/agents";
-import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
+import type { SandboxSession } from "./sandbox-session.js";
 import { captureAnalyticsEvent } from "@responder/core/analytics";
 import { getRuntimeRepositories } from "@responder/core/db/investigations";
 import {
@@ -58,7 +58,7 @@ export function createPullRequestTool(input: {
   organizationId: string;
   pullRequestRequestId?: string;
   repositories: CheckedOutRepository[];
-  session: DaytonaSandboxSession;
+  session: SandboxSession;
   targetRepository?: string;
 }) {
   const configuredRepositoryNames = [

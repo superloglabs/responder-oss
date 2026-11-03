@@ -1,9 +1,12 @@
 import { z } from "zod";
+import { encryptCredentials } from "../../../../packages/core/src/credentials/encryption.js";
 import {
   createWorkspaceSecretRecord,
   findWorkspaceSecretByName,
+  storeWorkspaceSecretValue,
   type WorkspaceSecretSummary,
 } from "../../../../packages/core/src/db/workspace-secrets.js";
+import { sandboxProvider } from "../../../../packages/core/src/sandbox-config.js";
 import { workspaceSecretEnvironmentVariableNameReservation } from "../../../../packages/core/src/workspace-secret-names.js";
 import {
   createDaytonaWorkspaceSecret,
@@ -59,8 +62,39 @@ function isWorkspaceSecretNameConflict(error: unknown): boolean {
   );
 }
 
-// Stores the value in Daytona and records only its metadata. The Daytona
-// secret is removed again if the record cannot be saved.
+// The Daytona provider needs a Daytona copy of every secret, so saving fails
+// without one. With Vercel the copy is made only when Daytona is configured.
+function usesDaytonaSecrets(): boolean {
+  return sandboxProvider() === "daytona" || Boolean(process.env.DAYTONA_API_KEY?.trim());
+}
+
+// Returns an error when a Daytona copy made for a failed save remains.
+async function deleteUnsavedDaytonaSecret(
+  daytonaSecret: { id: string } | null,
+): Promise<{ error: string; ok: false; status: 502 } | null> {
+  if (!daytonaSecret) return null;
+  try {
+    await deleteDaytonaWorkspaceSecret(daytonaSecret.id);
+    return null;
+  } catch (cleanupError) {
+    console.error("Unable to clean up workspace secret", {
+      cleanupError,
+      daytonaSecretId: daytonaSecret.id,
+    });
+    return {
+      error: "Unable to clean up workspace secret after storage failed",
+      ok: false,
+      status: 502,
+    };
+  }
+}
+
+// Stores the value encrypted, and in Daytona when it is in use, so either
+// sandbox provider can use the secret. The Daytona secret is removed again if
+// the record cannot be saved. Saving a secret again fills in what it lacks:
+// a stored value, because Daytona cannot return the one it holds, or a
+// Daytona copy, once Daytona is in use. Both copies then hold the submitted
+// value and hosts, and an older Daytona copy is replaced.
 export async function storeWorkspaceSecret(input: {
   organizationId: string;
   secret: WorkspaceSecretInput;
@@ -79,36 +113,66 @@ export async function storeWorkspaceSecret(input: {
     organizationId: input.organizationId,
     name,
   });
-  if (existing) return conflict;
+  const daytonaInUse = usesDaytonaSecrets();
+  if (existing?.hasValue && (existing.daytonaSecretId || !daytonaInUse)) return conflict;
+  const encryptedValue = encryptCredentials({ value });
 
   let daytonaSecret: { id: string; name: string } | null = null;
+  if (existing) {
+    try {
+      if (daytonaInUse) {
+        daytonaSecret = await createDaytonaWorkspaceSecret({ value, allowedHosts });
+      }
+      const stored = await storeWorkspaceSecretValue({
+        allowedHosts,
+        daytonaSecretId: daytonaSecret?.id ?? existing.daytonaSecretId,
+        daytonaSecretName: daytonaSecret?.name ?? existing.daytonaSecretName,
+        encryptedValue,
+        id: existing.id,
+        missing: existing.hasValue ? "daytonaCopy" : "value",
+      });
+      if (!stored) return (await deleteUnsavedDaytonaSecret(daytonaSecret)) ?? conflict;
+    } catch {
+      return (await deleteUnsavedDaytonaSecret(daytonaSecret)) ??
+        { error: "Unable to store workspace secret", ok: false, status: 502 };
+    }
+    if (daytonaSecret && existing.daytonaSecretId) {
+      // Sandboxes that mounted the old copy mount the new one on their next turn.
+      await deleteDaytonaWorkspaceSecret(existing.daytonaSecretId).catch((error: unknown) => {
+        console.error("Unable to delete a replaced workspace secret", {
+          daytonaSecretId: existing.daytonaSecretId,
+          error,
+        });
+      });
+    }
+    return {
+      ok: true,
+      secret: {
+        allowedHosts,
+        createdAt: existing.createdAt,
+        id: existing.id,
+        name: existing.name,
+      },
+    };
+  }
+
   try {
-    daytonaSecret = await createDaytonaWorkspaceSecret({ value, allowedHosts });
+    if (daytonaInUse) {
+      daytonaSecret = await createDaytonaWorkspaceSecret({ value, allowedHosts });
+    }
     const secret = await createWorkspaceSecretRecord({
       organizationId: input.organizationId,
       userId: input.userId,
       name,
       allowedHosts,
-      daytonaSecretId: daytonaSecret.id,
-      daytonaSecretName: daytonaSecret.name,
+      daytonaSecretId: daytonaSecret?.id ?? null,
+      daytonaSecretName: daytonaSecret?.name ?? null,
+      encryptedValue,
     });
     return { ok: true, secret };
   } catch (error) {
-    if (daytonaSecret) {
-      try {
-        await deleteDaytonaWorkspaceSecret(daytonaSecret.id);
-      } catch (cleanupError) {
-        console.error("Unable to clean up workspace secret", {
-          cleanupError,
-          daytonaSecretId: daytonaSecret.id,
-        });
-        return {
-          error: "Unable to clean up workspace secret after storage failed",
-          ok: false,
-          status: 502,
-        };
-      }
-    }
+    const cleanupFailure = await deleteUnsavedDaytonaSecret(daytonaSecret);
+    if (cleanupFailure) return cleanupFailure;
     if (isWorkspaceSecretNameConflict(error)) return conflict;
     return { error: "Unable to store workspace secret", ok: false, status: 502 };
   }

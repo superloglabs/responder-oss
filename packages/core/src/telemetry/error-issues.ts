@@ -5,8 +5,11 @@ import {
   fingerprintLog,
   pythonTracebackException,
   stripNullBytes,
+  previousFingerprint,
+  previousFingerprintLog,
 } from "./fingerprint.js";
 import { fingerprintLogV1, fingerprintV1 } from "./fingerprint-v1.js";
+import { decodeReactError, minifiedMessageAttribute } from "./react-errors.js";
 
 // Error issues group a workspace's exceptions by fingerprint. Exceptions are
 // span events named "exception" and logs at ERROR severity or above. The
@@ -59,6 +62,12 @@ export type ErrorIssueActivity = {
 };
 
 export type ErrorIssuePullRequest = { linkedAt: string; url: string };
+
+// An exception is a span's exception event or a log with a stack trace. Other
+// issues are plain error log lines, which change with each message's wording.
+export function isExceptionIssue(issue: { kind: ErrorIssueKind; stacktrace: string | null }): boolean {
+  return issue.kind === "span" || Boolean(issue.stacktrace?.trim());
+}
 
 // What an occurrence means for its issue:
 // - new: the fingerprint had no issue
@@ -261,12 +270,26 @@ function utcHour(date: Date): string {
   return `${date.toISOString().slice(0, 13)}:00:00.000Z`;
 }
 
+// A production React error is grouped and titled by React's own message. The
+// minified one stays on the sample.
+function withReactMessage(candidate: ErrorCandidate): ErrorCandidate {
+  const message = decodeReactError(candidate.exception_message);
+  if (message === null) return candidate;
+  return {
+    ...candidate,
+    attrs: { ...candidate.attrs, [minifiedMessageAttribute]: candidate.exception_message },
+    body: decodeReactError(candidate.body) ?? candidate.body,
+    exception_message: message,
+  };
+}
+
 // Fingerprints each candidate and collapses those with the same workspace and
 // fingerprint, so an exception storm is one write per issue. The newest
 // occurrence becomes the sample.
 export function groupErrorCandidates(candidates: ErrorCandidate[]): ErrorOccurrences[] {
   const groups = new Map<string, ErrorOccurrences>();
-  for (const candidate of candidates) {
+  for (const received of candidates) {
+    const candidate = withReactMessage(received);
     // A log whose body is a Python traceback has its stack there.
     const bodyTraceback = candidate.kind === "log" && !candidate.exception_stacktrace
       ? pythonTracebackException(candidate.body)
@@ -284,7 +307,9 @@ export function groupErrorCandidates(candidates: ErrorCandidate[]): ErrorOccurre
       stacktrace: bodyTraceback ? null : stacktrace,
     };
     const fp = candidate.kind === "span" ? fingerprint(spanInput) : fingerprintLog(logInput);
-    const previousFingerprint = candidate.kind === "span" ? fingerprintV1(spanInput) : fingerprintLogV1(logInput);
+    const previousFingerprints = candidate.kind === "span"
+      ? [previousFingerprint(spanInput), fingerprintV1(spanInput)]
+      : [previousFingerprintLog(logInput), fingerprintLogV1(logInput)];
     const message = stripNullBytes(
       candidate.kind === "span"
         ? candidate.exception_message
@@ -321,7 +346,7 @@ export function groupErrorCandidates(candidates: ErrorCandidate[]): ErrorOccurre
         lastSeenAt: seenAt,
         message: sample.message,
         organizationId: candidate.project_id,
-        previousFingerprints: [previousFingerprint],
+        previousFingerprints,
         sample,
         service,
         title: errorIssueTitle(fp, message),
@@ -330,7 +355,9 @@ export function groupErrorCandidates(candidates: ErrorCandidate[]): ErrorOccurre
       continue;
     }
     existing.eventCount += 1;
-    if (!existing.previousFingerprints.includes(previousFingerprint)) existing.previousFingerprints.push(previousFingerprint);
+    for (const previous of previousFingerprints) {
+      if (!existing.previousFingerprints.includes(previous)) existing.previousFingerprints.push(previous);
+    }
     existing.dailyCounts[day] = (existing.dailyCounts[day] ?? 0) + 1;
     existing.hourlyCounts[hour] = (existing.hourlyCounts[hour] ?? 0) + 1;
     if (seenAt < existing.firstSeenAt) existing.firstSeenAt = seenAt;

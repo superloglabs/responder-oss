@@ -45,11 +45,11 @@ import { issueRoutes } from "./issues/routes.js";
 import { createSyntheticRoutes } from "./synthetics/routes.js";
 import { createAlertRoutes } from "./telemetry/alert-routes.js";
 import { createErrorNotificationRoutes } from "./telemetry/error-notification-routes.js";
+import { createSandboxNetworkRoutes } from "./agents/sandbox-network-routes.js";
 import { createErrorIssueRoutes } from "./telemetry/error-issue-routes.js";
 import { createDashboardRoutes } from "./telemetry/dashboard-routes.js";
 import { createIngestKeyRoutes } from "./telemetry/ingest-key-routes.js";
 import { createIngestRoutes } from "./telemetry/ingest-routes.js";
-import { createBrowserRelayRoutes } from "./telemetry/browser-relay-routes.js";
 import { createSourceRoutes } from "./telemetry/source-routes.js";
 import { createTelemetryRoutes } from "./telemetry/routes.js";
 import { queueInvestigation } from "./investigations/queue.js";
@@ -77,6 +77,7 @@ import { listEnabledOrganizationCapabilities } from "../../../packages/core/src/
 import { apiKeyRoutes } from "./management/api-key-routes.js";
 import { terraformRoutes } from "./terraform/routes.js";
 import { skillRoutes } from "./skills/routes.js";
+import { memoryRoutes } from "./memories/routes.js";
 import { managementMcpRoutes } from "./management/mcp.js";
 import { managementApiRoutes } from "./management/routes.js";
 import { sourceMapRoutes } from "./source-maps/routes.js";
@@ -538,18 +539,19 @@ export const app = instrumentedApp
   .route("/api/pull-requests", pullRequestRoutes)
   .route("/api/agents", agentRoutes)
   .route("/api/skills", skillRoutes)
+  .route("/api/memories", memoryRoutes)
   .route("/api/billing", billingRoutes)
   .route("/api/issues", issueRoutes)
   .route("/api/scans", scanRoutes)
   .route("/api/suggestions", suggestionRoutes)
   .route("/api/ingest", createIngestRoutes())
-  .route("/api/telemetry/browser", createBrowserRelayRoutes())
   .route("/api/telemetry/ingest-keys", createIngestKeyRoutes())
   .route("/api/telemetry/sources", createSourceRoutes())
   .route("/api/telemetry/alerts", createAlertRoutes())
   .route("/api/synthetic-checks", createSyntheticRoutes())
   .route("/api/terraform", terraformRoutes)
   .route("/api/error-notifications", createErrorNotificationRoutes())
+  .route("/api/sandbox-network", createSandboxNetworkRoutes())
   .route("/api/error-issues", createErrorIssueRoutes())
   .route("/api/telemetry/dashboards", createDashboardRoutes())
   .route("/api/telemetry", createTelemetryRoutes())

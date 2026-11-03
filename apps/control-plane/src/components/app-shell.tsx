@@ -25,6 +25,7 @@ import {
   XIcon,
 } from "@phosphor-icons/react";
 import { ColorThemeToggle } from "./color-theme-toggle";
+import { SidebarUsageCard } from "./sidebar-usage-card";
 import { TelemetryCallCard } from "./telemetry-call-card";
 import "./workspace.css";
 
@@ -313,6 +314,7 @@ export function AppShell({
         </div>
         <div className="globalHeader__right" ref={menuRef}>
           {workspace && !guest ? <TelemetryCallCard /> : null}
+          {workspace && !guest ? <SidebarUsageCard enabled={options.automations} /> : null}
           <ColorThemeToggle
             className={workspace ? "globalThemeToggle globalThemeToggle--workspace" : "globalThemeToggle"}
             showLabel={workspace}

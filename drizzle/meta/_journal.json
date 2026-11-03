@@ -729,6 +729,41 @@
       "when": 1793288632947,
       "tag": "0103_error_issue_claims",
       "breakpoints": true
+    },
+    {
+      "idx": 104,
+      "version": "7",
+      "when": 1793655539681,
+      "tag": "0104_workspace_secret_values",
+      "breakpoints": true
+    },
+    {
+      "idx": 105,
+      "version": "7",
+      "when": 1793698694316,
+      "tag": "0105_sandbox_network_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 106,
+      "version": "7",
+      "when": 1793700009977,
+      "tag": "0106_workspace_secret_value_present",
+      "breakpoints": true
+    },
+    {
+      "idx": 107,
+      "version": "7",
+      "when": 1793702776981,
+      "tag": "0107_workspace_memories",
+      "breakpoints": true
+    },
+    {
+      "idx": 108,
+      "version": "7",
+      "when": 1793703680959,
+      "tag": "0108_run_billing_accounts",
+      "breakpoints": true
     }
   ]
 }

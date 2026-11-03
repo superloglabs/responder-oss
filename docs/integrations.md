@@ -1073,7 +1073,7 @@ value once, with the OpenTelemetry SDK settings for it.
 
 The worker groups a telemetry workspace's exceptions into error issues by
 fingerprint. An exception is a span event named `exception` or a log at ERROR
-severity or above. The fingerprint is the exception type and the top five
+severity or above. The fingerprint is the exception type, without its module, and the top five
 frames of the application's own code. When the stack has none of the
 application's code, the message takes the frames' place, with URLs, paths,
 IDs, generated codes, numbers and timestamps replaced. A frame is its function
@@ -1085,8 +1085,8 @@ and Python stacks are read; other languages group by type and message. Chunk
 load errors and React hydration errors each group into one issue whatever
 their stack. A log without a stack groups by its service, severity and
 normalized body. Fingerprints start with the algorithm version
-(`v2:`). An occurrence whose fingerprint has no issue takes over the issue its
-`v1:` fingerprint named, so the change of algorithm opens no known error again
+(`v3:`). An occurrence whose fingerprint has no issue takes over the issue its
+`v2:` or `v1:` fingerprint named, so the change of algorithm opens no known error again
 as new.
 
 ### Source maps
@@ -1103,8 +1103,19 @@ Before grouping, the worker rewrites each frame whose file has a map to its
 original file, line, and function. The function is the one around the
 original position in the source the map embeds; without embedded source it is
 the name the caller called. The browser's stack stays on the sample as
-`exception.stacktrace.minified`. Maps that have not matched an error for 30
-days are deleted every hour.
+`exception.stacktrace.minified`. The React component stack that
+`@superlog/react` attaches as `react.component_stack` is rewritten the same
+way, with the original in `react.component_stack.minified`. Maps that have not
+matched an error for 30 days are deleted every hour.
+
+Production React throws many of its errors as a code and a link, such as
+`Minified React error #418; visit https://react.dev/errors/418?args[]=HTML`.
+Before grouping, a message with a code in React's table is replaced by
+React's text for that code with the link's arguments filled in, so the issue's
+title says what failed; other messages are left as they are. The original
+stays on the sample as `exception.message.minified`. `pnpm
+react:generate-error-codes <commit>` regenerates the table from React's
+repository.
 
 Every ten seconds the worker reads exceptions from ClickHouse's
 `otel_issue_candidates` table in arrival order, 30 seconds behind the present,
@@ -1142,6 +1153,9 @@ When enabled, they always notify on new errors and resolved errors that happen a
 Repeated occurrences of an open or silenced issue do not notify. This does
 not require an investigation automation.
 
+**Only exceptions** posts only span exceptions and logs with a stack trace.
+Plain error log lines stay on the Errors page.
+
 The worker persists each destination with the error transition, retries failed
 sends independently up to ten attempts with backoff, and recovers interrupted
 deliveries. The worker needs `RESPONDER_APP_URL` (or `BETTER_AUTH_URL`) for issue links.
@@ -1169,7 +1183,8 @@ recorded, or deleted after 30 days, gets none.
 
 An automation can start on error issues with the **Errors** trigger, offered
 in workspaces with telemetry. It runs on new issues, regressions (a resolved
-issue that occurs again), or both, and can be limited to some services. The
+issue that occurs again), or both, and can be limited to some services or to
+exceptions only. The
 worker starts the runs after the pass that opened the issue is saved. A new
 issue runs each automation once; a regression runs it once per time the
 issue reopens. The run's trigger has the issue's title, service, counts,

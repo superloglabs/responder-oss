@@ -16,16 +16,12 @@ import { scrubSentryEvent } from "./sentry-scrubbing.js";
 
 let telemetry: NodeTelemetry | null = null;
 
-// Requests that are not traced: load balancer health checks, telemetry
-// ingest (including this service's own exports when it sends to its own
-// cell), and browser telemetry relayed to the OTLP endpoint.
+// Requests that are not traced: load balancer health checks and telemetry
+// ingest, including this service's own exports and the browser's when they
+// send to this cell.
 export function isUntracedRequest(urlPath: string): boolean {
   const path = urlPath.split("?")[0] ?? urlPath;
-  return (
-    path === "/api/health" ||
-    path.startsWith("/api/ingest/") ||
-    path.startsWith("/api/telemetry/browser/")
-  );
+  return path === "/api/health" || path.startsWith("/api/ingest/");
 }
 
 // Call before the application modules are imported, so that Postgres and the

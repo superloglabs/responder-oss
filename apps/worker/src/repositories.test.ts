@@ -1,4 +1,5 @@
 import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
+import type { SandboxSession } from "./sandbox-session.js";
 import { execFile } from "node:child_process";
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -560,7 +561,7 @@ describe("Daytona repository checkout", () => {
     const session = fakeSession();
     let uploadedArchive: Buffer | undefined;
     const upload = vi.fn(
-      async (_session: DaytonaSandboxSession, localPath: string) => {
+      async (_session: SandboxSession, localPath: string) => {
         uploadedArchive = await readFile(localPath);
       },
     );

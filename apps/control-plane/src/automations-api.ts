@@ -27,6 +27,7 @@ export type AutomationTrigger =
     }
   | {
       eventTypes: Array<"new_issue" | "regression">;
+      exceptionsOnly?: boolean;
       kind: "errors";
       services?: string[];
     }
@@ -430,6 +431,9 @@ export function cancelAutomationSubscription(id: string) { return automationJson
 export function fetchAutomationModels(credentialId: string, refresh = false) { return automationJson<{ models: AvailableAutomationModel[] }>(`/api/automations/credentials/${encodeURIComponent(credentialId)}/models${refresh ? "?refresh=true" : ""}`); }
 
 // Models available with included usage, served through AI Gateway.
+export interface PlanAutomationModel { id: string; name: string; provider: AutomationModelProvider }
+// The one model a workspace that pays per run may use, or null.
+export function fetchPlanAutomationModel() { return automationJson<{ model: PlanAutomationModel | null }>("/api/automations/plan-model"); }
 export function fetchIncludedAutomationModels(provider: AutomationModelProvider) { return automationJson<{ models: AvailableAutomationModel[] }>(`/api/automations/included-models/${encodeURIComponent(provider)}`); }
 
 export async function fetchAutomationCredentials(): Promise<AutomationCredential[]> {

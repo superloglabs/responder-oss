@@ -29,6 +29,7 @@ import type {
   StructuredInvestigationReport,
 } from "../investigations/report.js";
 import type { SuggestionCodeChange } from "../suggestions/model.js";
+import type { MemoryType } from "../memories/config.js";
 import type {
   AlertAggregation,
   AlertComparator,
@@ -562,8 +563,12 @@ export const workspaceSecrets = pgTable(
       .notNull()
       .references(() => organization.id, { onDelete: "restrict" }),
     name: text("name").notNull(),
-    daytonaSecretId: text("daytona_secret_id").notNull(),
-    daytonaSecretName: text("daytona_secret_name").notNull(),
+    // Set when Daytona is configured. Daytona never returns a value.
+    daytonaSecretId: text("daytona_secret_id"),
+    daytonaSecretName: text("daytona_secret_name"),
+    // AES-256-GCM, as for other stored credentials. Vercel takes the value at
+    // each sandbox start. Empty for secrets saved before this column existed.
+    encryptedValue: text("encrypted_value"),
     allowedHosts: jsonb("allowed_hosts").$type<string[]>().notNull(),
     createdBy: uuid("created_by").references(() => user.id, {
       onDelete: "set null",
@@ -581,8 +586,26 @@ export const workspaceSecrets = pgTable(
     uniqueIndex("workspace_secrets_daytona_name_idx").on(
       table.daytonaSecretName,
     ),
+    // A secret with neither copy could not reach a sandbox on any provider.
+    check(
+      "workspace_secrets_value_present",
+      sql`${table.encryptedValue} is not null or ${table.daytonaSecretId} is not null`,
+    ),
   ],
 );
+
+// No row means sandboxes have open outbound access. A restricted workspace's
+// sandboxes reach only the listed domains, Superlog, and each secret's hosts.
+export const sandboxNetworkSettings = pgTable("sandbox_network_settings", {
+  organizationId: uuid("organization_id")
+    .primaryKey()
+    .references(() => organization.id, { onDelete: "cascade" }),
+  restricted: boolean("restricted").notNull().default(false),
+  // Kept while unrestricted, so turning the restriction back on restores it.
+  allowedDomains: jsonb("allowed_domains").$type<string[]>().notNull().default([]),
+  updatedBy: uuid("updated_by").references(() => user.id, { onDelete: "set null" }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
 export const agentVersionSecrets = pgTable(
   "agent_version_secrets",
@@ -661,6 +684,40 @@ export const workspaceSkillSecrets = pgTable(
   ],
 );
 
+// Facts members saved for agents, in Claude Code's memory format. Every
+// automation run and tag mode thread reads them; runs cannot change them.
+export const workspaceMemories = pgTable(
+  "workspace_memories",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description").notNull(),
+    type: text("type").$type<MemoryType>().notNull(),
+    body: text("body").notNull(),
+    createdBy: uuid("created_by").references(() => user.id, {
+      onDelete: "set null",
+    }),
+    updatedBy: uuid("updated_by").references(() => user.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("workspace_memories_organization_name_idx").on(
+      table.organizationId,
+      table.name,
+    ),
+  ],
+);
+
 export const organizationCapabilityValues = [
   "automations",
   "simplified_navigation",
@@ -703,6 +760,26 @@ export const telemetryNotificationPauses = pgTable("telemetry_notification_pause
     .primaryKey()
     .references(() => organization.id, { onDelete: "cascade" }),
   pausedBy: uuid("paused_by").references(() => user.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+// A workspace that pays a price per run instead of a usage plan. Until it
+// moves to a paid plan, its automations run only on this model, each
+// successful run counts once against `feature_id` for the Autumn customer
+// `customer_id`, and model and sandbox usage are not charged. Operators set
+// these rows; there is no app setting for them.
+export const runBillingAccounts = pgTable("run_billing_accounts", {
+  organizationId: uuid("organization_id")
+    .primaryKey()
+    .references(() => organization.id, { onDelete: "cascade" }),
+  customerId: text("customer_id").notNull(),
+  featureId: text("feature_id").notNull(),
+  modelProvider: text("model_provider").notNull(),
+  model: text("model").notNull(),
+  // The name the model picker shows for the model.
+  modelName: text("model_name").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
