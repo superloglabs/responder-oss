@@ -62,14 +62,20 @@ export function initializeBrowserTelemetry(
   const endpoint = config.ingestEndpoint?.trim();
   const ingestKey = config.ingestKey?.trim();
   if (!endpoint || !ingestKey) return false;
-  const started = startBrowserTelemetry({
-    endpoint,
-    environment: config.environment?.trim() || undefined,
-    ingestKey,
-    origin: window.location.origin,
-    release: config.release?.trim() || undefined,
-    sampleRate: sentrySampleRate(config.tracesSampleRate),
-  });
+  let started: boolean;
+  try {
+    started = startBrowserTelemetry({
+      endpoint,
+      environment: config.environment?.trim() || undefined,
+      ingestKey,
+      origin: window.location.origin,
+      release: config.release?.trim() || undefined,
+      sampleRate: sentrySampleRate(config.tracesSampleRate),
+    });
+  } catch {
+    // The app renders without telemetry rather than not at all.
+    return false;
+  }
   if (started) applyTelemetryIdentity();
   return started;
 }

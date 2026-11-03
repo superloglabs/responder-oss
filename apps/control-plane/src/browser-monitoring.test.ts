@@ -115,4 +115,16 @@ describe("browser error monitoring", () => {
     expect(starterMocks.startBrowserTelemetry).toHaveBeenLastCalledWith(expect.objectContaining({ sampleRate: 0 }));
     vi.unstubAllGlobals();
   });
+
+  it("keeps the app rendering when the telemetry SDK fails to start", () => {
+    vi.stubGlobal("window", { location: { origin: "https://superlog.sh" } });
+    starterMocks.startBrowserTelemetry.mockImplementationOnce(() => {
+      throw new Error("localStorage is unavailable");
+    });
+
+    expect(
+      initializeBrowserTelemetry({ ingestEndpoint: "https://superlog.sh/api/ingest", ingestKey: "sl_ingest_key" }),
+    ).toBe(false);
+    vi.unstubAllGlobals();
+  });
 });
