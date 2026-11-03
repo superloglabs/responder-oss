@@ -27,11 +27,11 @@ const buildsSentrySourceMaps =
 const uploadsSuperlogSourceMaps = Boolean(process.env.SUPERLOG_API_KEY?.trim());
 const publicDocumentPaths: ReadonlySet<string> = new Set(publicDocumentPathnames);
 
-// Tags and uploads before any other plugin writes, so Sentry's upload, when
-// configured, finds the maps and deletes them afterwards.
+// Tags and uploads before any other plugin writes. When the build also makes
+// maps for Sentry, they stay for Sentry's upload, which deletes them after it.
 function superlogSourceMapUpload(): Plugin {
   const plugin = superlogSourceMaps({
-    deleteAfterUpload: !uploadsSentrySourceMaps,
+    deleteAfterUpload: !buildsSentrySourceMaps,
     release,
     url: process.env.SUPERLOG_URL?.trim() || undefined,
   }) as Plugin;
