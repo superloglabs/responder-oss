@@ -257,7 +257,7 @@ describe("sandbox agent configuration", () => {
     expect(instructions).not.toContain("search_observability_suggestions");
   });
 
-  it("lists the workspace's memories in tag mode threads", () => {
+  it("lists the workspace's memories in tag mode threads, including assistant turns", () => {
     const memories = [{
       body: "Restart the worker after an RDS failover.",
       description: "Worker handlers hang after a database restart",
@@ -273,11 +273,23 @@ describe("sandbox agent configuration", () => {
       threadMode: true,
       workspaceMemories: memories,
     });
+    const assistantInstructions = investigationInstructions({
+      agentPrompt: "Answer the person.",
+      assistant: { integrationsUrl: "https://responder.example/settings", pullRequests: false },
+      clickStackConnected: false,
+      datadogConnected: false,
+      repositories: [],
+      sentryConnected: false,
+      threadMode: true,
+      workspaceMemories: memories,
+    });
 
     expect(instructions).toContain(
       "Each memory is a file in /home/daytona/workspace/.responder/memory:\n- worker-hangs-after-db-restart: Worker handlers hang after a database restart (worker-hangs-after-db-restart.md)",
     );
     expect(instructions).toContain("A memory can be out of date");
+    expect(assistantInstructions).toContain("- worker-hangs-after-db-restart: Worker handlers hang after a database restart (worker-hangs-after-db-restart.md)");
+    expect(assistantInstructions).toContain("You are Responder, the Slack assistant");
     expect(investigationInstructions({
       agentPrompt: "Investigate what the person asked.",
       clickStackConnected: false,

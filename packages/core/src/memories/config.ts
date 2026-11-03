@@ -12,8 +12,9 @@ export const memoryDescriptionMaxLength = 1_024;
 export const memoryBodyMaxLength = 20_000;
 // Every memory is listed in each run's prompt, so a workspace keeps a few.
 export const workspaceMemoriesMaxCount = 200;
-// A full batch stays under the API's 1 MiB request limit.
-export const memoryImportMaxCount = 20;
+// A full batch of non-ASCII bodies, up to 3 bytes a character, stays under
+// the API's 1 MiB request limit.
+export const memoryImportMaxCount = 16;
 
 export const memoryTypes = ["user", "feedback", "project", "reference"] as const;
 export type MemoryType = (typeof memoryTypes)[number];
@@ -35,7 +36,7 @@ export const memoryInputSchema = z.object({
     .trim()
     .min(1, "Description is required")
     .max(memoryDescriptionMaxLength)
-    .refine((description) => !description.includes("\n"), "Use one line")
+    .refine((description) => !/[\r\n\u2028\u2029]/u.test(description), "Use one line")
     .describe("One line that says what the memory is about. Agents choose which memories to read from it."),
   type: z
     .enum(memoryTypes)
@@ -68,8 +69,8 @@ const credentialPatterns: Array<{ kind: string; pattern: RegExp }> = [
 ];
 
 // The kinds of credentials a memory seems to contain.
-export function memoryCredentialKinds(memory: Pick<MemoryInput, "body" | "description">): string[] {
-  const text = `${memory.description}\n${memory.body}`;
+export function memoryCredentialKinds(memory: Pick<MemoryInput, "body" | "description" | "name">): string[] {
+  const text = `${memory.name}\n${memory.description}\n${memory.body}`;
   return credentialPatterns
     .filter(({ pattern }) => pattern.test(text))
     .map(({ kind }) => kind);

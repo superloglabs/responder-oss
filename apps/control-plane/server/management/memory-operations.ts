@@ -4,7 +4,7 @@ import {
   getWorkspaceMemory,
   importWorkspaceMemories,
   listWorkspaceMemories,
-  updateWorkspaceMemory,
+  patchWorkspaceMemory,
   WorkspaceMemoryError,
 } from "../../../../packages/core/src/db/workspace-memories.js";
 import {
@@ -135,15 +135,12 @@ export const memoryOperations = [
       if (Object.values(changes).every((value) => value === undefined)) {
         throw new ManagementError(400, "Send at least one field to change.", "nothing_to_update");
       }
-      const current = await getWorkspaceMemory(context.organizationId, id);
-      if (!current) throw memoryNotFound();
-      const defined = Object.fromEntries(Object.entries(changes).filter(([, value]) => value !== undefined));
       try {
-        const updated = await updateWorkspaceMemory({
+        const updated = await patchWorkspaceMemory({
           organizationId: context.organizationId,
           memoryId: id,
           userId: context.user.id,
-          memory: memoryInputSchema.parse({ ...current, ...defined }),
+          changes,
         });
         if (!updated) throw memoryNotFound();
       } catch (error) {

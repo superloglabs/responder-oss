@@ -28,13 +28,13 @@ export async function fetchMemories(): Promise<MemoryListItem[]> {
 }
 
 export async function fetchMemory(memoryId: string): Promise<MemoryDetail> {
-  return (await memoryJson<{ memory: MemoryDetail }>(`/api/memories/${memoryId}`)).memory;
+  return (await memoryJson<{ memory: MemoryDetail }>(`/api/memories/${encodeURIComponent(memoryId)}`)).memory;
 }
 
 // Creates the memory when `memoryId` is undefined. Returns the memory's ID.
 export async function saveMemory(memoryId: string | undefined, input: MemoryInput): Promise<string> {
   const response = await memoryJson<{ memory: { id: string } }>(
-    memoryId ? `/api/memories/${memoryId}` : "/api/memories",
+    memoryId ? `/api/memories/${encodeURIComponent(memoryId)}` : "/api/memories",
     {
       body: JSON.stringify(input),
       headers: { "content-type": "application/json" },
@@ -45,5 +45,5 @@ export async function saveMemory(memoryId: string | undefined, input: MemoryInpu
 }
 
 export async function deleteMemory(memoryId: string): Promise<void> {
-  await memoryJson(`/api/memories/${memoryId}`, { method: "DELETE" });
+  await memoryJson(`/api/memories/${encodeURIComponent(memoryId)}`, { method: "DELETE" });
 }

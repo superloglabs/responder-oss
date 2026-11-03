@@ -35,7 +35,14 @@ export function MemoryEditorPage() {
   // again, so nothing overwrites edits made after saving.
   const [loadedMemoryId, setLoadedMemoryId] = useState<string | undefined>(undefined);
   const loadedMemoryIdRef = useRef<string | undefined>(undefined);
-  const loading = Boolean(memoryId) && loadedMemoryId !== memoryId;
+  // A memory that failed to load is not shown, so saving cannot replace it
+  // with an empty form.
+  const [failedMemoryId, setFailedMemoryId] = useState<string | undefined>(undefined);
+  const loadFailed = Boolean(memoryId) && failedMemoryId === memoryId;
+  const loading = Boolean(memoryId) && loadedMemoryId !== memoryId && !loadFailed;
+  // Counts edits, so a save that finishes after more edits does not mark
+  // them saved.
+  const edits = useRef(0);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -43,25 +50,40 @@ export function MemoryEditorPage() {
 
   useEffect(() => {
     let cancelled = false;
-    if (memoryId && loadedMemoryIdRef.current !== memoryId) {
+    if (!memoryId) {
+      // Opening a new memory from an existing one starts from an empty form.
+      if (loadedMemoryIdRef.current !== undefined) {
+        loadedMemoryIdRef.current = undefined;
+        setLoadedMemoryId(undefined);
+        setMemory(emptyMemory);
+        setSavedName("");
+        setLastSaved(null);
+        setSaved(false);
+        setError(null);
+      }
+    } else if (loadedMemoryIdRef.current !== memoryId) {
+      setError(null);
       void fetchMemory(memoryId)
         .then((loaded) => {
           if (cancelled) return;
           setMemory({ body: loaded.body, description: loaded.description, name: loaded.name, type: loaded.type });
           setSavedName(loaded.name);
           setLastSaved({ at: loaded.updatedAt, by: loaded.updatedBy?.name ?? null });
-        })
-        .catch((cause: unknown) => { if (!cancelled) setError(cause instanceof Error ? cause.message : "Unable to load the memory"); })
-        .finally(() => {
-          if (cancelled) return;
+          setSaved(false);
           loadedMemoryIdRef.current = memoryId;
           setLoadedMemoryId(memoryId);
+        })
+        .catch((cause: unknown) => {
+          if (cancelled) return;
+          setError(cause instanceof Error ? cause.message : "Unable to load the memory");
+          setFailedMemoryId(memoryId);
         });
     }
     return () => { cancelled = true; };
   }, [memoryId]);
 
   function update(patch: Partial<MemoryInput>) {
+    edits.current += 1;
     setMemory((current) => ({ ...current, ...patch }));
     setSaved(false);
   }
@@ -70,11 +92,12 @@ export function MemoryEditorPage() {
     event.preventDefault();
     setSaving(true);
     setError(null);
+    const editsAtSave = edits.current;
     try {
       const id = await saveMemory(memoryId, memory);
       setSavedName(memory.name);
-      setSaved(true);
-      setLastSaved(null);
+      setSaved(edits.current === editsAtSave);
+      setLastSaved({ at: new Date().toISOString(), by: null });
       if (!memoryId) {
         loadedMemoryIdRef.current = id;
         setLoadedMemoryId(id);
@@ -109,13 +132,13 @@ export function MemoryEditorPage() {
             <h1>{memoryId ? savedName : "New memory"}</h1>
             <span className="automationCreate__spacer" />
             {saved ? <span aria-live="polite" className="automationCreate__saveStatus">Saved</span> : null}
-            {memoryId ? <button className="automationCreate__secondary" disabled={loading} onClick={() => void remove()} type="button"><TrashIcon size={14} />Delete</button> : null}
-            <button className="automationCreate__save" disabled={saving || loading} form="memory-settings" type="submit"><FloppyDiskIcon size={14} />{saving ? "Saving…" : "Save"}</button>
+            {memoryId ? <button className="automationCreate__secondary" disabled={loading || loadFailed} onClick={() => void remove()} type="button"><TrashIcon size={14} />Delete</button> : null}
+            <button className="automationCreate__save" disabled={saving || loading || loadFailed} form="memory-settings" type="submit"><FloppyDiskIcon size={14} />{saving ? "Saving…" : "Save"}</button>
           </div>
         </header>
         {error ? <p className="formError" role="alert">{error}</p> : null}
         {credentials.length > 0 ? <p className="automationCreate__unsaved" role="alert">This memory seems to contain {credentials.join(", ")}. Every run in the workspace reads memories, so they cannot hold credentials. Say where the secret is kept instead.</p> : null}
-        {loading ? <AutomationEditorSkeleton /> : <form className="automationCreate__form" id="memory-settings" onSubmit={(event) => void submit(event)}>
+        {loadFailed ? null : loading ? <AutomationEditorSkeleton /> : <form className="automationCreate__form" id="memory-settings" onSubmit={(event) => void submit(event)}>
           <section className="automationCreate__section automationCreate__section--trigger" aria-labelledby="memory-details">
             <h2 id="memory-details">Details</h2>
             <div className="memoryEditor__fields">

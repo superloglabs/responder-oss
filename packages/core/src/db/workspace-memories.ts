@@ -1,6 +1,7 @@
 import { and, asc, count, eq, sql } from "drizzle-orm";
 import {
   memoryCredentialKinds,
+  memoryInputSchema,
   workspaceMemoriesMaxCount,
   type MemoryInput,
   type MemoryType,
@@ -215,6 +216,56 @@ export async function updateWorkspaceMemory(input: {
     if (isMemoryNameConflict(error)) {
       throw new WorkspaceMemoryError(
         `A memory named ${input.memory.name} already exists in this workspace`,
+        "name_conflict",
+      );
+    }
+    throw error;
+  }
+}
+
+// Changes the fields given and keeps the rest. The row stays locked from
+// read to write, so concurrent changes to one memory cannot undo each other.
+export async function patchWorkspaceMemory(input: {
+  organizationId: string;
+  memoryId: string;
+  userId: string;
+  changes: Partial<MemoryInput>;
+}): Promise<boolean> {
+  try {
+    return await getDatabase().transaction(async (tx) => {
+      const rows = await tx
+        .select({
+          name: workspaceMemories.name,
+          description: workspaceMemories.description,
+          type: workspaceMemories.type,
+          body: workspaceMemories.body,
+        })
+        .from(workspaceMemories)
+        .where(
+          and(
+            eq(workspaceMemories.id, input.memoryId),
+            eq(workspaceMemories.organizationId, input.organizationId),
+          ),
+        )
+        .for("update")
+        .limit(1);
+      const current = rows[0];
+      if (!current) return false;
+      const defined = Object.fromEntries(
+        Object.entries(input.changes).filter(([, value]) => value !== undefined),
+      );
+      const memory = memoryInputSchema.parse({ ...current, ...defined });
+      assertNoCredentials([memory]);
+      await tx
+        .update(workspaceMemories)
+        .set({ ...memory, updatedAt: new Date(), updatedBy: input.userId })
+        .where(eq(workspaceMemories.id, input.memoryId));
+      return true;
+    });
+  } catch (error) {
+    if (isMemoryNameConflict(error)) {
+      throw new WorkspaceMemoryError(
+        `A memory named ${input.changes.name} already exists in this workspace`,
         "name_conflict",
       );
     }

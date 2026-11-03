@@ -17,7 +17,7 @@ const mocks = vi.hoisted(() => ({
   get: vi.fn(),
   import: vi.fn(),
   list: vi.fn(),
-  update: vi.fn(),
+  patch: vi.fn(),
 }));
 
 vi.mock("../../../../packages/core/src/db/api-keys.js", () => ({
@@ -38,8 +38,12 @@ vi.mock("../../../../packages/core/src/db/workspace-memories.js", async (importO
   getWorkspaceMemory: mocks.get,
   importWorkspaceMemories: mocks.import,
   listWorkspaceMemories: mocks.list,
-  updateWorkspaceMemory: mocks.update,
+  patchWorkspaceMemory: mocks.patch,
 }));
+
+const memories = await vi.importActual<typeof import("../../../../packages/core/src/db/workspace-memories.js")>(
+  "../../../../packages/core/src/db/workspace-memories.js",
+);
 
 const app = new Hono()
   .route("/api/v1", managementApiRoutes)
@@ -64,6 +68,15 @@ async function callTool(name: string, args: Record<string, unknown> = {}) {
     isError?: boolean;
   };
   return { body: JSON.parse(result.content[0]!.text) as Record<string, unknown>, isError: result.isError };
+}
+
+async function rest(method: string, path: string, body?: unknown) {
+  const response = await app.request(`/api/v1${path}`, {
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    method,
+  });
+  return { body: await response.json() as Record<string, unknown>, status: response.status };
 }
 
 const regions = {
@@ -91,7 +104,7 @@ describe("memory operations", () => {
     });
     mocks.capability.mockImplementation(async (_organization: string, capability: string) => capability === "automations");
     mocks.get.mockResolvedValue(stored);
-    mocks.update.mockResolvedValue(true);
+    mocks.patch.mockResolvedValue(true);
   });
 
   afterEach(() => {
@@ -146,11 +159,12 @@ describe("memory operations", () => {
     expect(mocks.import).not.toHaveBeenCalled();
   });
 
-  it("reports memories that look like they contain credentials", async () => {
-    const { WorkspaceMemoryError } = await import("../../../../packages/core/src/db/workspace-memories.js");
-    mocks.import.mockRejectedValue(new WorkspaceMemoryError("These memories look like they contain credentials: db (a URL with a password).", "credential"));
+  it("refuses memories that look like they contain credentials", async () => {
+    mocks.import.mockImplementation(memories.importWorkspaceMemories);
 
-    expect(await callTool("import_memories", { memories: [regions] })).toMatchObject({
+    expect(await callTool("import_memories", {
+      memories: [regions, { body: "psql postgres://owner:hunter2@db.internal/app", description: "Database access", name: "db" }],
+    })).toMatchObject({
       body: { code: "credential", error: expect.stringContaining("db (a URL with a password)") },
       isError: true,
     });
@@ -160,8 +174,8 @@ describe("memory operations", () => {
     const { body, isError } = await callTool("update_memory", { body: "The EU cell runs in eu-west-3.", memoryId });
 
     expect(isError).toBeFalsy();
-    expect(mocks.update).toHaveBeenCalledWith({
-      memory: { ...regions, body: "The EU cell runs in eu-west-3." },
+    expect(mocks.patch).toHaveBeenCalledWith({
+      changes: { body: "The EU cell runs in eu-west-3." },
       memoryId,
       organizationId,
       userId,
@@ -171,12 +185,44 @@ describe("memory operations", () => {
 
   it("returns a missing memory as not found", async () => {
     mocks.get.mockResolvedValue(null);
+    mocks.patch.mockResolvedValue(false);
     mocks.delete.mockResolvedValue(false);
 
     expect(await callTool("get_memory", { memoryId })).toMatchObject({ body: { code: "memory_not_found" }, isError: true });
     expect(await callTool("update_memory", { description: "New", memoryId })).toMatchObject({ body: { code: "memory_not_found" }, isError: true });
     expect(await callTool("delete_memory", { memoryId })).toMatchObject({ body: { code: "memory_not_found" }, isError: true });
-    expect(mocks.update).not.toHaveBeenCalled();
+  });
+
+  it("serves the same operations over the REST API", async () => {
+    mocks.list.mockResolvedValue([stored]);
+    mocks.import.mockResolvedValue({ created: [{ id: memoryId, name: regions.name }], existing: [] });
+    mocks.delete.mockResolvedValue(true);
+
+    expect(await rest("GET", "/memories")).toMatchObject({
+      body: { memories: [{ id: memoryId, name: regions.name, url: `https://responder.example/memory/${memoryId}` }] },
+      status: 200,
+    });
+    expect(await rest("POST", "/memories/import", { memories: [regions] })).toMatchObject({
+      body: { created: [{ id: memoryId, name: regions.name }], existing: [] },
+      status: 200,
+    });
+    expect(await rest("PATCH", `/memories/${memoryId}`, { type: "reference" })).toMatchObject({ status: 200 });
+    expect(mocks.patch).toHaveBeenCalledWith(expect.objectContaining({ changes: { type: "reference" } }));
+    expect(await rest("DELETE", `/memories/${memoryId}`)).toEqual({ body: { deleted: true }, status: 200 });
+
+    mocks.get.mockResolvedValue(null);
+    expect(await rest("GET", `/memories/${memoryId}`)).toMatchObject({ body: { code: "memory_not_found" }, status: 404 });
+    expect(await rest("PATCH", `/memories/${memoryId}`, {})).toMatchObject({ body: { code: "nothing_to_update" }, status: 400 });
+  });
+
+  it("refuses the REST API without automations", async () => {
+    mocks.capability.mockResolvedValue(false);
+
+    expect(await rest("POST", "/memories/import", { memories: [regions] })).toMatchObject({
+      body: { code: "automations_unavailable" },
+      status: 404,
+    });
+    expect(mocks.import).not.toHaveBeenCalled();
   });
 
   // The Memory page gives people this prompt for their coding agent.
