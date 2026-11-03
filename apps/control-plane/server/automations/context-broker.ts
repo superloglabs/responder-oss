@@ -110,6 +110,11 @@ import {
   type VercelToolDependencies,
 } from "./vercel-context.js";
 
+// Provider tools that run a search agent, such as Sentry's, can take more than
+// a minute. Matches the worker's MCP tool timeout for Claude, the longest an
+// agent waits for a context tool.
+const PROXIED_REQUEST_TIMEOUT_MS = 120_000;
+
 const accountIdSchema = z.uuid();
 const requestSchema = z.object({
   id: z.union([z.string(), z.number()]).optional(),
@@ -888,7 +893,7 @@ async function proxyMcpRequest(input: {
   rawBody: string;
   request: Request;
   target: {
-    fetch?: (input: string, init: RequestInit) => Promise<Response>;
+    fetch?: ManagedMcpServer["fetch"];
     headers: Headers;
     url: string;
   };
@@ -908,7 +913,7 @@ async function proxyMcpRequest(input: {
     headers: input.target.headers,
     method: "POST",
     signal: input.request.signal,
-  });
+  }, { timeoutMs: PROXIED_REQUEST_TIMEOUT_MS });
   const headers = new Headers({ "cache-control": "no-store" });
   for (const name of [
     "content-type",

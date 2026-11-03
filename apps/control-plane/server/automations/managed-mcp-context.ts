@@ -29,7 +29,11 @@ export interface McpTool {
 export interface ManagedMcpServer {
   // Identifies one connection's tool listing on one server.
   cacheKey: string;
-  fetch: (input: string, init: RequestInit) => Promise<Response>;
+  fetch: (
+    input: string,
+    init: RequestInit,
+    options?: { timeoutMs?: number },
+  ) => Promise<Response>;
   headers: () => Promise<Headers>;
   isAllowed: (tool: McpTool) => boolean;
   // Names the provider in errors, for example "Google Cloud MCP".

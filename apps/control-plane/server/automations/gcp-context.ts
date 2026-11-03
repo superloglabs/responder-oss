@@ -15,7 +15,7 @@ const MAX_CACHED_CLIENTS = 200;
 
 export interface GcpContextDependencies {
   authHeaders: (connection: GcpConnectionCredentials) => Promise<Headers>;
-  fetch: (input: string, init: RequestInit) => Promise<Response>;
+  fetch: ManagedMcpServer["fetch"];
   now: () => number;
 }
 

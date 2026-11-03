@@ -407,15 +407,17 @@ async function fetchPinnedRequest(
   }
 }
 
+// `timeoutMs` bounds the whole exchange, including reading the response body.
 export async function safeCustomMcpFetch(
   input: RequestInfo | URL,
   init?: RequestInit,
+  options: { timeoutMs?: number } = {},
 ): Promise<Response> {
   const initialRequest = new Request(input, init);
   let request = new Request(initialRequest, {
     signal: AbortSignal.any([
       initialRequest.signal,
-      AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      AbortSignal.timeout(options.timeoutMs ?? REQUEST_TIMEOUT_MS),
     ]),
   });
   let redirects = 0;
