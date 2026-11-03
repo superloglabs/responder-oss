@@ -790,7 +790,7 @@ function SandboxImageSection() {
         Python, git, and the agent tools. Add what your repositories need to
         build and test, such as browsers or databases. Packages and the setup
         script are built into an image once, so runs start with them. Changes
-        apply to new runs when the image is ready.
+        to them apply to new runs when the image is ready.
         {state && !state.supported
           ? " These settings need the Vercel sandbox provider."
           : state && !state.canEdit ? " Admins can change this." : null}
@@ -828,7 +828,7 @@ function SandboxImageSection() {
           <TextAreaField
             className="sandboxSettings__code"
             disabled={!canEdit || saving}
-            hint="Runs with bash each time a sandbox starts or resumes, before the agent. Use it for services, such as sudo dockerd &. It changes with the image, so it never runs without the packages. A failure stops the run."
+            hint="Runs with bash each time a sandbox starts or resumes, before the agent. Use it for services, such as sudo dockerd &. With packages or a setup script, it is part of the image and changes when the image is ready. Without them, it applies right away. A failure stops the run."
             label="Start command"
             onChange={(event) => setStartCommand(event.target.value)}
             placeholder="sudo dockerd >/tmp/dockerd.log 2>&1 &"
