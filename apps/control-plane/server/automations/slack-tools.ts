@@ -281,7 +281,7 @@ export function slackToolDefinitions(scope: SlackToolScope) {
         openWorldHint: true,
         readOnlyHint: false,
       },
-      description: `Start uploading a file from the sandbox to Slack, such as a screenshot or a screen recording. Pass the file's name and its size in bytes (stat -c %s <path>). Then upload it from the sandbox with curl -sS -F file=@<path> '<upload_url>', which must answer 200, and post it with slack_finish_file_upload. Files up to ${maxSlackUploadBytes / 1024 / 1024} MB. Images and mp4, mov, or webm videos play in Slack.`,
+      description: `Start uploading a file from the sandbox to Slack, such as a screenshot or a screen recording. Pass the file's name and its size in bytes (stat -c %s <path>). Then upload it from the sandbox with curl -sS -F file=@<path> '<upload_url>', which must answer 200, and post it with slack_finish_file_upload. Files up to ${maxSlackUploadBytes / 1024 / 1024} MB. Images and mp4, mov, or webm videos play in Slack. A sandbox limited to listed domains needs files.slack.com on the list; if the upload cannot connect, say so instead of retrying.`,
       inputSchema: {
         additionalProperties: false,
         properties: {

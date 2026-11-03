@@ -454,6 +454,39 @@ describe("automation Slack tools", () => {
     }));
   });
 
+  it("posts files from a trigger-only connection only in its thread", async () => {
+    const triggerOnly = claim({ roles: ["trigger"], trigger: slackTrigger });
+    const deps = dependencies();
+    for (const args of [
+      { channel_id: "C999", files: [{ file_id: "F0FILE1" }] },
+      { channel_id: "C999", files: [{ file_id: "F0FILE1" }], thread_ts: "100.000099" },
+    ]) {
+      await expect(call(triggerOnly, deps, "slack_finish_file_upload", args))
+        .resolves.toMatchObject({ isError: true });
+    }
+    expect(deps.finishFileUpload).not.toHaveBeenCalled();
+  });
+
+  it("does not post the same files twice in a run", async () => {
+    const deps = dependencies();
+    deps.beginAttempt
+      .mockResolvedValueOnce({ id: "attempt-1", status: "started" })
+      .mockResolvedValueOnce({
+        externalReference: "C123:files:F0FILE1",
+        id: "attempt-1",
+        status: "existing_succeeded",
+      });
+    const args = { channel_id: "C123", files: [{ file_id: "F0FILE1" }] };
+    await call(claim(), deps, "slack_finish_file_upload", args);
+    await expect(call(claim(), deps, "slack_finish_file_upload", args)).resolves.toEqual({
+      content: [{
+        text: JSON.stringify({ channelId: "C123", files: 1, note: "These files were already posted in this run." }),
+        type: "text",
+      }],
+    });
+    expect(deps.finishFileUpload).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps uploaded files out of channels the automation cannot post in", async () => {
     const deps = dependencies();
     await expect(call(claim(), deps, "slack_finish_file_upload", {

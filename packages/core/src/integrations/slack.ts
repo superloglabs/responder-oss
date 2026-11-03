@@ -198,11 +198,16 @@ export async function startSlackFileUpload(input: {
     filename: input.filename,
     length: String(input.length),
   }), input.signal);
-  const { file_id: fileId, upload_url: uploadUrl } = z.object({
+  const parsed = z.object({
     file_id: z.string().min(1),
     upload_url: z.url(),
-  }).parse(ticket);
-  return { fileId, uploadUrl };
+  }).safeParse(ticket);
+  if (!parsed.success) {
+    throw new SlackApiError("files.getUploadURLExternal", "invalid_response", parsed.error.issues
+      .slice(0, 7)
+      .map((issue) => `Invalid field ${issue.path.join(".") || "response"} (${issue.code})`));
+  }
+  return { fileId: parsed.data.file_id, uploadUrl: parsed.data.upload_url };
 }
 
 // Shares uploaded files in a channel or thread, as one message.
