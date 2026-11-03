@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 // scripts/error-codes/codes.json at one commit. Pass a commit SHA to update the
 // table; without one it uses the commit the table was generated from.
 const commit = process.argv[2] ?? "76baa3b5434fad315ece9cfd4d20d7a8d6c34a25";
+if (!/^[0-9a-f]{40}$/u.test(commit)) throw new Error("Pass a full 40-character React commit SHA.");
 const OUTPUT_PATH = resolve("packages/core/src/telemetry/react-error-codes.ts");
 const sourceUrl = `https://raw.githubusercontent.com/facebook/react/${commit}/scripts/error-codes/codes.json`;
 
