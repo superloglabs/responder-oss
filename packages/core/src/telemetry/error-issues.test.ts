@@ -54,6 +54,30 @@ describe("groupErrorCandidates", () => {
     expect(issue?.sample.attributes["exception.message.minified"]).toBe(minified);
   });
 
+  it("groups a stackless React error log by its decoded body when the body wraps the message", () => {
+    const minified = (args: string) =>
+      `Minified React error #31; visit https://react.dev/errors/31?args[]=${args} for the full message or use the non-minified dev environment for full errors and additional helpful warnings.`;
+    const log = (args: string) => candidate({
+      body: `Uncaught ${minified(args)}`,
+      exception_message: minified(args),
+      exception_stacktrace: "",
+      exception_type: "Error",
+      kind: "log",
+    });
+    const [issue] = groupErrorCandidates([log("object%20with%20keys%20%7Bid%7D")]);
+
+    expect(issue?.sample.message).toMatch(/^Objects are not valid as a React child/u);
+    expect(groupErrorCandidates([log("object%20with%20keys%20%7Bid%7D")])[0]?.fingerprint).toBe(
+      groupErrorCandidates([candidate({
+        body: "Uncaught Objects are not valid as a React child (found: object with keys {id}). If you meant to render a collection of children, use an array instead.",
+        exception_message: "Objects are not valid as a React child (found: object with keys {id}). If you meant to render a collection of children, use an array instead.",
+        exception_stacktrace: "",
+        exception_type: "Error",
+        kind: "log",
+      })])[0]?.fingerprint,
+    );
+  });
+
   it("collapses occurrences of one fingerprint and keeps the newest as the sample", () => {
     const [issue, ...rest] = groupErrorCandidates([
       candidate({ seen_ms: "1793000000000", trace_id: "first" }),

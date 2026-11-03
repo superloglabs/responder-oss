@@ -127,6 +127,13 @@ describe("symbolicateCandidates", () => {
       "    at loadCart (src/cart.js:7:17)",
     ].join("\n"));
     expect(react?.attrs["react.component_stack.minified"]).toBe(componentStack);
+
+    const [stackless] = await symbolicateCandidates(
+      [candidate({ attrs: { ...candidate().attrs, "react.component_stack": componentStack }, exception_stacktrace: "" })],
+      load,
+    );
+    expect(stackless?.attrs["react.component_stack"]).toContain("at renderTotal (src/cart.js:2:15)");
+    expect(stackless?.exception_stacktrace).toBe("");
   });
 
   it("leaves candidates without debug IDs or maps as they were", async () => {

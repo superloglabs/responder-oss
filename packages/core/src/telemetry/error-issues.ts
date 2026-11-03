@@ -278,7 +278,7 @@ function withReactMessage(candidate: ErrorCandidate): ErrorCandidate {
   return {
     ...candidate,
     attrs: { ...candidate.attrs, [minifiedMessageAttribute]: candidate.exception_message },
-    body: candidate.body === candidate.exception_message ? message : candidate.body,
+    body: decodeReactError(candidate.body) ?? candidate.body,
     exception_message: message,
   };
 }

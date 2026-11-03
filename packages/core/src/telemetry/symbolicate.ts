@@ -115,7 +115,7 @@ export function symbolicateStack(stacktrace: string, debugIds: Record<string, st
 
 function debugIdsOf(candidate: ErrorCandidate): Record<string, string> | null {
   const raw = candidate.attrs?.[debugIdsAttribute];
-  if (!raw || !candidate.exception_stacktrace) return null;
+  if (!raw || (!candidate.exception_stacktrace && !candidate.attrs[componentStackAttribute])) return null;
   try {
     const parsed: unknown = JSON.parse(raw);
     if (typeof parsed !== "object" || parsed === null) return null;
