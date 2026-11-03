@@ -195,6 +195,19 @@ async function testProviderCredential(input: {
   }
 }
 
+// A workspace that pays per run may not save or enable another model.
+async function modelRefusal(
+  organizationId: string,
+  configuration: { model: string; modelProvider: string },
+): Promise<{ error: string; status: 422 | 502 } | null> {
+  try {
+    const refusal = await automationModelRefusal(organizationId, configuration);
+    return refusal ? { error: refusal, status: 422 } : null;
+  } catch {
+    return { error: "Unable to check the workspace's plan. Please retry.", status: 502 };
+  }
+}
+
 export const automationRoutes = new Hono()
   // The one model a workspace that pays per run may use, or null.
   .get("/plan-model", async (context) => {
@@ -508,8 +521,8 @@ export const automationRoutes = new Hono()
     const suggestedTemplate = z.uuid().safeParse(
       (body as { suggestedTemplate?: unknown }).suggestedTemplate,
     );
-    const refusal = await automationModelRefusal(access.tenant.organizationId, parsed.data.configuration);
-    if (refusal) return context.json({ error: refusal }, 422);
+    const refusal = await modelRefusal(access.tenant.organizationId, parsed.data.configuration);
+    if (refusal) return context.json({ error: refusal.error }, refusal.status);
     try {
       const automation = await createAutomation(
         access.tenant.organizationId,
@@ -622,8 +635,8 @@ export const automationRoutes = new Hono()
         400,
       );
     }
-    const refusal = await automationModelRefusal(access.tenant.organizationId, parsed.data.configuration);
-    if (refusal) return context.json({ error: refusal }, 422);
+    const refusal = await modelRefusal(access.tenant.organizationId, parsed.data.configuration);
+    if (refusal) return context.json({ error: refusal.error }, refusal.status);
     try {
       const updated = await updateAutomation(
         access.tenant.organizationId,
@@ -646,6 +659,11 @@ export const automationRoutes = new Hono()
       await context.req.json().catch(() => null),
     );
     if (!parsed.success) return context.json({ error: "Invalid status" }, 400);
+    if (parsed.data.enabled) {
+      const current = await getAutomation(access.tenant.organizationId, context.req.param("automationId"));
+      const refusal = current && await modelRefusal(access.tenant.organizationId, current.configuration);
+      if (refusal) return context.json({ error: refusal.error }, refusal.status);
+    }
     const updated = await setAutomationEnabled({
       automationId: context.req.param("automationId"),
       enabled: parsed.data.enabled,

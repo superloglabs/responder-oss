@@ -1911,6 +1911,23 @@ describe("automation run processor", () => {
       expect(deps.trackBilledRun).toHaveBeenCalledWith({ account: runBilling, organizationId, runId });
     });
 
+    it("counts the run before marking it succeeded, retrying a failed count", async () => {
+      const deps = runBilledDependencies("claude-sonnet-5.5");
+      const order: string[] = [];
+      deps.trackBilledRun
+        .mockRejectedValueOnce(new Error("Autumn unavailable"))
+        .mockImplementation(async () => { order.push("counted"); });
+      deps.setStatus.mockImplementation(async (input: { status: string }) => {
+        order.push(input.status);
+        return true;
+      });
+
+      await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
+
+      expect(deps.trackBilledRun).toHaveBeenCalledTimes(2);
+      expect(order.indexOf("counted")).toBeLessThan(order.indexOf("succeeded"));
+    });
+
     it("refuses another model before a sandbox starts", async () => {
       const deps = runBilledDependencies("claude-opus-5.5");
 

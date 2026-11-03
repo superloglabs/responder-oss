@@ -33,27 +33,35 @@ export function AutomationModelPicker({ configuration, onChange, requestedOpen }
 }) {
   const [open, setOpen] = useState(false);
   const [catalogs, setCatalogs] = useState<Partial<Record<AutomationModelProvider, Catalog>>>({});
-  const [planModel, setPlanModel] = useState<PlanAutomationModel | null>(null);
+  // Undefined until the workspace's billing is known.
+  const [planModel, setPlanModel] = useState<PlanAutomationModel | null | "error">();
   // Radix keeps focus on menu rows, so typing and pointing are sent to the
   // open submenu's search field.
   const searchInputs = useRef(new Map<AutomationModelProvider, HTMLInputElement>());
   const focusSearch = (provider: AutomationModelProvider) => searchInputs.current.get(provider)?.focus();
   const [lastRequestedOpen, setLastRequestedOpen] = useState(requestedOpen);
   if (lastRequestedOpen !== requestedOpen) { setLastRequestedOpen(requestedOpen); setOpen(true); }
+  function loadPlanModel() {
+    setPlanModel(undefined);
+    fetchPlanAutomationModel()
+      .then(({ model }) => setPlanModel(model))
+      .catch(() => setPlanModel("error"));
+  }
   useEffect(() => {
     let active = true;
     fetchPlanAutomationModel()
       .then(({ model }) => { if (active) setPlanModel(model); })
-      .catch(() => undefined);
+      .catch(() => { if (active) setPlanModel("error"); });
     return () => { active = false; };
   }, []);
+  const plan = typeof planModel === "object" ? planModel : null;
   // Another model would not run, so the plan's model replaces it.
-  const planModelMissing = planModel !== null &&
-    (configuration.modelProvider !== planModel.provider || configuration.model !== planModel.id);
+  const planModelMissing = plan !== null &&
+    (configuration.modelProvider !== plan.provider || configuration.model !== plan.id);
   useEffect(() => {
-    if (planModel && planModelMissing) chooseModel(planModel.provider, planModel);
+    if (plan && planModelMissing) chooseModel(plan.provider, plan);
   // eslint-disable-next-line react-hooks/exhaustive-deps -- runs when the plan model loads or the choice drifts from it
-  }, [planModel, planModelMissing]);
+  }, [plan, planModelMissing]);
   // Load every provider's models up front so submenus open populated.
   useEffect(() => {
     let active = true;
@@ -84,9 +92,14 @@ export function AutomationModelPicker({ configuration, onChange, requestedOpen }
   const subscriptionModels = providerCatalog?.status === "ready" && providerCatalog.subscription === true;
   return <div className="automationModel">
     <DropdownMenu open={open} onOpenChange={setOpen}>
-      <DropdownMenuTrigger asChild><button className="automationModel__toggle" type="button">{configuration.model ? `Model: ${planModel && !planModelMissing ? planModel.name : configuration.model}` : "Choose model"}<CaretDownIcon size={12} /></button></DropdownMenuTrigger>
+      <DropdownMenuTrigger asChild><button className="automationModel__toggle" type="button">{configuration.model ? `Model: ${plan && !planModelMissing ? plan.name : configuration.model}` : "Choose model"}<CaretDownIcon size={12} /></button></DropdownMenuTrigger>
       <DropdownMenuContent align="start">
-        {planModel ? <DropdownMenuItem onSelect={() => chooseModel(planModel.provider, planModel)}>
+        {planModel === undefined ? <p className="px-2 py-1.5 text-sm text-muted-foreground">Loading models…</p>
+        : planModel === "error" ? <>
+          <p className="px-2 py-1.5 text-sm text-muted-foreground">Unable to load models.</p>
+          <DropdownMenuItem onSelect={event => { event.preventDefault(); loadPlanModel(); }}>Retry</DropdownMenuItem>
+        </>
+        : planModel ? <DropdownMenuItem onSelect={() => chooseModel(planModel.provider, planModel)}>
           {planModel.name}
           <CheckIcon className={cn("ml-auto", planModelMissing ? "opacity-0" : "opacity-100")} />
         </DropdownMenuItem> : automationModelProviders.map(provider => {

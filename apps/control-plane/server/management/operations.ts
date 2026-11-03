@@ -186,6 +186,17 @@ async function requireAutomation(context: ManagementContext, id: string) {
   return automation;
 }
 
+// A workspace that pays per run may not save or enable another model.
+async function requireModelOnPlan(
+  context: ManagementContext,
+  configuration: { model: string; modelProvider: string },
+): Promise<void> {
+  const refusal = await automationModelRefusal(context.organizationId, configuration).catch(() => {
+    throw new ManagementError(502, "Unable to check the workspace's plan. Please retry.", "billing_unavailable");
+  });
+  if (refusal) throw new ManagementError(422, refusal, "model_not_on_plan");
+}
+
 async function saveAutomation(
   context: ManagementContext,
   id: string | null,
@@ -194,8 +205,7 @@ async function saveAutomation(
   const parsed = automationInputSchema.safeParse(candidate);
   if (!parsed.success) throw invalid("Invalid automation", parsed.error);
   const input: AutomationInput = parsed.data;
-  const refusal = await automationModelRefusal(context.organizationId, input.configuration);
-  if (refusal) throw new ManagementError(422, refusal, "model_not_on_plan");
+  await requireModelOnPlan(context, input.configuration);
   let savedId = id;
   try {
     if (id) {
@@ -523,6 +533,9 @@ export const managementOperations: ManagementOperation[] = [
       ) {
         if (input.enabled === undefined) {
           throw new ManagementError(400, "Nothing to change", "invalid_request");
+        }
+        if (input.enabled) {
+          await requireModelOnPlan(context, (await requireAutomation(context, input.automationId)).configuration);
         }
         const updated = await setAutomationEnabled({
           automationId: input.automationId,

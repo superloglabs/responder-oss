@@ -236,8 +236,10 @@ investigation credits.
   each run whose first turn succeeds is tracked once, with the run ID as the
   idempotency key, against the row's Autumn customer and feature; and model
   and sandbox usage are recorded but not charged. The model picker and
-  `list_included_models` offer only that model, and saving an automation on
-  another model is refused.
+  `list_included_models` offer only that model. Saving or enabling an
+  automation on another model is refused, and so is any save while the plan
+  cannot be read. The run is counted before it is marked succeeded, with
+  retries; a count that still fails is reported and not charged.
 - Suggested automation templates are paid by Responder and do not use the
   usage credit. From 05:00 UTC each day, the worker asks a model through
   Responder's AI Gateway key for templates for each organization with

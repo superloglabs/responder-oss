@@ -1255,6 +1255,24 @@ export async function processAutomationRun(
       await slackCard?.finish("error", "Automation run was cancelled", result.transcript.items);
       return { runId: run.runId };
     }
+    // A run is counted once, when its first turn succeeds, before the run is
+    // marked finished so a worker exit cannot skip the count. The run ID keys
+    // the count, so a retried turn is not counted twice. A count that still
+    // fails after retries is reported and the run is not charged.
+    if (runBilling && firstTurn) {
+      const account = runBilling;
+      await withRetries(() => dependencies.trackBilledRun({
+        account,
+        organizationId: run.organizationId,
+        runId: run.runId,
+      }), billedRunRetryDelaysMs).catch((error: unknown) =>
+        dependencies.reportException(error, {
+          jobId,
+          operation: "automation",
+          organizationId: run.organizationId,
+          requestId: run.runId,
+        }).catch(() => undefined));
+    }
     if (!(await dependencies.setStatus({
       leaseId: run.leaseId,
       resultSummary: resultSummary(result.transcript, result.actions),
@@ -1269,21 +1287,7 @@ export async function processAutomationRun(
     }
     await recordEvent(dependencies, run.runId, "run_succeeded");
     turnEnded = true;
-    // A run is counted once, when its first turn succeeds. A failed count is
-    // reported and the run is not charged.
-    if (runBilling && firstTurn) {
-      await dependencies.trackBilledRun({
-        account: runBilling,
-        organizationId: run.organizationId,
-        runId: run.runId,
-      }).catch((error: unknown) =>
-        dependencies.reportException(error, {
-          jobId,
-          operation: "automation",
-          organizationId: run.organizationId,
-          requestId: run.runId,
-        }).catch(() => undefined));
-    }
+
     const reply = result.transcript.items.filter((item) => !item.subagentId).findLast((item) => item.kind === "message");
     outcome = { message: reply?.kind === "message" ? reply.text : null, status: "succeeded" };
     await slackCard?.finish("complete", undefined, result.transcript.items);
@@ -1525,6 +1529,19 @@ async function answerNewMessages(
       requestId: run.runId,
     }).catch(() => undefined);
   }
+}
+
+const billedRunRetryDelaysMs = [1_000, 5_000, 15_000];
+
+async function withRetries<T>(attempt: () => Promise<T>, delaysMs: number[]): Promise<T> {
+  for (const delayMs of delaysMs) {
+    try {
+      return await attempt();
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+  return attempt();
 }
 
 class AutomationAllowanceExhaustedError extends Error {

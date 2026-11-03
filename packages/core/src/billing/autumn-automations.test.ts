@@ -507,15 +507,18 @@ describe("automation billing", () => {
       for (let attempt = 0; attempt < 2; attempt += 1) {
         await trackBilledRun({ account, organizationId: "organization-run-count", runId: "run-1" });
       }
-      expect(client.track).toHaveBeenCalledWith(
-        {
-          customerId: "earlier-customer",
-          featureId: "investigations",
-          properties: { organizationId: "organization-run-count", runId: "run-1" },
-          value: 1,
-        },
-        expect.objectContaining({ headers: { "Idempotency-Key": "billed-run:run-1" } }),
-      );
+      expect(client.track).toHaveBeenCalledTimes(2);
+      for (const call of client.track.mock.calls) {
+        expect(call).toEqual([
+          {
+            customerId: "earlier-customer",
+            featureId: "investigations",
+            properties: { organizationId: "organization-run-count", runId: "run-1" },
+            value: 1,
+          },
+          expect.objectContaining({ headers: { "Idempotency-Key": "billed-run:run-1" } }),
+        ]);
+      }
     });
 
     it("refuses other models while paying per run", async () => {

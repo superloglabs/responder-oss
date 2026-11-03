@@ -744,13 +744,14 @@ export async function organizationRunBilling(organizationId: string): Promise<Ru
   return value;
 }
 
-// Why the workspace may not save an automation on this model, or null when it
-// may. A lookup failure does not stop the save; the run checks again.
+// Why the workspace may not save or enable an automation on this model, or
+// null when it may. Throws when billing cannot be read, so the save fails
+// rather than storing an automation that would not run.
 export async function automationModelRefusal(
   organizationId: string,
   configuration: { model: string; modelProvider: string },
 ): Promise<string | null> {
-  const account = await organizationRunBilling(organizationId).catch(() => null);
+  const account = await organizationRunBilling(organizationId);
   if (!account) return null;
   if (configuration.modelProvider === account.modelProvider && configuration.model === account.model) return null;
   return `This workspace's plan runs automations on the ${account.modelName} model. Move to Pro or Team in billing settings to use other models.`;
