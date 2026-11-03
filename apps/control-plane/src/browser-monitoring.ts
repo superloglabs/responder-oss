@@ -1,6 +1,7 @@
 import * as Sentry from "@sentry/react";
 import { setAttributes, setUser } from "@superlog/browser/api";
 import { sentrySampleRate } from "@responder/core/observability/sentry";
+import { startBrowserTelemetry } from "./browser-telemetry";
 
 export interface BrowserMonitoringConfig {
   dsn?: string;
@@ -36,36 +37,47 @@ export function initializeBrowserMonitoring(
   return true;
 }
 
-type BrowserTelemetryModule = Pick<
-  typeof import("./browser-telemetry"),
-  "startBrowserTelemetry"
->;
+export interface BrowserTelemetryEnvironment {
+  environment?: string;
+  ingestEndpoint?: string;
+  ingestKey?: string;
+  release?: string;
+  tracesSampleRate?: string;
+}
 
-// Browser telemetry goes through a relay that accepts only signed-in users, so
-// it starts after sign-in. @superlog/browser and OpenTelemetry are a separate
-// chunk that loads only when telemetry is on; the identity calls below are
-// part of the main bundle and apply once it starts.
-export function startSignedInBrowserTelemetry(
-  config: BrowserMonitoringConfig & { otelTracesSampleRate?: string } = {
-    ...defaultConfig,
-    otelTracesSampleRate: import.meta.env.VITE_OTEL_TRACES_SAMPLE_RATE,
-  },
-  load: () => Promise<BrowserTelemetryModule> = () => import("./browser-telemetry"),
-): Promise<boolean> {
-  const sampleRate = sentrySampleRate(config.otelTracesSampleRate);
-  if (sampleRate <= 0) return Promise.resolve(false);
-  return load()
-    .then(({ startBrowserTelemetry }) => {
-      const started = startBrowserTelemetry({
-        environment: config.environment?.trim() || undefined,
-        origin: window.location.origin,
-        release: config.release?.trim() || undefined,
-        sampleRate,
-      });
-      if (started) applyTelemetryIdentity();
-      return started;
-    })
-    .catch(() => false);
+const defaultTelemetryConfig: BrowserTelemetryEnvironment = {
+  environment: defaultConfig.environment,
+  ingestEndpoint: import.meta.env.VITE_SUPERLOG_INGEST_ENDPOINT,
+  ingestKey: import.meta.env.VITE_SUPERLOG_INGEST_KEY,
+  release: defaultConfig.release,
+  tracesSampleRate: import.meta.env.VITE_OTEL_TRACES_SAMPLE_RATE,
+};
+
+// Browser telemetry starts on page load for every visitor, signed in or not,
+// when an ingest endpoint and key are configured. It starts before the app
+// renders, as Sentry does, so errors in the first render are sent.
+export function initializeBrowserTelemetry(
+  config: BrowserTelemetryEnvironment = defaultTelemetryConfig,
+): boolean {
+  const endpoint = config.ingestEndpoint?.trim();
+  const ingestKey = config.ingestKey?.trim();
+  if (!endpoint || !ingestKey) return false;
+  let started: boolean;
+  try {
+    started = startBrowserTelemetry({
+      endpoint,
+      environment: config.environment?.trim() || undefined,
+      ingestKey,
+      origin: window.location.origin,
+      release: config.release?.trim() || undefined,
+      sampleRate: sentrySampleRate(config.tracesSampleRate),
+    });
+  } catch {
+    // The app renders without telemetry rather than not at all.
+    return false;
+  }
+  if (started) applyTelemetryIdentity();
+  return started;
 }
 
 let identity: { organizationId?: string | null; organizationName?: string | null; userId?: string; userName?: string } = {};

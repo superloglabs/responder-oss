@@ -181,7 +181,6 @@ describe("control-plane error monitoring", () => {
 
     expect(isUntracedRequest("/api/health")).toBe(true);
     expect(isUntracedRequest("/api/ingest/v1/traces")).toBe(true);
-    expect(isUntracedRequest("/api/telemetry/browser/v1/traces")).toBe(true);
     expect(isUntracedRequest("/api/health?probe=1")).toBe(true);
     expect(isUntracedRequest("/api/healthz")).toBe(false);
     expect(isUntracedRequest("/api/telemetry/logs")).toBe(false);
