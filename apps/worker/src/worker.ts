@@ -102,7 +102,7 @@ import { processGcpProjectSetupJob } from "@responder/core/integrations/gcp-setu
 import { purgeAutomationModelBrokerGrants } from "@responder/core/db/automation-model-broker";
 import { requireDaytonaClientConfig } from "@responder/core/daytona-config";
 import { deleteExpiredArchivedSandboxes } from "./sandbox.js";
-import { buildSandboxImage, maintainSandboxImages } from "./sandbox-image.js";
+import { maintainSandboxImages, runSandboxImageBuildJob } from "./sandbox-image.js";
 import { settleUnbilledAutomationModelUsage } from "@responder/core/automations/model-usage-billing";
 import { settleUnbilledUsage } from "@responder/core/billing/usage-billing";
 import { BILLING_NOTICE_RETRY_WINDOW_MS } from "@responder/core/billing/notifications";
@@ -658,10 +658,13 @@ boss.on("error", (error: unknown) => {
 async function shutdown(signal: string): Promise<void> {
   if (stopping) return;
   stopping = true;
-  // Stop taking automation runs before handing the active ones back, so this
-  // worker does not fetch them again.
-  await Promise.all([automationRunQueue, legacyAutomationRunQueue].map((queue) =>
-    boss.offWork(queue, { wait: false })));
+  // Stop taking automation runs and image builds before handing the active
+  // ones back, so this worker does not fetch them again.
+  await Promise.all([
+    automationRunQueue,
+    legacyAutomationRunQueue,
+    sandboxImageBuildQueue,
+  ].map((queue) => boss.offWork(queue, { wait: false })));
   automationRunShutdown.abort();
   sandboxImageShutdown.abort();
   if (pollers.sandboxImages) clearInterval(pollers.sandboxImages);
@@ -822,10 +825,15 @@ await boss.work(gcpProjectSetupQueue, { localConcurrency: 2 }, tracedJobHandler(
 }));
 await boss.work(sandboxImageBuildQueue, { localConcurrency: 2 }, tracedJobHandler(sandboxImageBuildQueue, async ([job]) => {
   const payload = sandboxImageBuildJobSchema.parse(job.data);
-  const outcome = await buildSandboxImage(payload.organizationId, {
+  const outcome = await runSandboxImageBuildJob(payload.organizationId, {
+    requeue: () => boss.send(
+      sandboxImageBuildQueue,
+      payload,
+      sandboxImageBuildJobOptions(payload.organizationId),
+    ),
     signal: sandboxImageShutdown.signal,
   }).catch(async (error: unknown) => {
-    // A build cut off by shutdown is queued again by the next maintenance pass.
+    // A build cut off by shutdown is already back on the queue.
     if (!stopping) {
       await reportWorkerException(error, {
         operation: "sandbox_image",

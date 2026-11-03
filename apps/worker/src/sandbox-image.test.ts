@@ -9,6 +9,7 @@ import type { VercelSandboxConfig } from "@responder/core/sandbox-config";
 import {
   buildSandboxImage,
   maintainSandboxImages,
+  runSandboxImageBuildJob,
   runSandboxStartCommand,
   workspaceSandbox,
 } from "./sandbox-image.js";
@@ -221,6 +222,52 @@ describe("sandbox image build", () => {
       dependencies,
     )).resolves.toBe("unsupported");
     expect(dependencies.getSettings).not.toHaveBeenCalled();
+  });
+});
+
+describe("sandbox image build job", () => {
+  it("queues a build cut off by shutdown again for the next worker", async () => {
+    const shutdown = new AbortController();
+    const requeue = vi.fn(async () => "job_2");
+    const build = vi.fn(async () => {
+      shutdown.abort();
+      throw new DOMException("This operation was aborted", "AbortError");
+    });
+    await expect(runSandboxImageBuildJob(organizationId, {
+      requeue,
+      signal: shutdown.signal,
+    }, build)).rejects.toMatchObject({ name: "AbortError" });
+    expect(build).toHaveBeenCalledWith(organizationId, { signal: shutdown.signal });
+    expect(requeue).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the build's error when queueing it again fails", async () => {
+    const shutdown = new AbortController();
+    shutdown.abort();
+    const build = vi.fn(async () => {
+      throw new DOMException("This operation was aborted", "AbortError");
+    });
+    await expect(runSandboxImageBuildJob(organizationId, {
+      requeue: vi.fn(async () => {
+        throw new Error("database unavailable");
+      }),
+      signal: shutdown.signal,
+    }, build)).rejects.toMatchObject({ name: "AbortError" });
+  });
+
+  it("leaves a build that failed on its own for settings to show", async () => {
+    const requeue = vi.fn(async () => "job_2");
+    await expect(runSandboxImageBuildJob(organizationId, {
+      requeue,
+      signal: new AbortController().signal,
+    }, vi.fn(async () => {
+      throw new Error("sandbox create failed");
+    }))).rejects.toThrow("sandbox create failed");
+    await expect(runSandboxImageBuildJob(organizationId, {
+      requeue,
+      signal: new AbortController().signal,
+    }, vi.fn(async () => "built" as const))).resolves.toBe("built");
+    expect(requeue).not.toHaveBeenCalled();
   });
 });
 
