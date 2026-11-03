@@ -300,13 +300,12 @@ async function purgeExpiredAutomationBrokerGrants(): Promise<void> {
 // snapshot, and deletes the snapshots they no longer use.
 async function maintainWorkspaceSandboxImages(): Promise<void> {
   try {
-    const result = await maintainSandboxImages(async (organizationId) => {
-      await boss.send(
+    const result = await maintainSandboxImages(async (organizationId) =>
+      Boolean(await boss.send(
         sandboxImageBuildQueue,
         { organizationId },
         sandboxImageBuildJobOptions(organizationId),
-      );
-    });
+      )));
     if (result.queued > 0 || result.deleted > 0) {
       console.log(JSON.stringify({ event: "sandbox_images_maintained", ...result }));
     }

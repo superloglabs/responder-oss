@@ -72,6 +72,26 @@ describe("sandbox settings", () => {
     expect(deps.queueBuild).not.toHaveBeenCalled();
   });
 
+  it("changes the start command without a build", async () => {
+    const { app, deps } = setup({ settings: playwright });
+    const next = { ...playwright, startCommand: "sudo dockerd >/tmp/dockerd.log 2>&1 &" };
+    await put(app, next);
+    expect(deps.save).toHaveBeenCalledWith(organizationId, next, userId, false);
+    expect(deps.queueBuild).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalid settings", async () => {
+    const { app, deps } = setup();
+    expect((await put(app, { ...playwright, vcpus: 3 })).status).toBe(400);
+    expect(deps.save).not.toHaveBeenCalled();
+  });
+
+  it("only lets admins ask for a rebuild", async () => {
+    const { app, deps } = setup({ role: "member", settings: playwright });
+    expect((await app.request("/rebuild", { method: "POST" })).status).toBe(403);
+    expect(deps.queueBuild).not.toHaveBeenCalled();
+  });
+
   it("shows a build as queued until the worker starts it", async () => {
     const { app } = setup({
       image: {

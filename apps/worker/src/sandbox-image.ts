@@ -170,7 +170,7 @@ class SandboxImageStepError extends Error {}
 // An admin asked for a rebuild after the image last built.
 function rebuildRequested(
   rebuildRequestedAt: Date | null,
-  image: SandboxImageRecord | null,
+  image: Pick<SandboxImageRecord, "startedAt"> | null,
 ): boolean {
   return rebuildRequestedAt !== null &&
     (!image || rebuildRequestedAt.getTime() > image.startedAt.getTime());
@@ -348,7 +348,8 @@ const maxDeletionRetryDelayMs = 6 * 60 * 60 * 1_000;
 // image needs one, so a lost queue request or a new base snapshot is caught
 // up, then deletes the snapshots that are due. Returns what it did.
 export async function maintainSandboxImages(
-  queue: (organizationId: string) => Promise<void>,
+  // Resolves false when a build for the workspace is already queued.
+  queue: (organizationId: string) => Promise<boolean>,
   environment: NodeJS.ProcessEnv = process.env,
   dependencies: MaintenanceDependencies = defaultMaintenanceDependencies,
   now: Date = new Date(),
@@ -359,8 +360,16 @@ export async function maintainSandboxImages(
   let queued = 0;
   for (const workspace of await dependencies.listWorkspaces()) {
     if (!sandboxImageNeedsBuild(workspace, base)) continue;
-    await queue(workspace.organizationId);
-    queued += 1;
+    // One workspace's failure leaves the others and the deletions to run.
+    try {
+      if (await queue(workspace.organizationId)) queued += 1;
+    } catch (error) {
+      console.error(JSON.stringify({
+        error: error instanceof Error ? error.message : String(error),
+        event: "sandbox_image_build_queue_failed",
+        organizationId: workspace.organizationId,
+      }));
+    }
   }
   let deleted = 0;
   for (const deletion of await dependencies.listDeletions(now)) {

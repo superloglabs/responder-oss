@@ -103,8 +103,13 @@ export async function getSandboxImage(
   return row ?? null;
 }
 
+// The list leaves out the build log, which the worker does not read.
+const imageStateSelection = Object.fromEntries(
+  Object.entries(imageSelection).filter(([field]) => field !== "log"),
+) as Omit<typeof imageSelection, "log">;
+
 export interface SandboxImageWorkspace {
-  image: SandboxImageRecord | null;
+  image: Omit<SandboxImageRecord, "log"> | null;
   organizationId: string;
   rebuildRequestedAt: Date | null;
   settings: SandboxImageSettings;
@@ -117,7 +122,7 @@ export async function listSandboxImageWorkspaces(): Promise<SandboxImageWorkspac
   const [configured, imagesWithoutSettings] = await Promise.all([
     database
       .select({
-        image: imageSelection,
+        image: imageStateSelection,
         organizationId: sandboxImageSettings.organizationId,
         rebuildRequestedAt: sandboxImageSettings.rebuildRequestedAt,
         settings: settingsSelection,
@@ -126,14 +131,14 @@ export async function listSandboxImageWorkspaces(): Promise<SandboxImageWorkspac
       .leftJoin(sandboxImages, eq(sandboxImages.organizationId, sandboxImageSettings.organizationId))
       .where(sql`jsonb_array_length(${sandboxImageSettings.packages}) > 0 OR ${sandboxImageSettings.setupScript} <> '' OR ${sandboxImages.organizationId} IS NOT NULL`),
     database
-      .select({ image: imageSelection, organizationId: sandboxImages.organizationId })
+      .select({ image: imageStateSelection, organizationId: sandboxImages.organizationId })
       .from(sandboxImages)
       .leftJoin(sandboxImageSettings, eq(sandboxImageSettings.organizationId, sandboxImages.organizationId))
       .where(isNull(sandboxImageSettings.organizationId)),
   ]);
   return [
     ...configured.map((row) => ({
-      image: row.image?.key ? row.image as SandboxImageRecord : null,
+      image: row.image?.key ? row.image as Omit<SandboxImageRecord, "log"> : null,
       organizationId: row.organizationId,
       rebuildRequestedAt: row.rebuildRequestedAt,
       settings: row.settings,
@@ -197,7 +202,8 @@ export async function completeSandboxImageBuild(
       finishedAt: now,
       log,
       snapshotBaseId: snapshot.snapshotId,
-      snapshotBuiltAt: now,
+      // Recording the same snapshot again keeps the time it was built.
+      snapshotBuiltAt: sql`CASE WHEN ${sandboxImages.snapshotId} IS DISTINCT FROM ${snapshot.builtSnapshotId} THEN ${now} ELSE ${sandboxImages.snapshotBuiltAt} END`,
       snapshotId: snapshot.builtSnapshotId,
       snapshotKey: key,
       snapshotRegion: snapshot.region,

@@ -249,7 +249,7 @@ describe("sandbox image maintenance", () => {
   }
 
   it("queues workspaces whose image is out of date, cut off, asked for, or left behind", async () => {
-    const queue = vi.fn<(organizationId: string) => Promise<void>>(async () => undefined);
+    const queue = vi.fn<(organizationId: string) => Promise<boolean>>(async () => true);
     const dependencies = maintenanceDependencies([
       { image: image(), organizationId: "current", settings },
       { image: image({ key: "old-base" }), organizationId: "outdated", settings },
@@ -275,13 +275,27 @@ describe("sandbox image maintenance", () => {
     ]);
   });
 
+  it("keeps going when queueing one workspace fails, and counts only new jobs", async () => {
+    const queue = vi.fn<(organizationId: string) => Promise<boolean>>(async (organizationId) => {
+      if (organizationId === "broken") throw new Error("queue unavailable");
+      return organizationId !== "already-queued";
+    });
+    const dependencies = maintenanceDependencies([
+      { image: null, organizationId: "broken", settings },
+      { image: null, organizationId: "already-queued", settings },
+      { image: null, organizationId: "new", settings },
+    ], [{ attempts: 0, snapshotId: "snap_old" }]);
+    await expect(maintainSandboxImages(queue, environment, dependencies))
+      .resolves.toEqual({ deleted: 1, queued: 1 });
+  });
+
   it("deletes due snapshots and retries a failed deletion later", async () => {
     const now = new Date("2026-11-03T15:00:00Z");
     const dependencies = maintenanceDependencies([], [
       { attempts: 0, snapshotId: "snap_old" },
       { attempts: 2, snapshotId: "snap_stuck" },
     ]);
-    const result = await maintainSandboxImages(async () => undefined, environment, dependencies, now);
+    const result = await maintainSandboxImages(async () => true, environment, dependencies, now);
     expect(result.deleted).toBe(1);
     expect(dependencies.finishDeletion).toHaveBeenCalledWith("snap_old");
     expect(dependencies.retryDeletion).toHaveBeenCalledWith(
