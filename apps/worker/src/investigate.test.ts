@@ -257,6 +257,37 @@ describe("sandbox agent configuration", () => {
     expect(instructions).not.toContain("search_observability_suggestions");
   });
 
+  it("lists the workspace's memories in tag mode threads", () => {
+    const memories = [{
+      body: "Restart the worker after an RDS failover.",
+      description: "Worker handlers hang after a database restart",
+      name: "worker-hangs-after-db-restart",
+      type: "project" as const,
+    }];
+    const instructions = investigationInstructions({
+      agentPrompt: "Investigate what the person asked.",
+      clickStackConnected: false,
+      datadogConnected: false,
+      repositories: [],
+      sentryConnected: false,
+      threadMode: true,
+      workspaceMemories: memories,
+    });
+
+    expect(instructions).toContain(
+      "Each memory is a file in /home/daytona/workspace/.responder/memory:\n- worker-hangs-after-db-restart: Worker handlers hang after a database restart (worker-hangs-after-db-restart.md)",
+    );
+    expect(instructions).toContain("A memory can be out of date");
+    expect(investigationInstructions({
+      agentPrompt: "Investigate what the person asked.",
+      clickStackConnected: false,
+      datadogConnected: false,
+      repositories: [],
+      sentryConnected: false,
+      threadMode: true,
+    })).not.toContain("Workspace memory");
+  });
+
   it("words Slack assistant turns as general requests with pull request and workspace tools", () => {
     const instructions = investigationInstructions({
       agentPrompt: "Reply in French.",

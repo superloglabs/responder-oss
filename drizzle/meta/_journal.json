@@ -750,6 +750,13 @@
       "when": 1793700009977,
       "tag": "0106_workspace_secret_value_present",
       "breakpoints": true
+    },
+    {
+      "idx": 107,
+      "version": "7",
+      "when": 1793702776981,
+      "tag": "0107_workspace_memories",
+      "breakpoints": true
     }
   ]
 }
