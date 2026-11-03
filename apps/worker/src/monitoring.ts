@@ -22,6 +22,7 @@ export interface WorkerErrorContext {
     | "linear_ticket"
     | "remediation"
     | "sandbox_cleanup"
+    | "sandbox_image"
     | "slack_delivery"
     | "synthetic_checks"
     | "telemetry_alerts"

@@ -609,6 +609,77 @@ export const sandboxNetworkSettings = pgTable("sandbox_network_settings", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// What a workspace adds to its sandboxes. See sandbox-image.ts.
+export const sandboxImageSettings = pgTable(
+  "sandbox_image_settings",
+  {
+    organizationId: uuid("organization_id")
+      .primaryKey()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    packages: jsonb("packages").$type<string[]>().notNull().default([]),
+    setupScript: text("setup_script").notNull().default(""),
+    startCommand: text("start_command").notNull().default(""),
+    vcpus: integer("vcpus").notNull().default(2),
+    // When the packages or setup script last changed, or a rebuild was asked
+    // for, so settings can show a build as queued until the worker starts it.
+    imageRequestedAt: timestamp("image_requested_at", { withTimezone: true }),
+    // When an admin asked to rebuild an image whose settings did not change.
+    rebuildRequestedAt: timestamp("rebuild_requested_at", { withTimezone: true }),
+    updatedBy: uuid("updated_by").references(() => user.id, { onDelete: "set null" }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check("sandbox_image_settings_vcpus_check", sql`${table.vcpus} IN (2, 4, 8)`),
+  ],
+);
+
+// A workspace's snapshot build: the build last started, and the last
+// snapshot that built, which runs keep using while a newer one builds.
+export const sandboxImages = pgTable(
+  "sandbox_images",
+  {
+    organizationId: uuid("organization_id")
+      .primaryKey()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    key: text("key").notNull(),
+    status: text("status").$type<"building" | "failed" | "ready">().notNull(),
+    error: text("error"),
+    // The end of the build output.
+    log: text("log").notNull().default(""),
+    startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    snapshotId: text("snapshot_id"),
+    snapshotKey: text("snapshot_key"),
+    snapshotBaseId: text("snapshot_base_id"),
+    snapshotRegion: text("snapshot_region"),
+    snapshotBuiltAt: timestamp("snapshot_built_at", { withTimezone: true }),
+  },
+  (table) => [
+    check(
+      "sandbox_images_status_check",
+      sql`${table.status} IN ('building', 'failed', 'ready')`,
+    ),
+  ],
+);
+
+// Workspace snapshots to delete from Vercel. A trigger on sandbox_images adds
+// the snapshot a row stops pointing to, including when a workspace is
+// deleted, so no snapshot is forgotten while it still costs storage. The
+// worker deletes each once `deleteAfter` passes, and retries failures.
+export const sandboxImageSnapshotDeletions = pgTable(
+  "sandbox_image_snapshot_deletions",
+  {
+    snapshotId: text("snapshot_id").primaryKey(),
+    deleteAfter: timestamp("delete_after", { withTimezone: true }).notNull().defaultNow(),
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("sandbox_image_snapshot_deletions_due_idx").on(table.deleteAfter),
+  ],
+);
+
 export const agentVersionSecrets = pgTable(
   "agent_version_secrets",
   {

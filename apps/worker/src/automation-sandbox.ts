@@ -14,6 +14,7 @@ import {
   prepareDaytonaSandbox,
   sandboxesLeftAfterFailedCreation,
 } from "./sandbox.js";
+import { runSandboxStartCommand } from "./sandbox-image.js";
 import { startSandboxMeter, type SandboxMeter } from "./sandbox-metering.js";
 import {
   applySandboxNetwork,
@@ -43,6 +44,7 @@ interface AutomationSandboxDependencies {
   meter: typeof startSandboxMeter;
   prepare: typeof prepareDaytonaSandbox;
   replaceSecrets: typeof replaceSandboxSecrets;
+  runStartCommand: typeof runSandboxStartCommand;
 }
 
 const defaultDependencies: AutomationSandboxDependencies = {
@@ -55,6 +57,7 @@ const defaultDependencies: AutomationSandboxDependencies = {
   meter: startSandboxMeter,
   prepare: prepareDaytonaSandbox,
   replaceSecrets: replaceSandboxSecrets,
+  runStartCommand: runSandboxStartCommand,
 };
 
 // Written once a sandbox has its tools and repositories. A resumed sandbox
@@ -93,9 +96,13 @@ export interface FreshAutomationSandboxInput<T> {
   network?: SandboxNetwork | null;
   onPaused?: (sandbox: PausedAutomationSandbox) => void;
   organizationId: string;
+  // The sandbox size the workspace chose, for metering.
+  resources?: { cpu: number; disk: number; memory: number };
   // A paused sandbox from an earlier turn of the run.
   resumeState?: Record<string, unknown>;
   signal?: AbortSignal;
+  // The workspace's command for every sandbox start and resume.
+  startCommand?: string;
   secrets?: SandboxSecretMount[];
   run(
     session: SandboxSession,
@@ -341,6 +348,7 @@ export async function runInFreshAutomationSandbox<T>(
       billable: true,
       organizationId: input.organizationId,
       snapshot: Boolean(input.config.sandboxSnapshotName),
+      ...(input.resources ? { resources: input.resources } : {}),
       workload: "automation",
       workloadId: input.runId,
     });
@@ -377,6 +385,12 @@ export async function runInFreshAutomationSandbox<T>(
             input.secrets ?? [],
             input.network ?? null,
           ),
+        input.signal,
+      );
+    }
+    if (input.startCommand) {
+      await abortable(
+        dependencies.runStartCommand(session, input.startCommand),
         input.signal,
       );
     }

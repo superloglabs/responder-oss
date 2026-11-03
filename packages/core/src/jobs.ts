@@ -45,6 +45,10 @@ export const gcpProjectSetupQueue = "responder-gcp-project-setup-v1";
 // dismissed. Jobs are grouped by workspace and run one at a time per group, so
 // two jobs never write the same day's suggestions at once.
 export const automationSuggestionRefillQueue = "responder-automation-suggestion-refills-v1";
+// Builds a workspace's sandbox snapshot. One build runs per workspace, and a
+// change saved during a build queues one more, which builds the latest
+// settings when it starts.
+export const sandboxImageBuildQueue = "responder-sandbox-image-builds-v1";
 
 export const investigationHeartbeatSeconds = 60;
 export const investigationLocalConcurrency = 2;
@@ -170,6 +174,18 @@ export const automationSuggestionRefillJobSchema = z.object({
   organizationId: z.uuid(),
   queuedAt: z.iso.datetime(),
 });
+// The job carries only the workspace. The build reads what to do, including
+// a requested rebuild, from the database when it starts.
+export const sandboxImageBuildJobSchema = z.object({
+  organizationId: z.uuid(),
+});
+
+export type SandboxImageBuildJob = z.infer<typeof sandboxImageBuildJobSchema>;
+
+export function sandboxImageBuildJobOptions(organizationId: string) {
+  return { singletonKey: organizationId };
+}
+
 export type AutomationSuggestionRefillJob = z.infer<typeof automationSuggestionRefillJobSchema>;
 export const responderJobSchema = z.union([
   investigationJobSchema,
@@ -349,6 +365,16 @@ export async function prepareWorkerQueues(boss: PgBoss): Promise<void> {
       expireInSeconds: 300,
       notify: true,
       // A failed refill closes its request; the member can ask again.
+      retryLimit: 0,
+    }),
+    boss.createQueue(sandboxImageBuildQueue, {
+      deleteAfterSeconds: 604_800,
+      // A build installs packages and runs the workspace's script, which may
+      // download browsers or container images.
+      expireInSeconds: 3_600,
+      notify: true,
+      policy: "stately",
+      // A failed build is shown in settings, where an admin can retry it.
       retryLimit: 0,
     }),
     boss.createQueue(legacyAutomationRunQueue, {
