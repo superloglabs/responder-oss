@@ -170,7 +170,8 @@ function secretRules(placeholder: string, value: string): NetworkPolicyRule[] {
 
 // Each sandbox sees only placeholders, and the firewall swaps a placeholder
 // for its value on requests to the secret's allowed hosts. Outbound access is
-// open unless the workspace restricts it to a list of domains. Real values
+// limited to the workspace's list of domains, or open when the workspace has
+// turned the restriction off. Real values
 // stay out of the session state, which is saved to the database, so this is
 // applied after every start.
 export function secretNetworkPolicy(

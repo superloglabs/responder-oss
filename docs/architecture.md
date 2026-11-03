@@ -119,10 +119,12 @@ types. `drizzle/` contains the ordered schema history.
   like the automation's own secrets, as Daytona placeholders that work only
   for their allowed hosts. Skill files are stored in the database, not
   encrypted, so they must not hold credentials.
-- Sandboxes have open outbound access unless a workspace owner or admin
-  restricts them in workspace settings. A restricted sandbox reaches only the
-  listed domains, the public application host (model broker and context
-  servers), and the allowed hosts of the secrets it mounts. Vercel enforces
+- Sandboxes reach only an allowlist unless a workspace owner or admin opens
+  them in workspace settings. A workspace starts with package registries,
+  their installers and CDNs, Debian's package mirrors, and GitHub on the
+  list. A restricted sandbox reaches only the listed domains,
+  the public application host (model broker and context servers), and the
+  allowed hosts of the secrets it mounts. Vercel enforces
   this with a custom firewall policy; Daytona with a domain allowlist, which
   needs Daytona Tier 3 or higher and holds at most 100 domains. The worker
   applies the list after every sandbox start and resume, so a change reaches
