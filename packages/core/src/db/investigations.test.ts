@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { encryptCredentials } from "../credentials/encryption.js";
 import { getDatabase } from "./client.js";
 import {
   investigationIssues,
@@ -16,6 +17,7 @@ import {
   contextConnectionUnavailableEvent,
   getInitialTriageContext,
   getInvestigationForSlackAction,
+  getRuntimeCustomMcpConnections,
   INITIAL_TRIAGE_HISTORY_LIMIT,
   investigationCanBeRetried,
   loadContextConnection,
@@ -29,6 +31,64 @@ import { McpOAuthRefreshError } from "../integrations/custom-mcp.js";
 vi.mock("./client.js", () => ({
   getDatabase: vi.fn(),
 }));
+
+describe("custom MCP runtime connections", () => {
+  it("carries the tool list for API token and OAuth connections", async () => {
+    vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 4).toString("base64"));
+    const configQuery = {
+      from: vi.fn(),
+      innerJoin: vi.fn(),
+      where: vi.fn(),
+      limit: vi.fn().mockResolvedValue([{
+        contextAccountIds: ["account-token", "account-open"],
+        organizationId: "organization-1",
+      }]),
+    };
+    configQuery.from.mockReturnValue(configQuery);
+    configQuery.innerJoin.mockReturnValue(configQuery);
+    configQuery.where.mockReturnValue(configQuery);
+    const accountQuery = {
+      from: vi.fn(),
+      where: vi.fn().mockResolvedValue([
+        {
+          displayName: "Orders API",
+          encryptedCredentials: encryptCredentials({
+            apiToken: "orders-token",
+            authType: "api_token",
+            mcpUrl: "https://mcp.example.com/orders",
+          }),
+          id: "account-token",
+          metadata: { allowedTools: ["list_orders"] },
+        },
+        {
+          displayName: "Search API",
+          encryptedCredentials: encryptCredentials({
+            apiToken: "search-token",
+            authType: "api_token",
+            mcpUrl: "https://mcp.example.com/search",
+          }),
+          id: "account-open",
+          metadata: {},
+        },
+      ]),
+    };
+    accountQuery.from.mockReturnValue(accountQuery);
+    const select = vi.fn()
+      .mockReturnValueOnce(configQuery)
+      .mockReturnValueOnce(accountQuery);
+    vi.mocked(getDatabase).mockReturnValue({ select } as never);
+    vi.spyOn(console, "info").mockImplementation(() => {});
+
+    const connections = await getRuntimeCustomMcpConnections("version-1");
+
+    expect(connections.map(({ accountId, allowedTools }) => ({ accountId, allowedTools })))
+      .toEqual([
+        { accountId: "account-token", allowedTools: ["list_orders"] },
+        { accountId: "account-open", allowedTools: null },
+      ]);
+    vi.unstubAllEnvs();
+  });
+});
 
 describe("initial triage context", () => {
   it("bounds the current alert and recent terminal incident history", async () => {

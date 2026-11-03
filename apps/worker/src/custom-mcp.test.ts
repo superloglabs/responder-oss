@@ -26,6 +26,11 @@ function upstream(): MCPServer {
       { name: "refund_order" },
     ]),
     callTool: vi.fn().mockResolvedValue([{ type: "text", text: "ok" }]),
+    callToolResult: vi.fn().mockResolvedValue({
+      content: [{ type: "text", text: "ok" }],
+      isError: false,
+      structuredContent: { orders: [] },
+    }),
   } as unknown as MCPServer;
 }
 
@@ -59,5 +64,22 @@ describe("custom MCP investigation connection", () => {
     await expect(server.callTool("list_orders", {})).resolves.toEqual([
       { type: "text", text: "ok" },
     ]);
+    await expect(server.callToolResult("refund_order", { id: "1" }))
+      .rejects.toThrow("not allowed on this connection");
+    expect(inner.callToolResult).not.toHaveBeenCalled();
+    await expect(server.callToolResult("list_orders", {})).resolves.toMatchObject({
+      structuredContent: { orders: [] },
+    });
+  });
+
+  it("allows no tools when the tool list is empty", async () => {
+    expect(createCustomMcpServer({ ...connection, allowedTools: [] }))
+      .toBeInstanceOf(ToolScopedMcpServer);
+    const inner = upstream();
+    const server = new ToolScopedMcpServer(inner, []);
+    await expect(server.listTools()).resolves.toEqual([]);
+    await expect(server.callTool("list_orders", {}))
+      .rejects.toThrow("not allowed on this connection");
+    expect(inner.callTool).not.toHaveBeenCalled();
   });
 });

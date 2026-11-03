@@ -6043,6 +6043,7 @@ button:disabled {
 
 .mcpToolList__actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
 }
@@ -6064,7 +6065,8 @@ button:disabled {
 }
 
 .mcpToolList {
-  max-height: 320px;
+  /* Keeps the dialog's footer on screen in short viewports. */
+  max-height: clamp(120px, 100vh - 460px, 320px);
   margin: 0;
   padding: 0;
   overflow-y: auto;

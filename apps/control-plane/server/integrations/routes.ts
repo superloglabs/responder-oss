@@ -3582,15 +3582,18 @@ export const integrationRoutes = new Hono()
           allowLocal: process.env.NODE_ENV !== "production",
         })
       ).toString();
-      // Reconnecting a server keeps the tools its agents were limited to.
-      const existing = await getOrganizationIntegrationAccountByExternalId({
-        externalAccountId: mcpUrl,
-        organizationId: tenant.organizationId,
-        provider: "custom_mcp",
-      });
-      const preservedToolAccess = existing && "allowedTools" in existing.metadata
-        ? { allowedTools: customMcpAllowedTools(existing.metadata) }
-        : {};
+      // Reconnecting a server keeps the tools its agents were limited to. The
+      // list is read just before each write, after any remote verification.
+      const preservedToolAccess = async () => {
+        const existing = await getOrganizationIntegrationAccountByExternalId({
+          externalAccountId: mcpUrl,
+          organizationId: tenant.organizationId,
+          provider: "custom_mcp",
+        });
+        return existing && "allowedTools" in existing.metadata
+          ? { allowedTools: customMcpAllowedTools(existing.metadata) }
+          : {};
+      };
 
       if (parsed.data.authType === "api_token") {
         failureOutcome = "verify_failed";
@@ -3609,7 +3612,12 @@ export const integrationRoutes = new Hono()
             mcpUrl,
           }),
           credentialKeyVersion: 1,
-          metadata: { authType: "api_token", mcpUrl, toolCount, ...preservedToolAccess },
+          metadata: {
+            authType: "api_token",
+            mcpUrl,
+            toolCount,
+            ...(await preservedToolAccess()),
+          },
         });
         await captureAnalyticsEvent({
           distinctId: tenant.user.id,
@@ -3646,7 +3654,7 @@ export const integrationRoutes = new Hono()
           oauth: {},
         }),
         credentialKeyVersion: 1,
-        metadata: { authType: "oauth", mcpUrl, ...preservedToolAccess },
+        metadata: { authType: "oauth", mcpUrl, ...(await preservedToolAccess()) },
         status: "pending",
       });
       const connectionState = await createIntegrationConnectionState({

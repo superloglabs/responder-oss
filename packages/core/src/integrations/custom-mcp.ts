@@ -108,7 +108,7 @@ export function oauthConnectionRefreshMessage(
 
 // A connection's metadata may limit agents to a list of the server's tools.
 // Without a list, agents can use every tool the server offers.
-export const MAX_CUSTOM_MCP_ALLOWED_TOOLS = 500;
+export const MAX_CUSTOM_MCP_ALLOWED_TOOLS = 2_000;
 export const customMcpAllowedToolsSchema = z
   .array(z.string().min(1).max(256))
   .max(MAX_CUSTOM_MCP_ALLOWED_TOOLS);
@@ -625,7 +625,11 @@ export async function listCustomMcpToolSummaries(input: {
     await client.connect(transport);
     const tools: CustomMcpToolSummary[] = [];
     let cursor: string | undefined;
-    for (let page = 0; page < MAX_TOOL_PAGES; page += 1) {
+    for (let page = 0; ; page += 1) {
+      // A cut-off listing would hide tools, so it fails instead.
+      if (page === MAX_TOOL_PAGES) {
+        throw new Error(`The MCP server listed tools on more than ${MAX_TOOL_PAGES} pages`);
+      }
       const listed = await client.listTools(cursor ? { cursor } : undefined);
       for (const tool of listed.tools) {
         tools.push({

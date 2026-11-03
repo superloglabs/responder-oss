@@ -1,5 +1,6 @@
 import {
   MCPServerStreamableHttp,
+  type CallToolResult,
   type CallToolResultContent,
   type MCPCallToolOptions,
   type MCPServer,
@@ -49,10 +50,27 @@ export class ToolScopedMcpServer implements MCPServer {
     meta?: Record<string, unknown> | null,
     options?: MCPCallToolOptions,
   ): Promise<CallToolResultContent> {
+    this.assertAllowed(toolName);
+    return this.server.callTool(toolName, args, meta, options);
+  }
+
+  async callToolResult(
+    toolName: string,
+    args: Record<string, unknown> | null,
+    meta?: Record<string, unknown> | null,
+    options?: MCPCallToolOptions,
+  ): Promise<CallToolResult> {
+    this.assertAllowed(toolName);
+    if (this.server.callToolResult) {
+      return this.server.callToolResult(toolName, args, meta, options);
+    }
+    return { content: await this.server.callTool(toolName, args, meta, options) };
+  }
+
+  private assertAllowed(toolName: string) {
     if (!this.allowedTools.has(toolName)) {
       throw new Error(`MCP tool ${toolName} is not allowed on this connection`);
     }
-    return this.server.callTool(toolName, args, meta, options);
   }
 
   invalidateToolsCache(): Promise<void> {

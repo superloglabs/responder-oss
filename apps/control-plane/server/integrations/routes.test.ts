@@ -2458,6 +2458,9 @@ describe("integration callback routing", () => {
       body: JSON.stringify({ allowedTools: ["search", "list_orders", "search"] }),
     });
     expect(limited.status).toBe(200);
+    await expect(limited.json()).resolves.toEqual({
+      allowedTools: ["list_orders", "search"],
+    });
     expect(setCustomMcpAllowedTools).toHaveBeenLastCalledWith({
       allowedTools: ["list_orders", "search"],
       integrationAccountId: "30000000-0000-4000-8000-000000000000",
@@ -2470,6 +2473,7 @@ describe("integration callback routing", () => {
       body: JSON.stringify({ allowedTools: null }),
     });
     expect(cleared.status).toBe(200);
+    await expect(cleared.json()).resolves.toEqual({ allowedTools: null });
     expect(setCustomMcpAllowedTools).toHaveBeenLastCalledWith({
       allowedTools: null,
       integrationAccountId: "30000000-0000-4000-8000-000000000000",
@@ -2482,6 +2486,14 @@ describe("integration callback routing", () => {
       body: JSON.stringify({ allowedTools: [""] }),
     });
     expect(invalid.status).toBe(400);
+
+    vi.mocked(setCustomMcpAllowedTools).mockResolvedValue(false);
+    const missing = await app.request(accountPath, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ allowedTools: ["search"] }),
+    });
+    expect(missing.status).toBe(404);
   });
 
   it("logs a useful custom MCP failure without echoing remote secrets", async () => {

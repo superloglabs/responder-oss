@@ -1,4 +1,5 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useDialogFocusTrap } from "../use-dialog-focus-trap";
 
 interface McpTool {
   description?: string;
@@ -28,6 +29,8 @@ export function CustomMcpToolsDialog({
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const dialogRef = useRef<HTMLElement>(null);
+  useDialogFocusTrap(dialogRef, true);
 
   useEffect(() => {
     let cancelled = false;
@@ -115,6 +118,7 @@ export function CustomMcpToolsDialog({
         aria-labelledby="custom-mcp-tools-title"
         aria-modal="true"
         className="siteDialog siteDialog--credentials"
+        ref={dialogRef}
         role="dialog"
       >
         <header className="siteDialog__header">
