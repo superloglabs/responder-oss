@@ -127,7 +127,7 @@ describe("repository inspection tools", () => {
 
     expect(session.execCommand).toHaveBeenCalledWith(
       expect.objectContaining({
-        cmd: expect.stringContaining("--sort path -- \"$target\" | sed -n '501,1001p'"),
+        cmd: expect.stringContaining("--sort path -- \"$target\" | sed -n '501,1001p;1001q'"),
       }),
     );
     expect(String(result).split("\n")).toHaveLength(501);

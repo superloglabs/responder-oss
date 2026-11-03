@@ -100,12 +100,18 @@ export function createRepositoryInspectionTools(input: {
         repositoryName,
         relativePath,
       );
+      // One line past the page tells us whether more files exist; sed quits
+      // there so rg stops producing output.
+      const lastLine = offset + LIST_FILES_PAGE_SIZE + 1;
       const output = await runInspectionCommand(
         input.session,
         {
           cmd: [
             checkedTargetScript(target.repository.path, target.path),
-            `rg --files --hidden --glob '!.git/**' --sort path -- "$target" | sed -n '${offset + 1},${offset + LIST_FILES_PAGE_SIZE + 1}p'`,
+            [
+              "rg --files --hidden --glob '!.git/**' --sort path -- \"$target\"",
+              `sed -n '${offset + 1},${lastLine}p;${lastLine}q'`,
+            ].join(" | "),
           ].join("\n"),
           workdir: target.repository.path,
         },
