@@ -297,6 +297,23 @@ export async function buildSandboxImage(
   }
 }
 
+// Runs one build job. A build cut off by shutdown goes back on the queue for
+// the next worker: during a deploy the new worker's boot-time maintenance pass
+// may have queued the very build the old worker then took and cut off, and the
+// next pass is ten minutes away. If queueing fails, that pass catches it up.
+export async function runSandboxImageBuildJob(
+  organizationId: string,
+  options: { requeue: () => Promise<unknown>; signal: AbortSignal },
+  build: typeof buildSandboxImage = buildSandboxImage,
+): Promise<SandboxImageBuildOutcome> {
+  try {
+    return await build(organizationId, { signal: options.signal });
+  } catch (error) {
+    if (options.signal.aborted) await options.requeue().catch(() => undefined);
+    throw error;
+  }
+}
+
 // Whether a workspace's image needs a build job: its settings or the base
 // snapshot changed, an admin asked for a rebuild, a build was cut off, or
 // settings that no longer need an image left one behind. A job for a build
