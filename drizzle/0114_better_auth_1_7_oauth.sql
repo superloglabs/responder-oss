@@ -58,4 +58,6 @@ CREATE UNIQUE INDEX "oauthClientResource_clientId_resourceId_uidx" ON "oauth_cli
 CREATE INDEX "oauthClientResource_clientId_idx" ON "oauth_client_resource" USING btree ("client_id");--> statement-breakpoint
 CREATE INDEX "oauthClientResource_resourceId_idx" ON "oauth_client_resource" USING btree ("resource_id");--> statement-breakpoint
 CREATE INDEX "oauthAccessToken_authorizationCodeId_idx" ON "oauth_access_token" USING btree ("authorization_code_id");--> statement-breakpoint
-CREATE INDEX "oauthRefreshToken_authorizationCodeId_idx" ON "oauth_refresh_token" USING btree ("authorization_code_id");
+CREATE INDEX "oauthRefreshToken_authorizationCodeId_idx" ON "oauth_refresh_token" USING btree ("authorization_code_id");--> statement-breakpoint
+-- Better Auth 1.7 reads the client kind from application_type.
+UPDATE "oauth_client" SET "application_type" = "type" WHERE "application_type" IS NULL AND "type" IN ('web', 'native');
