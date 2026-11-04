@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   authenticate: vi.fn(),
   capability: vi.fn(),
   channels: vi.fn(),
+  findRoutine: vi.fn(),
   get: vi.fn(),
   save: vi.fn(),
 }));
@@ -33,6 +34,10 @@ vi.mock("../../../../packages/core/src/db/error-notifications.js", async (import
   ...(await importOriginal<object>()),
   getErrorNotificationSettings: mocks.get,
   saveErrorNotificationSettings: mocks.save,
+}));
+vi.mock("../../../../packages/core/src/db/claude-routines.js", () => ({
+  findClaudeRoutine: mocks.findRoutine,
+  listClaudeRoutines: vi.fn().mockResolvedValue([]),
 }));
 vi.mock("../../../../packages/core/src/db/telemetry-alerts.js", async (importOriginal) => ({
   ...(await importOriginal<object>()),
@@ -66,6 +71,7 @@ async function callTool(name: string, args: Record<string, unknown> = {}) {
 
 const channel = { accountName: "Acme", channelId: "C0123ABCD", integrationAccountId, metadata: {}, name: "errors" };
 const slack = { channelId: "C0123ABCD", integrationAccountId };
+const routineId = "61616161-6161-4161-8161-616161616161";
 
 describe("error notification operations", () => {
   let stored = { enabled: false, targets: [] as Array<Record<string, string>> };
@@ -80,6 +86,7 @@ describe("error notification operations", () => {
     });
     mocks.capability.mockImplementation(async (_organization: string, capability: string) => capability === "telemetry");
     mocks.channels.mockResolvedValue([channel]);
+    mocks.findRoutine.mockImplementation(async (_organization: string, id: string) => (id === routineId ? { id } : null));
     mocks.get.mockImplementation(async () => stored);
     mocks.save.mockImplementation(async (_organization: string, settings: typeof stored) => { stored = settings; });
   });
@@ -101,23 +108,23 @@ describe("error notification operations", () => {
   it("turns notifications on for an available channel", async () => {
     const { body } = await callTool("update_error_notifications", { enabled: true, slack });
 
-    expect(body).toEqual({ notifications: { enabled: true, exceptionsOnly: false, slack } });
+    expect(body).toEqual({ notifications: { enabled: true, exceptionsOnly: false, slack, claudeRoutineId: null } });
     expect(mocks.save).toHaveBeenCalledWith(organizationId, { enabled: true, exceptionsOnly: false, targets: [{ kind: "slack", ...slack }] });
   });
 
   it("posts only exceptions, and keeps that choice until it changes", async () => {
     const { body } = await callTool("update_error_notifications", { enabled: true, exceptionsOnly: true, slack });
-    expect(body).toEqual({ notifications: { enabled: true, exceptionsOnly: true, slack } });
+    expect(body).toEqual({ notifications: { enabled: true, exceptionsOnly: true, slack, claudeRoutineId: null } });
 
     const { body: kept } = await callTool("update_error_notifications", { enabled: true });
-    expect(kept).toEqual({ notifications: { enabled: true, exceptionsOnly: true, slack } });
+    expect(kept).toEqual({ notifications: { enabled: true, exceptionsOnly: true, slack, claudeRoutineId: null } });
   });
 
   it("keeps the channel when turning notifications off", async () => {
     stored = { enabled: true, targets: [{ kind: "slack", ...slack }] };
     const { body } = await callTool("update_error_notifications", { enabled: false });
 
-    expect(body).toEqual({ notifications: { enabled: false, exceptionsOnly: false, slack } });
+    expect(body).toEqual({ notifications: { enabled: false, exceptionsOnly: false, slack, claudeRoutineId: null } });
   });
 
   it("turns notifications off after their channel became unavailable", async () => {
@@ -126,12 +133,31 @@ describe("error notification operations", () => {
     const { body, isError } = await callTool("update_error_notifications", { enabled: false });
 
     expect(isError).toBeFalsy();
-    expect(body).toEqual({ notifications: { enabled: false, exceptionsOnly: false, slack } });
+    expect(body).toEqual({ notifications: { enabled: false, exceptionsOnly: false, slack, claudeRoutineId: null } });
   });
 
   it("needs a channel to turn notifications on", async () => {
     expect(await callTool("update_error_notifications", { enabled: true })).toMatchObject({
       body: { code: "slack_channel_required" },
+      isError: true,
+    });
+    expect(mocks.save).not.toHaveBeenCalled();
+  });
+
+  it("starts a Claude routine with or without a channel", async () => {
+    const { body } = await callTool("update_error_notifications", { enabled: true, claudeRoutineId: routineId });
+    expect(body).toEqual({ notifications: { enabled: true, exceptionsOnly: false, slack: null, claudeRoutineId: routineId } });
+    expect(mocks.save).toHaveBeenLastCalledWith(organizationId, {
+      enabled: true, exceptionsOnly: false, targets: [{ kind: "claude_routine", routineId }],
+    });
+
+    const { body: both } = await callTool("update_error_notifications", { enabled: true, slack });
+    expect(both).toEqual({ notifications: { enabled: true, exceptionsOnly: false, slack, claudeRoutineId: routineId } });
+  });
+
+  it("refuses a routine from another workspace", async () => {
+    expect(await callTool("update_error_notifications", { enabled: true, claudeRoutineId: integrationAccountId })).toMatchObject({
+      body: { code: "claude_routine_unavailable" },
       isError: true,
     });
     expect(mocks.save).not.toHaveBeenCalled();

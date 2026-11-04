@@ -8,6 +8,7 @@ const slack = { channelId: "C0123", integrationAccountId: "71717171-7171-4171-81
 
 const alert: TelemetryAlert = {
   aggregation: "count",
+  claudeRoutineId: null,
   comparator: "gt",
   createdAt: "2026-10-28T10:00:00.000Z",
   description: null,

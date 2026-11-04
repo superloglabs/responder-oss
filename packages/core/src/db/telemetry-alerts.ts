@@ -11,6 +11,7 @@ import {
 } from "./schema.js";
 
 export type TelemetryAlert = AlertRule & {
+  claudeRoutineId: string | null;
   createdAt: string;
   description: string | null;
   enabled: boolean;
@@ -40,6 +41,7 @@ export type TelemetryAlertEpisode = {
 
 const alertColumns = {
   aggregation: telemetryAlerts.aggregation,
+  claudeRoutineId: telemetryAlerts.claudeRoutineId,
   comparator: telemetryAlerts.comparator,
   createdAt: telemetryAlerts.createdAt,
   description: telemetryAlerts.description,
@@ -158,6 +160,9 @@ export async function listTelemetryAlertIntervals(alertId: string, since: Date, 
 }
 
 export type TelemetryAlertActivation = TelemetryAlertEpisode & {
+  // The session the alert's Claude routine started for the activation.
+  claudeRoutineSessionUrl: string | null;
+  claudeRoutineStartedAt: string | null;
   // Opened while the workspace's notifications were paused, so not posted.
   notificationsPaused: boolean;
   ruleSnapshot: AlertUpdate | null;
@@ -178,6 +183,7 @@ export async function findTelemetryAlertActivation(alertId: string, activationId
     openValue: row.openValue, lastValue: row.lastValue, peakValue: row.peakValue,
     ruleSnapshot: row.ruleSnapshot, endReason: row.endReason, notificationsPaused: row.notificationsPaused,
     slackChannelId: row.slackChannelId, slackMessageTs: row.slackMessageTs,
+    claudeRoutineSessionUrl: row.claudeRoutineSessionUrl, claudeRoutineStartedAt: row.claudeRoutineStartedAt?.toISOString() ?? null,
     recoveryNotifiedAt: row.endReason === "recovered" && row.slackMessageTs && row.slackIntegrationAccountId ? row.recoveryNotifiedAt?.toISOString() ?? null : null,
   };
 }
@@ -185,6 +191,7 @@ export async function findTelemetryAlertActivation(alertId: string, activationId
 function ruleValues(input: AlertUpdate) {
   return {
     aggregation: input.aggregation,
+    claudeRoutineId: input.claudeRoutineId,
     comparator: input.comparator,
     description: input.description,
     enabled: input.enabled,
@@ -299,6 +306,7 @@ export type DueTelemetryAlert = TelemetryAlert & {
 export async function claimDueTelemetryAlerts(limit: number): Promise<DueTelemetryAlert[]> {
   const result = await getDatabase().execute<{
     aggregation: AlertRule["aggregation"];
+    claude_routine_id: string | null;
     comparator: AlertRule["comparator"];
     created_at: Date | string;
     description: string | null;
@@ -342,6 +350,7 @@ export async function claimDueTelemetryAlerts(limit: number): Promise<DueTelemet
   const time = (value: Date | string) => new Date(value).toISOString();
   return result.rows.map((row) => ({
     aggregation: row.aggregation,
+    claudeRoutineId: row.claude_routine_id,
     comparator: row.comparator,
     createdAt: time(row.created_at),
     description: row.description,
@@ -374,6 +383,7 @@ export async function recordTelemetryAlertCheck(alertId: string, error: string |
 }
 
 export type OpenTelemetryAlertEpisode = {
+  claudeRoutineStartedAt: Date | null;
   groupKey: string;
   id: string;
   // Opened while the workspace's notifications were paused: never announced.
@@ -386,6 +396,7 @@ export type OpenTelemetryAlertEpisode = {
 };
 
 const openEpisodeColumns = {
+  claudeRoutineStartedAt: telemetryAlertEpisodes.claudeRoutineStartedAt,
   groupKey: telemetryAlertEpisodes.groupKey,
   id: telemetryAlertEpisodes.id,
   notificationsPaused: telemetryAlertEpisodes.notificationsPaused,
@@ -437,7 +448,8 @@ export async function openTelemetryAlertEpisode(input: {
         'enabled', enabled,
         'evaluationIntervalSeconds', evaluation_interval_seconds,
         'slack', case when slack_channel_id is null then null else jsonb_build_object(
-          'channelId', slack_channel_id, 'integrationAccountId', slack_integration_account_id) end)
+          'channelId', slack_channel_id, 'integrationAccountId', slack_integration_account_id) end,
+        'claudeRoutineId', claude_routine_id)
     from ${telemetryAlerts}
     where ${telemetryAlerts.id} = ${input.alertId}
       and ${telemetryAlerts.enabled}
@@ -449,6 +461,7 @@ export async function openTelemetryAlertEpisode(input: {
   const row = result.rows[0];
   return row
     ? {
+        claudeRoutineStartedAt: null,
         groupKey: row.group_key,
         id: row.id,
         notificationsPaused: row.notifications_paused,
@@ -492,6 +505,29 @@ export async function setTelemetryAlertEpisodeMessage(episodeId: string, message
   await getDatabase()
     .update(telemetryAlertEpisodes)
     .set({ slackMessageTs: messageTs, updatedAt: new Date() })
+    .where(eq(telemetryAlertEpisodes.id, episodeId));
+}
+
+// Claims the start of the alert's Claude routine for an episode. False when
+// it was already started, so each activation starts at most one session.
+export async function claimTelemetryAlertEpisodeRoutine(episodeId: string): Promise<boolean> {
+  const rows = await getDatabase()
+    .update(telemetryAlertEpisodes)
+    .set({ claudeRoutineStartedAt: new Date() })
+    .where(and(eq(telemetryAlertEpisodes.id, episodeId), isNull(telemetryAlertEpisodes.claudeRoutineStartedAt)))
+    .returning({ id: telemetryAlertEpisodes.id });
+  return rows.length > 0;
+}
+
+// Records the started session, or, with null, releases a claim whose start
+// certainly created none so a later check tries again.
+export async function finishTelemetryAlertEpisodeRoutine(
+  episodeId: string,
+  outcome: { sessionUrl: string | null } | null,
+): Promise<void> {
+  await getDatabase()
+    .update(telemetryAlertEpisodes)
+    .set(outcome ? { claudeRoutineSessionUrl: outcome.sessionUrl } : { claudeRoutineStartedAt: null })
     .where(eq(telemetryAlertEpisodes.id, episodeId));
 }
 

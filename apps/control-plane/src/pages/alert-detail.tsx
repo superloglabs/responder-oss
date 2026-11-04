@@ -615,9 +615,21 @@ function ActivationDetail({ alert, activation }: { alert: TelemetryAlert; activa
               </tbody>
             </table>
           </div>
-        ) : (
+        ) : activation.claudeRoutineStartedAt ? null : (
           <p className="alertEmpty">No notification destination was recorded for this activation.</p>
         )}
+        {activation.claudeRoutineStartedAt ? (
+          <p className="alertEmpty">
+            Claude routine started at{" "}
+            <time dateTime={activation.claudeRoutineStartedAt}>{time(activation.claudeRoutineStartedAt, true)}</time>.
+            {activation.claudeRoutineSessionUrl ? (
+              <>
+                {" "}
+                <a href={activation.claudeRoutineSessionUrl} rel="noreferrer" target="_blank">Open the session</a>
+              </>
+            ) : null}
+          </p>
+        ) : null}
       </section>
     </div>
   );

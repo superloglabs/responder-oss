@@ -71,7 +71,7 @@ describe.skipIf(!testUrl)("error notification outbox (PostgreSQL)", () => {
     await processPendingErrorNotifications(fail);
     expect((await deliveries(first.issueId))[0]).toMatchObject({ attempts: 1, status: "pending" });
     await getDatabase().update(errorNotificationDeliveries).set({ status: "sending", nextAttemptAt: new Date(0) }).where(eq(errorNotificationDeliveries.issueId, first.issueId));
-    const send = vi.fn(async () => "123.456");
+    const send = vi.fn(async () => ({ messageTimestamp: "123.456" }));
     await Promise.all([processPendingErrorNotifications(send), processPendingErrorNotifications(send)]);
     expect(send).toHaveBeenCalledTimes(1);
     expect((await deliveries(first.issueId))[0]).toMatchObject({ attempts: 2, status: "sent", messageTimestamp: "123.456" });
@@ -84,10 +84,10 @@ describe.skipIf(!testUrl)("error notification outbox (PostgreSQL)", () => {
     const first = await getDatabase().transaction((tx) => recordErrorOccurrences(tx, occurrences("followup")));
     // Activity before the notification is sent has no thread to go to.
     await postErrorIssueUpdate(organizationId, first.issueId, actor, { message: "Early" });
-    await processPendingErrorNotifications(async () => "111.000");
+    await processPendingErrorNotifications(async () => ({ messageTimestamp: "111.000" }));
     await setErrorIssueStatus(organizationId, first.issueId, "resolved", { actor });
     await getDatabase().transaction((tx) => recordErrorOccurrences(tx, occurrences("followup")));
-    await processPendingErrorNotifications(async () => "222.000");
+    await processPendingErrorNotifications(async () => ({ messageTimestamp: "222.000" }));
 
     await claimErrorIssue(organizationId, first.issueId, { actor, credential: "oauth:client" });
     await postErrorIssueUpdate(organizationId, first.issueId, actor, { message: "Fix", pullRequestUrl: "https://github.com/acme/api/pull/7" });

@@ -7,8 +7,11 @@ import type { errorNotificationDeliveries } from "@responder/core/db/schema";
 import { pausedTelemetryNotificationOrganizations } from "@responder/core/db/telemetry-notification-pauses";
 import { listTelemetryAlertSlackChannels } from "@responder/core/db/telemetry-alerts";
 import { organizationHasCapability } from "@responder/core/db/organization-capabilities";
+import { startClaudeRoutine } from "@responder/core/db/claude-routines";
 import { responderErrorIssueUrl } from "@responder/core/responder-urls";
-import { errorNotificationTargetKey, matchesErrorNotification, type ErrorNotificationSnapshot } from "@responder/core/telemetry/error-notifications";
+import {
+  errorNotificationTargetKey, errorRoutineText, matchesErrorNotification, type ErrorNotificationSnapshot,
+} from "@responder/core/telemetry/error-notifications";
 import {
   type ErrorIssueActivity, type ErrorIssueActor, type ErrorIssueClaim, type ErrorIssueStatus, errorIssueActorName,
 } from "@responder/core/telemetry/error-issues";
@@ -127,6 +130,7 @@ const defaults = {
   settings: getErrorNotificationSettings, paused: pausedTelemetryNotificationOrganizations,
   hasCapability: organizationHasCapability,
   origin: () => process.env.RESPONDER_APP_URL ?? process.env.BETTER_AUTH_URL,
+  startRoutine: (input: Parameters<typeof startClaudeRoutine>[0]) => startClaudeRoutine(input),
 };
 // Whether the workspace still sends to a delivery's destination.
 async function destinationAvailable(delivery: Delivery, deps: Pick<typeof defaults, "channels" | "hasCapability" | "paused" | "settings">): Promise<boolean> {
@@ -134,19 +138,30 @@ async function destinationAvailable(delivery: Delivery, deps: Pick<typeof defaul
   const settings = await deps.settings(delivery.organizationId);
   if (!matchesErrorNotification(settings) || !settings.targets.some((target) => errorNotificationTargetKey(target) === delivery.targetKey)) return false;
   const target = delivery.target;
+  // A removed routine is found when it is started.
+  if (target.kind === "claude_routine") return true;
   return (await deps.channels(delivery.organizationId)).some((channel) => channel.integrationAccountId === target.integrationAccountId && channel.channelId === target.channelId);
 }
 
-// Returns the posted message's timestamp, or null for a destination that is
-// no longer authorized. Sending is idempotent per persisted delivery; each
-// destination retries independently.
-export async function deliverErrorNotification(delivery: Delivery, deps = defaults): Promise<string | null> {
+// Returns the posted Slack message's timestamp, if any, or null for a
+// destination that is no longer authorized. Posting is idempotent per
+// persisted delivery; each destination retries independently.
+export async function deliverErrorNotification(
+  delivery: Delivery,
+  deps = defaults,
+): Promise<{ messageTimestamp: string | null } | null> {
   if (!(await destinationAvailable(delivery, deps))) return null;
   const origin = deps.origin();
   if (!origin) throw new Error("Application URL is not configured");
   const url = responderErrorIssueUrl(delivery.issueId, origin);
-  const message = errorNotificationMessage(delivery.snapshot, url);
   const target = delivery.target;
+  if (target.kind === "claude_routine") {
+    const started = await deps.startRoutine({
+      organizationId: delivery.organizationId, routineId: target.routineId, text: errorRoutineText(delivery.snapshot, delivery.issueId, url),
+    });
+    return started ? { messageTimestamp: null } : null;
+  }
+  const message = errorNotificationMessage(delivery.snapshot, url);
   const [result] = await deps.post({
     organizationId: delivery.organizationId,
     notifications: [{ kind: "slack", integrationAccountId: target.integrationAccountId, channelId: target.channelId }],
@@ -156,7 +171,7 @@ export async function deliverErrorNotification(delivery: Delivery, deps = defaul
     unfurlLinks: false,
   });
   if (!result || "error" in result || !result.timestamp) throw new Error("Slack notification failed");
-  return result.timestamp;
+  return { messageTimestamp: result.timestamp };
 }
 
 // Slack refuses to edit a message that was deleted or is too old to edit.
@@ -170,7 +185,8 @@ export async function deliverErrorNotificationFollowup(
   deps: typeof defaults & { update: typeof updateSlackNotification } = { ...defaults, update: updateSlackNotification },
 ): Promise<boolean> {
   const { activity, delivery, issue } = followup;
-  if (!(await destinationAvailable(delivery, deps))) return false;
+  // Only Slack messages have threads to reply in.
+  if (delivery.target.kind !== "slack" || !(await destinationAvailable(delivery, deps))) return false;
   const origin = deps.origin();
   if (!origin) throw new Error("Application URL is not configured");
   const url = responderErrorIssueUrl(delivery.issueId, origin);

@@ -171,3 +171,19 @@ export function alertRecoveredMessage(
     text: `${slackText(input.alertName)} recovered${group}`,
   };
 }
+
+// The context a Claude routine gets when an episode opens. Plain text: the
+// routine receives it as data, not Markdown.
+export function alertRoutineText(input: AlertMessageInput & { alertId: string; startedAt: Date }): string {
+  const group = input.groupBy ? ` for ${alertFieldLabel(input.groupBy).replace(/^AI /u, "")} ${input.groupKey || "(none)"}` : "";
+  const unit = alertValueUnit(input.rule);
+  return [
+    `Superlog alert "${input.alertName}" is firing${group}.`,
+    "",
+    `${describeAlertRule(input.rule)}: ${formatAlertValue(input.value, unit)}, ${describeAlertCondition(input.rule.comparator, input.rule.threshold, unit)}.`,
+    `Started at: ${input.startedAt.toISOString()}`,
+    `Alert ID: ${input.alertId}`,
+    ...(input.alertUrl ? [`Alert: ${input.alertUrl}`] : []),
+    ...(input.alertDescription ? ["", "Description:", input.alertDescription] : []),
+  ].join("\n");
+}

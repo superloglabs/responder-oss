@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { ClaudeRoutineFireError } from "@responder/core/claude-routines";
 import type { DueTelemetryAlert, OpenTelemetryAlertEpisode } from "@responder/core/db/telemetry-alerts";
 import { checkDueTelemetryAlerts, checkTelemetryAlert, type TelemetryAlertDependencies } from "./telemetry-alerts.js";
 
@@ -7,6 +8,7 @@ const slack = { channelId: "C123", integrationAccountId: "00000000-0000-4000-800
 
 const alert: DueTelemetryAlert = {
   aggregation: "count",
+  claudeRoutineId: null,
   comparator: "gt",
   field: null,
   createdAt: now.toISOString(),
@@ -32,6 +34,7 @@ const alert: DueTelemetryAlert = {
 
 function episode(overrides: Partial<OpenTelemetryAlertEpisode> = {}): OpenTelemetryAlertEpisode {
   return {
+    claudeRoutineStartedAt: null,
     groupKey: "",
     id: "episode-1",
     notificationsPaused: false,
@@ -47,8 +50,10 @@ function episode(overrides: Partial<OpenTelemetryAlertEpisode> = {}): OpenTeleme
 function dependencies(overrides: Partial<TelemetryAlertDependencies> = {}) {
   const dependencies: TelemetryAlertDependencies = {
     claim: vi.fn(async () => [alert]),
+    claimRoutine: vi.fn(async () => true),
     client: () => ({}) as never,
     continueEpisode: vi.fn(async () => undefined),
+    finishRoutine: vi.fn(async () => undefined),
     markRecoveryNotified: vi.fn(async () => undefined),
     now: () => now,
     openEpisode: vi.fn(async () => episode({ slackMessageTs: null })),
@@ -61,6 +66,7 @@ function dependencies(overrides: Partial<TelemetryAlertDependencies> = {}) {
     renderChart: vi.fn(async () => ({ altText: "Evaluation graph", png: Buffer.from("png") })),
     resolveEpisode: vi.fn(async () => true),
     setMessage: vi.fn(async () => undefined),
+    startRoutine: vi.fn(async () => ({ sessionUrl: "https://claude.ai/code/session_01" })),
     unannouncedRecoveries: vi.fn(async () => []),
     values: vi.fn(async () => [{ group: "", value: 25 }]),
     ...overrides,
@@ -69,6 +75,71 @@ function dependencies(overrides: Partial<TelemetryAlertDependencies> = {}) {
 }
 
 describe("checkTelemetryAlert", () => {
+  const routineId = "00000000-0000-4000-8000-0000000000bb";
+
+  it("starts the alert's Claude routine once when an episode opens", async () => {
+    const deps = dependencies();
+
+    await checkTelemetryAlert({ ...alert, claudeRoutineId: routineId, description: "Roll back first." }, {} as never, deps);
+
+    expect(deps.claimRoutine).toHaveBeenCalledWith("episode-1");
+    expect(deps.startRoutine).toHaveBeenCalledWith({ organizationId: "org-1", routineId, text: expect.any(String) });
+    const { text } = vi.mocked(deps.startRoutine).mock.calls[0]![0];
+    expect(text).toContain('Superlog alert "Checkout errors" is firing.');
+    expect(text).toContain("ERROR logs in the last 5 minutes: 25, above 10.");
+    expect(text).toContain("Alert: https://us.superlog.sh/alerts/alert-1");
+    expect(text).toContain("Roll back first.");
+    expect(deps.finishRoutine).toHaveBeenCalledWith("episode-1", { sessionUrl: "https://claude.ai/code/session_01" });
+    expect(deps.recordCheck).toHaveBeenCalledWith("alert-1", null);
+  });
+
+  it("starts the routine without a Slack channel", async () => {
+    const deps = dependencies({ openEpisode: vi.fn(async () => episode({ slackChannelId: null, slackIntegrationAccountId: null, slackMessageTs: null })) });
+
+    await checkTelemetryAlert({ ...alert, claudeRoutineId: routineId, slack: null }, {} as never, deps);
+
+    expect(deps.post).not.toHaveBeenCalled();
+    expect(deps.startRoutine).toHaveBeenCalledOnce();
+  });
+
+  it("does not start the routine again for a continuing episode or while paused", async () => {
+    const started = dependencies({
+      openEpisodes: vi.fn(async () => [episode({ claudeRoutineStartedAt: now })]),
+    });
+    await checkTelemetryAlert({ ...alert, claudeRoutineId: routineId }, {} as never, started);
+    expect(started.startRoutine).not.toHaveBeenCalled();
+
+    const paused = dependencies();
+    await checkTelemetryAlert({ ...alert, claudeRoutineId: routineId, notificationsPaused: true }, {} as never, paused);
+    expect(paused.startRoutine).not.toHaveBeenCalled();
+
+    const claimed = dependencies({ claimRoutine: vi.fn(async () => false) });
+    await checkTelemetryAlert({ ...alert, claudeRoutineId: routineId }, {} as never, claimed);
+    expect(claimed.startRoutine).not.toHaveBeenCalled();
+  });
+
+  it("releases the claim only when the start certainly created no session", async () => {
+    const limited = dependencies({
+      startRoutine: vi.fn(async () => {
+        throw new ClaudeRoutineFireError("The routine's hourly limit was reached", true);
+      }),
+    });
+    await checkTelemetryAlert({ ...alert, claudeRoutineId: routineId }, {} as never, limited);
+    expect(limited.finishRoutine).toHaveBeenCalledWith("episode-1", null);
+    expect(limited.recordCheck).toHaveBeenCalledWith(
+      "alert-1",
+      "Starting the Claude routine failed: The routine's hourly limit was reached",
+    );
+
+    const timedOut = dependencies({
+      startRoutine: vi.fn(async () => {
+        throw new ClaudeRoutineFireError("Anthropic did not answer in time", false);
+      }),
+    });
+    await checkTelemetryAlert({ ...alert, claudeRoutineId: routineId }, {} as never, timedOut);
+    expect(timedOut.finishRoutine).not.toHaveBeenCalled();
+  });
+
   it("opens an episode and announces it in the alert's channel", async () => {
     const deps = dependencies();
 

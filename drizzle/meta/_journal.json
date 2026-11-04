@@ -806,6 +806,13 @@
       "when": 1793794701822,
       "tag": "0114_better_auth_1_7_oauth",
       "breakpoints": true
+    },
+    {
+      "idx": 115,
+      "version": "7",
+      "when": 1793807051495,
+      "tag": "0115_claude_routines",
+      "breakpoints": true
     }
   ]
 }

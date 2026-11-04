@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { findClaudeRoutine, listClaudeRoutines } from "../../../../packages/core/src/db/claude-routines.js";
 import { organizationHasCapability } from "../../../../packages/core/src/db/organization-capabilities.js";
 import {
   createTelemetryAlert,
@@ -74,6 +75,10 @@ const settingFields = {
     })
     .nullable()
     .describe("Where firing and recovery messages are posted. Without a channel the alert only records its activations."),
+  claudeRoutineId: z
+    .uuid()
+    .nullable()
+    .describe("The `id` of one of the workspace's Claude routines, started once each time the alert fires with the alert's details as its text. Null starts nothing."),
 };
 
 const optionalRuleFields = {
@@ -96,6 +101,7 @@ const alertSchema = z.object({
   lastEvaluatedAt: z.string().nullable(),
   name: z.string(),
   slack: z.object({ channelId: z.string(), integrationAccountId: z.string() }).nullable(),
+  claudeRoutineId: z.string().nullable(),
   updatedAt: z.string(),
   url: z.url().describe("The alert in Superlog."),
 });
@@ -160,6 +166,12 @@ async function checkSlack(context: ManagementContext, slack: AlertSlackTarget | 
   }
 }
 
+async function checkRoutine(context: ManagementContext, routineId: string | null): Promise<void> {
+  if (routineId && !(await findClaudeRoutine(context.organizationId, routineId))) {
+    throw new ManagementError(400, "Choose one of the workspace's Claude routines.", "claude_routine_unavailable");
+  }
+}
+
 export const alertOperations = [
   defineOperation({
     name: "list_alerts",
@@ -215,12 +227,14 @@ export const alertOperations = [
         .describe(`${settingFields.evaluationIntervalSeconds.description} Defaults to 60.`),
       name: settingFields.name,
       slack: settingFields.slack.optional(),
+      claudeRoutineId: settingFields.claudeRoutineId.optional(),
     }),
     output: z.object({ alert: alertSchema }),
     async run(context, input) {
       await requireAlerts(context);
       const alert = parseAlert(alertCreateSchema, input);
       await checkSlack(context, alert.slack);
+      await checkRoutine(context, alert.claudeRoutineId);
       const created = await createTelemetryAlert(context.organizationId, { ...alert, createdBy: context.user.id });
       return { alert: withUrl(created) };
     },
@@ -247,6 +261,7 @@ export const alertOperations = [
       const defined = Object.fromEntries(Object.entries(changes).filter(([, value]) => value !== undefined));
       const alert = parseAlert(alertCreateSchema, { ...current, ...defined });
       await checkSlack(context, alert.slack);
+      await checkRoutine(context, alert.claudeRoutineId);
       const updated = await updateTelemetryAlert(context.organizationId, id, alert);
       if (!updated) throw alertNotFound();
       return { alert: withUrl(updated) };
@@ -294,6 +309,35 @@ export const alertOperations = [
         throw new ManagementError(404, "Alerts are not available in this workspace.", "alerts_unavailable");
       }
       return { channels: await listTelemetryAlertSlackChannels(context.organizationId) };
+    },
+  }),
+  defineOperation({
+    name: "list_claude_routines",
+    summary: "List Claude routines",
+    description:
+      "Lists the Claude Code routines alerts and error notifications can start. Owners and admins add routines in Superlog's settings with the routine's Fire URL and token.",
+    method: "GET",
+    path: "/claude-routines",
+    tag: "Integrations",
+    effect: "read",
+    input: z.object({}),
+    output: z.object({
+      routines: z.array(
+        z.object({
+          createdAt: z.string(),
+          id: z.string().describe("The `claudeRoutineId` to use in an alert or error notifications."),
+          lastError: z.string().nullable().describe("Why the last start failed, if it did."),
+          lastFiredAt: z.string().nullable().describe("When the routine was last started."),
+          name: z.string(),
+          triggerId: z.string().describe("The `trig_` ID in the routine's Fire URL."),
+        }),
+      ),
+    }),
+    async run(context) {
+      if (!(await organizationHasCapability(context.organizationId, "telemetry"))) {
+        throw new ManagementError(404, "Telemetry is not available in this workspace.", "telemetry_unavailable");
+      }
+      return { routines: await listClaudeRoutines(context.organizationId) };
     },
   }),
   defineOperation({

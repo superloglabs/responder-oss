@@ -5,6 +5,9 @@ import { defaultErrorNotificationSettings } from "../../../../packages/core/src/
 const organizationId = "00000000-0000-4000-8000-000000000001";
 const userId = "00000000-0000-4000-8000-000000000002";
 const accountId = "00000000-0000-4000-8000-000000000003";
+const routine = {
+  id: "00000000-0000-4000-8000-000000000004", name: "Triage", triggerId: "trig_01", createdAt: "2026-11-04T00:00:00.000Z", lastFiredAt: null, lastError: null,
+};
 function setup() {
   const deps: NonNullable<Parameters<typeof createErrorNotificationRoutes>[0]> = {
     tenant: vi.fn(async () => ({ ok: true as const, role: "admin", organizationId, user: { id: userId, name: "Ash", email: "ash@example.com" } })),
@@ -12,11 +15,13 @@ function setup() {
     get: vi.fn(async () => defaultErrorNotificationSettings), save: vi.fn(async () => {}),
     channels: vi.fn(async () => [{ integrationAccountId: accountId, channelId: "C123", name: "errors", accountName: "Team", private: false }]),
     refresh: vi.fn(async () => undefined) as never,
+    routines: vi.fn(async () => [routine]),
+    findRoutine: vi.fn(async (_organizationId: string, id: string) => (id === routine.id ? routine : null)),
   };
   return { deps, app: createErrorNotificationRoutes(deps) };
 }
 const valid = { ...defaultErrorNotificationSettings, enabled: true, targets: [{ kind: "slack", integrationAccountId: accountId, channelId: "C123" }] };
-function put(app: ReturnType<typeof createErrorNotificationRoutes>, body = valid) {
+function put(app: ReturnType<typeof createErrorNotificationRoutes>, body: unknown = valid) {
   return app.request("/", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 }
 describe("error notification settings", () => {
@@ -61,5 +66,17 @@ describe("error notification settings", () => {
     expect((await put(app, { ...valid, targets: [] })).status).toBe(400);
     expect((await put(app, { ...valid, targets: [...valid.targets, ...valid.targets] })).status).toBe(400);
     expect(deps.save).not.toHaveBeenCalled();
+  });
+  it("saves a Claude routine from the workspace with or without a channel", async () => {
+    const { app, deps } = setup();
+    const routineTarget = { kind: "claude_routine", routineId: routine.id };
+    expect((await put(app, { ...valid, targets: [routineTarget] })).status).toBe(200);
+    expect((await put(app, { ...valid, targets: [...valid.targets, routineTarget] })).status).toBe(200);
+    expect((await put(app, { ...valid, targets: [{ kind: "claude_routine", routineId: accountId }] })).status).toBe(400);
+    expect(deps.save).toHaveBeenCalledTimes(2);
+  });
+  it("lists the workspace's routines with the settings", async () => {
+    const { app } = setup();
+    expect(await (await app.request("/")).json()).toMatchObject({ routines: [routine] });
   });
 });

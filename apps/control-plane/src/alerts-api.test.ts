@@ -25,6 +25,7 @@ describe("alertRequest", () => {
     ).toEqual({
       body: {
         aggregation: "count",
+        claudeRoutineId: null,
         comparator: "gt",
         description: null,
         enabled: true,
@@ -126,6 +127,7 @@ describe("alertForm", () => {
   it("round-trips a copied Superlog alert, keeping filters the form does not edit", () => {
     const alert: TelemetryAlert = {
       aggregation: "count",
+      claudeRoutineId: null,
       comparator: "lt",
       field: null,
       createdAt: "",
@@ -150,6 +152,7 @@ describe("alertForm", () => {
     expect(request).toEqual({
       body: {
         aggregation: "count",
+        claudeRoutineId: null,
         comparator: "lt",
         description: "Check the orders database first.",
         enabled: false,

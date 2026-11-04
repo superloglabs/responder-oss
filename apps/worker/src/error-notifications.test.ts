@@ -19,9 +19,34 @@ function dependencies() {
     channels: vi.fn(async () => [{ integrationAccountId: "account", channelId: "C123", name: "errors", accountName: "Team", private: false }]),
     settings: vi.fn(async () => ({ ...defaultErrorNotificationSettings, enabled: true, targets: [delivery.target] })),
     paused: vi.fn(async () => new Set<string>()), hasCapability: vi.fn(async () => true), origin: () => "https://example.com",
+    startRoutine: vi.fn<(input: { organizationId: string; routineId: string; text: string }) => Promise<{ sessionUrl: string | null } | null>>(async () => ({ sessionUrl: "https://claude.ai/code/session_01" })),
   };
 }
 describe("error notification delivery", () => {
+  const routineTarget = { kind: "claude_routine" as const, routineId: "00000000-0000-4000-8000-000000000002" };
+  const routineDelivery: Delivery = { ...delivery, targetKey: `claude_routine:${routineTarget.routineId}`, target: routineTarget };
+  it("starts the workspace's Claude routine with the error's details", async () => {
+    const deps = dependencies();
+    deps.settings.mockResolvedValue({ ...defaultErrorNotificationSettings, enabled: true, targets: [routineTarget] });
+    expect(await deliverErrorNotification(routineDelivery, deps)).toEqual({ messageTimestamp: null });
+    expect(deps.post).not.toHaveBeenCalled();
+    expect(deps.channels).not.toHaveBeenCalled();
+    const input = deps.startRoutine.mock.calls[0]![0];
+    expect(input).toMatchObject({ organizationId: "workspace", routineId: routineTarget.routineId });
+    expect(input.text).toContain("Superlog saw a new error.");
+    expect(input.text).toContain("Error: TypeError: <script>alert(1)</script>");
+    expect(input.text).toContain("Error issue: https://example.com/errors/issue");
+  });
+  it("cancels a routine delivery after the routine is removed or deselected", async () => {
+    const deps = dependencies();
+    deps.settings.mockResolvedValue({ ...defaultErrorNotificationSettings, enabled: true, targets: [routineTarget] });
+    deps.startRoutine.mockResolvedValue(null);
+    expect(await deliverErrorNotification(routineDelivery, deps)).toBeNull();
+    deps.settings.mockResolvedValue({ ...defaultErrorNotificationSettings, enabled: true, targets: [delivery.target] });
+    deps.startRoutine.mockClear();
+    expect(await deliverErrorNotification(routineDelivery, deps)).toBeNull();
+    expect(deps.startRoutine).not.toHaveBeenCalled();
+  });
   it("does not deliver to an unavailable channel", async () => {
     const deps = dependencies(); deps.channels.mockResolvedValue([]);
     expect(await deliverErrorNotification(delivery, deps)).toBeNull();
@@ -43,7 +68,7 @@ describe("error notification delivery", () => {
     const slack: Delivery = { ...delivery, targetKey: "slack:account:C123", target: { kind: "slack", integrationAccountId: "account", channelId: "C123" } };
     vi.mocked(deps.settings).mockResolvedValue({ ...defaultErrorNotificationSettings, enabled: true, targets: [slack.target] });
     vi.mocked(deps.post).mockResolvedValue([{ notification: { kind: "slack", integrationAccountId: "account", channelId: "C123" }, timestamp: "123.456" }]);
-    expect(await deliverErrorNotification(slack, deps)).toBe("123.456");
+    expect(await deliverErrorNotification(slack, deps)).toEqual({ messageTimestamp: "123.456" });
     expect(deps.post).toHaveBeenCalledWith(expect.objectContaining({ organizationId: "workspace", seed: "error-notice/delivery", unfurlLinks: false }));
     await deliverErrorNotification(slack, deps);
     expect(deps.post).toHaveBeenCalledTimes(2);

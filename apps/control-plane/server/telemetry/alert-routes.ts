@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
+import { findClaudeRoutine } from "../../../../packages/core/src/db/claude-routines.js";
 import { organizationHasCapability } from "../../../../packages/core/src/db/organization-capabilities.js";
 import {
   createTelemetryAlert,
@@ -36,6 +37,7 @@ export type AlertRouteDependencies = {
   createAlert: typeof createTelemetryAlert;
   deleteAlert: typeof deleteTelemetryAlert;
   episodes: typeof listTelemetryAlertEpisodes;
+  findRoutine: typeof findClaudeRoutine;
   intervals: typeof listTelemetryAlertIntervals;
   findAlert: typeof findTelemetryAlert;
   findActivation: typeof findTelemetryAlertActivation;
@@ -68,6 +70,7 @@ const defaultDependencies: AlertRouteDependencies = {
   createAlert: createTelemetryAlert,
   deleteAlert: deleteTelemetryAlert,
   episodes: listTelemetryAlertEpisodes,
+  findRoutine: findClaudeRoutine,
   intervals: listTelemetryAlertIntervals,
   findAlert: findTelemetryAlert,
   findActivation: findTelemetryAlertActivation,
@@ -114,6 +117,13 @@ export function createAlertRoutes(dependencies: AlertRouteDependencies = default
     return found ? null : "Choose a Slack channel from a connected workspace";
   }
 
+  async function destinationProblem(organizationId: string, alert: { claudeRoutineId: string | null; slack: AlertSlackTarget | null }) {
+    if (alert.claudeRoutineId && !(await dependencies.findRoutine(organizationId, alert.claudeRoutineId))) {
+      return "Choose a Claude routine from this workspace";
+    }
+    return slackProblem(organizationId, alert.slack);
+  }
+
   const notFound = { error: "Alert not found" };
 
   return new Hono()
@@ -127,7 +137,7 @@ export function createAlertRoutes(dependencies: AlertRouteDependencies = default
       if (!granted.ok) return context.json({ error: granted.error }, granted.status);
       const body = alertCreateSchema.safeParse(await jsonBody(context.req.raw));
       if (!body.success) return context.json({ error: body.error.issues[0]?.message ?? "Invalid alert" }, 400);
-      const problem = await slackProblem(granted.organizationId, body.data.slack);
+      const problem = await destinationProblem(granted.organizationId, body.data);
       if (problem) return context.json({ error: problem }, 400);
       const alert = await dependencies.createAlert(granted.organizationId, { ...body.data, createdBy: granted.userId });
       return context.json({ alert }, 201);
@@ -262,16 +272,19 @@ export function createAlertRoutes(dependencies: AlertRouteDependencies = default
       const alertId = idSchema.safeParse(context.req.param("alertId"));
       if (!alertId.success) return context.json(notFound, 404);
       const input = await jsonBody(context.req.raw);
-      // A replacement from a page loaded before descriptions existed keeps
-      // the alert's description.
-      if (input && typeof input === "object" && !("description" in input)) {
+      // A replacement from a page loaded before descriptions or routines
+      // existed keeps the alert's description and routine.
+      if (input && typeof input === "object" && (!("description" in input) || !("claudeRoutineId" in input))) {
         const current = await dependencies.findAlert(granted.organizationId, alertId.data);
         if (!current) return context.json(notFound, 404);
-        Object.assign(input, { description: current.description });
+        Object.assign(input, {
+          ...("description" in input ? {} : { description: current.description }),
+          ...("claudeRoutineId" in input ? {} : { claudeRoutineId: current.claudeRoutineId }),
+        });
       }
       const body = alertUpdateSchema.safeParse(input);
       if (!body.success) return context.json({ error: body.error.issues[0]?.message ?? "Invalid alert" }, 400);
-      const problem = await slackProblem(granted.organizationId, body.data.slack);
+      const problem = await destinationProblem(granted.organizationId, body.data);
       if (problem) return context.json({ error: problem }, 400);
       const alert = await dependencies.updateAlert(granted.organizationId, alertId.data, body.data);
       return alert ? context.json({ alert }) : context.json(notFound, 404);

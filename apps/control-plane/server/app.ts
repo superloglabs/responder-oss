@@ -50,6 +50,7 @@ import { integrationRoutes } from "./integrations/routes.js";
 import { issueRoutes } from "./issues/routes.js";
 import { createSyntheticRoutes } from "./synthetics/routes.js";
 import { createAlertRoutes } from "./telemetry/alert-routes.js";
+import { createClaudeRoutineRoutes } from "./claude-routines/routes.js";
 import { createErrorNotificationRoutes } from "./telemetry/error-notification-routes.js";
 import { createSandboxNetworkRoutes } from "./agents/sandbox-network-routes.js";
 import { createSandboxImageRoutes } from "./agents/sandbox-image-routes.js";
@@ -609,6 +610,7 @@ export const app = instrumentedApp
   .route("/api/synthetic-checks", createSyntheticRoutes())
   .route("/api/terraform", terraformRoutes)
   .route("/api/error-notifications", createErrorNotificationRoutes())
+  .route("/api/claude-routines", createClaudeRoutineRoutes())
   .route("/api/sandbox-network", createSandboxNetworkRoutes())
   .route("/api/sandbox-settings", createSandboxImageRoutes())
   .route("/api/error-issues", createErrorIssueRoutes())

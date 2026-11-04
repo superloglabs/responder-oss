@@ -102,6 +102,8 @@ const alertSettingsSchema = z.object({
   evaluationIntervalSeconds: z.number().int().min(60).max(3_600).default(60),
   name: z.string().trim().min(1).max(200),
   slack: alertSlackSchema.nullable().default(null),
+  // The Claude routine started once for each activation.
+  claudeRoutineId: z.uuid().nullable().default(null),
 });
 
 export const alertCreateSchema = refinedRule(alertRuleSchema.extend(alertSettingsSchema.shape));
@@ -186,6 +188,7 @@ export function worseValue(comparator: AlertComparator, a: number, b: number): n
 export {
   alertFiringMessage,
   alertRecoveredMessage,
+  alertRoutineText,
   describeAlertCondition,
   describeAlertRule,
   formatAlertValue,
