@@ -1060,9 +1060,16 @@ telemetry Overview page to send logs, traces and metrics. Every option needs a c
   `GCP_SHARED_READER_SERVICE_ACCOUNT` with its own AWS credentials, through
   the workload identity pool provider in `GCP_SHARED_READER_AUDIENCE`
   (`//iam.googleapis.com/projects/<pool project number>/locations/global/workloadIdentityPools/<pool>/providers/<provider>`).
-  The provider must map `attribute.aws_role` to the AWS role name. Grant the
-  service account's Workload Identity User role to the worker's role only,
-  not to the API's:
+  The provider is an AWS provider for the deployment's AWS account, with this
+  attribute mapping:
+
+  ```text
+  google.subject=assertion.arn
+  attribute.aws_role=assertion.arn.extract('assumed-role/{role}/')
+  ```
+
+  Grant the service account's Workload Identity User role to the worker's role
+  only, not to the API's:
 
   ```text
   principalSet://iam.googleapis.com/projects/<pool project number>/locations/global/workloadIdentityPools/<pool>/attribute.aws_role/<worker role name>
