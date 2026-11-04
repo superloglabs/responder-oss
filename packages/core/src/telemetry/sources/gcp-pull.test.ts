@@ -9,6 +9,25 @@ function entry(timestamp: string) {
 }
 
 describe("pullGcpSource", () => {
+  it("reads only metrics when logs are off", async () => {
+    const request = vi.fn<GcpRequest>(async () => ({
+      timeSeries: [{
+        metric: { type: gcpMetricTypes[0] },
+        points: [{ interval: { endTime: "2026-10-15T09:54:00Z" }, value: { int64Value: "3" } }],
+        resource: { labels: { project_id: "shop-prod" }, type: "global" },
+      }],
+    }));
+    const forward = vi.fn(async () => true);
+
+    const result = await pullGcpSource({ forward, gcpProjectId: "shop-prod", logs: false, now, request, state: {} });
+
+    expect(request.mock.calls.some(([input]) => input.url.includes("entries:list"))).toBe(false);
+    expect(forward).not.toHaveBeenCalledWith("logs", expect.anything());
+    expect(forward).toHaveBeenCalledWith("metrics", expect.anything());
+    expect(result).toMatchObject({ error: null, logs: 0, received: true });
+    expect(result.state.logsCursor).toBeUndefined();
+  });
+
   it("reads logs from five minutes back, then from the cursor", async () => {
     const request = vi.fn<GcpRequest>(async (input) =>
       input.url.includes("entries:list") ? { entries: [entry("2026-10-15T09:57:00.5Z")] } : { timeSeries: [] },
