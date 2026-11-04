@@ -66,7 +66,7 @@ describe("pullGcpTelemetrySources", () => {
       };
     });
     const reader = {
-      audience: "//iam.googleapis.com/projects/1/locations/global/workloadIdentityPools/runtime/providers/aws",
+      audience: "//iam.googleapis.com/projects/1/locations/global/workloadIdentityPools/runtime/providers/aws-runtime",
       serviceAccount: "metrics-reader@operator-project.iam.gserviceaccount.com",
     };
     const createSharedRequest = vi.fn(() => sharedRequest);

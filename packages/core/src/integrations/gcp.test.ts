@@ -97,7 +97,7 @@ describe("GCP integration", () => {
 
 
   it("reads the shared reader from the environment only when it is complete", () => {
-    const audience = "//iam.googleapis.com/projects/123456789012/locations/global/workloadIdentityPools/runtime/providers/aws";
+    const audience = "//iam.googleapis.com/projects/123456789012/locations/global/workloadIdentityPools/runtime/providers/aws-runtime";
     const serviceAccount = "metrics-reader@operator-project.iam.gserviceaccount.com";
 
     expect(gcpSharedReaderConfig({})).toBeNull();
@@ -114,11 +114,22 @@ describe("GCP integration", () => {
       GCP_SHARED_READER_AUDIENCE: audience,
       GCP_SHARED_READER_SERVICE_ACCOUNT: "not-an-account",
     })).toThrow();
+    for (const invalid of [
+      "//iam.googleapis.com/projects/123456789012/locations/global/workloadIdentityPools/-/providers/aws-provider",
+      "//iam.googleapis.com/projects/123456789012/locations/global/workloadIdentityPools/runtime/providers/a",
+      "//iam.googleapis.com/projects/123456789012/locations/global/workloadIdentityPools/1runtime/providers/aws-provider",
+      "//iam.googleapis.com/projects/123456789012/locations/global/workloadIdentityPools/runtime-/providers/aws-provider",
+    ]) {
+      expect(() => gcpSharedReaderConfig({
+        GCP_SHARED_READER_AUDIENCE: invalid,
+        GCP_SHARED_READER_SERVICE_ACCOUNT: serviceAccount,
+      })).toThrow();
+    }
   });
 
   it("signs in as the shared reader with the task's own AWS credentials", async () => {
     const config = {
-      audience: "//iam.googleapis.com/projects/123456789012/locations/global/workloadIdentityPools/runtime/providers/aws",
+      audience: "//iam.googleapis.com/projects/123456789012/locations/global/workloadIdentityPools/runtime/providers/aws-runtime",
       serviceAccount: "metrics-reader@operator-project.iam.gserviceaccount.com",
     };
     const credentials = vi.fn(async () => ({

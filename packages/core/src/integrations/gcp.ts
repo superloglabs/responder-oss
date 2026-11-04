@@ -205,9 +205,15 @@ export interface GcpSharedReaderConfig {
   serviceAccount: string;
 }
 
+// Pool and provider IDs are 4 to 32 characters: lowercase letters, digits and
+// hyphens, starting with a letter and not ending with a hyphen.
+const workloadIdentityId = "[a-z][a-z0-9-]{2,30}[a-z0-9]";
 const sharedReaderAudienceSchema = z
   .string()
-  .regex(/^\/\/iam\.googleapis\.com\/projects\/[1-9]\d{0,19}\/locations\/global\/workloadIdentityPools\/[a-z0-9-]+\/providers\/[a-z0-9-]+$/u);
+  .regex(new RegExp(
+    `^//iam\\.googleapis\\.com/projects/[1-9]\\d{0,19}/locations/global/workloadIdentityPools/${workloadIdentityId}/providers/${workloadIdentityId}$`,
+    "u",
+  ));
 const sharedReaderServiceAccountSchema = z
   .string()
   .regex(/^[a-z][a-z0-9-]{4,28}[a-z0-9]@[a-z][a-z0-9-]{4,28}[a-z0-9]\.iam\.gserviceaccount\.com$/u);

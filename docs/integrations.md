@@ -1054,16 +1054,32 @@ telemetry Overview page to send logs, traces and metrics. Every option needs a c
   source that falls more than an hour behind skips ahead. Data Access audit
   logs are skipped.
 
-  An operator can also add a source with no integration account, for a
-  project that granted the operator's own service account Monitoring Viewer
-  instead of connecting. Its external ID is the Google Cloud project ID. The
-  worker reads its metrics, not its logs, by signing in as the service account
-  in `GCP_SHARED_READER_SERVICE_ACCOUNT` with the worker's own AWS credentials,
-  through the workload identity pool provider in
-  `GCP_SHARED_READER_AUDIENCE`. Grant that service account's Workload Identity
-  User role to the worker's AWS role only, not to the API's. Without both
-  variables these sources are not read. Such a source gives investigations no
-  Google Cloud context.
+  An operator can also read metrics from a project that granted the
+  operator's own service account Monitoring Viewer instead of connecting. The
+  worker signs in as the service account in
+  `GCP_SHARED_READER_SERVICE_ACCOUNT` with its own AWS credentials, through
+  the workload identity pool provider in `GCP_SHARED_READER_AUDIENCE`
+  (`//iam.googleapis.com/projects/<pool project number>/locations/global/workloadIdentityPools/<pool>/providers/<provider>`).
+  The provider must map `attribute.aws_role` to the AWS role name. Grant the
+  service account's Workload Identity User role to the worker's role only,
+  not to the API's:
+
+  ```text
+  principalSet://iam.googleapis.com/projects/<pool project number>/locations/global/workloadIdentityPools/<pool>/attribute.aws_role/<worker role name>
+  ```
+
+  There is no screen for these sources. Add one row per project to
+  `telemetry_sources` with `provider` `gcp`, `external_id` set to the Google
+  Cloud project ID, a `display_name`, `status` `pending`, and no
+  `integration_account_id`:
+
+  ```sql
+  INSERT INTO telemetry_sources (organization_id, provider, external_id, display_name, status)
+  VALUES ('<workspace id>', 'gcp', '<project id>', '<project id>', 'pending');
+  ```
+
+  The worker reads their metrics, not their logs. Without both variables these
+  sources are not read. They give investigations no Google Cloud context.
 - **Vercel**: choose a connected installation. Responder creates a trace drain
   that sends OTLP to `<cell>/api/ingest/v1/traces` and a log drain that sends
   NDJSON to `<cell>/api/ingest/vercel/logs`, both for the projects the
