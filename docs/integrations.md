@@ -1053,6 +1053,40 @@ telemetry Overview page to send logs, traces and metrics. Every option needs a c
   behind the present, so late entries outside that window are not read. A
   source that falls more than an hour behind skips ahead. Data Access audit
   logs are skipped.
+
+  An operator can also read metrics from a project that granted the
+  operator's own service account Monitoring Viewer instead of connecting. The
+  worker signs in as the service account in
+  `GCP_SHARED_READER_SERVICE_ACCOUNT` with its own AWS credentials, through
+  the workload identity pool provider in `GCP_SHARED_READER_AUDIENCE`
+  (`//iam.googleapis.com/projects/<pool project number>/locations/global/workloadIdentityPools/<pool>/providers/<provider>`).
+  The provider is an AWS provider for the deployment's AWS account, with this
+  attribute mapping:
+
+  ```text
+  google.subject=assertion.arn
+  attribute.aws_role=assertion.arn.extract('assumed-role/{role}/')
+  ```
+
+  Grant the service account's Workload Identity User role to the worker's role
+  only, not to the API's:
+
+  ```text
+  principalSet://iam.googleapis.com/projects/<pool project number>/locations/global/workloadIdentityPools/<pool>/attribute.aws_role/<worker role name>
+  ```
+
+  There is no screen for these sources. Add one row per project to
+  `telemetry_sources` with `provider` `gcp`, `external_id` set to the Google
+  Cloud project ID, a `display_name`, `status` `pending`, and no
+  `integration_account_id`:
+
+  ```sql
+  INSERT INTO telemetry_sources (organization_id, provider, external_id, display_name, status)
+  VALUES ('<workspace id>', 'gcp', '<project id>', '<project id>', 'pending');
+  ```
+
+  The worker reads their metrics, not their logs. Without both variables these
+  sources are not read. They give investigations no Google Cloud context.
 - **Vercel**: choose a connected installation. Responder creates a trace drain
   that sends OTLP to `<cell>/api/ingest/v1/traces` and a log drain that sends
   NDJSON to `<cell>/api/ingest/vercel/logs`, both for the projects the

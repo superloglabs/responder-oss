@@ -80,6 +80,7 @@ export function providerDisplayName(provider: string): string {
   if (provider === "errors") return "Errors";
   if (provider === "webhook") return "Webhook";
   if (provider === "skills") return "Skills";
+  if (provider === "telemetry") return "Telemetry";
   if (provider in providerGlyphs) {
     return providerGlyphs[provider as ProviderGlyphId].label;
   }

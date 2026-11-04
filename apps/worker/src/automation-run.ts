@@ -139,6 +139,7 @@ import {
   issueCatalogInstructions,
   usesIssueCatalog,
 } from "./issue-catalog.js";
+import { telemetryToolInstructions, telemetryToolSpecs } from "./telemetry-tools.js";
 import {
   automationRunSecrets,
   automationSkillInstructions,
@@ -212,6 +213,7 @@ export interface AutomationRunDependencies {
   deleteSubscriptionSecret: (secretId: string) => Promise<void>;
   updateEvent: typeof updateAutomationRunEvent;
   usageWaiverStart: typeof usageWaiverStart;
+  telemetryTools: typeof telemetryToolSpecs;
   waiveUsage: typeof waiveAutomationRunUsage;
   workspaceTools: typeof workspaceToolSpecs;
 }
@@ -272,6 +274,7 @@ export const defaultAutomationRunDependencies: AutomationRunDependencies = {
   deleteSubscriptionSecret: (secretId) => deleteSubscriptionRunSecret(secretId),
   updateEvent: updateAutomationRunEvent,
   usageWaiverStart,
+  telemetryTools: telemetryToolSpecs,
   waiveUsage: waiveAutomationRunUsage,
   workspaceTools: workspaceToolSpecs,
 };
@@ -607,6 +610,7 @@ function automationPrompt(
   workspace?: { integrationsUrl: string },
   reviewCheckout?: { error?: string; savedChanges?: string },
   issueCatalog = false,
+  telemetry = false,
 ): string {
   const continuation = conversationPrompt(conversation, resumed, reviewCheckout);
   const secretInstructions = workspaceSecretUsageInstructions(extensions.secrets);
@@ -617,6 +621,7 @@ function automationPrompt(
     "This is an unattended automation run. Complete the task without asking for approval, except for steps the automation's instructions leave to people to decide.",
     automationActionInstructions(notificationChannels.names, workspace, notificationChannels.inThread),
     ...(issueCatalog ? [issueCatalogInstructions()] : []),
+    ...(telemetry ? [telemetryToolInstructions()] : []),
     repositoryInstructions(repositories),
     ...repositoryAgentDocsInstructions(agentDocs, repositories[0]?.repository),
     ...contextInstructions(connections),
@@ -1107,7 +1112,11 @@ export async function processAutomationRun(
           runId: run.runId,
         })
       : null;
-    const runTools = [...workspaceTools, ...(issueCatalog?.tools ?? [])];
+    // Workspaces that send telemetry to Superlog let a run read it.
+    const telemetryTools = await dependencies.hasCapability(run.organizationId, "telemetry")
+      ? dependencies.telemetryTools({ organizationId: run.organizationId })
+      : [];
+    const runTools = [...workspaceTools, ...telemetryTools, ...(issueCatalog?.tools ?? [])];
 
     // Subscription runs always delete their sandbox so the access token does
     // not outlive the turn. Other runs pause it for a follow-up.
@@ -1262,6 +1271,7 @@ export async function processAutomationRun(
                   workspaceTools.length > 0 ? { integrationsUrl } : undefined,
                   reviewCheckout,
                   issueCatalog !== null,
+                  telemetryTools.length > 0,
                 ),
                 toolServer: automationToolServer,
                 workspacePath: repositories[0]?.path ?? automationWorkspaceRoot,

@@ -166,6 +166,7 @@ function dependencies() {
     updateEvent: vi.fn().mockResolvedValue(undefined),
     usageWaiverStart: vi.fn<AutomationRunDependencies["usageWaiverStart"]>()
       .mockResolvedValue(new Date("2026-09-22T18:59:59.000Z")),
+    telemetryTools: vi.fn<AutomationRunDependencies["telemetryTools"]>(() => []),
     waiveUsage: vi.fn<AutomationRunDependencies["waiveUsage"]>().mockResolvedValue(true),
     issueCatalog: vi.fn<AutomationRunDependencies["issueCatalog"]>(() => ({
       recordAction: vi.fn().mockResolvedValue(undefined),
@@ -868,6 +869,51 @@ describe("automation run processor", () => {
     expect(deps.workspaceTools).not.toHaveBeenCalled();
     expect(deps.createToolHandler.mock.calls[0]![0].workspaceTools).toEqual([]);
     expect(deps.runCodex.mock.calls[0]![1].prompt).not.toContain("get_workspace");
+  });
+
+  it("gives runs the telemetry tools in workspaces with telemetry", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    const telemetryTool = {
+      description: "Search spans.",
+      execute: vi.fn(),
+      name: "query_traces",
+      parameters: z.object({}),
+      readOnly: true,
+    };
+    deps.hasCapability.mockImplementation(async (_organizationId, capability) => capability === "telemetry");
+    deps.telemetryTools.mockReturnValue([telemetryTool]);
+
+    await processAutomationRun("job-1", {
+      kind: "automation_run",
+      queuedAt: "2026-09-22T19:00:00.000Z",
+      runId,
+    }, process.env, deps);
+
+    expect(deps.telemetryTools).toHaveBeenCalledWith({ organizationId });
+    expect(deps.workspaceTools).not.toHaveBeenCalled();
+    expect(deps.createToolHandler.mock.calls[0]![0].workspaceTools).toEqual([telemetryTool]);
+    const server = deps.session.materializeEntry.mock.calls
+      .map(([call]) => call as { entry: { content: string }; path: string })
+      .find((call) => call.path.endsWith("/tools/server.mjs"));
+    expect(server?.entry.content).toContain("\"name\":\"query_traces\"");
+    expect(deps.runCodex.mock.calls[0]![1].prompt).toContain("This workspace sends its logs, traces, and metrics to Superlog.");
+  });
+
+  it("leaves out the telemetry tools without telemetry", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+
+    await processAutomationRun("job-1", {
+      kind: "automation_run",
+      queuedAt: "2026-09-22T19:00:00.000Z",
+      runId,
+    }, process.env, deps);
+
+    expect(deps.telemetryTools).not.toHaveBeenCalled();
+    expect(deps.runCodex.mock.calls[0]![1].prompt).not.toContain("query_traces");
   });
 
   describe("Slack plan card", () => {

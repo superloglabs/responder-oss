@@ -206,6 +206,8 @@ async function pullMetrics(input: {
 export async function pullGcpSource(input: {
   forward: GcpForward;
   gcpProjectId: string;
+  // False for an identity that may read only Cloud Monitoring.
+  logs?: boolean;
   now?: Date;
   request: GcpRequest;
   state: Record<string, unknown>;
@@ -218,14 +220,16 @@ export async function pullGcpSource(input: {
   let points = 0;
   let metricsRead = false;
 
-  try {
-    const result = await pullLogs({ ...input, now, state });
-    state.logsCursor = result.cursor;
-    if (result.page) state.logsPage = result.page;
-    else delete state.logsPage;
-    logs = result.entries;
-  } catch (error) {
-    errors.push(`Logs: ${errorText(error)}`);
+  if (input.logs !== false) {
+    try {
+      const result = await pullLogs({ ...input, now, state });
+      state.logsCursor = result.cursor;
+      if (result.page) state.logsPage = result.page;
+      else delete state.logsPage;
+      logs = result.entries;
+    } catch (error) {
+      errors.push(`Logs: ${errorText(error)}`);
+    }
   }
 
   const metricsDue = !state.metricsPulledAt || now.getTime() - new Date(state.metricsPulledAt).getTime() >= METRICS_EVERY_MS;

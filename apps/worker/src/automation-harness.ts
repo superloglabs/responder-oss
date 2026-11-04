@@ -27,15 +27,24 @@ export interface AutomationModelRoute {
 export const automationToolCallTimeoutMs = 150_000;
 
 // The worker's own tools, served to the agent by a local MCP server: GitHub
-// reads and pull requests, and Slack notifications.
+// reads and pull requests, Slack notifications, and the workspace's telemetry.
 export const automationToolServerName = "superlog";
 
 export const postNotificationToolName = "post_notification";
 export const skipNotificationToolName = "skip_notification";
 
+export const telemetryToolNames: ReadonlySet<string> = new Set([
+  "get_trace",
+  "list_services",
+  "query_logs",
+  "query_metrics",
+  "query_traces",
+]);
+
 // The service each worker tool acts on, shown on the run page.
 export function automationToolProvider(tool: string): string {
-  return tool === postNotificationToolName || tool === skipNotificationToolName ? "slack" : "github";
+  if (tool === postNotificationToolName || tool === skipNotificationToolName) return "slack";
+  return telemetryToolNames.has(tool) ? "telemetry" : "github";
 }
 
 // A local MCP server the harness starts in the sandbox.

@@ -206,7 +206,6 @@ export function createResponderAuth() {
     user: {
       additionalFields: {
         lastOrganizationId: {
-          fieldName: "last_organization_id",
           input: false,
           required: false,
           returned: false,
@@ -369,6 +368,9 @@ export function createResponderAuth() {
         // MCP clients register themselves and authenticate with PKCE.
         allowDynamicClientRegistration: true,
         allowUnauthenticatedClientRegistration: true,
+        // Desktop clients such as Claude Code and Codex register loopback
+        // http redirects, which Better Auth accepts only from native clients.
+        clientRegistrationDefaultApplicationType: "infer",
         consentPage: mcpOAuthPagePath,
         // Access tokens are opaque and stored hashed, like API keys.
         disableJwtPlugin: true,
@@ -397,7 +399,11 @@ export function createResponderAuth() {
           refreshToken: mcpRefreshTokenPrefix,
         },
         scopes: mcpOAuthScopes,
-        validAudiences: [mcpResourceUrl(baseURL)],
+        resources: [mcpResourceUrl(baseURL)],
+        clientRegistrationDefaultResources: [mcpResourceUrl(baseURL)],
+        // There is one resource, and clients registered before Better Auth
+        // 1.7 are not linked to it.
+        enforcePerClientResources: false,
       }),
     ],
     secret,

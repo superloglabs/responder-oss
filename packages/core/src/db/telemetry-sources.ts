@@ -233,6 +233,28 @@ export async function listGcpTelemetrySources(): Promise<
   return rows.flatMap((row) => (row.encryptedCredentials ? [{ ...row, encryptedCredentials: row.encryptedCredentials }] : []));
 }
 
+// Google Cloud sources with no integration account: projects that granted
+// the operator's shared reader Monitoring Viewer. The external ID is the
+// Google Cloud project ID.
+export async function listGcpSharedReaderSources(): Promise<
+  Array<{
+    gcpProjectId: string;
+    id: string;
+    organizationId: string;
+    state: Record<string, unknown>;
+  }>
+> {
+  return getDatabase()
+    .select({
+      gcpProjectId: telemetrySources.externalId,
+      id: telemetrySources.id,
+      organizationId: telemetrySources.organizationId,
+      state: telemetrySources.state,
+    })
+    .from(telemetrySources)
+    .where(and(eq(telemetrySources.provider, "gcp"), isNull(telemetrySources.integrationAccountId)));
+}
+
 // The Vercel projects an installation shares, as synced when it connected.
 export async function listVercelInstallationProjectIds(integrationAccountId: string): Promise<string[]> {
   const rows = await getDatabase()
