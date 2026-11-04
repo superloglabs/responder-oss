@@ -39,3 +39,15 @@ minimumReleaseAgeExclude:
   - '@posthog/core@1.48.0'
   - '@posthog/types@1.403.1'
   - posthog-js@1.416.1
+  # Better Auth security release from 2026-11-03.
+  - '@better-auth/core@1.7.16'
+  - '@better-auth/drizzle-adapter@1.7.16'
+  - '@better-auth/kysely-adapter@1.7.16'
+  - '@better-auth/memory-adapter@1.7.16'
+  - '@better-auth/mongo-adapter@1.7.16'
+  - '@better-auth/oauth-provider@1.7.16'
+  - '@better-auth/prisma-adapter@1.7.16'
+  - '@better-auth/telemetry@1.7.16'
+  - auth@1.7.16
+  - better-auth@1.7.16
+  - better-call@1.4.5
