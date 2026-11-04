@@ -54,6 +54,7 @@ import {
   HomePage,
   IntegrationPage,
   IntegrationsPage,
+  ObservabilityPage,
   OpenSourcePage,
   PrivacyPage,
   PricingPage,
@@ -122,6 +123,7 @@ export function App() {
       <Route element={<ComparisonIndexPage />} path="/compare" />
       <Route element={<ComparisonPage />} path="/compare/:slug" />
       <Route element={<OpenSourcePage />} path="/open-source" />
+      <Route element={<ObservabilityPage />} path="/observability" />
       <Route element={<TeamPage />} path="/team" />
       <Route element={<PrivacyPage />} path="/privacy" />
       <Route element={<TermsPage />} path="/tos" />

@@ -80,3 +80,7 @@ export function ComparisonPage() {
 export function OpenSourcePage() {
   return <Navigate replace to="/app" />;
 }
+
+export function ObservabilityPage() {
+  return <Navigate replace to="/app" />;
+}
