@@ -8,6 +8,7 @@ import { z } from "zod";
 import {
   assumeAwsIntegrationBroker,
   awsIntegrationPrincipalArn,
+  awsTaskCredentials,
   type AwsTemporaryCredentials,
 } from "./aws.js";
 
@@ -191,6 +192,82 @@ export function createGcpAuthClient(
     scopes: [...GCP_ACCESS_SCOPES],
     service_account_impersonation_url:
       `https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${gcpInvestigationServiceAccountEmail(parsed)}:generateAccessToken`,
+    subject_token_type: "urn:ietf:params:aws:token-type:aws4_request",
+  });
+}
+
+// An operator-configured Google service account that projects grant
+// Monitoring Viewer directly, instead of connecting through the setup flow.
+// The worker signs in as it with its own AWS task credentials, through a
+// workload identity pool in the operator's Google Cloud project.
+export interface GcpSharedReaderConfig {
+  audience: string;
+  serviceAccount: string;
+}
+
+const sharedReaderAudienceSchema = z
+  .string()
+  .regex(/^\/\/iam\.googleapis\.com\/projects\/[1-9]\d{0,19}\/locations\/global\/workloadIdentityPools\/[a-z0-9-]+\/providers\/[a-z0-9-]+$/u);
+const sharedReaderServiceAccountSchema = z
+  .string()
+  .regex(/^[a-z][a-z0-9-]{4,28}[a-z0-9]@[a-z][a-z0-9-]{4,28}[a-z0-9]\.iam\.gserviceaccount\.com$/u);
+
+export function gcpSharedReaderConfig(
+  environment: NodeJS.ProcessEnv = process.env,
+): GcpSharedReaderConfig | null {
+  const audience = environment.GCP_SHARED_READER_AUDIENCE?.trim();
+  const serviceAccount = environment.GCP_SHARED_READER_SERVICE_ACCOUNT?.trim();
+  if (!audience || !serviceAccount) return null;
+  return {
+    audience: sharedReaderAudienceSchema.parse(audience),
+    serviceAccount: sharedReaderServiceAccountSchema.parse(serviceAccount),
+  };
+}
+
+type TaskCredentials = () => Promise<{
+  accessKeyId: string;
+  expiration?: Date;
+  secretAccessKey: string;
+  sessionToken?: string;
+}>;
+
+class TaskCredentialsSupplier implements AwsSecurityCredentialsSupplier {
+  constructor(
+    private readonly credentials: TaskCredentials,
+    private readonly environment: NodeJS.ProcessEnv,
+  ) {}
+
+  async getAwsRegion(): Promise<string> {
+    return this.environment.AWS_REGION ?? "us-east-1";
+  }
+
+  async getAwsSecurityCredentials(): Promise<AwsSecurityCredentials> {
+    const credentials = await this.credentials();
+    return {
+      accessKeyId: credentials.accessKeyId,
+      secretAccessKey: credentials.secretAccessKey,
+      ...(credentials.sessionToken ? { token: credentials.sessionToken } : {}),
+    };
+  }
+}
+
+export function createGcpSharedReaderClient(
+  config: GcpSharedReaderConfig,
+  options: {
+    credentials?: TaskCredentials;
+    environment?: NodeJS.ProcessEnv;
+  } = {},
+): AwsClient {
+  const environment = options.environment ?? process.env;
+  return new AwsClient({
+    audience: config.audience,
+    aws_security_credentials_supplier: new TaskCredentialsSupplier(
+      options.credentials ?? awsTaskCredentials(environment),
+      environment,
+    ),
+    scopes: [...GCP_ACCESS_SCOPES],
+    service_account_impersonation_url:
+      `https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${config.serviceAccount}:generateAccessToken`,
     subject_token_type: "urn:ietf:params:aws:token-type:aws4_request",
   });
 }

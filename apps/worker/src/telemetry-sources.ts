@@ -1,9 +1,16 @@
 import { decryptCredentials } from "@responder/core/credentials/encryption";
-import { listGcpTelemetrySources, updateTelemetrySource } from "@responder/core/db/telemetry-sources";
+import {
+  listGcpSharedReaderSources,
+  listGcpTelemetrySources,
+  updateTelemetrySource,
+} from "@responder/core/db/telemetry-sources";
 import {
   createGcpAuthClient,
+  createGcpSharedReaderClient,
   gcpConnectionCredentialsSchema,
   type GcpConnectionCredentials,
+  gcpSharedReaderConfig,
+  type GcpSharedReaderConfig,
 } from "@responder/core/integrations/gcp";
 import { telemetryCollectorUrl } from "@responder/core/telemetry/client";
 import { forwardToCollector } from "@responder/core/telemetry/forward";
@@ -11,16 +18,21 @@ import { type GcpRequest, pullGcpSource } from "@responder/core/telemetry/source
 
 // Reads every Google Cloud telemetry source once. Sources are read a few at a
 // time; each one's Google client is kept so its token is reused across passes.
+// Sources without an integration account are read with the operator's shared
+// reader, which may read Cloud Monitoring only, so they get metrics and no logs.
 
 const concurrentSources = 4;
 
 export interface GcpTelemetryPullDependencies {
   collectorUrl: () => string | null;
   createRequest: (credentials: GcpConnectionCredentials) => GcpRequest;
+  createSharedRequest: (reader: GcpSharedReaderConfig) => GcpRequest;
   decrypt: (encrypted: string) => Record<string, unknown>;
   forward: typeof forwardToCollector;
   list: typeof listGcpTelemetrySources;
+  listShared: typeof listGcpSharedReaderSources;
   now: () => Date;
+  sharedReader: () => GcpSharedReaderConfig | null;
   update: typeof updateTelemetrySource;
 }
 
@@ -36,14 +48,37 @@ function cachedRequest(credentials: GcpConnectionCredentials): GcpRequest {
   return request;
 }
 
+let sharedClient: { key: string; request: GcpRequest } | null = null;
+
+function cachedSharedRequest(reader: GcpSharedReaderConfig): GcpRequest {
+  const key = `${reader.audience} ${reader.serviceAccount}`;
+  if (sharedClient?.key === key) return sharedClient.request;
+  const client = createGcpSharedReaderClient(reader);
+  const request: GcpRequest = async (input) =>
+    (await client.request({ data: input.data, method: input.method, timeout: 30_000, url: input.url })).data;
+  sharedClient = { key, request };
+  return request;
+}
+
 export const defaultGcpTelemetryPullDependencies: GcpTelemetryPullDependencies = {
   collectorUrl: telemetryCollectorUrl,
   createRequest: cachedRequest,
+  createSharedRequest: cachedSharedRequest,
   decrypt: (encrypted) => decryptCredentials(encrypted),
   forward: forwardToCollector,
   list: listGcpTelemetrySources,
+  listShared: listGcpSharedReaderSources,
   now: () => new Date(),
+  sharedReader: () => gcpSharedReaderConfig(),
   update: updateTelemetrySource,
+};
+
+type PullTarget = {
+  gcpProjectId: string;
+  logs: boolean;
+  organizationId: string;
+  request: GcpRequest;
+  state: Record<string, unknown>;
 };
 
 export async function pullGcpTelemetrySources(
@@ -52,13 +87,42 @@ export async function pullGcpTelemetrySources(
   const collector = dependencies.collectorUrl();
   if (!collector) return { failed: 0, sources: 0 };
   const collectorUrl: string = collector;
-  const sources = await dependencies.list();
+  const connected = await dependencies.list();
+  const reader = dependencies.sharedReader();
+  const shared = reader ? await dependencies.listShared() : [];
   let failed = 0;
-  const queue = [...sources];
-  async function next(): Promise<void> {
-    for (let source = queue.shift(); source; source = queue.shift()) {
-      try {
+  // Each entry resolves its client when it is read, so a source whose
+  // credentials cannot be read fails alone.
+  const queue: Array<{ id: string; target: () => PullTarget }> = [
+    ...connected.map((source) => ({
+      id: source.id,
+      target: (): PullTarget => {
         const credentials = gcpConnectionCredentialsSchema.parse(dependencies.decrypt(source.encryptedCredentials));
+        return {
+          gcpProjectId: credentials.projectId,
+          logs: true,
+          organizationId: source.organizationId,
+          request: dependencies.createRequest(credentials),
+          state: source.state,
+        };
+      },
+    })),
+    ...shared.map((source) => ({
+      id: source.id,
+      target: (): PullTarget => ({
+        gcpProjectId: source.gcpProjectId,
+        logs: false,
+        organizationId: source.organizationId,
+        request: dependencies.createSharedRequest(reader!),
+        state: source.state,
+      }),
+    })),
+  ];
+  const total = queue.length;
+  async function next(): Promise<void> {
+    for (let entry = queue.shift(); entry; entry = queue.shift()) {
+      try {
+        const source = entry.target();
         const organizationId = source.organizationId;
         const now = dependencies.now();
         const result = await pullGcpSource({
@@ -72,13 +136,14 @@ export async function pullGcpTelemetrySources(
             });
             return response.ok;
           },
-          gcpProjectId: credentials.projectId,
+          gcpProjectId: source.gcpProjectId,
+          logs: source.logs,
           now,
-          request: dependencies.createRequest(credentials),
+          request: source.request,
           state: source.state,
         });
         if (result.error) failed += 1;
-        await dependencies.update(source.id, {
+        await dependencies.update(entry.id, {
           lastError: result.error,
           state: result.state,
           status: result.error && !result.received ? "failed" : "active",
@@ -91,17 +156,17 @@ export async function pullGcpTelemetrySources(
             logs: result.logs,
             organizationId: source.organizationId,
             points: result.points,
-            sourceId: source.id,
+            sourceId: entry.id,
           }));
         }
       } catch (error) {
         failed += 1;
         await dependencies
-          .update(source.id, { lastError: error instanceof Error ? error.message : String(error), status: "failed" })
+          .update(entry.id, { lastError: error instanceof Error ? error.message : String(error), status: "failed" })
           .catch(() => undefined);
       }
     }
   }
-  await Promise.all(Array.from({ length: Math.min(concurrentSources, sources.length) }, next));
-  return { failed, sources: sources.length };
+  await Promise.all(Array.from({ length: Math.min(concurrentSources, total) }, next));
+  return { failed, sources: total };
 }

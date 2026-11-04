@@ -2,11 +2,13 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createGcpAuthClient,
   createGcpSessionName,
+  createGcpSharedReaderClient,
   GCP_ACCESS_SCOPES,
   gcpConnectionCredentialsSchema,
   gcpBrokerIdentity,
   gcpConnectionPrincipalSet,
   gcpInvestigationServiceAccountEmail,
+  gcpSharedReaderConfig,
   gcpWorkloadIdentityAttributes,
   gcpWorkloadIdentityAudience,
 } from "./gcp.js";
@@ -93,4 +95,60 @@ describe("GCP integration", () => {
     });
   });
 
+
+  it("reads the shared reader from the environment only when it is complete", () => {
+    const audience = "//iam.googleapis.com/projects/123456789012/locations/global/workloadIdentityPools/runtime/providers/aws";
+    const serviceAccount = "metrics-reader@operator-project.iam.gserviceaccount.com";
+
+    expect(gcpSharedReaderConfig({})).toBeNull();
+    expect(gcpSharedReaderConfig({ GCP_SHARED_READER_AUDIENCE: audience })).toBeNull();
+    expect(gcpSharedReaderConfig({
+      GCP_SHARED_READER_AUDIENCE: audience,
+      GCP_SHARED_READER_SERVICE_ACCOUNT: serviceAccount,
+    })).toEqual({ audience, serviceAccount });
+    expect(() => gcpSharedReaderConfig({
+      GCP_SHARED_READER_AUDIENCE: "https://example.com",
+      GCP_SHARED_READER_SERVICE_ACCOUNT: serviceAccount,
+    })).toThrow();
+    expect(() => gcpSharedReaderConfig({
+      GCP_SHARED_READER_AUDIENCE: audience,
+      GCP_SHARED_READER_SERVICE_ACCOUNT: "not-an-account",
+    })).toThrow();
+  });
+
+  it("signs in as the shared reader with the task's own AWS credentials", async () => {
+    const config = {
+      audience: "//iam.googleapis.com/projects/123456789012/locations/global/workloadIdentityPools/runtime/providers/aws",
+      serviceAccount: "metrics-reader@operator-project.iam.gserviceaccount.com",
+    };
+    const credentials = vi.fn(async () => ({
+      accessKeyId: "task-key",
+      expiration: new Date("2026-10-15T11:00:00Z"),
+      secretAccessKey: "task-secret",
+      sessionToken: "task-token",
+    }));
+    const client = createGcpSharedReaderClient(config, {
+      credentials,
+      environment: { AWS_REGION: "us-west-2" },
+    });
+    const internals = client as unknown as {
+      audience: string;
+      awsSecurityCredentialsSupplier: {
+        getAwsRegion(context: object): Promise<string>;
+        getAwsSecurityCredentials(context: object): Promise<unknown>;
+      };
+      serviceAccountImpersonationUrl: string;
+    };
+
+    expect(internals.audience).toBe(config.audience);
+    expect(internals.serviceAccountImpersonationUrl).toBe(
+      "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/metrics-reader@operator-project.iam.gserviceaccount.com:generateAccessToken",
+    );
+    expect(await internals.awsSecurityCredentialsSupplier.getAwsRegion({})).toBe("us-west-2");
+    expect(await internals.awsSecurityCredentialsSupplier.getAwsSecurityCredentials({})).toEqual({
+      accessKeyId: "task-key",
+      secretAccessKey: "task-secret",
+      token: "task-token",
+    });
+  });
 });

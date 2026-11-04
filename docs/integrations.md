@@ -1053,6 +1053,17 @@ telemetry Overview page to send logs, traces and metrics. Every option needs a c
   behind the present, so late entries outside that window are not read. A
   source that falls more than an hour behind skips ahead. Data Access audit
   logs are skipped.
+
+  An operator can also add a source with no integration account, for a
+  project that granted the operator's own service account Monitoring Viewer
+  instead of connecting. Its external ID is the Google Cloud project ID. The
+  worker reads its metrics, not its logs, by signing in as the service account
+  in `GCP_SHARED_READER_SERVICE_ACCOUNT` with the worker's own AWS credentials,
+  through the workload identity pool provider in
+  `GCP_SHARED_READER_AUDIENCE`. Grant that service account's Workload Identity
+  User role to the worker's AWS role only, not to the API's. Without both
+  variables these sources are not read. Such a source gives investigations no
+  Google Cloud context.
 - **Vercel**: choose a connected installation. Responder creates a trace drain
   that sends OTLP to `<cell>/api/ingest/v1/traces` and a log drain that sends
   NDJSON to `<cell>/api/ingest/vercel/logs`, both for the projects the

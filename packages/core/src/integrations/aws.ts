@@ -137,6 +137,15 @@ interface StsTemporaryCredentials {
   sessionToken: string;
 }
 
+// The process's own AWS credentials (the ECS task role in production), from
+// the SDK's default provider chain, which caches and refreshes them.
+export function awsTaskCredentials(
+  environment: NodeJS.ProcessEnv = process.env,
+): () => Promise<{ accessKeyId: string; expiration?: Date; secretAccessKey: string; sessionToken?: string }> {
+  const client = new STSClient({ region: environment.AWS_REGION ?? AWS_MCP_SIGNING_REGION });
+  return () => client.config.credentials();
+}
+
 export async function assumeAwsIntegrationBroker(
   options: {
     environment?: NodeJS.ProcessEnv;
