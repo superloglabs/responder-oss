@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { telemetryToolNames } from "./automation-harness.js";
 import { telemetryToolSpecs } from "./telemetry-tools.js";
 import { callWorkspaceTool } from "./workspace-tools.js";
 
@@ -46,6 +47,7 @@ describe("telemetryToolSpecs", () => {
       ["get_trace", true],
       ["query_metrics", true],
     ]);
+    expect(new Set(Object.keys(tools()))).toEqual(telemetryToolNames);
   });
 
   it("reads the last hour of the workspace's spans when the harness leaves out optional fields", async () => {
