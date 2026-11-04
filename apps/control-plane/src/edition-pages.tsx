@@ -56,3 +56,27 @@ export function SmsConsentPage() {
 export function EnterprisePage() {
   return <Navigate replace to="/app" />;
 }
+
+export function ChangelogPage() {
+  return <Navigate replace to="/app" />;
+}
+
+export function IntegrationsPage() {
+  return <Navigate replace to="/app" />;
+}
+
+export function IntegrationPage() {
+  return <Navigate replace to="/app" />;
+}
+
+export function ComparisonIndexPage() {
+  return <Navigate replace to="/app" />;
+}
+
+export function ComparisonPage() {
+  return <Navigate replace to="/app" />;
+}
+
+export function OpenSourcePage() {
+  return <Navigate replace to="/app" />;
+}
