@@ -25,6 +25,7 @@ import {
   XIcon,
 } from "@phosphor-icons/react";
 import { ColorThemeToggle } from "./color-theme-toggle";
+import { OnboardingResumeCard } from "./onboarding-resume-card";
 import { SidebarUsageCard } from "./sidebar-usage-card";
 import { TelemetryCallCard } from "./telemetry-call-card";
 import "./workspace.css";
@@ -314,6 +315,12 @@ export function AppShell({
         </div>
         <div className="globalHeader__right" ref={menuRef}>
           {!workspace ? <ColorThemeToggle className="globalThemeToggle" /> : null}
+          {workspace && !guest ? (
+            <OnboardingResumeCard
+              capabilities={capabilities}
+              organizationId={session.data?.session.activeOrganizationId}
+            />
+          ) : null}
           {workspace && !guest ? <TelemetryCallCard /> : null}
           {workspace && !guest ? <SidebarUsageCard enabled={options.automations} /> : null}
           {guest ?? <div className="accountMenu">

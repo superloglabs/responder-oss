@@ -8,6 +8,7 @@ import {
   onboardingStepAtPath,
   onboardingStepFromPath,
   onboardingSteps,
+  onboardingStepsFor,
   recommendedTemplates,
   templateProviders,
 } from "./onboarding-presentation";
@@ -16,12 +17,18 @@ import type { CatalogPlan, PlanCatalog } from "../plan-comparison";
 const ids = (connected: string[]) => recommendedTemplates(connected).map(({ template }) => template.id);
 
 describe("onboarding steps", () => {
-  it("lists the same steps on every installation", () => {
-    expect(onboardingSteps).toEqual(["workspace", "code", "alerts", "usage", "templates"]);
+  it("lists every step in order", () => {
+    expect(onboardingSteps).toEqual(["workspace", "code", "telemetry", "alerts", "usage", "templates"]);
+  });
+
+  it("offers the telemetry step only with the telemetry capability", () => {
+    expect(onboardingStepsFor(["automations", "telemetry"])).toEqual(onboardingSteps);
+    expect(onboardingStepsFor(["automations"])).toEqual(["workspace", "code", "alerts", "usage", "templates"]);
   });
 
   it("opens the code step for unknown steps and the finished workspace step", () => {
     expect(onboardingStepFromPath("alerts")).toBe("alerts");
+    expect(onboardingStepFromPath("telemetry")).toBe("telemetry");
     expect(onboardingStepFromPath("plan")).toBe("code");
     expect(onboardingStepFromPath("workspace")).toBe("code");
     expect(onboardingStepFromPath(undefined)).toBe("code");
