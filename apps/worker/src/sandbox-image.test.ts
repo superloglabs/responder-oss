@@ -113,10 +113,11 @@ function fakeSandbox(failingCommand?: string) {
     runCommand: vi.fn(async ({ args }: { args: string[] }) => {
       const command = args[1]!;
       commands.push(command);
-      return {
+      const finished = {
         exitCode: failingCommand && command.includes(failingCommand) ? 1 : 0,
         output: async () => `ran ${command}\n`,
       };
+      return { wait: async () => finished };
     }),
     snapshot: vi.fn(async () => ({ snapshotId: "snap_new" })),
     stop: vi.fn(async () => undefined),
@@ -198,7 +199,7 @@ describe("sandbox image build", () => {
     const shutdown = new AbortController();
     sandbox.runCommand.mockImplementationOnce(async () => {
       shutdown.abort();
-      return { exitCode: 1, output: async () => "killed\n" };
+      return { wait: async () => ({ exitCode: 1, output: async () => "killed\n" }) };
     });
     const dependencies = buildDependencies({ sandbox });
     await expect(buildSandboxImage(organizationId, { signal: shutdown.signal }, environment, dependencies))
