@@ -15,6 +15,7 @@ import {
 } from "../legacy-account-handoff";
 import { workspaceSlug } from "./workspace";
 import { automationSetupReturnPath } from "../pages/shared-automation-template-presentation";
+import { ActiveWorkspaceCheck } from "./active-workspace-check";
 import { ImpersonationBanner } from "./impersonation-banner";
 import { OrganizationCapabilitiesProvider } from "./organization-capabilities-provider";
 import { requestCapabilities } from "../organization-capabilities";
@@ -1139,9 +1140,15 @@ export function AuthGate({ children }: AuthGateProps) {
   return (
     <>
       <ImpersonationBanner />
-      <OrganizationCapabilitiesProvider fallback={loading}>
-        {children}
-      </OrganizationCapabilitiesProvider>
+      <ActiveWorkspaceCheck
+        activeOrganizationId={session.data.session.activeOrganizationId}
+        fallback={loading}
+        onCleared={session.refetch}
+      >
+        <OrganizationCapabilitiesProvider fallback={loading}>
+          {children}
+        </OrganizationCapabilitiesProvider>
+      </ActiveWorkspaceCheck>
     </>
   );
 }

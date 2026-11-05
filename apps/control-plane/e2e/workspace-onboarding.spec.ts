@@ -400,3 +400,103 @@ test("redirects malformed invitation links", async ({ page }) => {
     page.getByRole("heading", { name: "Agents", exact: true }),
   ).toBeVisible();
 });
+
+test("clears a deleted active workspace and offers the workspace in another region", async ({
+  page,
+}) => {
+  const deletedOrganizationId = "33333333-3333-4333-8333-333333333333";
+  let activeOrganizationId: string | null = deletedOrganizationId;
+  const activationRequests: unknown[] = [];
+
+  await page.route("**/api/cells/workspaces", (route) =>
+    route.fulfill({
+      json: {
+        cookieDomain: null,
+        workspaces: [
+          {
+            cell: { id: "us", label: "United States", url: "https://us.example.com" },
+            name: "Alara Dental",
+          },
+        ],
+      },
+    }),
+  );
+  await page.route("**/api/auth/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+
+    if (path.endsWith("/get-session")) {
+      await route.fulfill({ json: sessionResponse(activeOrganizationId) });
+      return;
+    }
+
+    if (path.endsWith("/organization/list")) {
+      await route.fulfill({ json: [] });
+      return;
+    }
+
+    if (path.endsWith("/organization/set-active")) {
+      activationRequests.push(route.request().postDataJSON());
+      activeOrganizationId = null;
+      await route.fulfill({
+        status: 403,
+        json: {
+          code: "USER_IS_NOT_A_MEMBER_OF_THE_ORGANIZATION",
+          message: "You are not a member of this organization",
+        },
+      });
+      return;
+    }
+
+    await route.fulfill({ json: null });
+  });
+  await page.goto("/agents");
+
+  await expect(
+    page.getByRole("heading", {
+      name: "Your workspace Alara Dental is in the United States region",
+    }),
+  ).toBeVisible();
+  await expect(page.getByText("Organization access denied")).toHaveCount(0);
+  expect(activationRequests).toEqual([{ organizationId: deletedOrganizationId }]);
+});
+
+test("keeps the active workspace of a member whose workspace list is out of date", async ({
+  page,
+}) => {
+  const activationRequests: unknown[] = [];
+
+  await page.route("**/api/context", (route) =>
+    route.fulfill({ json: { capabilities: [] } }),
+  );
+  await page.route("**/api/auth/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+
+    if (path.endsWith("/get-session")) {
+      await route.fulfill({ json: sessionResponse(organization.id) });
+      return;
+    }
+
+    if (path.endsWith("/organization/list")) {
+      await route.fulfill({ json: [] });
+      return;
+    }
+
+    if (path.endsWith("/organization/set-active")) {
+      activationRequests.push(route.request().postDataJSON());
+      await route.fulfill({ json: organization });
+      return;
+    }
+
+    if (path.endsWith("/organization/get-full-organization")) {
+      await route.fulfill({ json: organization });
+      return;
+    }
+
+    await route.fulfill({ json: null });
+  });
+  await page.goto("/agents");
+
+  await expect(page.getByRole("heading", { name: "Agents", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Name your workspace" })).toHaveCount(0);
+  expect(activationRequests).toEqual([{ organizationId: organization.id }]);
+});
