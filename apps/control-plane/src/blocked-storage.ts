@@ -1,12 +1,14 @@
 // Browsers set to block site data throw a SecurityError when a page reads
-// window.localStorage or window.sessionStorage. Libraries such as the consent
-// manager read them while rendering, so the error takes down the whole page.
-// Replacing a blocked storage with one kept in memory lets the page work; what
-// it stores lasts until the page unloads.
+// window.localStorage or window.sessionStorage, and storage without quota
+// throws when written. Libraries such as the consent manager read storage
+// while rendering, so the error takes down the whole page. Replacing unusable
+// storage with one kept in memory lets the page work; what it stores lasts
+// until the page unloads.
 
 type StorageName = "localStorage" | "sessionStorage";
 
 const storageNames: StorageName[] = ["localStorage", "sessionStorage"];
+const probeKey = "responder-storage-probe";
 
 export class MemoryStorage implements Storage {
   readonly #values = new Map<string, string>();
@@ -36,9 +38,11 @@ export class MemoryStorage implements Storage {
   }
 }
 
-function isBlocked(target: Window, name: StorageName) {
+function isUnusable(target: Window, name: StorageName) {
   try {
-    void target[name];
+    const storage = target[name];
+    storage.setItem(probeKey, probeKey);
+    storage.removeItem(probeKey);
     return false;
   } catch {
     return true;
@@ -49,7 +53,7 @@ function isBlocked(target: Window, name: StorageName) {
 export function replaceBlockedStorage(target: Window): StorageName[] {
   const replaced: StorageName[] = [];
   for (const name of storageNames) {
-    if (!isBlocked(target, name)) continue;
+    if (!isUnusable(target, name)) continue;
     try {
       Object.defineProperty(target, name, {
         configurable: true,

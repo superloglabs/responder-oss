@@ -1,3 +1,4 @@
+import "./replace-blocked-storage";
 import "@fontsource-variable/inter";
 import * as Sentry from "@sentry/react";
 import { StrictMode } from "react";
@@ -11,11 +12,7 @@ import "./styles.css";
 import "./design-system/design-system.css";
 import "./design-system/design-library.css";
 import "@c15t/react/styles.css";
-import { replaceBlockedStorage } from "./blocked-storage";
 
-// Before anything reads storage, so a browser that blocks site data still
-// renders the page.
-replaceBlockedStorage(window);
 initializeBrowserMonitoring();
 initializeBrowserTelemetry();
 // Ad click ids arrive in the landing URL; they are stored only after consent.

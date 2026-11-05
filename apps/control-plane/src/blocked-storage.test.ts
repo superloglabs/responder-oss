@@ -60,6 +60,28 @@ describe("replaceBlockedStorage", () => {
     expect(target.sessionStorage).toBe(session);
   });
 
+  it("replaces storage that refuses writes", () => {
+    const { session, target } = browserWindow({ local: false, session: false });
+    const local = target.localStorage;
+    local.setItem("kept", "1");
+    local.setItem = () => {
+      throw new DOMException("The quota has been exceeded.", "QuotaExceededError");
+    };
+
+    expect(replaceBlockedStorage(target)).toEqual(["localStorage"]);
+    expect(target.localStorage).not.toBe(local);
+    target.localStorage.setItem("a", "1");
+    expect(target.localStorage.getItem("a")).toBe("1");
+    expect(target.sessionStorage).toBe(session);
+  });
+
+  it("leaves no probe value in storage it keeps", () => {
+    const { local, target } = browserWindow({ local: false, session: false });
+
+    replaceBlockedStorage(target);
+    expect(local.length).toBe(0);
+  });
+
   it("leaves a property it cannot redefine", () => {
     const target = {};
     Object.defineProperty(target, "localStorage", {
