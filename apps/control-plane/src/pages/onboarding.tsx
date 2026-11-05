@@ -7,6 +7,7 @@ import { DatadogConnectionDialog } from "../components/datadog-site-dialog";
 import { GrafanaConnectionDialog } from "../components/grafana-connection-dialog";
 import { ProviderGlyph } from "../components/icons";
 import { OnboardingFrame, OnboardingLoading } from "../components/onboarding-frame";
+import { PostHogConnectionDialog } from "../components/posthog-connection-dialog";
 import { providerDisplayName, type ProviderGlyphId } from "../components/provider-glyphs";
 import { useIntegrationConnect } from "../components/use-integration-connect";
 import { useOrganizationCapabilities } from "../organization-capabilities";
@@ -27,6 +28,7 @@ import {
   planBillingState,
   planChangeConfirmation,
   recommendedTemplates,
+  returnedConnectionError,
   type BillingPlanSummary,
   type OnboardingProvider,
   type OnboardingStep,
@@ -203,7 +205,7 @@ export function OnboardingPage() {
             </div>
           </section>
         ))}
-        <p className="onboarding__note">More tools, such as Linear and PostHog, are in <Link to="/settings">Integrations</Link>.</p>
+        <p className="onboarding__note">More tools, such as Linear, are in <Link to="/settings">Integrations</Link>.</p>
       </OnboardingFrame>
     );
   }
@@ -343,8 +345,9 @@ function ConnectRow({ description, integration, onConnected, provider }: {
   );
 }
 
-// One alert source. OAuth providers connect in a popup so this step stays
-// open; Datadog and Grafana ask for their details and return here.
+// One alert source. Sentry and the chat tools connect in a popup so this step
+// stays open. Datadog, Grafana, and PostHog first ask for details, such as a
+// site or an access level, then leave for the provider and return here.
 function ConnectTile({ integration, onConnected, provider }: {
   integration: OnboardingIntegration;
   onConnected: (provider: string, signal: AbortSignal) => Promise<boolean>;
@@ -352,15 +355,17 @@ function ConnectTile({ integration, onConnected, provider }: {
 }) {
   const name = providerDisplayName(provider);
   const { connect, connecting, error } = useIntegrationConnect(provider, name, onConnected);
+  const [returnedError] = useState(() => returnedConnectionError(window.location.search, provider));
   const [enteringDetails, setEnteringDetails] = useState(false);
-  const asksForDetails = provider === "datadog" || provider === "grafana";
+  const asksForDetails = provider === "datadog" || provider === "grafana" || provider === "posthog";
   const isConnected = integration.state === "connected";
+  const shownError = error ?? (isConnected ? null : returnedError);
   return (
     <div className={`onboardingTile${isConnected ? " isConnected" : ""}`}>
       <ProviderGlyph decorative provider={provider} />
       <span className="onboardingTile__body">
         <strong>{name}</strong>
-        {error ? <small className="onboarding__error" role="alert">{error}</small> : null}
+        {shownError ? <small className="onboarding__error" role="alert">{shownError}</small> : null}
       </span>
       {isConnected ? (
         <span className="onboarding__connected"><CheckIcon aria-hidden="true" size={14} />Connected</span>
@@ -384,6 +389,14 @@ function ConnectTile({ integration, onConnected, provider }: {
       ) : null}
       {provider === "grafana" ? (
         <GrafanaConnectionDialog
+          connectUrl={integration.connectUrl ?? ""}
+          onCancel={() => setEnteringDetails(false)}
+          open={enteringDetails}
+          returnTo={onboardingPath("alerts")}
+        />
+      ) : null}
+      {provider === "posthog" ? (
+        <PostHogConnectionDialog
           connectUrl={integration.connectUrl ?? ""}
           onCancel={() => setEnteringDetails(false)}
           open={enteringDetails}

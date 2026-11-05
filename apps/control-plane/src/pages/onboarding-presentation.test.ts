@@ -9,6 +9,7 @@ import {
   onboardingStepFromPath,
   onboardingSteps,
   recommendedTemplates,
+  returnedConnectionError,
   templateProviders,
 } from "./onboarding-presentation";
 import type { CatalogPlan, PlanCatalog } from "../plan-comparison";
@@ -43,6 +44,21 @@ describe("connectedProviders", () => {
       { id: "sentry", state: "available" },
       { id: "slack", state: "setup_required" },
     ])).toEqual(["github"]);
+  });
+});
+
+describe("returnedConnectionError", () => {
+  it("explains a failed or cancelled connection for the provider it names", () => {
+    expect(returnedConnectionError("?integration=posthog&status=error&reason=connection_failed", "posthog"))
+      .toBe("The connection could not be completed.");
+    expect(returnedConnectionError("?integration=posthog&status=error&reason=cancelled", "posthog"))
+      .toBe("The connection was cancelled.");
+  });
+
+  it("ignores other providers, successful connections, and plain visits", () => {
+    expect(returnedConnectionError("?integration=datadog&status=error", "posthog")).toBeNull();
+    expect(returnedConnectionError("?integration=posthog&status=connected", "posthog")).toBeNull();
+    expect(returnedConnectionError("", "posthog")).toBeNull();
   });
 });
 
