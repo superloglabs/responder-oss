@@ -41,8 +41,10 @@ export class MemoryStorage implements Storage {
 function isUnusable(target: Window, name: StorageName) {
   try {
     const storage = target[name];
+    const saved = storage.getItem(probeKey);
     storage.setItem(probeKey, probeKey);
-    storage.removeItem(probeKey);
+    if (saved === null) storage.removeItem(probeKey);
+    else storage.setItem(probeKey, saved);
     return false;
   } catch {
     return true;

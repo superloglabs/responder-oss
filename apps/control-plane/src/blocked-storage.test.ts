@@ -76,10 +76,19 @@ describe("replaceBlockedStorage", () => {
   });
 
   it("leaves no probe value in storage it keeps", () => {
-    const { local, target } = browserWindow({ local: false, session: false });
+    const { local, session, target } = browserWindow({ local: false, session: false });
 
     replaceBlockedStorage(target);
     expect(local.length).toBe(0);
+    expect(session.length).toBe(0);
+  });
+
+  it("keeps a value stored under the probe key", () => {
+    const { local, target } = browserWindow({ local: false, session: false });
+    local.setItem("responder-storage-probe", "saved");
+
+    expect(replaceBlockedStorage(target)).toEqual([]);
+    expect(local.getItem("responder-storage-probe")).toBe("saved");
   });
 
   it("leaves a property it cannot redefine", () => {
