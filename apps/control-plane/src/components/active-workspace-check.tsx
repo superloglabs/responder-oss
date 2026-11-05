@@ -56,7 +56,15 @@ export function ActiveWorkspaceCheck({
           );
         }
       })
-      .catch(() => undefined)
+      .catch((error: unknown) => {
+        console.error(
+          JSON.stringify({
+            event: "stale_active_workspace_check_failed",
+            organizationId: activeOrganizationId,
+            errorMessage: error instanceof Error ? error.message : String(error),
+          }),
+        );
+      })
       .finally(() => {
         inFlight.current = null;
         setChecked(activeOrganizationId);
