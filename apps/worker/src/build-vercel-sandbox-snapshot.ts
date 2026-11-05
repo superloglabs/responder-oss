@@ -1,6 +1,7 @@
 import { requireSandboxConfig } from "@responder/core/sandbox-config";
 import { Sandbox } from "@vercel/sandbox";
 import { sandboxSnapshotResources, vercelSandboxSnapshotCommands } from "./sandbox-snapshot.js";
+import { runVercelCommand } from "./vercel-sandbox.js";
 
 const buildTimeoutMs = 30 * 60 * 1_000;
 
@@ -23,7 +24,10 @@ export async function buildVercelSandboxSnapshot(
   });
   try {
     for (const command of vercelSandboxSnapshotCommands()) {
-      const result = await sandbox.runCommand({ args: ["-lc", `set -e; ${command}`], cmd: "/bin/sh" });
+      const result = await runVercelCommand(sandbox, {
+        args: ["-lc", `set -e; ${command}`],
+        cmd: "/bin/sh",
+      });
       if (result.exitCode !== 0) {
         throw new Error(`Snapshot command failed: ${command}\n${await result.output("both")}`);
       }

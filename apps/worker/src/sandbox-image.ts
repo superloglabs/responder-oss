@@ -33,6 +33,7 @@ import {
 import { Sandbox, Snapshot } from "@vercel/sandbox";
 import type { SandboxSession } from "./sandbox-session.js";
 import { sandboxSnapshotResources } from "./sandbox-snapshot.js";
+import { runVercelCommand } from "./vercel-sandbox.js";
 
 // The sandbox a workspace's run starts with: its snapshot when one has built,
 // its size, and the start command that goes with the snapshot. Workspace sandbox
@@ -252,10 +253,11 @@ export async function buildSandboxImage(
     const run = async (label: string, command: string) => {
       options.signal?.throwIfAborted();
       await append(`$ ${label}\n`);
-      const result = await sandbox.runCommand({
+      const result = await runVercelCommand(sandbox, {
         args: ["-lc", command],
         cmd: "/bin/bash",
         cwd: sandboxHome,
+        ...(options.signal ? { signal: options.signal } : {}),
       });
       await append(`${await result.output("both")}\n`);
       options.signal?.throwIfAborted();

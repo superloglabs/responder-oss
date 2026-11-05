@@ -12,6 +12,7 @@ import {
   applyVercelSandboxSecrets,
   createVercelSandboxSession,
   resumedSameVercelSandbox,
+  runVercelCommand,
   secretNetworkPolicy,
   vercelSecretPlaceholder,
 } from "./vercel-sandbox.js";
@@ -187,6 +188,16 @@ describe("createVercelSandboxSession", () => {
     expect(session.state.workspacePersistence).toBe("tar");
   });
 
+  it("runs the session's commands detached", async () => {
+    const finished = { exitCode: 0, output: () => Promise.resolve("") };
+    const detachedRun = vi.fn().mockResolvedValue({ cmdId: "cmd_1", wait: () => Promise.resolve(finished) });
+    const sandbox = { ...started(), runCommand: detachedRun };
+    vi.mocked(Sandbox.create).mockResolvedValue(sandbox as unknown as Awaited<ReturnType<typeof Sandbox.create>>);
+    await createVercelSandboxSession(config, "tar", undefined, noSleep);
+    await expect(sandbox.runCommand({ args: ["-lc", "true"], cmd: "/bin/sh" })).resolves.toBe(finished);
+    expect(detachedRun).toHaveBeenLastCalledWith({ args: ["-lc", "true"], cmd: "/bin/sh", detached: true });
+  });
+
   it("retries a provider outage but not a rejected request", async () => {
     const outage = Object.assign(new Error("unavailable"), { response: { status: 503 } });
     const rejected = Object.assign(new Error("forbidden"), { response: { status: 403 } });
@@ -208,6 +219,56 @@ describe("createVercelSandboxSession", () => {
     });
     await expect(createVercelSandboxSession(config, "tar", abort.signal, noSleep)).rejects.toThrow("cancelled");
     expect(stop).toHaveBeenCalled();
+  });
+});
+
+describe("runVercelCommand", () => {
+  const noSleep = () => Promise.resolve();
+  const finished = { exitCode: 0, output: () => Promise.resolve("done\n") };
+  const streamEnded = Object.assign(new Error("Stream ended before command finished"), {
+    name: "StreamError",
+  });
+
+  function sandboxWithWaits(...waits: Array<() => Promise<unknown>>) {
+    const wait = vi.fn();
+    for (const next of waits) wait.mockImplementationOnce(next);
+    const runCommand = vi.fn().mockResolvedValue({ cmdId: "cmd_1", wait });
+    return { runCommand, wait, sandbox: { runCommand } as unknown as Sandbox };
+  }
+
+  it("starts the command detached", async () => {
+    const { runCommand, sandbox } = sandboxWithWaits(() => Promise.resolve(finished));
+    await expect(runVercelCommand(sandbox, { args: ["-lc", "codex exec"], cmd: "/bin/sh" }, noSleep))
+      .resolves.toBe(finished);
+    expect(runCommand).toHaveBeenCalledWith({ args: ["-lc", "codex exec"], cmd: "/bin/sh", detached: true });
+  });
+
+  it("waits again when the stream or connection drops", async () => {
+    const { runCommand, sandbox, wait } = sandboxWithWaits(
+      () => Promise.reject(streamEnded),
+      () => Promise.reject(new TypeError("terminated")),
+      () => Promise.reject(Object.assign(new Error("bad gateway"), { response: { status: 502 } })),
+      () => Promise.resolve(finished),
+    );
+    await expect(runVercelCommand(sandbox, { cmd: "/bin/sh" }, noSleep)).resolves.toBe(finished);
+    expect(runCommand).toHaveBeenCalledTimes(1);
+    expect(wait).toHaveBeenCalledTimes(4);
+  });
+
+  it("does not wait again after a rejected request or a cancellation", async () => {
+    const rejected = Object.assign(new Error("not found"), { response: { status: 404 } });
+    const first = sandboxWithWaits(() => Promise.reject(rejected));
+    await expect(runVercelCommand(first.sandbox, { cmd: "/bin/sh" }, noSleep)).rejects.toBe(rejected);
+    expect(first.wait).toHaveBeenCalledTimes(1);
+
+    const abort = new AbortController();
+    const second = sandboxWithWaits(() => {
+      abort.abort();
+      return Promise.reject(streamEnded);
+    });
+    await expect(runVercelCommand(second.sandbox, { cmd: "/bin/sh", signal: abort.signal }, noSleep))
+      .rejects.toBe(streamEnded);
+    expect(second.wait).toHaveBeenCalledTimes(1);
   });
 });
 
