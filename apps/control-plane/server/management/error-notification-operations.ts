@@ -3,13 +3,18 @@ import {
   getErrorNotificationSettings,
   saveErrorNotificationSettings,
 } from "../../../../packages/core/src/db/error-notifications.js";
+import { findClaudeRoutine } from "../../../../packages/core/src/db/claude-routines.js";
 import { organizationHasCapability } from "../../../../packages/core/src/db/organization-capabilities.js";
 import { listTelemetryAlertSlackChannels } from "../../../../packages/core/src/db/telemetry-alerts.js";
-import type { ErrorNotificationSettings } from "../../../../packages/core/src/telemetry/error-notifications.js";
+import {
+  errorNotificationRoutineId,
+  errorNotificationSlackTarget,
+  type ErrorNotificationSettings,
+} from "../../../../packages/core/src/telemetry/error-notifications.js";
 import { defineOperation, ManagementError, type ManagementContext } from "./operation.js";
 
-// The Slack channel that hears about new and regressed error issues, as the
-// Notifications dialog on the Errors page sets it.
+// The Slack channel and Claude routine that hear about new and regressed
+// error issues, as the Notifications dialog on the Errors page sets them.
 
 const slackSchema = z.object({
   channelId: z.string().trim().regex(/^[CG][A-Z0-9]+$/u).describe("The Slack channel ID: the `externalId` of a `slack_channel` resource."),
@@ -20,6 +25,7 @@ const notificationsSchema = z.object({
   enabled: z.boolean(),
   exceptionsOnly: z.boolean(),
   slack: z.object({ channelId: z.string(), integrationAccountId: z.string() }).nullable(),
+  claudeRoutineId: z.string().nullable(),
 });
 
 // Notification routing can disclose error details, so only workspace owners
@@ -34,11 +40,12 @@ async function requireErrorNotificationAdmin(context: ManagementContext): Promis
 }
 
 function presented(settings: ErrorNotificationSettings) {
-  const target = settings.targets[0];
+  const target = errorNotificationSlackTarget(settings);
   return {
     enabled: settings.enabled,
     exceptionsOnly: settings.exceptionsOnly ?? false,
     slack: target ? { channelId: target.channelId, integrationAccountId: target.integrationAccountId } : null,
+    claudeRoutineId: errorNotificationRoutineId(settings),
   };
 }
 
@@ -46,7 +53,7 @@ export const errorNotificationOperations = [
   defineOperation({
     name: "get_error_notifications",
     summary: "Get error notifications",
-    description: "Returns whether new and regressed error issues post to Slack, and to which channel. Workspace owners and admins only.",
+    description: "Returns whether new and regressed error issues post to Slack and start a Claude routine, and which ones. Workspace owners and admins only.",
     method: "GET",
     path: "/error-notifications",
     tag: "Errors",
@@ -62,7 +69,7 @@ export const errorNotificationOperations = [
     name: "update_error_notifications",
     summary: "Turn error notifications on or off",
     description:
-      "Posts each new error issue, and each resolved issue that occurs again, to one Slack channel. For a private channel, invite the Superlog app first. Earlier errors are not posted. Workspace owners and admins only.",
+      "Posts each new error issue, and each resolved issue that occurs again, to one Slack channel, and can start one Claude routine with the error's details. For a private channel, invite the Superlog app first. Earlier errors are not sent. Workspace owners and admins only.",
     method: "PATCH",
     path: "/error-notifications",
     tag: "Errors",
@@ -70,15 +77,24 @@ export const errorNotificationOperations = [
     input: z.object({
       enabled: z.boolean(),
       exceptionsOnly: z.boolean().optional().describe("Post only exceptions, not plain error log lines. Keeps the current value when left out."),
-      slack: slackSchema.nullable().optional().describe("Required to turn notifications on. Keeps the current channel when left out."),
+      slack: slackSchema.nullable().optional().describe("Keeps the current channel when left out. Turning notifications on needs a channel or a routine."),
+      claudeRoutineId: z
+        .uuid()
+        .nullable()
+        .optional()
+        .describe("The `id` of one of the workspace's Claude routines, started once for each new or regressed error. Keeps the current routine when left out."),
     }),
     output: z.object({ notifications: notificationsSchema }),
     async run(context, input) {
       await requireErrorNotificationAdmin(context);
       const current = await getErrorNotificationSettings(context.organizationId);
       const slack = input.slack === undefined ? presented(current).slack : input.slack;
-      if (input.enabled && !slack) {
-        throw new ManagementError(422, "Choose a Slack channel before turning notifications on.", "slack_channel_required");
+      const claudeRoutineId = input.claudeRoutineId === undefined ? presented(current).claudeRoutineId : input.claudeRoutineId;
+      if (input.enabled && !slack && !claudeRoutineId) {
+        throw new ManagementError(422, "Choose a Slack channel or a Claude routine before turning notifications on.", "slack_channel_required");
+      }
+      if (claudeRoutineId && (input.enabled || input.claudeRoutineId) && !(await findClaudeRoutine(context.organizationId, claudeRoutineId))) {
+        throw new ManagementError(422, "Choose one of the workspace's Claude routines.", "claude_routine_unavailable");
       }
       // Turning notifications off keeps the saved channel even if Superlog can
       // no longer post to it. Only a channel being turned on or newly chosen
@@ -96,7 +112,10 @@ export const errorNotificationOperations = [
       const settings: ErrorNotificationSettings = {
         enabled: input.enabled,
         exceptionsOnly: input.exceptionsOnly ?? current.exceptionsOnly ?? false,
-        targets: slack ? [{ kind: "slack", ...slack }] : [],
+        targets: [
+          ...(slack ? [{ kind: "slack" as const, ...slack }] : []),
+          ...(claudeRoutineId ? [{ kind: "claude_routine" as const, routineId: claudeRoutineId }] : []),
+        ],
       };
       await saveErrorNotificationSettings(context.organizationId, settings);
       return { notifications: presented(await getErrorNotificationSettings(context.organizationId)) };

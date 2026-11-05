@@ -8,6 +8,7 @@ const userId = "21212121-2121-4121-8121-212121212121";
 const apiKeyId = "31313131-3131-4131-8131-313131313131";
 const alertId = "41414141-4141-4141-8141-414141414141";
 const slackAccountId = "51515151-5151-4151-8151-515151515151";
+const routineId = "61616161-6161-4161-8161-616161616161";
 const token = `slk_${"a".repeat(43)}`;
 
 const mocks = vi.hoisted(() => ({
@@ -41,6 +42,10 @@ vi.mock("../../../../packages/core/src/telemetry/client.js", () => ({
 }));
 vi.mock("../../../../packages/core/src/telemetry/alert-values.js", () => ({
   alertValues: mocks.alertValues,
+}));
+vi.mock("../../../../packages/core/src/db/claude-routines.js", () => ({
+  findClaudeRoutine: vi.fn(async (_organizationId: string, id: string) => (id === routineId ? { id } : null)),
+  listClaudeRoutines: vi.fn(async () => []),
 }));
 vi.mock("../../../../packages/core/src/db/telemetry-alerts.js", () => ({
   createTelemetryAlert: mocks.createAlert,
@@ -88,6 +93,7 @@ async function callTool(name: string, args: Record<string, unknown> = {}) {
 const slack = { channelId: "C0ALERTS", integrationAccountId: slackAccountId };
 const alert = {
   aggregation: "count",
+  claudeRoutineId: null,
   comparator: "gt",
   createdAt: "2026-10-20T10:00:00.000Z",
   description: "See the API runbook.",
@@ -192,6 +198,7 @@ describe("alert operations", () => {
     expect(response.status).toBe(201);
     expect(mocks.createAlert).toHaveBeenCalledWith(organizationId, {
       aggregation: "count",
+      claudeRoutineId: null,
       comparator: "gt",
       createdBy: userId,
       description: null,
@@ -238,6 +245,18 @@ describe("alert operations", () => {
     expect(mocks.createAlert).not.toHaveBeenCalled();
   });
 
+  it("starts only a Claude routine of the workspace", async () => {
+    const rule = { aggregation: "count", comparator: "gt", name: "API errors", source: "logs", threshold: 10 };
+    const refused = await callTool("create_alert", { ...rule, claudeRoutineId: slackAccountId });
+    expect(refused.body.code).toBe("claude_routine_unavailable");
+    expect(mocks.createAlert).not.toHaveBeenCalled();
+
+    mocks.createAlert.mockResolvedValue({ ...alert, claudeRoutineId: routineId });
+    const created = await callTool("create_alert", { ...rule, claudeRoutineId: routineId });
+    expect(created.isError).toBeUndefined();
+    expect(mocks.createAlert).toHaveBeenCalledWith(organizationId, expect.objectContaining({ claudeRoutineId: routineId }));
+  });
+
   it("changes only the fields sent and keeps the rest", async () => {
     mocks.findAlert.mockResolvedValue(alert);
     mocks.updateAlert.mockResolvedValue({ ...alert, threshold: 25 });
@@ -247,6 +266,7 @@ describe("alert operations", () => {
     expect(result.isError).toBeUndefined();
     expect(mocks.updateAlert).toHaveBeenCalledWith(organizationId, alertId, {
       aggregation: "count",
+      claudeRoutineId: null,
       comparator: "gt",
       description: "See the API runbook.",
       enabled: true,

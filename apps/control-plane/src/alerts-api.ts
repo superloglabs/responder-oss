@@ -123,6 +123,8 @@ export interface AlertForm {
   severity: string;
   // "integrationAccountId:channelId", or "" for no channel.
   slack: string;
+  // The Claude routine to start, or "" for none.
+  claudeRoutineId: string;
   source: AlertSource;
   // Spans with an error status only.
   spanErrors: boolean;
@@ -133,6 +135,7 @@ export interface AlertForm {
 export function emptyAlertForm(): AlertForm {
   return {
     aggregation: "count",
+    claudeRoutineId: "",
     comparator: "gt",
     description: "",
     enabled: true,
@@ -160,6 +163,7 @@ export function alertForm(alert: TelemetryAlert): AlertForm {
   const { metricKind, metricUnit, minDurationMs, resourceAttrs, service, severity, spanName, statusCode } = alert.filter;
   return {
     aggregation: alert.aggregation,
+    claudeRoutineId: alert.claudeRoutineId ?? "",
     comparator: alert.comparator,
     description: alert.description ?? "",
     enabled: alert.enabled,
@@ -230,6 +234,7 @@ export function alertRequest(form: AlertForm): { error: string } | { body: Alert
     body: {
       aggregation:
         form.source === "metric" ? (form.aggregation === "sum" ? "sum" : "avg") : form.aggregation,
+      claudeRoutineId: form.claudeRoutineId || null,
       comparator: form.comparator,
       description: form.description.trim() || null,
       enabled: form.enabled,

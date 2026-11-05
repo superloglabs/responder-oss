@@ -5,6 +5,7 @@
 .errorNotifications__provider { display: flex; color: var(--ds-text-secondary); }
 .errorNotifications__destination { display: grid; gap: 10px; min-width: 0; }
 .errorNotifications__label { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; font-weight: 500; }
+.errorNotifications__destination .dsField__label { color: inherit; font-size: inherit; font-weight: 500; }
 .errorNotifications__label > :last-child { overflow-wrap: anywhere; color: var(--ds-text-muted); font-weight: 400; font-size: 12px; }
 .errorChannelPicker__search { display: flex; align-items: center; gap: var(--spacing-8, 8px); min-height: 34px; padding: var(--spacing-4, 4px) var(--spacing-10, 10px); border: 1px solid var(--color-border-card, #e3e3e3); border-radius: var(--radius-6, 6px); background: var(--ds-surface-overlay); color: var(--ds-text-muted); }
 .errorChannelPicker__trigger { display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--ds-text-muted); cursor: pointer; }

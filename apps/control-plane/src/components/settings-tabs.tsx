@@ -7,6 +7,7 @@ import { useIngestAvailable } from "../use-ingest-available";
 export type SettingsSection =
   | "api-keys"
   | "billing"
+  | "claude-routines"
   | "ingest-keys"
   | "integrations"
   | "mcp"
@@ -24,6 +25,7 @@ export function SettingsTabs({
   const [billingEnabled, setBillingEnabled] = useState(false);
   const ingestAvailable = useIngestAvailable();
   const automationsEnabled = capabilities.includes("automations");
+  const telemetryEnabled = capabilities.includes("telemetry");
   const sidebarSections = settingsInSidebar(navigationOptions(capabilities));
 
   useEffect(() => {
@@ -93,6 +95,15 @@ export function SettingsTabs({
           to="/settings/ingest-keys"
         >
           Ingest keys
+        </Link>
+      ) : null}
+      {telemetryEnabled || active === "claude-routines" ? (
+        <Link
+          aria-current={active === "claude-routines" ? "page" : undefined}
+          className={active === "claude-routines" ? "isActive" : undefined}
+          to="/settings/claude-routines"
+        >
+          Claude routines
         </Link>
       ) : null}
       {billingEnabled || active === "billing" ? (

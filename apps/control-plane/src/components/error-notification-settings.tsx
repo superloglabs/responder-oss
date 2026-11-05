@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useId, useState } from "react";
 import { Combobox } from "@base-ui/react/combobox";
-import { CheckIcon, CaretDownIcon, SlackLogoIcon } from "@phosphor-icons/react";
+import { BellIcon, CheckIcon, CaretDownIcon } from "@phosphor-icons/react";
 import { Link } from "react-router-dom";
-import type { ErrorNotificationSettings } from "../../../../packages/core/src/telemetry/error-notifications";
+import type { ErrorNotificationSettings, ErrorNotificationTarget } from "../../../../packages/core/src/telemetry/error-notifications";
 import type { TelemetryAlertSlackChannel } from "../../../../packages/core/src/db/telemetry-alerts";
-import { Button, Switch } from "../design-system";
+import type { ClaudeRoutine } from "../../../../packages/core/src/db/claude-routines";
+import { Button, SelectField, Switch } from "../design-system";
 import { DashboardDialog } from "./dashboard-dialog";
 import "./dashboards.css";
 import "./error-notification-settings.css";
@@ -13,7 +14,12 @@ import { apiErrorMessage } from "../agents-api";
 type Configuration = {
   settings: ErrorNotificationSettings;
   channels: TelemetryAlertSlackChannel[];
+  routines: ClaudeRoutine[];
 };
+// The settings with the destination of one kind replaced, or removed.
+function withTarget(settings: ErrorNotificationSettings, kind: ErrorNotificationTarget["kind"], target: ErrorNotificationTarget | null): ErrorNotificationSettings {
+  return { ...settings, targets: [...settings.targets.filter((item) => item.kind !== kind), ...(target ? [target] : [])] };
+}
 async function request<T>(method = "GET", body?: unknown): Promise<T> {
   const response = await fetch("/api/error-notifications", { method,
     ...(body ? { headers: { "content-type": "application/json" }, body: JSON.stringify(body) } : {}),
@@ -47,18 +53,24 @@ export function ErrorNotificationSettingsDialog({ onClose }: { onClose: () => vo
   const channelInputId = useId();
   const [portalContainer, setPortalContainer] = useState<HTMLDialogElement | null>(null);
   const attachDestination = useCallback((node: HTMLDivElement | null) => { setPortalContainer(node?.closest("dialog") ?? null); }, []);
-  const target = settings?.targets[0];
+  const target = settings?.targets.find((item) => item.kind === "slack");
+  const routineId = settings?.targets.find((item) => item.kind === "claude_routine")?.routineId ?? "";
   const selectedChannel = configuration?.channels.find((channel) => channel.integrationAccountId === target?.integrationAccountId && channel.channelId === target?.channelId);
+  const routineOptions = [
+    { label: "Don't start a routine", value: "" },
+    ...(configuration?.routines ?? []).map((routine) => ({ label: routine.name, value: routine.id })),
+    ...(routineId && !configuration?.routines.some((routine) => routine.id === routineId) ? [{ label: "A routine that was removed", value: routineId }] : []),
+  ];
   return <DashboardDialog title="Error notifications" onClose={() => { if (!saving) onClose(); }} actions={<>
     <Button variant="secondary" disabled={saving} onClick={onClose}>Cancel</Button>
-    <Button variant="primary" disabled={!settings || saving || (settings.enabled && !target)} onClick={() => void save()}>{saving ? "Saving…" : "Save notifications"}</Button>
+    <Button variant="primary" disabled={!settings || saving || (settings.enabled && settings.targets.length === 0)} onClick={() => void save()}>{saving ? "Saving…" : "Save notifications"}</Button>
   </>}>
     <p className="errorNotifications__description">Notify your team when a new error appears or a resolved error happens again.</p>
     {error ? <p role="alert">{error}</p> : null}
     {!configuration && !error ? <p role="status">Loading notifications…</p> : null}
     {settings && configuration ? <fieldset className="errorNotifications" disabled={saving}>
       <div className="errorNotifications__toggle">
-        <span className="errorNotifications__provider"><SlackLogoIcon size={22} aria-hidden="true" /></span>
+        <span className="errorNotifications__provider"><BellIcon size={22} aria-hidden="true" /></span>
         <Switch label="Enable error notifications" checked={settings.enabled} onCheckedChange={(enabled) => setSettings({ ...settings, enabled })} />
       </div>
       <div className="errorNotifications__destination" ref={attachDestination}>
@@ -77,7 +89,7 @@ export function ErrorNotificationSettingsDialog({ onClose }: { onClose: () => vo
             const query = search.trim().replace(/^#/, "").toLocaleLowerCase();
             return [channel.name, channel.accountName].some((value) => value.toLocaleLowerCase().includes(query));
           }}
-          onValueChange={(channel) => setSettings({ ...settings, targets: channel ? [{ kind: "slack", integrationAccountId: channel.integrationAccountId, channelId: channel.channelId }] : [] })}
+          onValueChange={(channel) => setSettings(withTarget(settings, "slack", channel ? { kind: "slack", integrationAccountId: channel.integrationAccountId, channelId: channel.channelId } : null))}
         >
           <Combobox.InputGroup className="errorChannelPicker__search">
             <Combobox.Input id={channelInputId} placeholder="Choose a channel…" />
@@ -104,6 +116,19 @@ export function ErrorNotificationSettingsDialog({ onClose }: { onClose: () => vo
           <p>Connect a Slack workspace or check channel access in <Link to="/settings">Integrations</Link>.</p>
         </div>}
         <p className="errorNotifications__hint">{settings.enabled ? "New and recurring errors will be sent to this channel." : "Notifications are paused. Your channel selection will be saved."}</p>
+      </div>
+      <div className="errorNotifications__destination">
+        <SelectField
+          label="Claude routine"
+          onChange={(value) => setSettings(withTarget(settings, "claude_routine", value ? { kind: "claude_routine", routineId: value } : null))}
+          options={routineOptions}
+          value={routineId}
+        />
+        <p className="errorNotifications__hint">
+          {configuration.routines.length
+            ? "Starts one session for each new or recurring error, with the error's details."
+            : <>Add a Claude Code routine in <Link to="/settings/claude-routines">Settings</Link> to start it for new and recurring errors.</>}
+        </p>
       </div>
       <div className="errorNotifications__toggle">
         <Switch label="Only exceptions" checked={settings.exceptionsOnly ?? false} onCheckedChange={(exceptionsOnly) => setSettings({ ...settings, exceptionsOnly })} />

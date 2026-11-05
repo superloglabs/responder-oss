@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { errorTriggerMatches } from "../automations/config.js";
 import { isExceptionIssue } from "./error-issues.js";
-import { notifiesErrorIssue } from "./error-notifications.js";
+import { errorNotificationSettingsSchema, errorNotificationTargetKey, notifiesErrorIssue } from "./error-notifications.js";
 
 describe("exceptions only", () => {
   it("counts span exceptions and logs with a stack trace as exceptions", () => {
@@ -27,5 +27,27 @@ describe("exceptions only", () => {
     expect(errorTriggerMatches(trigger, change)).toBe(true);
     expect(errorTriggerMatches({ ...trigger, exceptionsOnly: true }, change)).toBe(false);
     expect(errorTriggerMatches({ ...trigger, exceptionsOnly: true }, { ...change, exception: true })).toBe(true);
+  });
+});
+
+describe("error notification destinations", () => {
+  const slack = { kind: "slack" as const, integrationAccountId: "00000000-0000-4000-8000-000000000001", channelId: "C123" };
+  const routine = { kind: "claude_routine" as const, routineId: "00000000-0000-4000-8000-000000000002" };
+
+  it("accepts a Slack channel, a Claude routine, or both", () => {
+    for (const targets of [[slack], [routine], [slack, routine]]) {
+      expect(errorNotificationSettingsSchema.safeParse({ enabled: true, targets }).success).toBe(true);
+    }
+  });
+
+  it("rejects two destinations of one kind and enabled settings without one", () => {
+    expect(errorNotificationSettingsSchema.safeParse({ enabled: true, targets: [routine, routine] }).success).toBe(false);
+    expect(errorNotificationSettingsSchema.safeParse({ enabled: true, targets: [] }).success).toBe(false);
+    expect(errorNotificationSettingsSchema.safeParse({ enabled: false, targets: [] }).success).toBe(true);
+  });
+
+  it("keys each destination by kind", () => {
+    expect(errorNotificationTargetKey(slack)).toBe(`slack:${slack.integrationAccountId}:C123`);
+    expect(errorNotificationTargetKey(routine)).toBe(`claude_routine:${routine.routineId}`);
   });
 });

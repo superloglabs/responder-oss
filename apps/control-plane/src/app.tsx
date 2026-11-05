@@ -77,6 +77,7 @@ import { WorkspaceSettingsPage } from "./pages/workspace-settings";
 import { ModelAccessSettingsPage } from "./pages/model-access-settings";
 import { ApiKeySettingsPage } from "./pages/api-key-settings";
 import { IngestKeySettingsPage } from "./pages/ingest-key-settings";
+import { ClaudeRoutineSettingsPage } from "./pages/claude-routine-settings";
 import { McpSettingsPage } from "./pages/mcp-settings";
 import { TagModeSettingsPage } from "./pages/tag-mode-settings";
 import { blogArticlePath } from "./public-routes";
@@ -239,6 +240,7 @@ export function App() {
         <Route element={<McpSettingsPage />} path="/settings/mcp" />
         <Route element={<ApiKeySettingsPage />} path="/settings/api-keys" />
         <Route element={<IngestKeySettingsPage />} path="/settings/ingest-keys" />
+        <Route element={<ClaudeRoutineSettingsPage />} path="/settings/claude-routines" />
         <Route element={<SuperuserUsersPage />} path="/superuser/users" />
       </Route>
       <Route element={<Navigate replace to="/" />} path="*" />

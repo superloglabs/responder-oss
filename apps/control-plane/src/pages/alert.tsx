@@ -39,6 +39,7 @@ import {
   describeAlertCondition,
   type AlertValueUnit,
 } from "../../../../packages/core/src/telemetry/alert-text";
+import { fetchClaudeRoutines, type ClaudeRoutine } from "../claude-routines-api";
 import { fetchServices } from "../telemetry-api";
 import { useDocumentTitle } from "../use-document-title";
 import { useTelemetryAvailable } from "../use-telemetry-available";
@@ -121,6 +122,7 @@ export function AlertPage() {
   const [deleting, setDeleting] = useState(false);
   const [channels, setChannels] = useState<TelemetryAlertSlackChannel[] | null>(null);
   const [refreshingChannels, setRefreshingChannels] = useState(false);
+  const [routines, setRoutines] = useState<ClaudeRoutine[] | null>(null);
   const [hours, setHours] = useState(1);
   const [revision, setRevision] = useState(0);
   const [metrics, setMetrics] = useState<MetricName[]>([]);
@@ -158,6 +160,9 @@ export function AlertPage() {
     fetchAlertSlackChannels()
       .then((loaded) => { if (!cancelled) setChannels(loaded); })
       .catch(() => { if (!cancelled) setChannels([]); });
+    fetchClaudeRoutines()
+      .then((loaded) => { if (!cancelled) setRoutines(loaded ?? []); })
+      .catch(() => { if (!cancelled) setRoutines([]); });
     return () => { cancelled = true; };
   }, []);
 
@@ -451,6 +456,23 @@ export function AlertPage() {
                 </p>
               ) : (
                 <p className="dashboardDialog__hint">Posts when the alert fires, and replies in the thread when it recovers.</p>
+              )}
+              <SelectField
+                label="Claude routine"
+                onChange={(claudeRoutineId) => update({ claudeRoutineId })}
+                options={withCurrent(
+                  [{ label: "Don't start a routine", value: "" }, ...(routines ?? []).map((routine) => ({ label: routine.name, value: routine.id }))],
+                  form.claudeRoutineId,
+                  routines === null ? "Loading routines…" : "A routine that was removed",
+                )}
+                value={form.claudeRoutineId}
+              />
+              {routines && routines.length === 0 ? (
+                <p className="dashboardDialog__hint">
+                  Add a Claude Code routine in <Link to="/settings/claude-routines">Settings</Link> to start it when the alert fires.
+                </p>
+              ) : (
+                <p className="dashboardDialog__hint">Starts one session each time the alert fires, with the alert&apos;s details and description.</p>
               )}
               <TextAreaField
                 hint="Posted with the alert when it fires. Markdown and links work."

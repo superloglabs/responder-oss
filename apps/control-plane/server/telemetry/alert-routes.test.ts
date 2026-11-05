@@ -15,8 +15,10 @@ const rule = {
   source: "logs",
   threshold: 10,
 };
+const routineId = "33333333-3333-4333-8333-333333333333";
 const alert: TelemetryAlert = {
   aggregation: "count",
+  claudeRoutineId: null,
   comparator: "gt",
   field: null,
   createdAt: now.toISOString(),
@@ -44,6 +46,10 @@ function routes(overrides: Partial<AlertRouteDependencies> = {}) {
     createAlert: vi.fn(async () => alert),
     deleteAlert: vi.fn(async () => true),
     episodes: vi.fn(async () => []),
+    findRoutine: vi.fn(async (_organizationId: string, id: string) =>
+      id === routineId
+        ? { createdAt: now.toISOString(), id, lastError: null, lastFiredAt: null, name: "Triage", triggerId: "trig_01" }
+        : null),
     intervals: vi.fn(async () => []),
     findAlert: vi.fn(async () => alert),
     findActivation: vi.fn(async () => null),
@@ -133,6 +139,24 @@ describe("alert routes", () => {
     expect(dependencies.updateAlert).toHaveBeenLastCalledWith(organizationId, alertId, expect.objectContaining({ description: null }));
   });
 
+  it("starts only a Claude routine from the workspace", async () => {
+    const { app, dependencies } = routes();
+
+    expect((await send(app, "POST", "/", { ...rule, claudeRoutineId: routineId })).status).toBe(201);
+    expect(dependencies.createAlert).toHaveBeenCalledWith(organizationId, expect.objectContaining({ claudeRoutineId: routineId }));
+    const foreign = await send(app, "POST", "/", { ...rule, claudeRoutineId: accountId });
+    expect(await foreign.json()).toEqual({ error: "Choose a Claude routine from this workspace" });
+  });
+
+  it("keeps the routine when a replacement leaves it out", async () => {
+    const { app, dependencies } = routes({ findAlert: vi.fn(async () => ({ ...alert, claudeRoutineId: routineId })) });
+
+    expect((await send(app, "PUT", `/${alertId}`, rule)).status).toBe(200);
+    expect(dependencies.updateAlert).toHaveBeenLastCalledWith(organizationId, alertId, expect.objectContaining({ claudeRoutineId: routineId }));
+    expect((await send(app, "PUT", `/${alertId}`, { ...rule, claudeRoutineId: null })).status).toBe(200);
+    expect(dependencies.updateAlert).toHaveBeenLastCalledWith(organizationId, alertId, expect.objectContaining({ claudeRoutineId: null }));
+  });
+
   it("previews the current value and a chart one window per bucket", async () => {
     const { app, dependencies } = routes();
 
@@ -191,6 +215,7 @@ const activation = {
   startedAt: "2026-10-14T11:35:00.000Z", endedAt: "2026-10-14T11:40:00.000Z",
   openValue: 12, peakValue: 20, lastValue: 4, ruleSnapshot: { ...alert, groupMode: "per_group" as const, groupBy: "service" },
   endReason: "recovered" as const, notificationsPaused: false, slackChannelId: "C1", slackMessageTs: null, recoveryNotifiedAt: null,
+  claudeRoutineSessionUrl: null, claudeRoutineStartedAt: null,
 };
 
 describe("activation details", () => {

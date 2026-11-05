@@ -1,8 +1,11 @@
 import { Hono } from "hono";
+import { findClaudeRoutine, listClaudeRoutines } from "../../../../packages/core/src/db/claude-routines.js";
 import { getErrorNotificationSettings, saveErrorNotificationSettings } from "../../../../packages/core/src/db/error-notifications.js";
 import { listTelemetryAlertSlackChannels } from "../../../../packages/core/src/db/telemetry-alerts.js";
 import { organizationHasCapability } from "../../../../packages/core/src/db/organization-capabilities.js";
-import { errorNotificationSettingsSchema } from "../../../../packages/core/src/telemetry/error-notifications.js";
+import {
+  errorNotificationRoutineId, errorNotificationSettingsSchema, errorNotificationSlackTarget,
+} from "../../../../packages/core/src/telemetry/error-notifications.js";
 import { refreshSlackChannelResources } from "../../../../packages/core/src/integrations/slack-channels.js";
 import { getActiveTenant } from "../tenant.js";
 
@@ -11,6 +14,7 @@ const defaults = {
   get: getErrorNotificationSettings, save: saveErrorNotificationSettings,
   channels: listTelemetryAlertSlackChannels,
   refresh: refreshSlackChannelResources,
+  routines: listClaudeRoutines, findRoutine: findClaudeRoutine,
 };
 export function createErrorNotificationRoutes(deps = defaults) {
   return new Hono<{ Variables: { organizationId: string } }>().use("*", async function requireErrorNotificationAdmin(context, next) {
@@ -26,8 +30,8 @@ export function createErrorNotificationRoutes(deps = defaults) {
     await next();
   }).get("/", async (context) => {
     const organizationId = context.get("organizationId");
-    const [settings, channels] = await Promise.all([deps.get(organizationId), deps.channels(organizationId)]);
-    return context.json({ settings, channels }, 200, { "cache-control": "no-store" });
+    const [settings, channels, routines] = await Promise.all([deps.get(organizationId), deps.channels(organizationId), deps.routines(organizationId)]);
+    return context.json({ settings, channels, routines }, 200, { "cache-control": "no-store" });
   }).post("/refresh-channels", async (context) => {
     const organizationId = context.get("organizationId");
     await deps.refresh(organizationId);
@@ -36,9 +40,16 @@ export function createErrorNotificationRoutes(deps = defaults) {
     const organizationId = context.get("organizationId");
     const parsed = errorNotificationSettingsSchema.safeParse(await context.req.json().catch(() => null));
     if (!parsed.success) return context.json({ error: parsed.error.issues[0]?.message ?? "Invalid notification settings" }, 400);
-    const channels = await deps.channels(organizationId);
-    if (parsed.data.enabled && parsed.data.targets.some((target) => !channels.some((channel) => channel.integrationAccountId === target.integrationAccountId && channel.channelId === target.channelId))) {
-      return context.json({ error: "Choose an available Slack channel" }, 400);
+    if (parsed.data.enabled) {
+      const slack = errorNotificationSlackTarget(parsed.data);
+      const channels = slack ? await deps.channels(organizationId) : [];
+      if (slack && !channels.some((channel) => channel.integrationAccountId === slack.integrationAccountId && channel.channelId === slack.channelId)) {
+        return context.json({ error: "Choose an available Slack channel" }, 400);
+      }
+      const routineId = errorNotificationRoutineId(parsed.data);
+      if (routineId && !(await deps.findRoutine(organizationId, routineId))) {
+        return context.json({ error: "Choose a Claude routine from this workspace" }, 400);
+      }
     }
     await deps.save(organizationId, parsed.data);
     return context.json({ settings: await deps.get(organizationId) });

@@ -1,7 +1,11 @@
 import type { AutomationNotification } from "@responder/core/automations/config";
+import { ClaudeRoutineFireError } from "@responder/core/claude-routines";
+import { startClaudeRoutine } from "@responder/core/db/claude-routines";
 import {
   claimDueTelemetryAlerts,
+  claimTelemetryAlertEpisodeRoutine,
   continueTelemetryAlertEpisode,
+  finishTelemetryAlertEpisodeRoutine,
   markTelemetryAlertRecoveryNotified,
   openTelemetryAlertEpisode,
   openTelemetryAlertEpisodes,
@@ -17,6 +21,7 @@ import { alertValues } from "@responder/core/telemetry/alert-values";
 import {
   alertFiringMessage,
   alertRecoveredMessage,
+  alertRoutineText,
   alertTransition,
   evaluateAlert,
 } from "@responder/core/telemetry/alerts";
@@ -33,11 +38,16 @@ const concurrentChecks = 4;
 // Episodes announced per alert check. A rule grouped by a busy attribute can
 // open many at once; the rest are announced on later checks.
 const announcementsPerCheck = 10;
+// Claude routine sessions started per alert check. Each one uses the
+// routine owner's Claude plan, and a routine accepts 30 starts an hour.
+const routineStartsPerCheck = 5;
 
 export interface TelemetryAlertDependencies {
   claim: typeof claimDueTelemetryAlerts;
+  claimRoutine: typeof claimTelemetryAlertEpisodeRoutine;
   client: () => TelemetryClient | null;
   continueEpisode: typeof continueTelemetryAlertEpisode;
+  finishRoutine: typeof finishTelemetryAlertEpisodeRoutine;
   markRecoveryNotified: typeof markTelemetryAlertRecoveryNotified;
   now: () => Date;
   openEpisode: typeof openTelemetryAlertEpisode;
@@ -48,6 +58,7 @@ export interface TelemetryAlertDependencies {
   renderChart: typeof renderAlertChart;
   resolveEpisode: typeof resolveTelemetryAlertEpisode;
   setMessage: typeof setTelemetryAlertEpisodeMessage;
+  startRoutine: (input: Parameters<typeof startClaudeRoutine>[0]) => ReturnType<typeof startClaudeRoutine>;
   // Starts the automations watching the alert's channel. The worker supplies
   // it with its job queue; without it, alerts only post.
   startAutomations?: (input: Parameters<typeof startAlertAutomations>[0]) => Promise<number>;
@@ -57,8 +68,10 @@ export interface TelemetryAlertDependencies {
 
 export const defaultTelemetryAlertDependencies: TelemetryAlertDependencies = {
   claim: claimDueTelemetryAlerts,
+  claimRoutine: claimTelemetryAlertEpisodeRoutine,
   client: getTelemetryClient,
   continueEpisode: continueTelemetryAlertEpisode,
+  finishRoutine: finishTelemetryAlertEpisodeRoutine,
   markRecoveryNotified: markTelemetryAlertRecoveryNotified,
   now: () => new Date(),
   openEpisode: openTelemetryAlertEpisode,
@@ -69,6 +82,7 @@ export const defaultTelemetryAlertDependencies: TelemetryAlertDependencies = {
   renderChart: renderAlertChart,
   resolveEpisode: resolveTelemetryAlertEpisode,
   setMessage: setTelemetryAlertEpisodeMessage,
+  startRoutine: (input) => startClaudeRoutine(input),
   unannouncedRecoveries: unannouncedTelemetryAlertRecoveries,
   values: alertValues,
 };
@@ -102,6 +116,27 @@ export async function checkTelemetryAlert(
   let announcements = 0;
   // The last failed Slack post, shown on the alert until a check posts fine.
   let postError: string | null = null;
+  let routineStarts = 0;
+  let routineError: string | null = null;
+
+  // Starts the alert's Claude routine once for the episode, apart from Slack.
+  async function startRoutine(episode: OpenTelemetryAlertEpisode, value: number) {
+    const routineId = alert.claudeRoutineId;
+    if (!routineId || alert.notificationsPaused || episode.notificationsPaused) return;
+    if (episode.claudeRoutineStartedAt || routineStarts >= routineStartsPerCheck) return;
+    if (!(await dependencies.claimRoutine(episode.id))) return;
+    routineStarts += 1;
+    const text = alertRoutineText({ ...message(episode.groupKey, value), alertId: alert.id, startedAt: episode.startedAt });
+    try {
+      const started = await dependencies.startRoutine({ organizationId: alert.organizationId, routineId, text });
+      await dependencies.finishRoutine(episode.id, started ?? { sessionUrl: null });
+    } catch (error) {
+      routineError = errorText(error);
+      console.warn(JSON.stringify({ alertId: alert.id, error: routineError, event: "telemetry_alert_routine_failed" }));
+      // Only a start that certainly created no session is tried again.
+      if (error instanceof ClaudeRoutineFireError && error.retryable) await dependencies.finishRoutine(episode.id, null);
+    }
+  }
 
   async function announce(episode: OpenTelemetryAlertEpisode, value: number) {
     const target = slackTarget(episode);
@@ -194,11 +229,15 @@ export async function checkTelemetryAlert(
           slack: alert.slack,
           value: evaluation.value,
         });
-        if (opened) await announce(opened, evaluation.value);
+        if (opened) {
+          await announce(opened, evaluation.value);
+          await startRoutine(opened, evaluation.value);
+        }
       } else if (transition === "continued" && episode) {
         await dependencies.continueEpisode(episode, alert.comparator, evaluation.value);
-        // An announcement that failed before is retried.
+        // An announcement or start that failed before is retried.
         await announce(episode, evaluation.value);
+        await startRoutine(episode, evaluation.value);
       } else if (transition === "recovered" && episode) {
         if (await dependencies.resolveEpisode(episode.id, evaluation.value)) {
           await announceRecovery({ ...episode, endedAt: now }, evaluation.value);
@@ -208,7 +247,11 @@ export async function checkTelemetryAlert(
     for (const recovery of await dependencies.unannouncedRecoveries(alert.id)) {
       if (recovery.endedAt.getTime() < now.getTime()) await announceRecovery(recovery, recovery.lastValue);
     }
-    await dependencies.recordCheck(alert.id, postError ? `Posting to Slack failed: ${postError}` : null);
+    const problems = [
+      postError ? `Posting to Slack failed: ${postError}` : null,
+      routineError ? `Starting the Claude routine failed: ${routineError}` : null,
+    ].filter((problem) => problem !== null);
+    await dependencies.recordCheck(alert.id, problems.length ? problems.join(" ") : null);
   } catch (error) {
     console.warn(JSON.stringify({ alertId: alert.id, error: errorText(error), event: "telemetry_alert_check_failed" }));
     await dependencies.recordCheck(alert.id, errorText(error)).catch(() => undefined);

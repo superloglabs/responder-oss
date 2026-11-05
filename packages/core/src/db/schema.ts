@@ -1002,6 +1002,31 @@ export const aiModelPriceOverrides = pgTable(
   ],
 );
 
+// A Claude Code routine that alerts and error notifications can start
+// through its API trigger.
+export const claudeRoutines = pgTable(
+  "claude_routines",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    // The `trig_` ID in the routine's Fire URL.
+    triggerId: text("trigger_id").notNull(),
+    // The routine's bearer token, encrypted as other stored credentials.
+    encryptedToken: text("encrypted_token").notNull(),
+    createdBy: uuid("created_by").references(() => user.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    lastFiredAt: timestamp("last_fired_at", { withTimezone: true }),
+    // Why the last start failed, cleared by the next one that succeeds.
+    lastError: text("last_error"),
+  },
+  (table) => [index("claude_routines_organization_idx").on(table.organizationId)],
+);
+
 // A threshold rule on the workspace's telemetry.
 export const telemetryAlerts = pgTable(
   "telemetry_alerts",
@@ -1031,6 +1056,8 @@ export const telemetryAlerts = pgTable(
       onDelete: "set null",
     }),
     slackChannelId: text("slack_channel_id"),
+    // Started once for each activation. Null starts nothing.
+    claudeRoutineId: uuid("claude_routine_id").references(() => claudeRoutines.id, { onDelete: "set null" }),
     createdBy: uuid("created_by").references(() => user.id, { onDelete: "set null" }),
     lastEvaluatedAt: timestamp("last_evaluated_at", { withTimezone: true }),
     // Why the last check failed, cleared by the next one that succeeds.
@@ -1076,6 +1103,10 @@ export const telemetryAlertEpisodes = pgTable(
     }),
     slackChannelId: text("slack_channel_id"),
     slackMessageTs: text("slack_message_ts"),
+    // Set when the alert's Claude routine is started for the episode, and
+    // kept after a start that may have created a session.
+    claudeRoutineStartedAt: timestamp("claude_routine_started_at", { withTimezone: true }),
+    claudeRoutineSessionUrl: text("claude_routine_session_url"),
     // Set once the recovery is posted, or when there is nothing to post.
     recoveryNotifiedAt: timestamp("recovery_notified_at", { withTimezone: true }),
     // Opened while the workspace's notifications were paused, so it is never

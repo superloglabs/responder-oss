@@ -1,4 +1,5 @@
 import { and, desc, eq, inArray, isNotNull, lte, sql } from "drizzle-orm";
+import { ClaudeRoutineFireError } from "../claude-routines.js";
 import { getDatabase } from "./client.js";
 import {
   errorIssueActivities, errorIssues, errorNotificationDeliveries, errorNotificationFollowups, errorNotificationSettings,
@@ -50,9 +51,12 @@ export function errorNotificationRetryAt(attempt: number, now: Date): Date {
 // Claim briefly under a row lock, then release the database connection before
 // calling providers. An interrupted worker's lease expires after five minutes.
 // The attempt number prevents an expired claim from acknowledging a new claim.
-// Delivering returns the posted message's timestamp, or null when the
-// destination is no longer authorized.
-export async function processPendingErrorNotifications(deliver: (delivery: typeof errorNotificationDeliveries.$inferSelect) => Promise<string | null>): Promise<void> {
+// Delivering returns the posted Slack message's timestamp, if any, or null
+// when the destination is no longer authorized. A Claude routine that may
+// have started is not tried again, since a retry could start a second session.
+export async function processPendingErrorNotifications(
+  deliver: (delivery: typeof errorNotificationDeliveries.$inferSelect) => Promise<{ messageTimestamp: string | null } | null>,
+): Promise<void> {
   for (let pass = 0; pass < 25; pass++) {
     const delivery = await getDatabase().transaction(async (tx) => {
       const [row] = await tx.select().from(errorNotificationDeliveries).where(and(
@@ -72,13 +76,13 @@ export async function processPendingErrorNotifications(deliver: (delivery: typeo
       ));
       // Stop retrying stale notifications after a bounded delivery window.
       const expired = Date.now() - delivery.createdAt.getTime() >= 23 * 3_600_000 || delivery.attempts > errorNotificationRetryLimit;
-      const messageTimestamp = !expired && issue?.status === "open" ? await deliver(delivery) : null;
-      const sent = messageTimestamp !== null;
+      const sent = !expired && issue?.status === "open" ? await deliver(delivery) : null;
       await getDatabase().update(errorNotificationDeliveries).set({
-        status: expired ? "failed" : sent ? "sent" : "cancelled", sentAt: sent ? new Date() : null, messageTimestamp,
+        status: expired ? "failed" : sent ? "sent" : "cancelled", sentAt: sent ? new Date() : null, messageTimestamp: sent?.messageTimestamp ?? null,
       }).where(claim);
-    } catch {
-      await getDatabase().update(errorNotificationDeliveries).set({ status: delivery.attempts >= errorNotificationRetryLimit ? "failed" : "pending", nextAttemptAt: errorNotificationRetryAt(delivery.attempts, new Date()) }).where(claim);
+    } catch (error) {
+      const final = delivery.attempts >= errorNotificationRetryLimit || (error instanceof ClaudeRoutineFireError && !error.retryable);
+      await getDatabase().update(errorNotificationDeliveries).set({ status: final ? "failed" : "pending", nextAttemptAt: errorNotificationRetryAt(delivery.attempts, new Date()) }).where(claim);
       console.warn(JSON.stringify({ event: "error_notification_delivery_failed", deliveryId: delivery.id, attempts: delivery.attempts }));
     }
   }
