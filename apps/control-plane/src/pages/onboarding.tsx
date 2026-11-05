@@ -7,6 +7,7 @@ import { DatadogConnectionDialog } from "../components/datadog-site-dialog";
 import { GrafanaConnectionDialog } from "../components/grafana-connection-dialog";
 import { ProviderGlyph } from "../components/icons";
 import { OnboardingFrame, OnboardingLoading } from "../components/onboarding-frame";
+import { PostHogConnectionDialog } from "../components/posthog-connection-dialog";
 import { providerDisplayName, type ProviderGlyphId } from "../components/provider-glyphs";
 import { useIntegrationConnect } from "../components/use-integration-connect";
 import { useOrganizationCapabilities } from "../organization-capabilities";
@@ -203,7 +204,7 @@ export function OnboardingPage() {
             </div>
           </section>
         ))}
-        <p className="onboarding__note">More tools, such as Linear and PostHog, are in <Link to="/settings">Integrations</Link>.</p>
+        <p className="onboarding__note">More tools, such as Linear, are in <Link to="/settings">Integrations</Link>.</p>
       </OnboardingFrame>
     );
   }
@@ -353,7 +354,7 @@ function ConnectTile({ integration, onConnected, provider }: {
   const name = providerDisplayName(provider);
   const { connect, connecting, error } = useIntegrationConnect(provider, name, onConnected);
   const [enteringDetails, setEnteringDetails] = useState(false);
-  const asksForDetails = provider === "datadog" || provider === "grafana";
+  const asksForDetails = provider === "datadog" || provider === "grafana" || provider === "posthog";
   const isConnected = integration.state === "connected";
   return (
     <div className={`onboardingTile${isConnected ? " isConnected" : ""}`}>
@@ -384,6 +385,14 @@ function ConnectTile({ integration, onConnected, provider }: {
       ) : null}
       {provider === "grafana" ? (
         <GrafanaConnectionDialog
+          connectUrl={integration.connectUrl ?? ""}
+          onCancel={() => setEnteringDetails(false)}
+          open={enteringDetails}
+          returnTo={onboardingPath("alerts")}
+        />
+      ) : null}
+      {provider === "posthog" ? (
+        <PostHogConnectionDialog
           connectUrl={integration.connectUrl ?? ""}
           onCancel={() => setEnteringDetails(false)}
           open={enteringDetails}

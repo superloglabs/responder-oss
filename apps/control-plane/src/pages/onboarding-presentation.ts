@@ -63,7 +63,7 @@ export function planChangeConfirmation(plan: { name: string; price: number }, cu
 // Integrations offered on the alerts step, grouped by what they tell the
 // agent: where errors and alerts come from, and where the team discusses them.
 export const onboardingAlertSources = [
-  { label: "Errors and monitoring", providers: ["sentry", "datadog", "grafana"] },
+  { label: "Errors and monitoring", providers: ["sentry", "datadog", "grafana", "posthog"] },
   { label: "Team chat", providers: ["slack", "discord"] },
 ] as const;
 
