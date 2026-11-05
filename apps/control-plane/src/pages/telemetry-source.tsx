@@ -1,6 +1,6 @@
 import { CodeIcon } from "@phosphor-icons/react";
 import { type FormEvent, type ReactNode, useCallback, useEffect, useState } from "react";
-import { Link, Navigate, useParams } from "react-router-dom";
+import { Link, Navigate, useParams, useSearchParams } from "react-router-dom";
 import { relativeTime } from "../agents-api";
 import { AppShell } from "../components/app-shell";
 import { TelemetrySourceSkeleton } from "../components/screen-skeletons";
@@ -31,6 +31,7 @@ import {
 import { telemetrySourceOption } from "../telemetry-source-options";
 import { useDocumentTitle } from "../use-document-title";
 import { useScrambledText } from "../use-scrambled-text";
+import { onboardingPath } from "./onboarding-presentation";
 import "../components/automation-run-history.css";
 import "../components/telemetry.css";
 
@@ -39,8 +40,11 @@ function errorText(cause: unknown, fallback: string): string {
 }
 
 // One way of sending telemetry: the OpenTelemetry SDK, or a cloud provider.
+// Opened from guided setup, it links back to setup.
 export function TelemetrySourcePage() {
   const { source } = useParams();
+  const [searchParams] = useSearchParams();
+  const fromSetup = searchParams.get("from") === "onboarding";
   const option = telemetrySourceOption(source);
   useDocumentTitle(option ? `Add telemetry · ${option.title}` : "Add telemetry");
   if (!option) return <Navigate replace to="/telemetry/setup" />;
@@ -57,7 +61,11 @@ export function TelemetrySourcePage() {
         </h1>
       </header>
       <div className={`telemetrySetup${option.id === "aws" ? " telemetrySetup--aws" : ""}`}>
-        <Link className="telemetrySetup__back" to="/telemetry/setup">← Add telemetry</Link>
+        {fromSetup ? (
+          <Link className="telemetrySetup__back" to={onboardingPath("telemetry")}>← Back to setup</Link>
+        ) : (
+          <Link className="telemetrySetup__back" to="/telemetry/setup">← Add telemetry</Link>
+        )}
         {option.id === "opentelemetry" ? <OpenTelemetrySetup /> : <CloudSourceSetup provider={option.id} />}
       </div>
     </AppShell>

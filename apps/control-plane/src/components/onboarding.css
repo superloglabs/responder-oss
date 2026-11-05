@@ -325,6 +325,37 @@
 .onboardingCodex__connect.automationModel { display: block; }
 .onboardingCodex__connect .automationModel__footer { max-width: 360px; padding: 0; }
 
+/* The telemetry step: an ingest key and the prompt for a coding agent. The
+   code block keeps the light theme of setup. */
+.onboardingTelemetry {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border: 1px solid var(--onboarding-border);
+  border-radius: 14px;
+}
+.onboardingTelemetry__key { display: flex; align-items: center; gap: 8px; }
+.onboardingTelemetry__key input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--onboarding-border);
+  border-radius: 10px;
+  background: #fafafa;
+  color: #202020;
+  font: inherit;
+  font-family: var(--ds-font-mono, ui-monospace, monospace);
+  font-size: 13px;
+}
+.onboardingTelemetry__key input:focus-visible { outline: 2px solid var(--onboarding-accent); outline-offset: 2px; }
+.onboardingTelemetry__key .onboarding__button { flex-shrink: 0; }
+.onboardingTelemetry .dsCodeBlock { border-color: var(--onboarding-border); background: #fafafa; }
+.onboardingTelemetry .dsCodeBlock pre { max-height: 220px; color: #3a3a3a; }
+.onboardingTelemetry .dsCodeBlock__language, .onboardingTelemetry .dsCodeBlock__copy { color: var(--onboarding-muted); }
+.onboarding__tiles a.onboarding__textButton { text-decoration: none; }
+
 /* Recommended templates. */
 .onboarding__templates { margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; list-style: none; }
 .onboarding__templates > li { display: flex; min-width: 0; }

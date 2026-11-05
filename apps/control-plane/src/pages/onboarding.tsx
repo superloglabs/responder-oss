@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
-import { ArrowLeftIcon, ArrowRightIcon, CheckIcon, CpuIcon, KeyIcon, SparkleIcon } from "@phosphor-icons/react";
+import { ArrowLeftIcon, ArrowRightIcon, CheckIcon, CodeIcon, CpuIcon, KeyIcon, SparkleIcon } from "@phosphor-icons/react";
+import { authClient } from "../auth-client";
 import { fetchAutomationCredentials } from "../automations-api";
 import { AutomationSubscriptionConnect } from "../components/automation-subscription-connect";
 import { DatadogConnectionDialog } from "../components/datadog-site-dialog";
@@ -9,10 +10,23 @@ import { ProviderGlyph } from "../components/icons";
 import { OnboardingFrame, OnboardingLoading } from "../components/onboarding-frame";
 import { PostHogConnectionDialog } from "../components/posthog-connection-dialog";
 import { providerDisplayName, type ProviderGlyphId } from "../components/provider-glyphs";
+import { CardContentSkeleton } from "../components/screen-skeletons";
 import { useIntegrationConnect } from "../components/use-integration-connect";
+import { copyToClipboard } from "../copy-to-clipboard";
+import { CodeBlock } from "../design-system";
+import {
+  createIngestKey,
+  defaultIngestKeyName,
+  fetchIngestKeys,
+  openTelemetryPrompt,
+  type TelemetryIngestKeySummary,
+} from "../ingest-keys-api";
+import { updateOnboardingProgress } from "../onboarding-progress";
 import { useOrganizationCapabilities } from "../organization-capabilities";
 import { homePath } from "../primary-navigation";
 import { planCatalog } from "../plan-catalog";
+import { fetchTelemetrySources, type TelemetrySourceOverview } from "../telemetry-sources-api";
+import { telemetrySourceOptions } from "../telemetry-source-options";
 import { useDocumentTitle } from "../use-document-title";
 import { automationModelProviders } from "../../../../packages/core/src/automations/model-providers";
 import { automationTemplateCategoryLabels } from "./automation-templates";
@@ -25,6 +39,7 @@ import {
   onboardingStepFromPath,
   onboardingStepStages,
   onboardingSteps,
+  onboardingStepsFor,
   planBillingState,
   planChangeConfirmation,
   recommendedTemplates,
@@ -65,15 +80,20 @@ async function fetchPlanBilling(): Promise<PlanBillingState<OnboardingBilling>> 
   return planBillingState(billing);
 }
 
-// Guided setup for a new workspace: connect code and alert sources, choose
-// a plan, then start an automation from a template that fits what is
-// connected. The workspace step runs before the workspace exists, in the
-// authentication gate.
+// Guided setup for a new workspace: connect code, send telemetry, connect
+// alert sources, choose a plan, then start an automation from a template
+// that fits what is connected. The workspace step runs before the workspace
+// exists, in the authentication gate. Every step can be skipped, and the
+// sidebar reopens setup at the step it was left on until it is finished.
 export function OnboardingPage() {
   useDocumentTitle("Set up Superlog");
   const capabilities = useOrganizationCapabilities();
+  const organizationId = authClient.useSession().data?.session.activeOrganizationId ?? null;
   const navigate = useNavigate();
   const { step: stepParameter } = useParams();
+  const steps = onboardingStepsFor(capabilities);
+  const step = onboardingStepFromPath(stepParameter);
+  const shown = capabilities.includes("automations") && stepParameter === step && steps.includes(step);
   const [integrations, setIntegrations] = useState<OnboardingIntegration[] | null>(null);
   const [billing, setBilling] = useState<PlanBillingState<OnboardingBilling> | undefined>(undefined);
   const [retryingBilling, setRetryingBilling] = useState(false);
@@ -93,6 +113,10 @@ export function OnboardingPage() {
     return () => { active = false; };
   }, []);
 
+  useEffect(() => {
+    if (organizationId && shown) updateOnboardingProgress(organizationId, { step });
+  }, [organizationId, shown, step]);
+
   // Reports whether the provider has a connection, for the connect popup.
   const refreshIntegrations = useCallback(async (provider: string, signal?: AbortSignal) => {
     const loaded = await fetchIntegrations(signal);
@@ -102,14 +126,24 @@ export function OnboardingPage() {
 
   if (!capabilities.includes("automations")) return <Navigate replace to={homePath(capabilities)} />;
 
-  const steps = onboardingSteps;
-  const step = onboardingStepFromPath(stepParameter);
   if (stepParameter !== step) return <Navigate replace to={onboardingPath(step)} />;
+  // A step this workspace does not offer, such as telemetry without the
+  // capability, moves on to the next one it does.
+  if (!steps.includes(step)) {
+    const nextOffered = steps.find((candidate) => onboardingSteps.indexOf(candidate) > onboardingSteps.indexOf(step));
+    return <Navigate replace to={nextOffered && nextOffered !== "workspace" ? onboardingPath(nextOffered) : homePath(capabilities)} />;
+  }
   const index = steps.indexOf(step);
   const next = steps[index + 1] as Exclude<OnboardingStep, "workspace"> | undefined;
   const previous = steps[index - 1];
   const finish = homePath(capabilities);
-  const goNext = () => navigate(next ? onboardingPath(next) : finish);
+  const finishSetup = () => {
+    if (organizationId) updateOnboardingProgress(organizationId, { finished: true });
+  };
+  const goNext = () => {
+    if (!next) finishSetup();
+    navigate(next ? onboardingPath(next) : finish);
+  };
   const connected = connectedProviders(integrations ?? []);
 
   const secondaryActions = (
@@ -117,7 +151,9 @@ export function OnboardingPage() {
       {previous && previous !== "workspace" ? (
         <Link className="onboarding__link" to={onboardingPath(previous)}><ArrowLeftIcon aria-hidden="true" size={14} />Back</Link>
       ) : null}
-      {next ? <Link className="onboarding__link onboarding__link--muted" to={finish}>Skip setup</Link> : null}
+      {next ? (
+        <Link className="onboarding__link onboarding__link--muted" title="Finish setup later from the sidebar" to={finish}>Skip setup</Link>
+      ) : null}
     </span>
   );
 
@@ -132,7 +168,7 @@ export function OnboardingPage() {
     );
   }
 
-  if (!integrations || billing === undefined) return <OnboardingLoading step={step} />;
+  if (!integrations || billing === undefined) return <OnboardingLoading step={step} steps={steps} />;
 
   if (step === "code") {
     const github = integrations.find((integration) => integration.id === "github");
@@ -164,6 +200,10 @@ export function OnboardingPage() {
         />
       </OnboardingFrame>
     );
+  }
+
+  if (step === "telemetry") {
+    return <TelemetryStep connected={connected} footerActions={secondaryActions} onContinue={goNext} steps={steps} />;
   }
 
   if (step === "alerts") {
@@ -270,7 +310,7 @@ export function OnboardingPage() {
     <OnboardingFrame
       footer={<>
         {secondaryActions}
-        <Link className="onboarding__link" to={finish}>Go to Superlog<ArrowRightIcon aria-hidden="true" size={14} /></Link>
+        <Link className="onboarding__link" onClick={finishSetup} to={finish}>Go to Superlog<ArrowRightIcon aria-hidden="true" size={14} /></Link>
       </>}
       step={step}
       steps={steps}
@@ -282,7 +322,7 @@ export function OnboardingPage() {
       <ul className="onboarding__templates">
         {recommendations.map(({ missing, providers, template }) => (
           <li key={template.id}>
-            <Link className="onboardingTemplate" to={`/automations/new?template=${template.id}`}>
+            <Link className="onboardingTemplate" onClick={finishSetup} to={`/automations/new?template=${template.id}`}>
               <span className="onboardingTemplate__top">
                 <span className="onboardingTemplate__category">{automationTemplateCategoryLabels[template.category]}</span>
                 <span className="onboardingTemplate__providers">
@@ -311,7 +351,7 @@ export function OnboardingPage() {
           </li>
         ))}
       </ul>
-      <p className="onboarding__note">Or <Link to="/automations">browse all templates</Link> and <Link to="/automations/new">start from scratch</Link>.</p>
+      <p className="onboarding__note">Or <Link onClick={finishSetup} to="/automations">browse all templates</Link> and <Link onClick={finishSetup} to="/automations/new">start from scratch</Link>.</p>
     </OnboardingFrame>
   );
 }
@@ -404,6 +444,188 @@ function ConnectTile({ integration, onConnected, provider }: {
         />
       ) : null}
     </div>
+  );
+}
+
+type TelemetrySourceOption = (typeof telemetrySourceOptions)[number];
+
+const cloudTelemetrySources = telemetrySourceOptions.filter(
+  (option): option is Exclude<TelemetrySourceOption, { id: "opentelemetry" }> => option.id !== "opentelemetry",
+);
+
+// Data from a new ingest key is checked this often until it arrives.
+const TELEMETRY_POLL_MS = 5_000;
+
+type TelemetryState = { keys: TelemetryIngestKeySummary[]; overview: TelemetrySourceOverview };
+
+// Sends logs, traces and metrics to the workspace: an ingest key and a
+// prompt for a coding agent here, or a cloud source on its own setup page,
+// which links back. A workspace in a cell without telemetry continues past.
+function TelemetryStep({ connected, footerActions, onContinue, steps }: {
+  connected: readonly string[];
+  footerActions: ReactNode;
+  onContinue: () => void;
+  steps: readonly OnboardingStep[];
+}) {
+  // Undefined while loading; null when the cell does not accept telemetry.
+  const [state, setState] = useState<TelemetryState | null | undefined>(undefined);
+  const [error, setError] = useState<string | null>(null);
+  const [created, setCreated] = useState<{ id: string; token: string } | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const [keys, overview] = await Promise.all([fetchIngestKeys(), fetchTelemetrySources()]);
+      setState(keys && overview ? { keys, overview } : null);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to load telemetry");
+    }
+  }, []);
+
+  useEffect(() => {
+    void Promise.resolve().then(load);
+  }, [load]);
+
+  const receiving = Boolean(created && state?.keys.find((key) => key.id === created.id)?.lastUsedAt);
+
+  // Shows when the new key first sends data.
+  useEffect(() => {
+    if (!created || receiving) return;
+    let active = true;
+    const timer = window.setInterval(() => {
+      void fetchIngestKeys()
+        .then((keys) => { if (active && keys) setState((current) => current && { ...current, keys }); })
+        .catch(() => undefined);
+    }, TELEMETRY_POLL_MS);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [created, receiving]);
+
+  async function create() {
+    setCreating(true);
+    setError(null);
+    try {
+      const { key, token } = await createIngestKey({ name: defaultIngestKeyName() });
+      setCreated({ id: key.id, token });
+      setState((current) => current && { ...current, keys: [...current.keys, key] });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to create the key");
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  // The key stays in the field, so it can be copied by hand when the
+  // clipboard is unavailable.
+  async function copyKey(token: string) {
+    try {
+      await copyToClipboard(token);
+    } catch {
+      setError("Unable to copy. Select the key and copy it manually.");
+      return;
+    }
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1600);
+  }
+
+  // A cell without telemetry has nothing to skip.
+  const ready = state === null || Boolean(state && (state.keys.length > 0 || state.overview.sources.length > 0));
+  let content: ReactNode;
+  if (state === undefined) {
+    content = error ? (
+      <div>
+        <p className="onboarding__error" role="alert">{error}</p>
+        <button className="onboarding__button" onClick={() => { setError(null); void load(); }} type="button">Try again</button>
+      </div>
+    ) : <CardContentSkeleton label="Loading telemetry…" />;
+  } else if (state === null) {
+    content = <p className="onboarding__note">This workspace cannot receive telemetry in this region yet. Continue without it.</p>;
+  } else {
+    const usedKeys = state.keys.filter((key) => key.lastUsedAt).length;
+    content = (
+      <>
+        <section aria-label="OpenTelemetry" className="onboardingTelemetry">
+          <div className="onboardingCodex__row">
+            <span className="onboardingConnection__logo"><CodeIcon aria-hidden="true" size={20} /></span>
+            <span className="onboardingConnection__body">
+              <strong>OpenTelemetry</strong>
+              <small>
+                {created
+                  ? receiving ? "Your app is sending data." : "Waiting for the first data from your app…"
+                  : usedKeys > 0
+                    ? `${usedKeys} ${usedKeys === 1 ? "ingest key is" : "ingest keys are"} sending data. Create another for a new app.`
+                    : "Create an ingest key and paste a prompt into your coding agent. It adds the SDK to your app."}
+              </small>
+            </span>
+            {created ? (
+              receiving ? <span className="onboarding__connected"><CheckIcon aria-hidden="true" size={14} />Receiving</span> : null
+            ) : (
+              <button className="onboarding__button" disabled={creating} onClick={() => void create()} type="button">
+                {creating ? "Creating…" : "Create ingest key"}
+              </button>
+            )}
+          </div>
+          {error ? <p className="onboarding__error" role="alert">{error}</p> : null}
+          {created ? (
+            <>
+              <div className="onboardingTelemetry__key">
+                <input aria-label="New ingest key" readOnly value={created.token} />
+                <button className="onboarding__button" onClick={() => void copyKey(created.token)} type="button">
+                  {copied ? "Copied" : "Copy key"}
+                </button>
+              </div>
+              <p className="onboarding__note">
+                You can see this key only once. Paste this prompt into Claude Code, Cursor, Codex or another coding agent. It contains the key.
+              </p>
+              <CodeBlock code={openTelemetryPrompt(window.location.origin, created.token)} language="prompt" />
+            </>
+          ) : null}
+        </section>
+        <section aria-label="Cloud providers" className="onboarding__group">
+          <h2>Or read from your cloud, without code changes</h2>
+          <div className="onboarding__tiles">
+            {cloudTelemetrySources.map((option) => {
+              const count = state.overview.sources.filter((source) => source.provider === option.id).length;
+              return (
+                <div className={`onboardingTile${count > 0 ? " isConnected" : ""}`} key={option.id}>
+                  <ProviderGlyph decorative provider={option.id} />
+                  <span className="onboardingTile__body"><strong>{option.title}</strong></span>
+                  {count > 0 ? (
+                    <span className="onboarding__connected"><CheckIcon aria-hidden="true" size={14} />Connected</span>
+                  ) : (
+                    <Link className="onboarding__textButton" to={`/telemetry/setup/${option.id}?from=onboarding`}>Set up</Link>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      </>
+    );
+  }
+
+  return (
+    <OnboardingFrame
+      activeStages={onboardingStepStages.telemetry}
+      connected={connected}
+      footer={<>
+        {footerActions}
+        <button className={ready ? "onboarding__primary" : "onboarding__link"} onClick={onContinue} type="button">
+          {ready ? "Continue" : "Skip for now"}<ArrowRightIcon aria-hidden="true" size={14} />
+        </button>
+      </>}
+      step="telemetry"
+      steps={steps}
+    >
+      <div className="onboarding__intro">
+        <h1>Send your telemetry</h1>
+        <p>Superlog keeps your logs, traces and metrics, groups the errors in them, and reads them when it looks for a cause.</p>
+      </div>
+      {content}
+    </OnboardingFrame>
   );
 }
 

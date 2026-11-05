@@ -65,9 +65,10 @@ export function OnboardingFrame({
 // The setup card while the session, the workspace, or a step's data loads,
 // so the progress stays on screen between steps and after a page load. It
 // has the step's layout, so the card keeps its shape when the step appears.
-export function OnboardingLoading({ step }: { step: OnboardingStep }) {
+// Before the workspace's capabilities load it lists every step.
+export function OnboardingLoading({ step, steps = onboardingSteps }: { step: OnboardingStep; steps?: readonly OnboardingStep[] }) {
   return (
-    <OnboardingFrame activeStages={onboardingStepStages[step]} footer={null} step={step} steps={onboardingSteps}>
+    <OnboardingFrame activeStages={onboardingStepStages[step]} footer={null} step={step} steps={steps}>
       <CardContentSkeleton label="Loading setup…" />
     </OnboardingFrame>
   );

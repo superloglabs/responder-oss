@@ -1,19 +1,27 @@
 import { automationTemplates, type AutomationTemplate } from "./automation-templates";
 import type { PlanCatalog } from "../plan-comparison";
 
-export type OnboardingStep = "workspace" | "code" | "alerts" | "usage" | "templates";
+export type OnboardingStep = "workspace" | "code" | "telemetry" | "alerts" | "usage" | "templates";
 
 export const onboardingStepLabels: Record<OnboardingStep, string> = {
   alerts: "Alerts",
   code: "Code",
+  telemetry: "Telemetry",
   templates: "Go live",
   usage: "Usage",
   workspace: "Workspace",
 };
 
-// Every installation lists the same steps. The usage step offers plans only
-// where billing can change them.
-export const onboardingSteps: readonly OnboardingStep[] = ["workspace", "code", "alerts", "usage", "templates"];
+// Every step in order. The usage step offers plans only where billing can
+// change them. Before the workspace exists its capabilities are unknown, so
+// the workspace step lists them all.
+export const onboardingSteps: readonly OnboardingStep[] = ["workspace", "code", "telemetry", "alerts", "usage", "templates"];
+
+// The steps a workspace sees. Telemetry is offered only with the telemetry
+// capability.
+export function onboardingStepsFor(capabilities: readonly string[]): OnboardingStep[] {
+  return onboardingSteps.filter((step) => step !== "telemetry" || capabilities.includes("telemetry"));
+}
 
 export type OnboardingStage = "alert" | "cause" | "fix";
 
@@ -22,6 +30,7 @@ export type OnboardingStage = "alert" | "cause" | "fix";
 export const onboardingStepStages: Partial<Record<OnboardingStep, OnboardingStage[]>> = {
   alerts: ["alert"],
   code: ["cause", "fix"],
+  telemetry: ["alert", "cause"],
   workspace: [],
 };
 
