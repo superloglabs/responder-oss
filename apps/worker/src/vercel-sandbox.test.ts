@@ -248,11 +248,13 @@ describe("runVercelCommand", () => {
       () => Promise.reject(streamEnded),
       () => Promise.reject(new TypeError("terminated")),
       () => Promise.reject(Object.assign(new Error("bad gateway"), { response: { status: 502 } })),
+      () => Promise.reject(Object.assign(new Error("Body Timeout Error"), { code: "UND_ERR_BODY_TIMEOUT" })),
+      () => Promise.reject(Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNRESET" } })),
       () => Promise.resolve(finished),
     );
     await expect(runVercelCommand(sandbox, { cmd: "/bin/sh" }, noSleep)).resolves.toBe(finished);
     expect(runCommand).toHaveBeenCalledTimes(1);
-    expect(wait).toHaveBeenCalledTimes(4);
+    expect(wait).toHaveBeenCalledTimes(6);
   });
 
   it("does not wait again after a rejected request or a cancellation", async () => {

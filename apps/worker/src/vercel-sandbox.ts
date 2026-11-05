@@ -84,6 +84,7 @@ function isDroppedVercelWait(error: unknown): boolean {
   const cause = error.cause as { code?: unknown } | undefined;
   return error.message === "terminated" ||
     error.message === "fetch failed" ||
+    droppedConnectionCodes.has(String((error as { code?: unknown }).code)) ||
     droppedConnectionCodes.has(String(cause?.code));
 }
 
