@@ -4,7 +4,13 @@ import { describe, expect, it, vi } from "vitest";
 const sdkMocks = vi.hoisted(() => ({ init: vi.fn().mockReturnValue({}) }));
 vi.mock("@superlog/browser", () => sdkMocks);
 
-import { ignoredUrls, SentryTraceHeaderPropagator, startBrowserTelemetry } from "./browser-telemetry";
+import {
+  dropAnonymousCodeErrors,
+  ignoredErrors,
+  ignoredUrls,
+  SentryTraceHeaderPropagator,
+  startBrowserTelemetry,
+} from "./browser-telemetry";
 
 const setter = { set: (carrier: Record<string, string>, key: string, value: string) => { carrier[key] = value; } };
 
@@ -34,6 +40,39 @@ describe("browser telemetry", () => {
     expect(isIgnored("https://superlog.sh.example.com/api")).toBe(true);
   });
 
+  it("ignores errors from wallet scripts the browser injects", () => {
+    const isIgnored = (message: string) => ignoredErrors.some((pattern) => pattern.test(message));
+
+    expect(isIgnored("undefined is not an object (evaluating 'window.ethereum.selectedAddress = undefined')")).toBe(true);
+    expect(isIgnored("Cannot read properties of undefined (reading 'selectedAddress')")).toBe(false);
+    expect(isIgnored("undefined is not an object (evaluating 'window.ethereumConfig.x')")).toBe(false);
+  });
+
+  it("drops errors raised only by code without a script URL, as extensions inject in Firefox", () => {
+    const event = (stacktrace?: string) => ({
+      attributes: {},
+      handled: false,
+      mechanism: "onerror",
+      message: "can't redefine non-configurable property Symbol.hasInstance",
+      stacktrace,
+      type: "TypeError",
+    });
+    const injected = event(
+      "TypeError: can't redefine non-configurable property Symbol.hasInstance\nT@<anonymous code>:1:3540\n@<anonymous code>:1:5823\n@<anonymous code>:1:6860\n",
+    );
+    const ownCode = event(
+      "TypeError: can't redefine non-configurable property Symbol.hasInstance\nT@<anonymous code>:1:3540\nrender@https://superlog.sh/assets/index-D1tcNzxr.js:12:345\n",
+    );
+    const chromium = event(
+      "TypeError: x is not a function\n    at render (https://superlog.sh/assets/index-D1tcNzxr.js:12:345)\n    at Array.map (<anonymous>)",
+    );
+
+    expect(dropAnonymousCodeErrors(injected)).toBeNull();
+    expect(dropAnonymousCodeErrors(ownCode)).toBe(ownCode);
+    expect(dropAnonymousCodeErrors(chromium)).toBe(chromium);
+    expect(dropAnonymousCodeErrors(event())).toEqual(event());
+  });
+
   it("starts error and page-load capture with traces off at a zero sample rate", () => {
     const started = startBrowserTelemetry({
       endpoint: "https://superlog.sh/api/ingest",
@@ -46,7 +85,9 @@ describe("browser telemetry", () => {
 
     expect(started).toBe(true);
     expect(sdkMocks.init).toHaveBeenCalledWith(expect.objectContaining({
+      beforeSend: dropAnonymousCodeErrors,
       endpoint: "https://superlog.sh/api/ingest",
+      ignoreErrors: ignoredErrors,
       ingestKey: "sl_ingest_key",
       service: "responder-web",
       tracesSampleRate: 0,
