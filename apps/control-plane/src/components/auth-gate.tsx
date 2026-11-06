@@ -112,38 +112,45 @@ export function SignIn({
         provider,
       }),
     );
-    // First-time social signups land with this marker so the X signup pixel
-    // fires exactly once, in AuthGate. Stale OAuth parameters are removed so
-    // retries do not accumulate duplicate errors in the return URL.
-    const signupIntent = isCreatingAccount ? crypto.randomUUID() : undefined;
-    const returnUrls = socialAuthUrls(window.location.href, signupIntent);
-    if (isCreatingAccount) {
-      sessionStorage.setItem(
-        explicitSignupStorageKey,
-        `social:${signupIntent}`,
-      );
-    }
-    const result = await authClient.signIn.social({
-      provider,
-      ...returnUrls,
-    });
-    if (result.error || !result.data) {
+    try {
+      // First-time social signups land with this marker so the X signup pixel
+      // fires exactly once, in AuthGate. Stale OAuth parameters are removed so
+      // retries do not accumulate duplicate errors in the return URL.
+      const signupIntent = isCreatingAccount ? crypto.randomUUID() : undefined;
+      const returnUrls = socialAuthUrls(window.location.href, signupIntent);
       if (isCreatingAccount) {
-        sessionStorage.removeItem(explicitSignupStorageKey);
+        sessionStorage.setItem(
+          explicitSignupStorageKey,
+          `social:${signupIntent}`,
+        );
       }
-      console.error(
-        JSON.stringify({
-          event: "social_sign_in_failed",
-          provider,
-          errorCode: authErrorCode(result.error, "missing_data"),
-        }),
-      );
+      const result = await authClient.signIn.social({
+        provider,
+        ...returnUrls,
+      });
+      if (result.error || !result.data) {
+        if (isCreatingAccount) {
+          sessionStorage.removeItem(explicitSignupStorageKey);
+        }
+        console.error(
+          JSON.stringify({
+            event: "social_sign_in_failed",
+            provider,
+            errorCode: authErrorCode(result.error, "missing_data"),
+          }),
+        );
+        setSocialProvider(null);
+        setError(
+          result.error?.message ??
+            `${provider === "google" ? "Google" : "GitHub"} sign in failed`,
+        );
+        return;
+      }
+    } catch {
+      if (isCreatingAccount) sessionStorage.removeItem(explicitSignupStorageKey);
       setSocialProvider(null);
-      setError(
-        result.error?.message ??
-          `${provider === "google" ? "Google" : "GitHub"} sign in failed`,
-      );
-      return;
+      console.error(JSON.stringify({ event: "social_sign_in_failed", provider, errorCode: "network_error" }));
+      setError("Could not connect. Please try again.");
     }
   }
 
@@ -208,10 +215,19 @@ export function SignIn({
       // the auth client follows, so it may not include the new user.
       const signedUpUserId = (result.data as { user?: { id?: string } }).user?.id;
       if (isCreatingAccount && signedUpUserId) {
-        trackRedditSignupPixel(signedUpUserId);
-        trackXSignupPixel(signedUpUserId);
+        for (const track of [trackRedditSignupPixel, trackXSignupPixel]) {
+          try {
+            track(signedUpUserId);
+          } catch {
+            console.error(JSON.stringify({ event: "signup_pixel_failed" }));
+          }
+        }
       }
     } catch {
+      console.error(JSON.stringify({
+        event: isCreatingAccount ? "email_sign_up_failed" : "email_sign_in_failed",
+        errorCode: "network_error",
+      }));
       if (isCreatingAccount) sessionStorage.removeItem(explicitSignupStorageKey);
       setIsSubmitting(false);
       setError("Could not connect. Please try again.");

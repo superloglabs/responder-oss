@@ -11502,7 +11502,7 @@ body:has(.appShell--scans) {
   line-height: 20px;
   text-shadow: 0 .5px .5px #0000004d;
 }
-.authPage .authSubmit:hover:not(:disabled) {
+.authPage .authSubmit:hover:not(:disabled):not(.oauthSecondary) {
   background-color: #373737;
 }
 .authPage .authSwitchPrompt {
