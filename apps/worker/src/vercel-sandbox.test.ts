@@ -257,6 +257,30 @@ describe("runVercelCommand", () => {
     expect(wait).toHaveBeenCalledTimes(6);
   });
 
+  it("logs a wait that outlives the headers timeout as a warning", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const headersTimeout = Object.assign(new TypeError("fetch failed"), {
+      cause: Object.assign(new Error("Headers Timeout Error"), { code: "UND_ERR_HEADERS_TIMEOUT" }),
+    });
+    const { sandbox, wait } = sandboxWithWaits(
+      () => Promise.reject(headersTimeout),
+      () => Promise.resolve(finished),
+    );
+    await expect(runVercelCommand(sandbox, { cmd: "/bin/sh" }, noSleep)).resolves.toBe(finished);
+    expect(wait).toHaveBeenCalledTimes(2);
+    expect(error).not.toHaveBeenCalled();
+    expect(JSON.parse(String(warn.mock.calls[0]?.[0]))).toEqual({
+      attempt: 1,
+      cmdId: "cmd_1",
+      error: "fetch failed",
+      errorCode: "UND_ERR_HEADERS_TIMEOUT",
+      event: "vercel_command_wait_retry",
+    });
+    warn.mockRestore();
+    error.mockRestore();
+  });
+
   it("does not wait again after a rejected request or a cancellation", async () => {
     const rejected = Object.assign(new Error("not found"), { response: { status: 404 } });
     const first = sandboxWithWaits(() => Promise.reject(rejected));
