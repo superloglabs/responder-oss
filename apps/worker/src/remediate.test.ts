@@ -177,6 +177,7 @@ describe("proposed diff remediation", () => {
         "git apply --whitespace=nowarn --recount /home/daytona/workspace/.responder/proposed.patch",
         "git apply --whitespace=nowarn --recount --unidiff-zero /home/daytona/workspace/.responder/proposed.patch",
         "git apply --whitespace=nowarn --recount --unidiff-zero -C3 /home/daytona/workspace/.responder/proposed.patch",
+        "git apply --whitespace=nowarn --recount --unidiff-zero -C3 --ignore-whitespace /home/daytona/workspace/.responder/proposed.patch",
       ].join(" || "),
       maxOutputTokens: 2_000,
       workdir: "/workspace/acme/api",
@@ -383,6 +384,57 @@ describe("proposed diff application with git", () => {
       "-c = 3",
       "+c = 30",
       " d = 4",
+    ].join("\n");
+
+    await expect(applyInRepository(files, diff)).rejects.toThrow(
+      "The proposed diff no longer applies cleanly",
+    );
+  });
+
+  it("applies a diff whose context pads a table cell differently", async () => {
+    const files = {
+      "inventory.md": [
+        "| Name  | Notes     | Source                |",
+        "| ----- | --------- | --------------------- |",
+        "| One   | First     | `app/one.py`          |",
+        "| Two   | Second    | `app/two.py`          |",
+        "| Three | Third     | `app/three.py`        |",
+      ].join("\n") + "\n",
+    };
+    const diff = [
+      "diff --git a/inventory.md b/inventory.md",
+      "--- a/inventory.md",
+      "+++ b/inventory.md",
+      "@@ -2,4 +2,4 @@",
+      " | ----- | --------- | --------------------- |",
+      " | One   | First     | `app/one.py`            |",
+      "-| Two   | Second    | `app/two.py`          |",
+      "+| Two   | Retried   | `app/two.py`          |",
+      " | Three | Third     | `app/three.py`        |",
+    ].join("\n");
+
+    await expect(applyInRepository(files, diff)).resolves.toEqual({
+      "inventory.md": [
+        "| Name  | Notes     | Source                |",
+        "| ----- | --------- | --------------------- |",
+        "| One   | First     | `app/one.py`          |",
+        "| Two   | Retried   | `app/two.py`          |",
+        "| Three | Third     | `app/three.py`        |",
+      ].join("\n") + "\n",
+    });
+  });
+
+  it("still rejects context that differs in more than whitespace", async () => {
+    const files = { "app.py": "a = 1\nb = 2\nc = 3\n" };
+    const diff = [
+      "diff --git a/app.py b/app.py",
+      "--- a/app.py",
+      "+++ b/app.py",
+      "@@ -1,3 +1,3 @@",
+      " a  =  1",
+      "-b = 2",
+      "+b = 20",
+      " c = 4",
     ].join("\n");
 
     await expect(applyInRepository(files, diff)).rejects.toThrow(
