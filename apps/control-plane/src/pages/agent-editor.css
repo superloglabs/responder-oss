@@ -7,25 +7,25 @@
 .agentDetailTabs button { position: relative; padding: 0 0 13px; border: 0; background: transparent; color: #666; font: inherit; font-size: 13px; cursor: pointer; }
 .agentDetailTabs button[aria-selected="true"] { color: #121212; }
 .agentDetailTabs button[aria-selected="true"]::after { content: ""; position: absolute; height: 2px; bottom: -1px; left: 0; right: 0; background: #4e58f9; }
-.agentInputPanel { display: flex; flex-direction: column; gap: 16px; padding: 16px; background: #fff; border: 1px solid #e3e3e3; border-radius: 8px; }
-.agentInputHeader { display: flex; align-items: center; gap: 10px; padding-bottom: 14px; border-bottom: 1px solid #eee; font-size: 13px; line-height: 18px; }
-.agentInputHeader > span { color: #666; font-size: 12px; }
+.agentInputPanel { display: flex; flex-direction: column; gap: 16px; padding: 16px; background: var(--ds-surface-base); border: 1px solid var(--ds-border-default); border-radius: 8px; }
+.agentInputHeader { display: flex; align-items: center; gap: 10px; padding-bottom: 14px; border-bottom: 1px solid var(--issues-hairline-soft); font-size: 13px; line-height: 18px; }
+.agentInputHeader > span { color: var(--ds-text-muted); font-size: 12px; }
 .agentTriggerPicker { position: relative; }
-.agentTriggerPicker summary { display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none; color: #121212; }
+.agentTriggerPicker summary { display: flex; align-items: center; gap: 8px; cursor: pointer; list-style: none; color: var(--issues-nav-active-text); }
 .agentTriggerPicker summary::-webkit-details-marker { display: none; }
-.agentTriggerPicker__menu { position: absolute; z-index: 20; top: calc(100% + 12px); left: -30px; width: 350px; max-width: calc(100vw - 70px); display: flex; flex-direction: column; padding: 6px; border: 1px solid #e3e3e3; border-radius: 10px; background: #fff; box-shadow: 0 8px 24px #00000014; }
-.agentTriggerPicker__menu > strong { padding: 8px; font-size: 12px; font-weight: 500; color: #666; }
-.agentTriggerPicker__menu button { display: flex; align-items: center; gap: 10px; padding: 12px 8px; width: 100%; border: 0; border-radius: 6px; background: transparent; text-align: left; color: #202020; cursor: pointer; }
-.agentTriggerPicker__menu button:hover { background: #f6f6f6; }
+.agentTriggerPicker__menu { position: absolute; z-index: 20; top: calc(100% + 12px); left: -30px; width: 350px; max-width: calc(100vw - 70px); display: flex; flex-direction: column; padding: 6px; border: 1px solid var(--ds-border-default); border-radius: 10px; background: var(--ds-surface-overlay); box-shadow: 0 8px 24px #00000014; }
+.agentTriggerPicker__menu > strong { padding: 8px; font-size: 12px; font-weight: 500; color: var(--ds-text-muted); }
+.agentTriggerPicker__menu button { display: flex; align-items: center; gap: 10px; padding: 12px 8px; width: 100%; border: 0; border-radius: 6px; background: transparent; text-align: left; color: var(--issues-strong-text); cursor: pointer; }
+.agentTriggerPicker__menu button:hover { background: var(--issues-icon-well); }
 .agentTriggerPicker__menu button > span:not(.providerMark) { display: flex; flex: 1; flex-direction: column; gap: 3px; }
 .agentTriggerPicker__menu b { font-size: 13px; font-weight: 400; }
-.agentTriggerPicker__menu small { font-size: 12px; color: #666; }
+.agentTriggerPicker__menu small { font-size: 12px; color: var(--ds-text-muted); }
 .agentTriggerPicker__menu .isConnected { color: #2c805e; }
 .appShell--workspace.appShell--create .agentInputPanel .connectedSetup { display: flex; flex-direction: column; align-items: stretch; gap: 12px; padding: 0; border: 0; border-radius: 0; background: transparent; }
 .appShell--workspace.appShell--create .agentInputPanel .connectedSetup > .providerMark { display: none; }
 .appShell--workspace.appShell--create .connectedSetup--channel > .dsCheckbox { border-top: 1px solid #f0f0f0; padding-top: 12px; }
 .appShell--workspace.appShell--create .createField { max-width: none; }
-.appShell--workspace.appShell--create .createField :is(.dsSelect__trigger, .channelPicker__trigger) { height: 32px; min-height: 32px; padding: 6px 10px; font-size: 13px; line-height: 18px; background: #fff; border: 1px solid #ddd; border-radius: 6px; color: #202020; }
+.appShell--workspace.appShell--create .createField :is(.dsSelect__trigger, .channelPicker__trigger) { height: 32px; min-height: 32px; padding: 6px 10px; font-size: 13px; line-height: 18px; background: var(--ds-surface-base); border: 1px solid var(--ds-border-strong); border-radius: 6px; color: var(--issues-strong-text); }
 .appShell--workspace.appShell--create .projectPicker { display: flex; flex-direction: column; gap: 10px; font-size: 13px; }
 .appShell--workspace.appShell--create .projectPicker > div { display: flex; flex-wrap: wrap; gap: 24px; }
 .appShell--workspace.appShell--create .createChoiceGrid { display: flex; flex-direction: column; gap: 8px; }
