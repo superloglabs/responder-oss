@@ -9,7 +9,8 @@ For a newly created local workspace, set
 This setting does not modify existing workspaces. Hosted operators can use the
 Signal capability switch in the private admin's organization table.
 
-Signal takes precedence in the sidebar: Setup, Findings, Usage, and Settings.
+Signal takes precedence in the sidebar: Setup, Findings, and Usage under Signal,
+with Settings in a separate Workspace group.
 Automations and telemetry are not displayed for these workspaces. Existing
 server authorization for other product areas remains unchanged; this UI flag
 does not grant API access.
@@ -36,4 +37,3 @@ Account/workspace actions continue to use the existing application behavior.
 `pnpm exec playwright test signal.spec.ts` covers capability-off direct access,
 the complete setup flow without writes, filtering/pagination, copy and restore,
 usage periods, keyboard account navigation, and mobile layout.
-

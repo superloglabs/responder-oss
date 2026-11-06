@@ -48,4 +48,3 @@ export function PeriodSelect({ days, onChange }: { days: number; onChange: (days
 export function Severity({ level }: { level: 2 | 3 }) {
   return <span className={`signalSeverity signalSeverity--${level}`}><i />SEV-{level}</span>;
 }
-

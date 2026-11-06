@@ -70,4 +70,3 @@ export const sampleFindings: Finding[] = [...dailyFindings].reverse().flatMap((d
 export function findingPrompt(finding: Finding) {
   return `Investigate ${finding.id}: ${finding.title}\n\nImpact: ${finding.summary}\n\nRoot cause: ${finding.cause}\n\nService: ${finding.service}\nSource: Datadog\n\nVerify the evidence and propose a fix with tests.`;
 }
-

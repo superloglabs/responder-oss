@@ -29,4 +29,3 @@ function SignalWorkspace() {
     </AppShell>
   </SignalContext.Provider>;
 }
-

@@ -125,4 +125,3 @@ test("mobile setup, detail, and navigation fit the viewport", async ({ page }) =
   await expect(page.getByRole("heading", { name: "Evidence" })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
-

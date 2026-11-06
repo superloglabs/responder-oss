@@ -69,4 +69,3 @@ export function SignalFindingDetail() {
     </div>
   </article>;
 }
-

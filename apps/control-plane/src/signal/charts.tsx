@@ -42,4 +42,3 @@ export function SignalChart({ title, points, max, unit = "", line = false, thres
 export function ChartLegend({ label, value, neutral = false, suffix }: { label: string; value: string | number; neutral?: boolean; suffix?: string }) {
   return <div className="signalLegend"><i className={`signalSwatch${neutral ? " signalSwatch--neutral" : ""}`} /><span>{label}</span><strong>{value}{suffix && <small> {suffix}</small>}</strong></div>;
 }
-

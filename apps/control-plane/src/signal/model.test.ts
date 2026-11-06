@@ -30,4 +30,3 @@ describe("Signal preview", () => {
     expect(periodData(30).reduce((n, p) => n + p.total, 0)).toBe(42);
   });
 });
-
