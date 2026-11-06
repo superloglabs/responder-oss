@@ -29,7 +29,7 @@ export function SignalChart({ title, points, max, unit = "", line = false, thres
         </svg>
         <div className="signalChartTargets">{points.map((p, i) => <button key={p.label} type="button" aria-label={`${p.label}: ${p.value}${unit}${p.accepted === undefined ? "" : `, ${p.accepted} accepted`}`} onFocus={() => setHovered(i)} onBlur={() => setHovered(null)} onMouseEnter={() => setHovered(i)} onMouseLeave={() => setHovered(null)} onKeyDown={(e) => { if (e.key === "Escape") setHovered(null); }} />)}</div>
         <div className="signalChartDates">{points.map((p, i) => <span key={p.label}>{points.length <= 7 || i % Math.ceil(points.length / 7) === 0 || i === points.length - 1 ? p.label : ""}</span>)}</div>
-        {point && <div className="signalChartTooltip" role="tooltip" style={{ left: `${Math.min(75, Math.max(0, (hovered ?? 0) / points.length * 100))}%` }}>
+        {point && <div className="signalChartTooltip" role="tooltip" style={{ left: `max(0px, min(${(hovered ?? 0) / points.length * 100}%, calc(100% - 202px)))` }}>
           {point.accepted !== undefined && <div><i className="signalSwatch signalSwatch--neutral" />Not yet accepted<strong>{point.value - point.accepted}</strong></div>}
           <div><i className="signalSwatch" />{point.accepted === undefined ? title : "Accepted"}<strong>{point.accepted ?? point.value}{unit}</strong></div>
           <small>{point.label}</small>

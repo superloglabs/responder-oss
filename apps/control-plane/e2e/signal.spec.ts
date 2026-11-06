@@ -112,6 +112,35 @@ test("account menu matches sidebar and supports keyboard navigation", async ({ p
   await expect(page.getByRole("menu")).toHaveCount(0);
 });
 
+test("keeps the last chart tooltip inside a narrow desktop chart", async ({ page }) => {
+  await workspace(page);
+  await page.setViewportSize({ width: 1100, height: 900 });
+  await page.goto("/signal/findings/SIG-042");
+  const chart = page.locator(".signalChart").first();
+  await chart.getByRole("button").last().focus();
+  const tooltip = await chart.getByRole("tooltip").boundingBox();
+  const canvas = await chart.locator(".signalChartCanvas").boundingBox();
+  expect(tooltip).not.toBeNull();
+  expect(canvas).not.toBeNull();
+  expect(tooltip!.x).toBeGreaterThanOrEqual(canvas!.x);
+  expect(tooltip!.x + tooltip!.width).toBeLessThanOrEqual(canvas!.x + canvas!.width + 1);
+});
+
+test("Signal workspace settings do not load unrelated product APIs", async ({ page }) => {
+  await workspace(page);
+  await page.route("**/api/auth/organization/get-active-member", (route) => route.fulfill({ json: { id: "member-id", role: "admin" } }));
+  const unrelated: string[] = [];
+  page.on("request", (request) => {
+    const path = new URL(request.url()).pathname;
+    if (/^\/api\/(billing|telemetry|sandbox|integrations\/github\/pull-request-author)/.test(path)) unrelated.push(path);
+  });
+  await page.goto("/settings/workspace");
+  await expect(page.getByRole("heading", { name: "Invite a teammate" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Settings sections" }).getByRole("link")).toHaveText(["Workspace"]);
+  await expect(page.getByRole("group", { name: "Workspace", exact: true }).getByRole("link")).toHaveText(["Settings"]);
+  expect(unrelated).toEqual([]);
+});
+
 test("mobile setup, detail, and navigation fit the viewport", async ({ page }) => {
   await workspace(page);
   await page.setViewportSize({ width: 390, height: 844 });

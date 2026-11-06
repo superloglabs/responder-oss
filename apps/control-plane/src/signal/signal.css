@@ -148,7 +148,7 @@
 .signalChartTargets { display: flex; position: absolute; inset: 0 0 auto; height: 88px; }
 .signalChartTargets button { flex: 1; min-width: 0; padding: 0; border: 0; border-radius: 0; background: transparent; }
 .signalChartTargets button:hover, .signalChartTargets button:focus-visible { background: #00000004; outline-offset: -2px; }
-.signalChartTooltip { pointer-events: none; position: absolute; z-index: 2; top: 0; width: 202px; border: .5px solid #dcdcdc; border-radius: 6px; background: #fafafa; box-shadow: 0 1px 2px #0000001a; font-size: 11px; color: #666; }
+.signalChartTooltip { pointer-events: none; position: absolute; z-index: 2; top: 0; width: min(202px, 100%); border: .5px solid #dcdcdc; border-radius: 6px; background: #fafafa; box-shadow: 0 1px 2px #0000001a; font-size: 11px; color: #666; }
 .signalChartTooltip > div { display: flex; align-items: center; gap: 8px; padding: 4px 8px; }
 .signalChartTooltip strong { margin-left: auto; font-weight: 400; color: #121212; }
 .signalChartTooltip > small { display: block; border-top: .5px solid #e8e8e8; padding: 3px 8px; font-size: 10px; }

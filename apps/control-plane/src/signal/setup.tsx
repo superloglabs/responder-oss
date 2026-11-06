@@ -3,22 +3,23 @@ import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { IconCheck, IconSearch } from "@tabler/icons-react";
 import { Button } from "../design-system";
 import { useDocumentTitle } from "../use-document-title";
+import { providerDisplayName } from "../components/provider-glyphs";
 import { useSignalPreview } from "./model";
 import { ConnectionRow, SignalDialog, SignalLogo } from "./shared";
 
 const telemetry = [
-  { provider: "datadog", name: "Datadog", description: "80% data completeness" },
-  { provider: "sentry", name: "Sentry", description: "90% data completeness" },
-  { provider: "grafana", name: "Grafana", description: "80% data completeness" },
+  { provider: "datadog", name: providerDisplayName("datadog"), description: "80% data completeness" },
+  { provider: "sentry", name: providerDisplayName("sentry"), description: "90% data completeness" },
+  { provider: "grafana", name: providerDisplayName("grafana"), description: "80% data completeness" },
   { provider: "otel", name: "OpenTelemetry", description: "100% data completeness" },
-  { provider: "aws", name: "AWS CloudWatch", description: "90% data completeness" },
+  { provider: "aws", name: `${providerDisplayName("aws")} CloudWatch`, description: "90% data completeness" },
 ];
 const context = [
-  { provider: "linear", name: "Linear", description: "Issues, priorities, and work already in progress" },
+  { provider: "linear", name: providerDisplayName("linear"), description: "Issues, priorities, and work already in progress" },
   { provider: "jira", name: "Jira", description: "Tickets, project history, and known issues" },
-  { provider: "posthog", name: "PostHog", description: "Product usage and customer impact" },
-  { provider: "aws-context", name: "AWS", description: "Infrastructure and resource context" },
-  { provider: "gcp", name: "Google Cloud", description: "Infrastructure and resource context" },
+  { provider: "posthog", name: providerDisplayName("posthog"), description: "Product usage and customer impact" },
+  { provider: "aws-context", name: providerDisplayName("aws"), description: "Infrastructure and resource context" },
+  { provider: "gcp", name: providerDisplayName("gcp"), description: "Infrastructure and resource context" },
 ];
 const steps = ["telemetry", "code", "repositories", "slack", "context", "plan"] as const;
 const headings = ["Connect your telemetry", "Connect your GitHub organization", "Select your repositories", "Connect Slack", "Add more context", "Choose your plan"];
@@ -72,8 +73,8 @@ export function SignalSetup() {
       </div>
     </div>}
     {index === 3 && <div className="signalConnections signalSlack">
-      <ConnectionRow provider="slack" name="Slack" description={connected("slack") ? "Acme" : "Connect your workspace"}
-        connected={connected("slack")} onConnect={() => connect("slack")} onManage={() => setManaging({ provider: "slack", name: "Slack" })} connectedActionLabel="Change workspace" />
+      <ConnectionRow provider="slack" name={providerDisplayName("slack")} description={connected("slack") ? "Acme" : "Connect your workspace"}
+        connected={connected("slack")} onConnect={() => connect("slack")} onManage={() => setManaging({ provider: "slack", name: providerDisplayName("slack") })} connectedActionLabel="Change workspace" />
       <div className="signalSlackFields"><div className="signalField">
         <label htmlFor="signal-findings-channel"><strong>Findings channel</strong><span>Issues that need your attention.</span></label>
         <select id="signal-findings-channel" aria-label="Findings channel" disabled={!connected("slack")} value={preview.channel} onChange={(e) => setPreview((state) => ({ ...state, channel: e.target.value }))}>

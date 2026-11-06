@@ -8,6 +8,7 @@ import { SettingsHeading } from "../components/settings-heading";
 import { MemberListSkeleton } from "../components/screen-skeletons";
 import { SelectField, Switch, TextAreaField, type SelectOption } from "../design-system";
 import { useDocumentTitle } from "../use-document-title";
+import { useOrganizationCapabilities } from "../organization-capabilities";
 import {
   teamPlanDescription,
   teamPlanRequiredCode,
@@ -77,6 +78,7 @@ interface WorkspaceBilling {
 
 export function WorkspaceSettingsPage() {
   useDocumentTitle("Workspace settings");
+  const signal = useOrganizationCapabilities().includes("signal");
   const session = authClient.useSession();
   const organization = authClient.useActiveOrganization();
   const activeMember = authClient.useActiveMember();
@@ -97,7 +99,7 @@ export function WorkspaceSettingsPage() {
   const [teamPlan, setTeamPlan] = useState<TeamPlan | null>(null);
 
   useEffect(() => {
-    if (!isAdmin || !organizationId) return;
+    if (signal || !isAdmin || !organizationId) return;
     let active = true;
     // Without the billing summary the form stays, and a refused invitation
     // still offers Team.
@@ -113,7 +115,7 @@ export function WorkspaceSettingsPage() {
     return () => {
       active = false;
     };
-  }, [isAdmin, organizationId]);
+  }, [signal, isAdmin, organizationId]);
 
   async function invite(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -490,9 +492,11 @@ export function WorkspaceSettingsPage() {
           </div>
         ) : null}
 
-        <PullRequestAuthorSection currentUserId={session.data?.user.id} />
-        <SandboxImageSection />
-        <SandboxNetworkSection />
+        {!signal && <>
+          <PullRequestAuthorSection currentUserId={session.data?.user.id} />
+          <SandboxImageSection />
+          <SandboxNetworkSection />
+        </>}
       </section>
     </AppShell>
   );
