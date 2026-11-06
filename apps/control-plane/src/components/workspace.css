@@ -37,6 +37,8 @@
   --issues-selected: #f7f7ff;
   --issues-run-failed: #b44545;
   --issues-card-hover-line: #d6d6d6;
+  --issues-note: #8a8a8a;
+  --issues-strong-on: #fff;
   --background: var(--issues-canvas);
   --foreground: var(--issues-text);
   --surface: var(--issues-row);
@@ -94,6 +96,8 @@
   --issues-selected: #10171c;
   --issues-run-failed: #cf9793;
   --issues-card-hover-line: rgb(52 52 52);
+  --issues-note: #8b8b86;
+  --issues-strong-on: rgb(7 7 7);
   --ds-surface-hover: #232323;
   color-scheme: dark;
 }
@@ -129,12 +133,12 @@
 .appShell--workspace .primaryNav__label { padding: 4px 8px; color: var(--issues-nav-label); font-size: 11px; font-weight: 500; line-height: 16px; letter-spacing: .02em; }
 .appShell--workspace .globalHeader__right { margin-top: auto; flex-direction: column; align-items: stretch; flex-shrink: 0; gap: 12px; padding-top: 12px; }
 .telemetryCallCard { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 12px; border: 1px solid var(--issues-popover-line); border-radius: 12px; background: var(--issues-popover); box-shadow: 0 1px 2px #0000000d; }
-.telemetryCallCard__dismiss { position: absolute; top: 8px; right: 8px; display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--issues-faint); cursor: pointer; }
+.telemetryCallCard__dismiss { position: absolute; top: 8px; right: 8px; display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--issues-note); cursor: pointer; }
 .telemetryCallCard__dismiss:hover { background: var(--issues-chip); color: var(--issues-strong-text); }
 .telemetryCallCard__eyebrow { padding: 1px 8px; border: 1px solid var(--issues-nav-active); border-radius: 999px; background: var(--issues-header); color: var(--issues-nav-text); font-size: 11px; font-weight: 500; line-height: 16px; }
 .telemetryCallCard__title { margin: 2px 0 0; padding-right: 16px; color: var(--issues-strong-text); font-size: 13px; font-weight: 600; line-height: 18px; text-wrap: balance; }
 .telemetryCallCard__body { margin: 0; color: var(--ds-text-muted); font-size: 12px; line-height: 17px; }
-.telemetryCallCard__action { display: flex; align-items: center; justify-content: center; gap: 6px; align-self: stretch; height: 32px; margin-top: 4px; border-radius: 8px; background: var(--issues-strong-text); color: var(--issues-canvas); font-size: 12px; font-weight: 500; text-decoration: none; }
+.telemetryCallCard__action { display: flex; align-items: center; justify-content: center; gap: 6px; align-self: stretch; height: 32px; margin-top: 4px; border-radius: 8px; background: var(--issues-strong-text); color: var(--issues-strong-on); font-size: 12px; font-weight: 500; text-decoration: none; }
 .telemetryCallCard__action:hover { background: var(--issues-strong-hover); }
 .telemetryCallCard :is(.telemetryCallCard__dismiss, .telemetryCallCard__action):focus-visible { outline: 2px solid var(--issues-focus); outline-offset: 2px; }
 @media (max-height: 560px) { .telemetryCallCard { display: none; } }
@@ -146,7 +150,7 @@
 .sidebarUsage__subscription { display: flex; flex-direction: column; gap: 10px; }
 .sidebarUsage__subscription + .sidebarUsage__subscription { padding-top: 10px; border-top: 1px solid var(--issues-nav-hover); }
 .sidebarUsage__meter { display: flex; flex-direction: column; gap: 6px; }
-.sidebarUsage__note { color: var(--issues-faint); font-size: 11px; line-height: 14px; }
+.sidebarUsage__note { color: var(--issues-note); font-size: 11px; line-height: 14px; }
 .sidebarUsage__row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; color: var(--ds-text-muted); font-size: 12px; line-height: 16px; }
 .sidebarUsage__amount { color: var(--issues-strong-text); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .sidebarUsage__bar { display: block; height: 4px; overflow: hidden; border-radius: 999px; background: var(--issues-nav-hover); }
