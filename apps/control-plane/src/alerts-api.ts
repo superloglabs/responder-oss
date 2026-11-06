@@ -102,6 +102,8 @@ export function fetchAlertActivationChart(alertId: string, activationId: string)
 export interface AlertForm {
   aggregation: AlertAggregation;
   comparator: AlertComparator;
+  // Posted with the firing message.
+  description: string;
   enabled: boolean;
   // Filter fields the form does not edit, kept from a copied Superlog alert.
   extraFilter: Pick<AlertFilter, "minDurationMs" | "spanName" | "statusCode">;
@@ -132,6 +134,7 @@ export function emptyAlertForm(): AlertForm {
   return {
     aggregation: "count",
     comparator: "gt",
+    description: "",
     enabled: true,
     extraFilter: {},
     field: "",
@@ -158,6 +161,7 @@ export function alertForm(alert: TelemetryAlert): AlertForm {
   return {
     aggregation: alert.aggregation,
     comparator: alert.comparator,
+    description: alert.description ?? "",
     enabled: alert.enabled,
     extraFilter: {
       ...(minDurationMs !== undefined ? { minDurationMs } : {}),
@@ -227,6 +231,7 @@ export function alertRequest(form: AlertForm): { error: string } | { body: Alert
       aggregation:
         form.source === "metric" ? (form.aggregation === "sum" ? "sum" : "avg") : form.aggregation,
       comparator: form.comparator,
+      description: form.description.trim() || null,
       enabled: form.enabled,
       evaluationIntervalSeconds: form.intervalSeconds,
       field: measured ? form.field : null,

@@ -25,7 +25,7 @@ import { AlertFilters } from "../components/alert-filters";
 import { AlertChart } from "../components/alert-chart";
 import { useAlertPreview } from "../use-alert-preview";
 import { DashboardDialog } from "../components/dashboard-dialog";
-import { Button, IconButton, SegmentedControl, SelectField, Switch, TextField } from "../design-system";
+import { Button, IconButton, SegmentedControl, SelectField, Switch, TextAreaField, TextField } from "../design-system";
 import {
   aiGroupFields,
   aiMeasureFields,
@@ -452,6 +452,15 @@ export function AlertPage() {
               ) : (
                 <p className="dashboardDialog__hint">Posts when the alert fires, and replies in the thread when it recovers.</p>
               )}
+              <TextAreaField
+                hint="Posted with the alert when it fires. Markdown and links work."
+                label="Description"
+                maxLength={2_000}
+                onChange={(event) => update({ description: event.target.value })}
+                placeholder="What this means, what to check first, or a runbook link"
+                rows={4}
+                value={form.description}
+              />
               </div>
             </section>
           </form>

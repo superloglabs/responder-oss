@@ -186,7 +186,7 @@ describe("Slack workspace tools", () => {
 
   it("refuses to save or enable a model the workspace's plan does not cover", async () => {
     const { call, dependencies } = workspaceTools();
-    dependencies.modelRefusal.mockResolvedValue("This workspace's plan runs automations on the Per-run model.");
+    dependencies.modelRefusal.mockResolvedValue("This workspace's plan runs automations on the Plan model.");
 
     await expect(call("update_automation", {
       automationId: ids.automation,
@@ -194,14 +194,14 @@ describe("Slack workspace tools", () => {
       description: null,
       enabled: true,
       name: null,
-    })).resolves.toContain("Per-run model");
+    })).resolves.toContain("Plan model");
     await expect(call("update_automation", {
       automationId: ids.automation,
-      configuration: JSON.stringify({ model: "claude-opus-5.5" }),
+      configuration: JSON.stringify({ model: "model-b" }),
       description: null,
       enabled: null,
       name: null,
-    })).resolves.toContain("Per-run model");
+    })).resolves.toContain("Plan model");
     expect(dependencies.modelRefusal).toHaveBeenCalledWith("organization-1", automationConfiguration);
     expect(dependencies.setAutomationEnabled).not.toHaveBeenCalled();
     expect(dependencies.updateAutomation).not.toHaveBeenCalled();

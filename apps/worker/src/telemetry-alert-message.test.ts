@@ -13,4 +13,16 @@ describe("alert image layout", () => {
     ]);
     expect(result.after).toEqual([{ type: "markdown", text: "[View alert](https://example.com/alerts/1)" }]);
   });
+
+  it("adds the description under the summary", () => {
+    const result = alertImageLayout({
+      alertDescription: "See the [runbook](https://example.com/runbook). <!here>",
+      alertName: "Worker errors", alertUrl: null, groupBy: null, groupKey: "",
+      rule: { aggregation: "count", comparator: "gt", threshold: 0, field: null, filter: { severity: "error" }, metricName: null, source: "logs", windowMinutes: 5 }, value: 2,
+    });
+    expect(result.before[1]).toEqual({
+      type: "markdown",
+      text: "**Worker errors**\n\n2 errors in the last 5 minutes.\n\nSee the [runbook](https://example.com/runbook). &lt;!here&gt;",
+    });
+  });
 });

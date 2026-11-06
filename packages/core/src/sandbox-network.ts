@@ -1,18 +1,51 @@
 import { z } from "zod";
 
 // A workspace's sandboxes either have open outbound access or reach only an
-// allowlist. Superlog's own host, which serves the model broker and context
-// servers, and each mounted secret's hosts are always on that list, so a run
-// keeps working however short the workspace's list is.
+// allowlist, which is the default. Superlog's own host, which serves the model
+// broker and context servers, and each mounted secret's hosts are always on
+// that list, so a run keeps working however short the workspace's list is.
 
 export interface SandboxNetworkSettings {
   restricted: boolean;
   allowedDomains: string[];
 }
 
+// The list a workspace starts with: package registries, their installers and
+// CDNs, Debian's package mirrors, and GitHub, so agents can install tools and
+// dependencies and read public code. OpenCode also installs its model
+// provider package from npm when a run starts, and a Daytona sandbox without a
+// snapshot installs its tools with apt and Bun's installer.
+export const defaultSandboxAllowedDomains = [
+  "registry.npmjs.org",
+  "registry.yarnpkg.com",
+  "nodejs.org",
+  "unpkg.com",
+  "cdn.jsdelivr.net",
+  "pypi.org",
+  "files.pythonhosted.org",
+  "bootstrap.pypa.io",
+  "astral.sh",
+  "bun.sh",
+  "proxy.golang.org",
+  "sum.golang.org",
+  "crates.io",
+  "index.crates.io",
+  "static.crates.io",
+  "rubygems.org",
+  "repo.maven.apache.org",
+  "repo1.maven.org",
+  "jsr.io",
+  "deb.debian.org",
+  "security.debian.org",
+  "github.com",
+  "api.github.com",
+  "codeload.github.com",
+  "*.githubusercontent.com",
+];
+
 export const defaultSandboxNetworkSettings: SandboxNetworkSettings = {
-  restricted: false,
-  allowedDomains: [],
+  restricted: true,
+  allowedDomains: defaultSandboxAllowedDomains,
 };
 
 // Daytona accepts up to 100 domains in all, Superlog's host and the secrets'

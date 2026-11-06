@@ -261,7 +261,15 @@ export function createAlertRoutes(dependencies: AlertRouteDependencies = default
       if (!granted.ok) return context.json({ error: granted.error }, granted.status);
       const alertId = idSchema.safeParse(context.req.param("alertId"));
       if (!alertId.success) return context.json(notFound, 404);
-      const body = alertUpdateSchema.safeParse(await jsonBody(context.req.raw));
+      const input = await jsonBody(context.req.raw);
+      // A replacement from a page loaded before descriptions existed keeps
+      // the alert's description.
+      if (input && typeof input === "object" && !("description" in input)) {
+        const current = await dependencies.findAlert(granted.organizationId, alertId.data);
+        if (!current) return context.json(notFound, 404);
+        Object.assign(input, { description: current.description });
+      }
+      const body = alertUpdateSchema.safeParse(input);
       if (!body.success) return context.json({ error: body.error.issues[0]?.message ?? "Invalid alert" }, 400);
       const problem = await slackProblem(granted.organizationId, body.data.slack);
       if (problem) return context.json({ error: problem }, 400);

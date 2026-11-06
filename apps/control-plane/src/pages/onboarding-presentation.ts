@@ -48,6 +48,14 @@ export function connectedProviders(integrations: ReadonlyArray<{ id: string; sta
   return integrations.filter((integration) => integration.state === "connected").map((integration) => integration.id);
 }
 
+// A connection that leaves for the provider's site comes back with its result
+// in the URL. This is the message for one that failed or was cancelled.
+export function returnedConnectionError(search: string, provider: string): string | null {
+  const params = new URLSearchParams(search);
+  if (params.get("integration") !== provider || params.get("status") !== "error") return null;
+  return params.get("reason") === "cancelled" ? "The connection was cancelled." : "The connection could not be completed.";
+}
+
 export function formatPlanPrice(value: number): string {
   return Number.isInteger(value) ? `$${value}` : `$${value.toFixed(2)}`;
 }
@@ -63,7 +71,7 @@ export function planChangeConfirmation(plan: { name: string; price: number }, cu
 // Integrations offered on the alerts step, grouped by what they tell the
 // agent: where errors and alerts come from, and where the team discusses them.
 export const onboardingAlertSources = [
-  { label: "Errors and monitoring", providers: ["sentry", "datadog", "grafana"] },
+  { label: "Errors and monitoring", providers: ["sentry", "datadog", "grafana", "posthog"] },
   { label: "Team chat", providers: ["slack", "discord"] },
 ] as const;
 

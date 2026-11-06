@@ -27,7 +27,7 @@ const PROTOCOL_VERSION = "2025-03-26";
 export function grafanaCloudContextServer(input: {
   accessToken: () => Promise<string>;
   accountId: string;
-  fetch: (input: string, init: RequestInit) => Promise<Response>;
+  fetch: ManagedMcpServer["fetch"];
   mcpUrl: string;
   now: () => number;
 }): ManagedMcpServer {

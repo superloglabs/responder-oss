@@ -27,6 +27,7 @@ function harness() {
     meter: vi.fn(() => meter),
     prepare: vi.fn().mockResolvedValue(undefined),
     replaceSecrets: vi.fn().mockResolvedValue(undefined),
+    runStartCommand: vi.fn().mockResolvedValue(undefined),
   };
   return { client, dependencies, meter, session };
 }

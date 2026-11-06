@@ -1,7 +1,8 @@
 import { z } from "zod";
 import {
+  automationConfigurationHarnessSchema,
+  automationConfigurationModelProviderSchema,
   automationConfigurationSchema,
-  automationHarnessSchema,
   automationModelProviderSchema,
   automationNotificationSchema,
   automationTriggerSchema,
@@ -127,12 +128,12 @@ export const automationConfigurationOutputSchema = z
   .object({
     contextAccountIds: z.array(z.uuid())
       .describe("Integration accounts the agent can read from, besides GitHub."),
-    harness: automationHarnessSchema.describe("The agent program that runs the model."),
+    harness: automationConfigurationHarnessSchema.describe("The agent program that runs the model."),
     maxModelRequests: z.number().int().describe("Most model requests in one run."),
     maxOutputTokensPerRequest: z.number().int(),
     maxRuntimeSeconds: z.number().int(),
     model: z.string(),
-    modelProvider: automationModelProviderSchema,
+    modelProvider: automationConfigurationModelProviderSchema,
     notifications: z.array(automationNotificationSchema)
       .describe("Slack channels that receive the result of scheduled, Sentry, Axiom, SigNoz, Honeycomb, Better Stack, and GitHub runs."),
     prompt: z.string().describe("The agent instructions."),
@@ -229,11 +230,11 @@ const automationSummarySchema = z
     createdAt: timestamp("When the automation was created."),
     description: z.string(),
     enabled: z.boolean(),
-    harness: automationHarnessSchema,
+    harness: automationConfigurationHarnessSchema,
     id: id("Automation ID."),
     lastRun: lastRunSchema.nullable(),
     model: z.string(),
-    modelProvider: automationModelProviderSchema,
+    modelProvider: automationConfigurationModelProviderSchema,
     name: z.string(),
     triggers: z.array(automationTriggerSchema),
     updatedAt: timestamp("When the automation was last changed."),

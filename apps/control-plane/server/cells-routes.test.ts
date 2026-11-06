@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { verifyBearerToken } from "../../../packages/core/src/auth/internal.js";
 import { app } from "./app.js";
 
 describe("cell directory route", () => {
@@ -40,6 +41,42 @@ describe("cell directory route", () => {
       cookieDomain: null,
       current: null,
     });
+  });
+});
+
+describe("member workspace routes", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("answers another cell only with the cell token", async () => {
+    vi.stubEnv("RESPONDER_CELL_TOKEN", "cell-token");
+    const request = (authorization: string | null, body: unknown) =>
+      app.request("/api/internal/cells/member-workspaces", {
+        body: JSON.stringify(body),
+        headers: {
+          ...(authorization ? { authorization } : {}),
+          "content-type": "application/json",
+        },
+        method: "POST",
+      });
+
+    expect((await request(null, { email: "ash@example.com" })).status).toBe(401);
+    expect((await request("Bearer wrong", { email: "ash@example.com" })).status).toBe(401);
+    expect((await request("Bearer cell-token", { email: "not an email" })).status).toBe(400);
+  });
+
+  it("refuses every cell when no cell token is configured", async () => {
+    vi.stubEnv("RESPONDER_CELL_TOKEN", "");
+
+    const response = await app.request("/api/internal/cells/member-workspaces", {
+      body: JSON.stringify({ email: "ash@example.com" }),
+      headers: { authorization: "Bearer cell-token", "content-type": "application/json" },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(401);
+    expect(verifyBearerToken("Bearer cell-token", "")).toBe(false);
   });
 });
 

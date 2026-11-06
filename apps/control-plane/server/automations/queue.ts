@@ -14,6 +14,8 @@ import {
   automationSuggestionRefillQueue,
   createJobBoss,
   prepareWorkerQueues,
+  sandboxImageBuildJobOptions,
+  sandboxImageBuildQueue,
 } from "../../../../packages/core/src/jobs.js";
 
 let boss: ReturnType<typeof createJobBoss> | undefined;
@@ -145,6 +147,18 @@ export async function queueAutomationSuggestionRefill(input: {
     queuedAt: new Date().toISOString(),
   }, { group: { id: input.organizationId } });
   if (!jobId) throw new Error("Automation suggestion refill job was not created");
+}
+
+// Asks the worker to build the workspace's sandbox snapshot from its current
+// settings. A build already waiting covers this request, since a build reads
+// the settings when it starts. A request lost here is queued by the worker's
+// next maintenance pass.
+export async function queueSandboxImageBuild(organizationId: string): Promise<void> {
+  await (await getBoss()).send(
+    sandboxImageBuildQueue,
+    { organizationId },
+    sandboxImageBuildJobOptions(organizationId),
+  );
 }
 
 export async function closeAutomationQueue(): Promise<void> {

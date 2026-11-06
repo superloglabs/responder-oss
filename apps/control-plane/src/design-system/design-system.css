@@ -48,6 +48,8 @@
   --ds-radius-medium: 16px;
   --ds-radius-large: 32px;
   --ds-radius-pill: 999px;
+  --ds-radius-sheet: 6px;
+  --ds-radius-table: 6px;
   --ds-duration-fast: 140ms;
   --ds-ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
   --shadow-xl:
@@ -1202,7 +1204,7 @@
   width: 100%;
   overflow: auto;
   border: 1px solid var(--ds-border-subtle);
-  border-radius: 14px;
+  border-radius: var(--ds-radius-table);
   background: var(--ds-surface-base);
   box-shadow:
     rgb(255 255 255 / 2%) 0 0 0 0.5px inset,

@@ -15,6 +15,7 @@ import {
 } from "../legacy-account-handoff";
 import { workspaceSlug } from "./workspace";
 import { automationSetupReturnPath } from "../pages/shared-automation-template-presentation";
+import { ActiveWorkspaceCheck } from "./active-workspace-check";
 import { ImpersonationBanner } from "./impersonation-banner";
 import { OrganizationCapabilitiesProvider } from "./organization-capabilities-provider";
 import { requestCapabilities } from "../organization-capabilities";
@@ -24,7 +25,15 @@ import { ColorThemeToggle } from "./color-theme-toggle";
 import { OnboardingFrame, OnboardingLoading } from "./onboarding-frame";
 import { AppFrameSkeleton, WorkspaceListSkeleton } from "./screen-skeletons";
 import { onboardingStepAtPath, onboardingStepStages, onboardingSteps } from "../pages/onboarding-presentation";
-import { cellSwitchUrl, rememberCell, useCellDirectory } from "../cells";
+import {
+  cellSwitchUrl,
+  fetchWorkspacesInOtherCells,
+  rememberCell,
+  useCellDirectory,
+  workspacesByCell,
+  type Cell,
+  type WorkspacesInOtherCells,
+} from "../cells";
 import { SegmentedControl } from "../design-system";
 
 interface AuthGateProps {
@@ -472,6 +481,57 @@ function PasswordResetRequest({ onBack }: { onBack: () => void }) {
   );
 }
 
+function workspaceNames(names: string[]): string {
+  return names.length === 1 ? names[0]! : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+}
+
+// Shown instead of workspace setup to a person whose workspaces are in
+// another region. Switching remembers that region, so the next visit goes
+// straight there.
+function WorkspaceInOtherCell({
+  found,
+  onStay,
+}: {
+  found: WorkspacesInOtherCells;
+  onStay: () => void;
+}) {
+  const groups = workspacesByCell(found.workspaces);
+  const [first] = groups;
+  function open(cell: Cell) {
+    rememberCell(cell.id, found.cookieDomain);
+    window.location.assign(cellSwitchUrl(cell, new URL(window.location.href)));
+  }
+  return (
+    <AuthFrame>
+      <div className="authIntro">
+        <h1>
+          {groups.length > 1
+            ? "Your workspaces are in other regions"
+            : first!.names.length === 1
+              ? `Your workspace ${first!.names[0]} is in the ${first!.cell.label} region`
+              : `Your workspaces ${workspaceNames(first!.names)} are in the ${first!.cell.label} region`}
+        </h1>
+        <p>Sign in there with the same account.</p>
+      </div>
+      <div className="workspaceList">
+        {groups.map((group) => (
+          <button
+            className="workspaceChoice"
+            key={group.cell.id}
+            onClick={() => open(group.cell)}
+            type="button"
+          >
+            <span>{`Open ${workspaceNames(group.names)} in ${group.cell.label}`}</span>
+          </button>
+        ))}
+      </div>
+      <button className="button button--secondary authSubmit" onClick={onStay} type="button">
+        Create a workspace here instead
+      </button>
+    </AuthFrame>
+  );
+}
+
 interface WorkspaceSetupProps {
   // Reports while a new workspace is being created, so the gate keeps this
   // setup on screen after the workspace becomes active.
@@ -491,6 +551,21 @@ function WorkspaceSetup({ onCreating, onReady }: WorkspaceSetupProps) {
   if (!isGuided && !organizations.isPending && !hasOrganizations && !automationSetupReturnPath(window.location)) {
     setIsGuided(true);
   }
+  // A person with no workspace here may have one in another region. Until
+  // that is known, setup waits; undefined is still loading, null is none.
+  const lookForOtherCells = !organizations.isPending && !hasOrganizations;
+  const [elsewhere, setElsewhere] = useState<WorkspacesInOtherCells | null | undefined>(undefined);
+  const [stayHere, setStayHere] = useState(false);
+  useEffect(() => {
+    if (!lookForOtherCells) return;
+    let active = true;
+    void fetchWorkspacesInOtherCells().then((found) => {
+      if (active) setElsewhere(found);
+    });
+    return () => {
+      active = false;
+    };
+  }, [lookForOtherCells]);
 
   async function activate(organizationId: string): Promise<boolean> {
     const result = await authClient.organization.setActive({ organizationId });
@@ -577,6 +652,13 @@ function WorkspaceSetup({ onCreating, onReady }: WorkspaceSetupProps) {
   // member does not see the workspace picker before guided setup.
   if (organizations.isPending && !automationSetupReturnPath(window.location)) {
     return <OnboardingLoading step="workspace" />;
+  }
+
+  if (lookForOtherCells && !stayHere) {
+    if (elsewhere === undefined) return <OnboardingLoading step="workspace" />;
+    if (elsewhere && elsewhere.workspaces.length > 0) {
+      return <WorkspaceInOtherCell found={elsewhere} onStay={() => setStayHere(true)} />;
+    }
   }
 
   // A member without workspaces starts guided setup by naming one, unless
@@ -1058,9 +1140,15 @@ export function AuthGate({ children }: AuthGateProps) {
   return (
     <>
       <ImpersonationBanner />
-      <OrganizationCapabilitiesProvider fallback={loading}>
-        {children}
-      </OrganizationCapabilitiesProvider>
+      <ActiveWorkspaceCheck
+        activeOrganizationId={session.data.session.activeOrganizationId}
+        fallback={loading}
+        onCleared={session.refetch}
+      >
+        <OrganizationCapabilitiesProvider fallback={loading}>
+          {children}
+        </OrganizationCapabilitiesProvider>
+      </ActiveWorkspaceCheck>
     </>
   );
 }

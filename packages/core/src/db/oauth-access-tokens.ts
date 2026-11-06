@@ -19,8 +19,8 @@ export function hashOAuthAccessToken(token: string): string {
   return createHash("sha256").update(token).digest("base64url");
 }
 
-// Resolves an unexpired access token with the required scope whose client
-// is enabled and whose person is still a member of the workspace the grant
+// Resolves an unexpired, unrevoked access token with the required scope
+// whose client is enabled and whose person is still a member of the workspace the grant
 // was made for.
 export async function authenticateOAuthAccessToken(
   token: string,
@@ -54,6 +54,7 @@ export async function authenticateOAuthAccessToken(
       and(
         eq(oauthAccessToken.token, hashOAuthAccessToken(stored)),
         gt(oauthAccessToken.expiresAt, now),
+        isNull(oauthAccessToken.revoked),
         arrayContains(oauthAccessToken.scopes, [input.scope]),
         or(isNull(oauthClient.disabled), eq(oauthClient.disabled, false)),
         or(

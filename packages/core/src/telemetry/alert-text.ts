@@ -16,6 +16,21 @@ export function slackText(value: string): string {
     .replace(/[.:]/gu, (character) => `${character}\u200b`);
 }
 
+const escapedDescriptionCharacters: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;" };
+
+// An alert's description keeps its Markdown and links, but cannot mention
+// people or channels. Escaping can make it five times longer, so it is cut
+// to leave the rest of the message room within Slack's 12,000-character block.
+export function alertDescriptionText(value: string, maxLength = 4_000): string {
+  let text = "";
+  for (const character of value) {
+    const escaped = escapedDescriptionCharacters[character] ?? character;
+    if (text.length + escaped.length > maxLength - 1) return `${text}…`;
+    text += escaped;
+  }
+  return text;
+}
+
 const numberFormat = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
 const dollars = new Intl.NumberFormat("en-US", { currency: "USD", maximumFractionDigits: 2, minimumFractionDigits: 2, style: "currency" });
 const centDollars = new Intl.NumberFormat("en-US", { currency: "USD", maximumSignificantDigits: 2, style: "currency" });
@@ -105,6 +120,7 @@ export function describeAlertCondition(comparator: AlertComparator, threshold: n
 }
 
 export interface AlertMessageInput {
+  alertDescription?: string | null;
   alertName: string;
   alertUrl: string | null;
   groupBy: string | null;
@@ -122,12 +138,13 @@ function groupLabel(input: Pick<AlertMessageInput, "groupBy" | "groupKey">): str
 export function alertFiringMessage(input: AlertMessageInput): { markdown: string; text: string } {
   const group = groupLabel(input);
   const unit = alertValueUnit(input.rule);
+  const description = input.alertDescription ? `\n\n${alertDescriptionText(input.alertDescription)}` : "";
   const link = input.alertUrl ? `\n\n[View alert](${input.alertUrl})` : "";
   return {
     markdown:
       `:rotating_light: **${slackText(input.alertName)}** is firing${group}.\n\n` +
       `${slackText(describeAlertRule(input.rule))}: **${formatAlertValue(input.value, unit)}**, ` +
-      `${describeAlertCondition(input.rule.comparator, input.rule.threshold, unit)}.${link}`,
+      `${describeAlertCondition(input.rule.comparator, input.rule.threshold, unit)}.${description}${link}`,
     text: `${slackText(input.alertName)} is firing${group}`,
   };
 }

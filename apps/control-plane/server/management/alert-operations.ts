@@ -58,6 +58,12 @@ const ruleFields = {
 };
 
 const settingFields = {
+  description: z
+    .string()
+    .trim()
+    .max(2_000)
+    .nullable()
+    .describe("Posted with the firing message in Slack, such as what the alert means, what to check, or a runbook link. Markdown and links work."),
   enabled: z.boolean().describe("A disabled alert is not checked."),
   evaluationIntervalSeconds: z.number().int().min(60).max(3_600).describe("How often the alert is checked."),
   name: z.string().trim().min(1).max(200),
@@ -82,6 +88,7 @@ const optionalRuleFields = {
 const alertSchema = z.object({
   ...ruleFields,
   createdAt: z.string(),
+  description: z.string().nullable(),
   enabled: z.boolean(),
   evaluationIntervalSeconds: z.number().int(),
   id: alertId,
@@ -201,6 +208,7 @@ export const alertOperations = [
     input: z.object({
       ...ruleFields,
       ...optionalRuleFields,
+      description: settingFields.description.optional(),
       enabled: settingFields.enabled.optional().describe(`${settingFields.enabled.description} Defaults to true.`),
       evaluationIntervalSeconds: settingFields.evaluationIntervalSeconds
         .optional()

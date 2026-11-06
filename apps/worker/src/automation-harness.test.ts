@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   assertAutomationHarnessModelCompatibility,
+  automationToolProvider,
   resolveAutomationWorkspacePath,
   validateBrokerBaseUrl,
 } from "./automation-harness.js";
@@ -66,5 +67,15 @@ describe("automation harness compatibility", () => {
     expect(() => resolveAutomationWorkspacePath("")).toThrow(
       "must be absolute",
     );
+  });
+});
+
+describe("automationToolProvider", () => {
+  it("names the service each worker tool acts on", () => {
+    expect(automationToolProvider("post_notification")).toBe("slack");
+    expect(automationToolProvider("open_pull_request")).toBe("github");
+    for (const tool of ["get_trace", "list_services", "query_logs", "query_metrics", "query_traces"]) {
+      expect(automationToolProvider(tool)).toBe("telemetry");
+    }
   });
 });

@@ -198,6 +198,24 @@ describe("automation configuration", () => {
     ).toThrow("requires an Anthropic model");
   });
 
+  it("names the plan's model only with its own provider, harness, and model", () => {
+    expect(automationConfigurationSchema.parse({
+      ...baseConfiguration,
+      harness: "plan",
+      model: "default",
+      modelProvider: "plan",
+    })).toMatchObject({ harness: "plan", model: "default", modelProvider: "plan" });
+    for (const configuration of [
+      { harness: "codex", model: "default", modelProvider: "plan" },
+      { harness: "plan", model: "gpt-5.4", modelProvider: "plan" },
+      { harness: "plan", model: "gpt-5.4", modelProvider: "openai" },
+      { harness: "codex", model: "default", modelProvider: "openai" },
+    ]) {
+      expect(() => automationConfigurationSchema.parse({ ...baseConfiguration, ...configuration }))
+        .toThrow("The plan's model uses provider");
+    }
+  });
+
   it("does not keep a model credential on the automation", () => {
     expect(
       automationConfigurationSchema.parse({

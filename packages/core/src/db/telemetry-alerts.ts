@@ -12,6 +12,7 @@ import {
 
 export type TelemetryAlert = AlertRule & {
   createdAt: string;
+  description: string | null;
   enabled: boolean;
   evaluationIntervalSeconds: number;
   id: string;
@@ -41,6 +42,7 @@ const alertColumns = {
   aggregation: telemetryAlerts.aggregation,
   comparator: telemetryAlerts.comparator,
   createdAt: telemetryAlerts.createdAt,
+  description: telemetryAlerts.description,
   enabled: telemetryAlerts.enabled,
   evaluationIntervalSeconds: telemetryAlerts.evaluationIntervalSeconds,
   field: telemetryAlerts.field,
@@ -184,6 +186,7 @@ function ruleValues(input: AlertUpdate) {
   return {
     aggregation: input.aggregation,
     comparator: input.comparator,
+    description: input.description,
     enabled: input.enabled,
     evaluationIntervalSeconds: input.evaluationIntervalSeconds,
     field: input.aggregation === "count" || input.source === "metric" ? null : input.field,
@@ -298,6 +301,7 @@ export async function claimDueTelemetryAlerts(limit: number): Promise<DueTelemet
     aggregation: AlertRule["aggregation"];
     comparator: AlertRule["comparator"];
     created_at: Date | string;
+    description: string | null;
     enabled: boolean;
     evaluation_interval_seconds: number;
     field: string | null;
@@ -340,6 +344,7 @@ export async function claimDueTelemetryAlerts(limit: number): Promise<DueTelemet
     aggregation: row.aggregation,
     comparator: row.comparator,
     createdAt: time(row.created_at),
+    description: row.description,
     enabled: row.enabled,
     evaluationIntervalSeconds: row.evaluation_interval_seconds,
     field: row.field,
@@ -428,7 +433,8 @@ export async function openTelemetryAlertEpisode(input: {
       jsonb_build_object(
         'aggregation', aggregation, 'comparator', comparator, 'field', field, 'filter', filter,
         'groupBy', group_by, 'groupMode', group_mode, 'metricName', metric_name, 'source', source,
-        'threshold', threshold, 'windowMinutes', window_minutes, 'name', name, 'enabled', enabled,
+        'threshold', threshold, 'windowMinutes', window_minutes, 'name', name, 'description', description,
+        'enabled', enabled,
         'evaluationIntervalSeconds', evaluation_interval_seconds,
         'slack', case when slack_channel_id is null then null else jsonb_build_object(
           'channelId', slack_channel_id, 'integrationAccountId', slack_integration_account_id) end)

@@ -9,7 +9,7 @@ import type { ManagedMcpServer } from "./managed-mcp-context.js";
 export function cloudflareContextServer(input: {
   accessToken: () => Promise<string>;
   accountId: string;
-  fetch: (input: string, init: RequestInit) => Promise<Response>;
+  fetch: ManagedMcpServer["fetch"];
   mcpUrl: string;
   now: () => number;
 }): ManagedMcpServer {

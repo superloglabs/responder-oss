@@ -10,13 +10,14 @@ import { daytonaSecretPlaceholderPrefix } from "@responder/core/automations/chat
 import { decryptCredentials } from "@responder/core/credentials/encryption";
 import { sandboxWorkspaceRoot, type VercelSandboxConfig } from "@responder/core/sandbox-config";
 import { sandboxAllowedDomains, type SandboxNetwork } from "@responder/core/sandbox-network";
-import { Sandbox } from "@vercel/sandbox";
+import { Sandbox, type Command, type CommandFinished } from "@vercel/sandbox";
 import { reportWorkerException, type WorkerErrorContext } from "./monitoring.js";
 import { sandboxSnapshotResources } from "./sandbox-snapshot.js";
 import type { SandboxSecretMount } from "./sandbox-session.js";
 
 type VercelSandboxSessionArguments = ConstructorParameters<typeof VercelSandboxSession>[0];
 type NetworkPolicy = Parameters<Sandbox["updateNetworkPolicy"]>[0];
+type VercelCommandParams = Parameters<Sandbox["runCommand"]>[0];
 type NetworkPolicyRule = Exclude<
   Exclude<NetworkPolicy, string>["allow"],
   string[] | undefined
@@ -29,6 +30,9 @@ const pausedSnapshotLifetimeMs = 24 * 60 * 60 * 1_000;
 const vercelCreateAttempts = 3;
 const vercelCreateRetryDelayMs = 5_000;
 const uploadChunkBytes = 32 * 1024 * 1024;
+// Enough waits to outlast the sandbox even when each one drops early.
+const commandWaitAttempts = 50;
+const commandWaitRetryDelayMs = 2_000;
 
 // The firewall can only match a whole header, so each place a credential
 // usually goes needs its own rule. A placeholder anywhere else reaches the
@@ -64,6 +68,81 @@ function isRetryableVercelError(error: unknown): boolean {
   return typeof status !== "number" || status === 429 || status >= 500;
 }
 
+const droppedConnectionCodes = new Set([
+  "ECONNRESET",
+  "ETIMEDOUT",
+  "UND_ERR_BODY_TIMEOUT",
+  "UND_ERR_SOCKET",
+]);
+
+// A wait that ended without the command's result: the stream ended early,
+// the connection closed, or Vercel answered with a server error.
+function isDroppedVercelWait(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  if (error.name === "StreamError") return true;
+  if ("response" in error) return isRetryableVercelError(error);
+  const cause = error.cause as { code?: unknown } | undefined;
+  return error.message === "terminated" ||
+    error.message === "fetch failed" ||
+    droppedConnectionCodes.has(String((error as { code?: unknown }).code)) ||
+    droppedConnectionCodes.has(String(cause?.code));
+}
+
+function defaultSleep(delayMs: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, delayMs));
+}
+
+// A waited command streams its result over the request that started it. When
+// the command runs for minutes without output, that stream can end without
+// the result. So the command runs detached, the worker waits on it with a
+// separate request, and a wait that drops is started again.
+export async function runVercelCommand(
+  sandbox: Pick<Sandbox, "runCommand">,
+  params: VercelCommandParams,
+  sleep: (delayMs: number) => Promise<void> = defaultSleep,
+): Promise<CommandFinished> {
+  const command = await sandbox.runCommand({ ...params, detached: true }) as Command;
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await command.wait(params.signal ? { signal: params.signal } : undefined);
+    } catch (error) {
+      if (
+        attempt >= commandWaitAttempts ||
+        params.signal?.aborted ||
+        !isDroppedVercelWait(error)
+      ) {
+        throw error;
+      }
+      console.error(JSON.stringify({
+        attempt,
+        cmdId: command.cmdId,
+        error: error instanceof Error ? error.message : String(error),
+        event: "vercel_command_wait_retry",
+      }));
+      await sleep(commandWaitRetryDelayMs);
+    }
+  }
+}
+
+// The SDK session runs every command as one waited request. This sends its
+// commands through runVercelCommand instead.
+function reattachCommands(sandbox: Sandbox): void {
+  const runCommand = sandbox.runCommand.bind(sandbox);
+  const start = { runCommand } as Pick<Sandbox, "runCommand">;
+  Object.defineProperty(sandbox, "runCommand", {
+    value: (
+      commandOrParams: string | VercelCommandParams,
+      args?: string[],
+      options?: { signal?: AbortSignal; timeoutMs?: number },
+    ) => {
+      const params: VercelCommandParams = typeof commandOrParams === "string"
+        ? { args, cmd: commandOrParams, signal: options?.signal, timeoutMs: options?.timeoutMs }
+        : commandOrParams;
+      return params.detached ? runCommand(params) : runVercelCommand(start, params);
+    },
+  });
+}
+
 // Starts the sandbox here rather than through the SDK client, which cannot
 // choose a region or a starting snapshot. The session runs on what it returns.
 async function startVercelSession(
@@ -75,13 +154,14 @@ async function startVercelSession(
     ...config.vercel,
     persistent: false,
     region: config.region,
-    resources: { vcpus: sandboxSnapshotResources.cpu },
+    resources: { vcpus: config.vcpus ?? sandboxSnapshotResources.cpu },
     source: { snapshotId, type: "snapshot" },
     timeout: vercelSandboxTimeoutMs,
   });
   try {
     // The SDK client was written for the older sandbox shape.
     Object.defineProperty(sandbox, "sandboxId", { value: sandbox.name });
+    reattachCommands(sandbox);
     const session = new VercelSandboxSession({
       credentials: config.vercel,
       sandbox: sandbox as unknown as VercelSandboxSessionArguments["sandbox"],
@@ -109,8 +189,7 @@ export async function createVercelSandboxSession(
   config: VercelSandboxConfig,
   persistence: VercelSandboxSessionState["workspacePersistence"],
   signal?: AbortSignal,
-  sleep: (delayMs: number) => Promise<void> = (delayMs) =>
-    new Promise((resolve) => setTimeout(resolve, delayMs)),
+  sleep: (delayMs: number) => Promise<void> = defaultSleep,
 ): Promise<VercelSandboxSession> {
   for (let attempt = 1; ; attempt += 1) {
     signal?.throwIfAborted();
@@ -170,7 +249,8 @@ function secretRules(placeholder: string, value: string): NetworkPolicyRule[] {
 
 // Each sandbox sees only placeholders, and the firewall swaps a placeholder
 // for its value on requests to the secret's allowed hosts. Outbound access is
-// open unless the workspace restricts it to a list of domains. Real values
+// limited to the workspace's list of domains, or open when the workspace has
+// turned the restriction off. Real values
 // stay out of the session state, which is saved to the database, so this is
 // applied after every start.
 export function secretNetworkPolicy(
@@ -285,7 +365,7 @@ function shellQuote(value: string): string {
 }
 
 async function runChecked(sandbox: Sandbox, command: string): Promise<void> {
-  const result = await sandbox.runCommand({ args: ["-c", command], cmd: "/bin/sh" });
+  const result = await runVercelCommand(sandbox, { args: ["-c", command], cmd: "/bin/sh" });
   if (result.exitCode !== 0) throw new Error("Unable to write a file to the Vercel sandbox");
 }
 

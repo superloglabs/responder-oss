@@ -75,3 +75,33 @@ export function useCellDirectory(enabled = true): CellDirectory | null {
   }, [enabled]);
   return directory;
 }
+
+export type WorkspaceInCell = { cell: Cell; name: string };
+
+export type WorkspacesInOtherCells = {
+  cookieDomain: string | null;
+  workspaces: WorkspaceInCell[];
+};
+
+// The signed-in person's workspaces in other cells. Null when they cannot be
+// read, so setup continues here.
+export async function fetchWorkspacesInOtherCells(): Promise<WorkspacesInOtherCells | null> {
+  try {
+    const response = await fetch("/api/cells/workspaces", { credentials: "include" });
+    return response.ok ? ((await response.json()) as WorkspacesInOtherCells) : null;
+  } catch {
+    return null;
+  }
+}
+
+// One line per cell, naming its workspaces, in the order of the cell
+// directory.
+export function workspacesByCell(workspaces: WorkspaceInCell[]): Array<{ cell: Cell; names: string[] }> {
+  const groups: Array<{ cell: Cell; names: string[] }> = [];
+  for (const workspace of workspaces) {
+    const group = groups.find((candidate) => candidate.cell.id === workspace.cell.id);
+    if (group) group.names.push(workspace.name);
+    else groups.push({ cell: workspace.cell, names: [workspace.name] });
+  }
+  return groups;
+}

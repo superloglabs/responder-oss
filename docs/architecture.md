@@ -119,10 +119,12 @@ types. `drizzle/` contains the ordered schema history.
   like the automation's own secrets, as Daytona placeholders that work only
   for their allowed hosts. Skill files are stored in the database, not
   encrypted, so they must not hold credentials.
-- Sandboxes have open outbound access unless a workspace owner or admin
-  restricts them in workspace settings. A restricted sandbox reaches only the
-  listed domains, the public application host (model broker and context
-  servers), and the allowed hosts of the secrets it mounts. Vercel enforces
+- Sandboxes reach only an allowlist unless a workspace owner or admin opens
+  them in workspace settings. A workspace starts with package registries,
+  their installers and CDNs, Debian's package mirrors, and GitHub on the
+  list. A restricted sandbox reaches only the listed domains,
+  the public application host (model broker and context servers), and the
+  allowed hosts of the secrets it mounts. Vercel enforces
   this with a custom firewall policy; Daytona with a domain allowlist, which
   needs Daytona Tier 3 or higher and holds at most 100 domains. The worker
   applies the list after every sandbox start and resume, so a change reaches
@@ -244,14 +246,20 @@ investigation credits.
 - The app shows a banner from the same balances while new work is paused.
 - An operator can give a workspace a `run_billing_accounts` row instead, to
   bill a price per run. Until the workspace moves to a paid plan, its
-  automations run only on the row's model, on Responder-funded inference;
+  automations run only on the plan's model, on Responder-funded inference;
   each run whose first turn succeeds is tracked once, with the run ID as the
   idempotency key, against the row's Autumn customer and feature; and model
-  and sandbox usage are recorded but not charged. The model picker and
-  `list_included_models` offer only that model. Saving or enabling an
-  automation on another model is refused, and so is any save while the plan
-  cannot be read. The run is counted before it is marked succeeded, with
-  retries; a count that still fails is reported and not charged.
+  and sandbox usage are recorded but not charged.
+- An automation names the plan's model as provider `plan`, harness `plan`,
+  and model `default`. The row's provider, model, and harness are read only
+  when a run starts, so automations, run events, and the app show only the
+  row's `model_name`. The model picker offers only that name, and
+  `list_included_models` lists no models. Saving or enabling an automation on
+  another model is refused, and so is any save while the plan cannot be read.
+  A workspace whose plan provides no model cannot save or run the alias; the
+  model picker clears it so another model can be chosen.
+  The run is counted before it is marked succeeded, with retries; a count
+  that still fails is reported and not charged.
 - Suggested automation templates are paid by Responder and do not use the
   usage credit. From 05:00 UTC each day, the worker asks a model through
   Responder's AI Gateway key for templates for each organization with
@@ -284,6 +292,25 @@ operator-managed runtime configuration.
 Production operators are responsible for TLS termination, network isolation,
 database backups, secret injection, observability, scaling, and rollbacks. The
 application does not depend on one infrastructure provider.
+
+### Regional cells
+
+A hosted deployment can run several cells, each a complete copy of the
+application with its own data, listed in `RESPONDER_CELLS`. Cells ask each
+other over `/api/internal/cells/*` with the shared `RESPONDER_CELL_TOKEN`;
+an empty token refuses every request.
+
+- A provider webhook for a tenant this cell does not hold is forwarded to the
+  cells that hold it. Event webhooks are copied to every such cell; interactive
+  Slack actions and Discord interactions go to one owner cell, because the
+  provider uses one cell's response. OAuth callbacks return to the cell named
+  in their state.
+- The user support page lists the users of every cell.
+- A person signed in to a cell where they belong to no workspace is told which
+  workspaces their address belongs to in other cells, and can switch there
+  instead of creating one. Only a verified, unbanned account on both sides
+  counts, an impersonating superuser is told nothing, each person may look six
+  times a minute, and a cell that does not answer is left out.
 
 ### Telemetry of the application
 

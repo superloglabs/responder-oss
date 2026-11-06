@@ -5,13 +5,15 @@ import {
   type TelemetryClient,
 } from "../../../../packages/core/src/telemetry/client.js";
 import {
-  getTraceDetail,
-  listServices,
-  queryLogs,
-  queryMetrics,
-  queryTraces,
-  type TimeRange,
-} from "../../../../packages/core/src/telemetry/query.js";
+  listTelemetryServices,
+  readTelemetryMetricPoints,
+  readTelemetryTrace,
+  searchTelemetryLogs,
+  searchTelemetrySpans,
+  TelemetryReadError,
+  telemetryReadRanges,
+  type TelemetryReadRange,
+} from "../../../../packages/core/src/telemetry/reads.js";
 import {
   defineOperation,
   ManagementError,
@@ -21,14 +23,9 @@ import {
 // Read-only access to the workspace's own logs, traces, and metrics. Every
 // query is scoped to the caller's workspace by the query layer.
 
-const rangeMinutes = { "15m": 15, "1h": 60, "6h": 360, "24h": 1_440, "7d": 10_080 } as const;
-type Range = keyof typeof rangeMinutes;
-// A minute to spare for a 30-day window resolved a moment before the request.
-const maximumWindowMs = 30 * 86_400_000 + 60_000;
-
 const windowInput = {
   range: z
-    .enum(Object.keys(rangeMinutes) as [Range, ...Range[]])
+    .enum(Object.keys(telemetryReadRanges) as [TelemetryReadRange, ...TelemetryReadRange[]])
     .default("1h")
     .describe("How far back from now to read, when `since` is not given."),
   since: z.iso
@@ -118,115 +115,6 @@ const metricPointSchema = z.object({
   value: z.number().nullable().describe("The value of a gauge or sum point."),
 });
 
-type Row = Record<string, unknown>;
-
-function text(value: unknown): string {
-  return value === null || value === undefined ? "" : String(value);
-}
-
-// ClickHouse prints 64-bit integers as strings.
-function numberOrNull(value: unknown): number | null {
-  if (value === null || value === undefined || value === "") return null;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function utc(value: unknown): string {
-  const timestamp = text(value);
-  return /^\d{4}-\d{2}-\d{2} \d/u.test(timestamp) ? `${timestamp.replace(" ", "T")}Z` : timestamp;
-}
-
-function attributeMap(value: unknown): Record<string, string> {
-  if (!value || typeof value !== "object") return {};
-  return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, text(entry)]));
-}
-
-// The workspace tag the ingest endpoint adds is not the sender's own attribute.
-function resourceAttributeMap(value: unknown): Record<string, string> {
-  const attributes = attributeMap(value);
-  delete attributes["superlog.project_id"];
-  return attributes;
-}
-
-function exceptionOf(row: Row) {
-  const type = text(row.exception_type);
-  const message = text(row.exception_message);
-  const stacktrace = text(row.exception_stacktrace);
-  return type || message || stacktrace ? { message, stacktrace, type } : null;
-}
-
-function logOf(row: Row) {
-  return {
-    attributes: attributeMap(row.log_attrs),
-    body: text(row.body),
-    eventName: text(row.event_name),
-    exception: exceptionOf(row),
-    resourceAttributes: resourceAttributeMap(row.resource_attrs),
-    service: text(row.service),
-    severity: text(row.severity),
-    severityNumber: numberOrNull(row.severity_number),
-    spanId: text(row.span_id),
-    timestamp: utc(row.timestamp),
-    traceId: text(row.trace_id),
-  };
-}
-
-function spanOf(row: Row) {
-  return {
-    attributes: attributeMap(row.span_attrs),
-    durationMs: numberOrNull(row.duration_ms) ?? 0,
-    exception: exceptionOf(row),
-    kind: text(row.span_kind),
-    name: text(row.span_name),
-    parentSpanId: text(row.parent_span_id),
-    resourceAttributes: resourceAttributeMap(row.resource_attrs),
-    service: text(row.service),
-    spanId: text(row.span_id),
-    statusCode: text(row.status_code),
-    statusMessage: text(row.status_message),
-    timestamp: utc(row.timestamp),
-    traceId: text(row.trace_id),
-  };
-}
-
-function metricPointOf(row: Row) {
-  const monotonic = row.is_monotonic;
-  return {
-    aggregationTemporality: numberOrNull(row.aggregation_temporality),
-    attributes: attributeMap(row.attributes),
-    count: numberOrNull(row.count),
-    isMonotonic: monotonic === null || monotonic === undefined ? null : Boolean(monotonic),
-    kind: text(row.kind) as z.infer<typeof metricPointSchema>["kind"],
-    max: numberOrNull(row.max),
-    min: numberOrNull(row.min),
-    name: text(row.metric_name),
-    resourceAttributes: resourceAttributeMap(row.resource_attrs),
-    service: text(row.service),
-    startTime: utc(row.start_time),
-    sum: numberOrNull(row.sum),
-    timestamp: utc(row.timestamp),
-    unit: text(row.unit),
-    value: numberOrNull(row.value),
-  };
-}
-
-export function telemetryWindow(
-  input: { range: Range; since?: string | undefined; until?: string | undefined },
-  now: Date,
-): Required<TimeRange> {
-  const until = input.until === undefined ? now.getTime() : Date.parse(input.until);
-  const since = input.since === undefined
-    ? until - rangeMinutes[input.range] * 60_000
-    : Date.parse(input.since);
-  if (!(until > since)) {
-    throw new ManagementError(400, "`since` must be before `until`.", "invalid_window");
-  }
-  if (until - since > maximumWindowMs) {
-    throw new ManagementError(400, "The window can be at most 30 days.", "invalid_window");
-  }
-  return { since: new Date(since).toISOString(), until: new Date(until).toISOString() };
-}
-
 async function telemetryClient(context: ManagementContext): Promise<TelemetryClient> {
   const client = getTelemetryClient();
   if (!client || !(await organizationHasCapability(context.organizationId, "telemetry"))) {
@@ -235,32 +123,15 @@ async function telemetryClient(context: ManagementContext): Promise<TelemetryCli
   return client;
 }
 
-function isTimeout(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  const details = error as Error & { code?: number | string; type?: string };
-  return (
-    details.name === "AbortError" ||
-    details.name === "TimeoutError" ||
-    details.message === "Timeout error." ||
-    details.type === "TIMEOUT_EXCEEDED" ||
-    details.type === "QUERY_WAS_CANCELLED" ||
-    String(details.code) === "159" ||
-    String(details.code) === "394"
-  );
-}
+const errorStatus = { invalid_window: 400, telemetry_query_timeout: 503, trace_not_found: 404 } as const;
 
-// A query that runs out of time is answered with how to narrow it, so an
-// agent can retry instead of giving up.
-async function read<T>(query: () => Promise<T>): Promise<T> {
+async function read<T>(context: ManagementContext, query: (client: TelemetryClient) => Promise<T>): Promise<T> {
+  const client = await telemetryClient(context);
   try {
-    return await query();
+    return await query(client);
   } catch (error) {
-    if (!isTimeout(error)) throw error;
-    throw new ManagementError(
-      503,
-      "The query did not finish in time. Retry with a shorter window, more filters, or a lower limit.",
-      "telemetry_query_timeout",
-    );
+    if (!(error instanceof TelemetryReadError)) throw error;
+    throw new ManagementError(errorStatus[error.code], error.message, error.code);
   }
 }
 
@@ -289,21 +160,8 @@ export const telemetryOperations = [
       traceId: z.string().regex(/^[0-9a-fA-F]{32}$/u).optional().describe("Only logs written in this trace."),
     }),
     output: z.object({ logs: z.array(logSchema), since: z.string(), until: z.string() }),
-    async run(context, input) {
-      const client = await telemetryClient(context);
-      const range = telemetryWindow(input, new Date());
-      const rows = await read(() => queryLogs(client, context.organizationId, {
-        limit: input.limit,
-        range,
-        ...(input.attributes ? { logAttrs: input.attributes } : {}),
-        ...(input.resourceAttributes ? { resourceAttrs: input.resourceAttributes } : {}),
-        ...(input.search ? { search: input.search } : {}),
-        ...(input.service ? { service: input.service } : {}),
-        ...(input.severity ? { severity: input.severity } : {}),
-        ...(input.traceId ? { traceId: input.traceId.toLowerCase() } : {}),
-      }));
-      return { logs: (rows as Row[]).map(logOf), ...range };
-    },
+    run: (context, input) =>
+      read(context, (client) => searchTelemetryLogs(client, context.organizationId, input, new Date())),
   }),
   defineOperation({
     name: "query_traces",
@@ -336,21 +194,8 @@ export const telemetryOperations = [
         ),
     }),
     output: z.object({ since: z.string(), spans: z.array(spanSchema), until: z.string() }),
-    async run(context, input) {
-      const client = await telemetryClient(context);
-      const range = telemetryWindow(input, new Date());
-      const rows = await read(() => queryTraces(client, context.organizationId, {
-        limit: input.limit,
-        range,
-        ...(input.attributes ? { spanAttrs: input.attributes } : {}),
-        ...(input.minDurationMs !== undefined ? { minDurationMs: input.minDurationMs } : {}),
-        ...(input.name ? { spanName: input.name } : {}),
-        ...(input.resourceAttributes ? { resourceAttrs: input.resourceAttributes } : {}),
-        ...(input.service ? { service: input.service } : {}),
-        ...(input.statusCode ? { statusCode: input.statusCode } : {}),
-      }));
-      return { spans: (rows as Row[]).map(spanOf), ...range };
-    },
+    run: (context, input) =>
+      read(context, (client) => searchTelemetrySpans(client, context.organizationId, input, new Date())),
   }),
   defineOperation({
     name: "get_trace",
@@ -364,17 +209,8 @@ export const telemetryOperations = [
       traceId: z.string().regex(/^[0-9a-fA-F]{32}$/u).describe("A 32-character hexadecimal trace ID."),
     }),
     output: z.object({ logs: z.array(logSchema), spans: z.array(spanSchema) }),
-    async run(context, input) {
-      const client = await telemetryClient(context);
-      const trace = await read(() => getTraceDetail(client, context.organizationId, input.traceId.toLowerCase()));
-      if (trace.spans.length === 0) {
-        throw new ManagementError(404, "Trace not found", "trace_not_found");
-      }
-      return {
-        logs: (trace.logs as Row[]).map(logOf),
-        spans: (trace.spans as Row[]).map(spanOf),
-      };
-    },
+    run: (context, input) =>
+      read(context, (client) => readTelemetryTrace(client, context.organizationId, input.traceId)),
   }),
   defineOperation({
     name: "query_metrics",
@@ -393,18 +229,8 @@ export const telemetryOperations = [
       service,
     }),
     output: z.object({ points: z.array(metricPointSchema), since: z.string(), until: z.string() }),
-    async run(context, input) {
-      const client = await telemetryClient(context);
-      const range = telemetryWindow(input, new Date());
-      const rows = await read(() => queryMetrics(client, context.organizationId, {
-        limit: input.limit,
-        range,
-        ...(input.name ? { metricName: input.name } : {}),
-        ...(input.resourceAttributes ? { resourceAttrs: input.resourceAttributes } : {}),
-        ...(input.service ? { service: input.service } : {}),
-      }));
-      return { points: rows.map(metricPointOf), ...range };
-    },
+    run: (context, input) =>
+      read(context, (client) => readTelemetryMetricPoints(client, context.organizationId, input, new Date())),
   }),
   defineOperation({
     name: "list_services",
@@ -416,11 +242,7 @@ export const telemetryOperations = [
     effect: "read",
     input: z.object(windowInput),
     output: z.object({ services: z.array(z.string()), since: z.string(), until: z.string() }),
-    async run(context, input) {
-      const client = await telemetryClient(context);
-      const range = telemetryWindow(input, new Date());
-      const services = await read(() => listServices(client, context.organizationId, range));
-      return { services, ...range };
-    },
+    run: (context, input) =>
+      read(context, (client) => listTelemetryServices(client, context.organizationId, input, new Date())),
   }),
 ];

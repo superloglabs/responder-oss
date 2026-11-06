@@ -15,25 +15,24 @@ describe("included models", () => {
 
   it("lists the gateway's models for a workspace on a usage plan", async () => {
     mocks.organizationRunBilling.mockResolvedValue(null);
-    mocks.listAIGatewayModels.mockResolvedValue([{ id: "claude-opus-5.5", name: "Claude Opus 5.5" }]);
+    mocks.listAIGatewayModels.mockResolvedValue([{ id: "model-b", name: "Model B" }]);
 
     await expect(listIncludedModels("organization-1", "anthropic")).resolves.toEqual([
-      { id: "claude-opus-5.5", name: "Claude Opus 5.5" },
+      { id: "model-b", name: "Model B" },
     ]);
   });
 
-  it("lists only the per-run model for a workspace that pays per run", async () => {
+  it("lists no provider's models for a workspace that pays per run", async () => {
     mocks.organizationRunBilling.mockResolvedValue({
       customerId: "earlier-customer",
       featureId: "investigations",
-      model: "claude-sonnet-5.5",
-      modelName: "Per-run model",
+      harness: "claude_agent_sdk",
+      model: "model-a",
+      modelName: "Plan model",
       modelProvider: "anthropic",
     });
 
-    await expect(listIncludedModels("organization-1", "anthropic")).resolves.toEqual([
-      { id: "claude-sonnet-5.5", name: "Per-run model" },
-    ]);
+    await expect(listIncludedModels("organization-1", "anthropic")).resolves.toEqual([]);
     await expect(listIncludedModels("organization-1", "openai")).resolves.toEqual([]);
     expect(mocks.listAIGatewayModels).not.toHaveBeenCalled();
   });

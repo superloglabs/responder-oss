@@ -106,10 +106,12 @@ function appFor(activeClaim: ReturnType<typeof claim> | null) {
       beginAttempt: vi.fn(),
       completeAttempt: vi.fn(),
       failAttempt: vi.fn(),
+      finishFileUpload: vi.fn(),
       postMessage: vi.fn(),
       readChannel: vi.fn(),
       readThread: vi.fn(),
       removeReaction: vi.fn(),
+      startFileUpload: vi.fn(),
       search: vi.fn().mockResolvedValue({
         channel: { id: "C123", name: "incidents" },
         matches: [],
@@ -716,9 +718,14 @@ describe("automation context broker", () => {
       );
       expect(forwarded.status).toBe(200);
       expect(await forwarded.text()).toContain("checkout failed");
-      const calls = dependencies.providerFetch.mock.calls as Array<[string, RequestInit]>;
+      const calls = dependencies.providerFetch.mock.calls as Array<
+        [string, RequestInit, { timeoutMs?: number }?]
+      >;
       expect(calls.every(([url]) => url === "https://mcp.cloudflare.com/mcp")).toBe(true);
       expect(new Headers(calls.at(-1)![1].headers).get("authorization")).toBe("Bearer fresh-cloudflare-token");
+      // Only the forwarded tool call waits longer; listing keeps the default.
+      expect(calls.at(-1)![2]).toEqual({ timeoutMs: 120_000 });
+      expect(calls.slice(0, -1).every(([, , options]) => options === undefined)).toBe(true);
       expect(dependencies.refreshCustomMcp).toHaveBeenCalledWith(expect.objectContaining({
         redirectUrl: expect.stringMatching(/\/api\/integrations\/cloudflare\/callback$/u),
       }));
@@ -1357,9 +1364,11 @@ describe("automation context broker", () => {
       integrationAccountId: accountId,
       organizationId: activeClaim.organizationId,
     });
+    // Sentry's search tools can run past the default 30 second bound.
     expect(dependencies.providerFetch).toHaveBeenCalledWith(
       "https://mcp.sentry.dev/mcp/acme?skills=inspect",
       expect.anything(),
+      { timeoutMs: 120_000 },
     );
     const request = dependencies.providerFetch.mock.calls[0]![1] as RequestInit;
     expect(new Headers(request.headers).get("authorization")).toBe(
@@ -1396,6 +1405,71 @@ describe("automation context broker", () => {
     expect(new Headers(request.headers).get("authorization")).toBe(
       "Bearer fresh-oauth-token",
     );
+  });
+
+  it("serves only a custom MCP connection's allowed tools", async () => {
+    vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 4).toString("base64"));
+    const limited = claim("custom_mcp", {
+      apiToken: "custom-api-token",
+      authType: "api_token",
+      mcpUrl: "https://mcp.example.test/api",
+    });
+    limited.account.metadata = { allowedTools: ["list_orders"] };
+    const { app, dependencies } = appFor(limited);
+    dependencies.providerFetch.mockImplementation(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body)) as { id?: string; method: string };
+      if (body.method === "notifications/initialized") {
+        return new Response(null, { status: 202 });
+      }
+      const result = body.method === "initialize"
+        ? { capabilities: { tools: {} }, protocolVersion: "2025-06-18" }
+        : body.method === "tools/list"
+          ? {
+              tools: [
+                { inputSchema: { type: "object" }, name: "list_orders" },
+                { inputSchema: { type: "object" }, name: "refund_order" },
+              ],
+            }
+          : { content: [{ text: "{\"ok\":true}", type: "text" }] };
+      return Response.json({ id: body.id, jsonrpc: "2.0", result });
+    });
+
+    const listed = await app.request(
+      `/api/automation-context-broker/v1/${accountId}`,
+      rpcRequest({ id: 1, jsonrpc: "2.0", method: "tools/list" }),
+    );
+    expect(listed.status).toBe(200);
+    const body = await listed.json() as { result: { tools: Array<{ name: string }> } };
+    expect(body.result.tools.map((tool) => tool.name)).toEqual(["list_orders"]);
+
+    const refused = await app.request(
+      `/api/automation-context-broker/v1/${accountId}`,
+      rpcRequest({
+        id: 2,
+        jsonrpc: "2.0",
+        method: "tools/call",
+        params: { arguments: {}, name: "refund_order" },
+      }),
+    );
+    expect(refused.status).toBe(400);
+    expect(await refused.json()).toMatchObject({
+      error: { message: "Unknown tool or tool not allowed on this connection" },
+    });
+
+    const allowed = await app.request(
+      `/api/automation-context-broker/v1/${accountId}`,
+      rpcRequest({
+        id: 3,
+        jsonrpc: "2.0",
+        method: "tools/call",
+        params: { arguments: {}, name: "list_orders" },
+      }),
+    );
+    expect(allowed.status).toBe(200);
+    expect(await allowed.text()).toContain("ok");
+    const calls = dependencies.providerFetch.mock.calls as Array<[string, RequestInit]>;
+    expect(new Headers(calls.at(-1)![1].headers).get("authorization"))
+      .toBe("Bearer custom-api-token");
   });
 
   it("names the connection to reconnect when its OAuth grant is rejected", async () => {

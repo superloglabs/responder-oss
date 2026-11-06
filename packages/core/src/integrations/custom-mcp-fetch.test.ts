@@ -177,4 +177,29 @@ describe("safe custom MCP fetch", () => {
     expect(networkMocks.fetch).toHaveBeenCalledTimes(1);
     expect(networkMocks.lookup).toHaveBeenCalledTimes(1);
   });
+
+  it("aborts the request after the caller's timeout", async () => {
+    networkMocks.fetch.mockImplementation(
+      (_url: string, init: { signal: AbortSignal }) =>
+        new Promise((_resolve, reject) => {
+          init.signal.addEventListener("abort", () => reject(init.signal.reason));
+        }),
+    );
+
+    await expect(
+      safeCustomMcpFetch("https://mcp.example.test/mcp", { method: "POST" }, {
+        timeoutMs: 10,
+      }),
+    ).rejects.toMatchObject({ name: "TimeoutError" });
+  });
+
+  it("bounds a request at 30 seconds by default", async () => {
+    const timeout = vi.spyOn(AbortSignal, "timeout");
+    networkMocks.fetch.mockResolvedValueOnce(new Response("ok"));
+
+    await safeCustomMcpFetch("https://mcp.example.test/mcp", { method: "POST" });
+
+    expect(timeout).toHaveBeenCalledWith(30_000);
+    timeout.mockRestore();
+  });
 });

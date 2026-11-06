@@ -19,6 +19,9 @@ import {
   prepareWorkerQueues,
   remediationJobSchema,
   remediationQueue as remediationQueueName,
+  sandboxImageBuildJobOptions,
+  sandboxImageBuildJobSchema,
+  sandboxImageBuildQueue,
   type LinearTicketJob,
   type RemediationJob,
   responderJobSchema,
@@ -99,6 +102,7 @@ import { processGcpProjectSetupJob } from "@responder/core/integrations/gcp-setu
 import { purgeAutomationModelBrokerGrants } from "@responder/core/db/automation-model-broker";
 import { requireDaytonaClientConfig } from "@responder/core/daytona-config";
 import { deleteExpiredArchivedSandboxes } from "./sandbox.js";
+import { buildSandboxImage, maintainSandboxImages } from "./sandbox-image.js";
 import { settleUnbilledAutomationModelUsage } from "@responder/core/automations/model-usage-billing";
 import { settleUnbilledUsage } from "@responder/core/billing/usage-billing";
 import { BILLING_NOTICE_RETRY_WINDOW_MS } from "@responder/core/billing/notifications";
@@ -153,6 +157,7 @@ let stopping = false;
 // Aborts when the worker starts to stop, so automation runs go back to the
 // queue instead of running past the task's stop timeout.
 const automationRunShutdown = new AbortController();
+const sandboxImageShutdown = new AbortController();
 let replayRequestDrain: Promise<void> | undefined;
 let linearTicketDrain: Promise<void> | undefined;
 let remediationRecoveryDrain: Promise<void> | undefined;
@@ -167,6 +172,7 @@ const pollers: {
   linearTicket?: NodeJS.Timeout;
   remediationRecovery?: NodeJS.Timeout;
   replayRequest?: NodeJS.Timeout;
+  sandboxImages?: NodeJS.Timeout;
   syntheticCheckPurge?: NodeJS.Timeout;
   sourceMapPurge?: NodeJS.Timeout;
   syntheticChecks?: NodeJS.Timeout;
@@ -287,6 +293,24 @@ async function purgeExpiredAutomationBrokerGrants(): Promise<void> {
     await reportWorkerException(error, { operation: "worker" }).catch(
       () => undefined,
     );
+  }
+}
+
+// Catches up workspace sandbox images with their settings and the base
+// snapshot, and deletes the snapshots they no longer use.
+async function maintainWorkspaceSandboxImages(): Promise<void> {
+  try {
+    const result = await maintainSandboxImages(async (organizationId) =>
+      Boolean(await boss.send(
+        sandboxImageBuildQueue,
+        { organizationId },
+        sandboxImageBuildJobOptions(organizationId),
+      )));
+    if (result.queued > 0 || result.deleted > 0) {
+      console.log(JSON.stringify({ event: "sandbox_images_maintained", ...result }));
+    }
+  } catch (error) {
+    await reportWorkerException(error, { operation: "sandbox_image" }).catch(() => undefined);
   }
 }
 
@@ -634,11 +658,16 @@ boss.on("error", (error: unknown) => {
 async function shutdown(signal: string): Promise<void> {
   if (stopping) return;
   stopping = true;
-  // Stop taking automation runs before handing the active ones back, so this
-  // worker does not fetch them again.
-  await Promise.all([automationRunQueue, legacyAutomationRunQueue].map((queue) =>
-    boss.offWork(queue, { wait: false })));
+  // Stop taking automation runs and image builds before handing the active
+  // ones back, so this worker does not fetch them again.
+  await Promise.all([
+    automationRunQueue,
+    legacyAutomationRunQueue,
+    sandboxImageBuildQueue,
+  ].map((queue) => boss.offWork(queue, { wait: false })));
   automationRunShutdown.abort();
+  sandboxImageShutdown.abort();
+  if (pollers.sandboxImages) clearInterval(pollers.sandboxImages);
   if (pollers.replayRequest) clearInterval(pollers.replayRequest);
   if (pollers.brokerGrantCleanup) clearInterval(pollers.brokerGrantCleanup);
   if (pollers.archivedSandboxCleanup) {
@@ -793,6 +822,33 @@ await boss.work(gcpProjectSetupQueue, { localConcurrency: 2 }, tracedJobHandler(
     },
   });
   return { status };
+}));
+await boss.work(sandboxImageBuildQueue, { localConcurrency: 2 }, tracedJobHandler(sandboxImageBuildQueue, async ([job]) => {
+  const payload = sandboxImageBuildJobSchema.parse(job.data);
+  const outcome = await buildSandboxImage(payload.organizationId, {
+    signal: sandboxImageShutdown.signal,
+  }).catch(async (error: unknown) => {
+    await reportWorkerException(error, {
+      operation: "sandbox_image",
+      organizationId: payload.organizationId,
+    }).catch(() => undefined);
+    throw error;
+  });
+  if (outcome === "interrupted") {
+    // Hand the build to the next worker. If this fails, the next maintenance
+    // pass queues it instead.
+    await boss.send(
+      sandboxImageBuildQueue,
+      { organizationId: payload.organizationId },
+      sandboxImageBuildJobOptions(payload.organizationId),
+    ).catch(() => undefined);
+  }
+  console.log(JSON.stringify({
+    event: "sandbox_image_build_finished",
+    organizationId: payload.organizationId,
+    outcome,
+  }));
+  return { outcome };
 }));
 await boss.work(remediationQueueName, { localConcurrency: 1 }, tracedJobHandler(remediationQueueName, async ([job]) => {
   const payload = remediationJobSchema.parse(job.data);
@@ -1231,6 +1287,12 @@ pollers.brokerGrantCleanup = setInterval(
   60 * 60 * 1_000,
 );
 pollers.brokerGrantCleanup.unref();
+void maintainWorkspaceSandboxImages();
+pollers.sandboxImages = setInterval(
+  () => void maintainWorkspaceSandboxImages(),
+  10 * 60 * 1_000,
+);
+pollers.sandboxImages.unref();
 void deleteExpiredSandboxes();
 pollers.archivedSandboxCleanup = setInterval(
   () => void deleteExpiredSandboxes(),

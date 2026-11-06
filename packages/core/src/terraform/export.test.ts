@@ -10,6 +10,7 @@ const alert: TelemetryAlert = {
   aggregation: "count",
   comparator: "gt",
   createdAt: "2026-10-28T10:00:00.000Z",
+  description: null,
   enabled: true,
   evaluationIntervalSeconds: 60,
   field: null,
