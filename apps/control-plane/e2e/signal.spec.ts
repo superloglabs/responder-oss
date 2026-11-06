@@ -1,0 +1,156 @@
+import { expect, test, type Page } from "@playwright/test";
+
+async function workspace(page: Page, enabled = true) {
+  const now = new Date().toISOString();
+  const organization = { id: "11111111-1111-4111-8111-111111111111", name: "Acme", slug: "acme", createdAt: now, logo: null, metadata: null };
+  await page.route("**/api/**", (route) => route.fulfill({ json: {} }));
+  await page.route("**/api/auth/**", (route) => {
+    const path = new URL(route.request().url()).pathname;
+    const userId = "22222222-2222-4222-8222-222222222222";
+    const json = path.endsWith("/get-session") ? {
+      session: { id: "session-id", userId, activeOrganizationId: organization.id, token: "session-token", expiresAt: new Date(Date.now() + 3600000).toISOString(), createdAt: now, updatedAt: now },
+      user: { id: userId, name: "Ada Lovelace", email: "ada@example.com", emailVerified: true, image: null, createdAt: now, updatedAt: now },
+    } : path.endsWith("/organization/list") ? [organization]
+      : path.endsWith("/organization/get-full-organization") ? organization : null;
+    return route.fulfill({ json });
+  });
+  await page.route("**/api/context", (route) => route.fulfill({ json: { capabilities: enabled ? ["signal"] : [] } }));
+  await page.route("**/api/legacy-account-redirect", (route) => route.fulfill({ json: { redirect: false } }));
+  await page.route("**/api/agents", (route) => route.fulfill({ json: { agents: [] } }));
+  await page.route("**/api/billing", (route) => route.fulfill({ json: { configured: false, enabled: false } }));
+}
+test.use({ viewport: { width: 1440, height: 1040 } });
+
+test("requires the capability for direct Signal routes", async ({ page }) => {
+  await workspace(page, false);
+  await page.goto("/signal/findings/SIG-042");
+  await expect(page).toHaveURL(/\/agents$/);
+  await expect(page.getByRole("navigation", { name: "Primary navigation" }).getByRole("link", { name: "Findings" })).toHaveCount(0);
+});
+
+test("completes preview setup without connecting or charging anything", async ({ page }) => {
+  await workspace(page);
+  const mutations: string[] = [];
+  page.on("request", (request) => { if (request.method() !== "GET" && request.url().includes("/api/") && !request.url().includes("/consent")) mutations.push(request.url()); });
+  await page.goto("/app");
+  await expect(page).toHaveURL(/\/signal\/setup$/);
+  await expect(page.getByRole("navigation", { name: "Primary navigation" }).getByRole("link")).toHaveText(["Setup", "Findings", "Usage", "Settings"]);
+  const next = page.getByRole("button", { name: "Continue", exact: true });
+  await expect(next).toBeDisabled();
+  await page.getByRole("button", { name: "Connect Datadog" }).click();
+  await expect(next).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Connect Sentry" })).toBeVisible();
+  await page.screenshot({ path: "test-results/signal-setup.png" });
+  await next.click();
+  await page.getByRole("button", { name: "Connect GitHub" }).click();
+  await expect(next).toBeDisabled();
+  await page.getByLabel("Search repositories").fill("api");
+  await page.getByRole("checkbox", { name: "acme / api" }).check();
+  await page.getByLabel("Search repositories").fill("");
+  await expect(page.getByText("1 selected")).toBeVisible();
+  await next.click();
+  await expect(next).toBeDisabled();
+  await page.getByRole("button", { name: "Connect Slack" }).click();
+  await page.getByLabel("Findings channel").selectOption("engineering");
+  await next.click();
+  await page.getByRole("button", { name: "Skip for now" }).click();
+  await page.getByRole("button", { name: "Choose Pro ($100)" }).click();
+  await expect(page.getByRole("dialog")).toContainText("does not collect payment details");
+  await page.getByRole("button", { name: "View sample findings" }).click();
+  await expect(page).toHaveURL(/\/signal\/findings$/);
+  await page.getByRole("link", { name: "Checkout requests time out after the payment client retry change", exact: true }).click();
+  await expect(page.locator(".signalProperties")).toContainText("#engineering");
+  expect(mutations).toEqual([]);
+});
+
+test("filters, paginates, and changes a finding in the preview", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await workspace(page);
+  await page.goto("/signal/findings");
+  await expect(page.getByText("Showing 9 of 42 findings")).toBeVisible();
+  await page.screenshot({ path: "test-results/signal-findings.png" });
+  await page.getByRole("button", { name: "Load more" }).click();
+  await expect(page.getByText("Showing 18 of 42 findings")).toBeVisible();
+  await page.getByLabel("Search findings").fill("nonsense");
+  await expect(page.getByRole("heading", { name: "No matching findings" })).toBeVisible();
+  await page.getByRole("button", { name: "Clear filters" }).click();
+  await page.getByRole("link", { name: "Checkout requests time out after the payment client retry change", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Evidence", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Copy prompt" }).click();
+  await expect(page.getByRole("status")).toHaveText("Prompt copied");
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toContain("SIG-042");
+  await page.getByRole("button", { name: "Mark as irrelevant" }).click();
+  await expect(page.locator(".signalProperties")).toContainText("Irrelevant");
+  await page.getByRole("button", { name: "Restore finding" }).click();
+  await page.locator(".workspaceSurface").evaluate((element) => element.scrollTo({ top: 0 }));
+  await page.screenshot({ path: "test-results/signal-detail.png" });
+  await page.getByRole("navigation", { name: "Primary navigation" }).getByRole("link", { name: "Usage" }).click();
+  await expect(page.getByText("42 findings", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "31 Oct: 4, 3 accepted" }).focus();
+  await expect(page.getByRole("tooltip")).toContainText("31 Oct");
+  await page.screenshot({ path: "test-results/signal-usage.png" });
+  await page.getByLabel("Date range").selectOption("7");
+  await expect(page.getByText("26 findings", { exact: true })).toBeVisible();
+  await page.getByLabel("Date range").selectOption("30");
+  await expect(page.getByText("8 Oct – 6 Nov, 2026")).toBeVisible();
+});
+
+test("account menu matches sidebar and supports keyboard navigation", async ({ page }) => {
+  await workspace(page);
+  await page.goto("/signal/findings");
+  const trigger = page.getByRole("button", { name: /Open Acme and account menu/ });
+  await trigger.click();
+  const active = page.getByRole("menuitem", { name: /Acme/ });
+  await expect(active).toBeFocused();
+  await expect(active).toHaveCSS("border-radius", "4px");
+  await expect(active).toHaveCSS("font-size", "13px");
+  await page.keyboard.press("ArrowDown");
+  await expect(page.getByRole("menuitem", { name: "Workspace settings" })).toBeFocused();
+  await page.screenshot({ path: "test-results/signal-account-menu.png" });
+  await page.keyboard.press("Escape");
+  await expect(trigger).toBeFocused();
+  await expect(page.getByRole("menu")).toHaveCount(0);
+});
+
+test("keeps the last chart tooltip inside a narrow desktop chart", async ({ page }) => {
+  await workspace(page);
+  await page.setViewportSize({ width: 1100, height: 900 });
+  await page.goto("/signal/findings/SIG-042");
+  const chart = page.locator(".signalChart").first();
+  await chart.getByRole("button").last().focus();
+  const tooltip = await chart.getByRole("tooltip").boundingBox();
+  const canvas = await chart.locator(".signalChartCanvas").boundingBox();
+  expect(tooltip).not.toBeNull();
+  expect(canvas).not.toBeNull();
+  expect(tooltip!.x).toBeGreaterThanOrEqual(canvas!.x);
+  expect(tooltip!.x + tooltip!.width).toBeLessThanOrEqual(canvas!.x + canvas!.width + 1);
+});
+
+test("Signal workspace settings do not load unrelated product APIs", async ({ page }) => {
+  await workspace(page);
+  await page.route("**/api/auth/organization/get-active-member", (route) => route.fulfill({ json: { id: "member-id", role: "admin" } }));
+  const unrelated: string[] = [];
+  page.on("request", (request) => {
+    const path = new URL(request.url()).pathname;
+    if (/^\/api\/(billing|telemetry|sandbox|integrations\/github\/pull-request-author)/.test(path)) unrelated.push(path);
+  });
+  await page.goto("/settings/workspace");
+  await expect(page.getByRole("heading", { name: "Invite a teammate" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Settings sections" }).getByRole("link")).toHaveText(["Workspace"]);
+  await expect(page.getByRole("group", { name: "Workspace", exact: true }).getByRole("link")).toHaveText(["Settings"]);
+  expect(unrelated).toEqual([]);
+});
+
+test("mobile setup, detail, and navigation fit the viewport", async ({ page }) => {
+  await workspace(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/signal/setup");
+  await expect(page.getByRole("button", { name: "Connect Sentry" })).toBeVisible();
+  await page.screenshot({ path: "test-results/signal-mobile.png" });
+  await page.getByRole("button", { name: "Open navigation" }).click();
+  await page.getByRole("navigation", { name: "Primary navigation" }).getByRole("link", { name: "Findings" }).click();
+  await expect(page.locator(".workspaceSurface")).not.toHaveAttribute("inert");
+  await page.getByRole("link", { name: "Checkout requests time out after the payment client retry change", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Evidence" })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});

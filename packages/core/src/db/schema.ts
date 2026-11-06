@@ -794,6 +794,7 @@ export const workspaceMemories = pgTable(
 );
 
 export const organizationCapabilityValues = [
+  "signal",
   "automations",
   "simplified_navigation",
   "telemetry",

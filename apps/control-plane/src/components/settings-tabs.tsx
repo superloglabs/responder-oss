@@ -21,6 +21,18 @@ export function SettingsTabs({
   active: SettingsSection;
   capabilities: string[];
 }) {
+  if (capabilities.includes("signal")) return (
+    <nav aria-label="Settings sections" className="settingsTabs">
+      <Link aria-current={active === "workspace" ? "page" : undefined} className={active === "workspace" ? "isActive" : undefined} to="/settings/workspace">Workspace</Link>
+    </nav>
+  );
+  return <ProductSettingsTabs active={active} capabilities={capabilities} />;
+}
+
+function ProductSettingsTabs({ active, capabilities }: {
+  active: SettingsSection;
+  capabilities: string[];
+}) {
   const [billingEnabled, setBillingEnabled] = useState(false);
   const ingestAvailable = useIngestAvailable();
   const automationsEnabled = capabilities.includes("automations");

@@ -61,7 +61,9 @@ export function AppShell({
   redesigned = false,
   wide = false,
 }: AppShellProps) {
-  const workspace = redesigned || density === "issues";
+  const capabilities = useOrganizationCapabilities(!guest);
+  const options = navigationOptions(capabilities);
+  const workspace = redesigned || density === "issues" || Boolean(options.signal);
   const session = authClient.useSession();
   const activeOrganization = authClient.useActiveOrganization();
   const organizations = authClient.useListOrganizations();
@@ -69,14 +71,13 @@ export function AppShell({
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [switchingTo, setSwitchingTo] = useState<string | null>(null);
   const [menuError, setMenuError] = useState<string | null>(null);
-  const capabilities = useOrganizationCapabilities(!guest);
-  const options = navigationOptions(capabilities);
   const navigation = primaryNavigation({
     ...options,
     automations: options.automations || Boolean(guest),
   });
   const activeSection = activeNavigationSection(active, settingsInSidebar(options));
   const menuRef = useRef<HTMLDivElement>(null);
+  const accountTriggerRef = useRef<HTMLButtonElement>(null);
   const sidebarRef = useRef<HTMLElement>(null);
   const sidebarTriggerRef = useRef<HTMLButtonElement>(null);
   const restoreSidebarFocusRef = useRef(false);
@@ -101,9 +102,18 @@ export function AppShell({
     }
 
     function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") setIsMenuOpen(false);
+      const items = Array.from(menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]:not(:disabled)') ?? []);
+      if (event.key === "Escape") { setIsMenuOpen(false); accountTriggerRef.current?.focus(); }
+      if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key) && menuRef.current?.contains(document.activeElement)) {
+        event.preventDefault();
+        const index = items.indexOf(document.activeElement as HTMLElement);
+        const next = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1 : (index + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+        items[next]?.focus();
+      }
+      if (event.key === "Tab") setIsMenuOpen(false);
     }
 
+    menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]:not(:disabled)')?.focus();
     document.addEventListener("mousedown", closeOnOutsideClick);
     document.addEventListener("keydown", closeOnEscape);
     return () => {
@@ -220,7 +230,7 @@ export function AppShell({
           className={isActive && !(workspace && item.children) ? "isActive" : undefined}
           to={item.to}
         >
-          {workspace ? <NavigationIcon section={item.section} /> : null}
+          {workspace ? <NavigationIcon section={item.section} signal={options.signal} /> : null}
           {item.label}
         </Link>
         {workspace && isActive && item.children ? (
@@ -242,7 +252,7 @@ export function AppShell({
   }
 
   return (
-    <main className={`appShell appShell--${density}${workspace ? " appShell--workspace" : ""}${workspace && isSidebarOpen ? " appShell--sidebarOpen" : ""}`}>
+    <main className={`appShell${options.signal ? " appShell--signal" : ""} appShell--${density}${workspace ? " appShell--workspace" : ""}${workspace && isSidebarOpen ? " appShell--sidebarOpen" : ""}`}>
       {workspace && isSidebarOpen ? (
         <button
           aria-hidden="true"
@@ -314,13 +324,14 @@ export function AppShell({
         </div>
         <div className="globalHeader__right" ref={menuRef}>
           {!workspace ? <ColorThemeToggle className="globalThemeToggle" /> : null}
-          {workspace && !guest ? <TelemetryCallCard /> : null}
-          {workspace && !guest ? <SidebarUsageCard enabled={options.automations} /> : null}
+          {workspace && !guest && !options.signal ? <TelemetryCallCard /> : null}
+          {workspace && !guest ? <SidebarUsageCard enabled={options.automations && !options.signal} /> : null}
           {guest ?? <div className="accountMenu">
             <button
               aria-expanded={isMenuOpen}
               aria-haspopup="menu"
               aria-label={`Open ${activeOrganization.data?.name ?? "workspace"} and account menu for ${displayName}`}
+              ref={accountTriggerRef}
               className="accountMenuTrigger"
               onClick={() => setIsMenuOpen((value) => !value)}
               type="button"
@@ -351,6 +362,7 @@ export function AppShell({
                       session.data?.session.activeOrganizationId;
                     return (
                       <button
+                        aria-current={isActive ? true : undefined}
                         className="accountPopover__item"
                         disabled={switchingTo !== null}
                         key={organization.id}
@@ -431,9 +443,9 @@ export function AppShell({
               <ListIcon aria-hidden="true" size={20} />
             </button>
           </div>
-          {guest ? null : <BillingBanner />}<div className={wide ? "workspaceContent workspaceContent--wide" : "workspaceContent"}>{children}</div>
+          {guest || options.signal ? null : <BillingBanner />}<div className={wide ? "workspaceContent workspaceContent--wide" : "workspaceContent"}>{children}</div>
         </div>
-      ) : <>{guest ? null : <BillingBanner />}{children}</>}
+      ) : <>{guest || options.signal ? null : <BillingBanner />}{children}</>}
     </main>
   );
 }

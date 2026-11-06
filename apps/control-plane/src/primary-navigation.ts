@@ -11,6 +11,9 @@ export type NavigationSection =
   | "memory"
   | "metrics"
   | "pull-requests"
+  | "signal-setup"
+  | "signal-findings"
+  | "signal-usage"
   | "scans"
   | "settings"
   | "skills"
@@ -20,7 +23,7 @@ export type NavigationSection =
   | "telemetry-overview"
   | "traces";
 
-export type NavigationGroup = "Automation" | "Detect" | "Explore";
+export type NavigationGroup = "Automation" | "Detect" | "Explore" | "Signal" | "Workspace";
 
 export interface NavigationItem {
   // Pages within the section, listed under it while it is open.
@@ -39,6 +42,7 @@ interface NavigationOptions {
   // Shown only with telemetry.
   dashboards?: boolean;
   simplified: boolean;
+  signal?: boolean;
   telemetry?: boolean;
 }
 
@@ -47,6 +51,12 @@ interface NavigationOptions {
 // With telemetry the sidebar groups automation and telemetry pages under
 // labels, and lists the remaining product areas above them.
 export function primaryNavigation(options: NavigationOptions): NavigationItem[] {
+  if (options.signal) return [
+    { group: "Signal", label: "Setup", section: "signal-setup", to: "/signal/setup" },
+    { group: "Signal", label: "Findings", section: "signal-findings", to: "/signal/findings" },
+    { group: "Signal", label: "Usage", section: "signal-usage", to: "/signal/usage" },
+    { group: "Workspace", label: "Settings", section: "settings", to: "/settings/workspace" },
+  ];
   const grouped = Boolean(options.telemetry);
   const inGroup = (group: NavigationGroup, items: NavigationItem[]) =>
     grouped ? items.map((item) => ({ ...item, group })) : items;
@@ -132,8 +142,8 @@ export function navigationBlocks(
 
 // Simplified navigation gives integrations and tag mode their own sidebar
 // entries. With telemetry they stay settings tabs.
-export function settingsInSidebar(options: Pick<NavigationOptions, "simplified" | "telemetry">): boolean {
-  return options.simplified && !options.telemetry;
+export function settingsInSidebar(options: Pick<NavigationOptions, "simplified" | "telemetry" | "signal">): boolean {
+  return !options.signal && options.simplified && !options.telemetry;
 }
 
 // Integrations and tag mode highlight settings while they are settings tabs.
@@ -156,6 +166,7 @@ export function navigationOptions(capabilities: readonly string[]): NavigationOp
     alerts: capabilities.includes("alerts"),
     automations: capabilities.includes("automations"),
     dashboards: capabilities.includes("dashboards"),
+    signal: capabilities.includes("signal"),
     simplified: capabilities.includes("simplified_navigation"),
     telemetry: capabilities.includes("telemetry"),
   };
@@ -167,5 +178,6 @@ export function navigationOptions(capabilities: readonly string[]): NavigationOp
 // chooses later.
 export function newWorkspacePath(capabilities: readonly string[] | null): string {
   if (!capabilities) return "/app";
+  if (capabilities.includes("signal")) return "/signal/setup";
   return capabilities.includes("automations") ? "/onboarding/code" : "/agents/new";
 }

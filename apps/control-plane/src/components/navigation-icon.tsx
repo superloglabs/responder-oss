@@ -1,5 +1,9 @@
 import {
   IconAdjustmentsHorizontalFilled,
+  IconAdjustmentsHorizontal,
+  IconChecklist,
+  IconFlag,
+  IconChartBar,
   IconBellFilled,
   IconBookmarkFilled,
   IconBoltFilled,
@@ -26,6 +30,9 @@ import {
 import type { NavigationSection } from "../primary-navigation";
 
 const navigationIcons: Record<NavigationSection, typeof GearIcon | typeof IconBoltFilled> = {
+  "signal-setup": IconChecklist,
+  "signal-findings": IconFlag,
+  "signal-usage": IconChartBar,
   agents: LightningIcon,
   "ai-models": CoinsIcon,
   alerts: IconBellFilled,
@@ -48,7 +55,7 @@ const navigationIcons: Record<NavigationSection, typeof GearIcon | typeof IconBo
   traces: IconSitemapFilled,
 };
 
-export function NavigationIcon({ section }: { section: NavigationSection }) {
-  const Icon = navigationIcons[section];
+export function NavigationIcon({ section, signal = false }: { section: NavigationSection; signal?: boolean }) {
+  const Icon = signal && section === "settings" ? IconAdjustmentsHorizontal : navigationIcons[section];
   return <Icon size={16} aria-hidden="true" />;
 }
