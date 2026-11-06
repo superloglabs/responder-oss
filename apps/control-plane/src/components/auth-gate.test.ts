@@ -12,6 +12,18 @@ vi.mock("../color-theme", () => ({
   useColorTheme: () => ({ theme: "light", toggleTheme: vi.fn() }),
 }));
 
+vi.mock("../cells", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../cells")>(),
+  useCellDirectory: () => ({
+    current: "eu",
+    cookieDomain: ".example.com",
+    cells: [
+      { id: "eu", label: "Europe", url: "https://eu.example.com" },
+      { id: "us", label: "United States", url: "https://us.example.com" },
+    ],
+  }),
+}));
+
 function renderSignIn(path = "/app") {
   vi.stubGlobal("window", { location: new URL(path, "https://example.com") });
   return renderToStaticMarkup(createElement(AuthGate, { children: null }));
@@ -33,6 +45,21 @@ describe("signed-out authentication", () => {
     for (const label of html.matchAll(/<label\b[^>]*>[\s\S]*?<\/label>/g)) {
       expect(label[0]).not.toContain("<button");
     }
+  });
+
+  it("omits the region selector at login but keeps residency choice for signup", () => {
+    expect(renderSignIn()).not.toContain('aria-label="Data region"');
+    expect(renderSignIn("/app?signup=1")).toContain('aria-label="Data region"');
+    expect(renderSignIn("/invite/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee?signup=1"))
+      .not.toContain('aria-label="Data region"');
+  });
+
+  it("keeps the account prompt outside the action and reserves space for feedback", () => {
+    const html = renderSignIn();
+    expect(html).toMatch(/<span class="authSwitchPrompt">Don’t have an account\?<\/span>/);
+    expect(html).toMatch(/<button[^>]*class="authSwitch"[^>]*>Get started<\/button>/);
+    expect(html).toContain('aria-busy="false"');
+    expect(html).toContain('class="authFeedback" aria-live="polite"');
   });
 
   it("starts on account creation for sign-up links and automation templates", () => {
