@@ -4,9 +4,8 @@ import { ArrowRightIcon } from "@phosphor-icons/react";
 import { authErrorCode } from "../auth-error-code";
 import { authClient } from "../auth-client";
 import { resetBrowserAnalytics } from "../browser-analytics";
-import { trackRedditSignupPixel } from "../reddit-pixel";
+import { trackSignupConversion } from "../signup-conversion";
 import { socialAuthErrorMessage, socialAuthUrls } from "../social-auth-url";
-import { trackXSignupPixel } from "../x-pixel";
 import {
   explicitSignupIntent,
   explicitSignupStorageKey,
@@ -46,7 +45,7 @@ export function AuthFrame({ children }: AuthGateProps) {
       <ColorThemeToggle className="authThemeToggle" />
       <section className="authCard">
         <div className="authBrand">
-          <img alt="Superlog" draggable={false} src="/superlog-wordmark.svg" />
+          <img alt="Superlog" draggable={false} src="/superlog-mark.svg" />
         </div>
         {children}
       </section>
@@ -112,102 +111,119 @@ export function SignIn({
         provider,
       }),
     );
-    // First-time social signups land with this marker so the X signup pixel
-    // fires exactly once, in AuthGate. Stale OAuth parameters are removed so
-    // retries do not accumulate duplicate errors in the return URL.
-    const signupIntent = isCreatingAccount ? crypto.randomUUID() : undefined;
-    const returnUrls = socialAuthUrls(window.location.href, signupIntent);
-    if (isCreatingAccount) {
-      sessionStorage.setItem(
-        explicitSignupStorageKey,
-        `social:${signupIntent}`,
-      );
-    }
-    const result = await authClient.signIn.social({
-      provider,
-      ...returnUrls,
-    });
-    if (result.error || !result.data) {
+    try {
+      // First-time social signups land with this marker so the X signup pixel
+      // fires exactly once, in AuthGate. Stale OAuth parameters are removed so
+      // retries do not accumulate duplicate errors in the return URL.
+      const signupIntent = isCreatingAccount ? crypto.randomUUID() : undefined;
+      const returnUrls = socialAuthUrls(window.location.href, signupIntent);
       if (isCreatingAccount) {
-        sessionStorage.removeItem(explicitSignupStorageKey);
+        sessionStorage.setItem(
+          explicitSignupStorageKey,
+          `social:${signupIntent}`,
+        );
       }
-      console.error(
-        JSON.stringify({
-          event: "social_sign_in_failed",
-          provider,
-          errorCode: authErrorCode(result.error, "missing_data"),
-        }),
-      );
+      const result = await authClient.signIn.social({
+        provider,
+        ...returnUrls,
+      });
+      if (result.error || !result.data) {
+        if (isCreatingAccount) {
+          sessionStorage.removeItem(explicitSignupStorageKey);
+        }
+        console.error(
+          JSON.stringify({
+            event: "social_sign_in_failed",
+            provider,
+            errorCode: authErrorCode(result.error, "missing_data"),
+          }),
+        );
+        setSocialProvider(null);
+        setError(
+          result.error?.message ??
+            `${provider === "google" ? "Google" : "GitHub"} sign in failed`,
+        );
+        return;
+      }
+    } catch {
+      if (isCreatingAccount) sessionStorage.removeItem(explicitSignupStorageKey);
       setSocialProvider(null);
-      setError(
-        result.error?.message ??
-          `${provider === "google" ? "Google" : "GitHub"} sign in failed`,
-      );
-      return;
+      console.error(JSON.stringify({ event: "social_sign_in_failed", provider, errorCode: "network_error" }));
+      setError("Could not connect. Please try again.");
     }
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (isSubmitting || socialProvider !== null) return;
     setError(null);
     setIsSubmitting(true);
 
     const data = new FormData(event.currentTarget);
     const email = String(data.get("email") ?? "");
     const password = String(data.get("password") ?? "");
-    if (isCreatingAccount && allowLegacyHandoff) {
-      // AuthGate clears a legacy marker after the newly-created session is
-      // visible. Keeping this intent in sessionStorage closes the race between
-      // Better Auth returning a session and the clear request completing.
-      sessionStorage.setItem(explicitSignupStorageKey, "email");
-    }
-    const result = isCreatingAccount
-      ? await authClient.signUp.email({
-          email,
-          name: String(data.get("name") ?? ""),
-          password,
-        })
-      : await authClient.signIn.email({ email, password });
+    try {
+      if (isCreatingAccount && allowLegacyHandoff) {
+        // AuthGate clears a legacy marker after the newly-created session is
+        // visible. Keeping this intent in sessionStorage closes the race between
+        // Better Auth returning a session and the clear request completing.
+        sessionStorage.setItem(explicitSignupStorageKey, "email");
+      }
+      const result = isCreatingAccount
+        ? await authClient.signUp.email({
+            email,
+            name: String(data.get("name") ?? ""),
+            password,
+          })
+        : await authClient.signIn.email({ email, password });
 
-    if (result.error) {
-      if (isCreatingAccount) {
-        sessionStorage.removeItem(explicitSignupStorageKey);
-      } else if (allowLegacyHandoff) {
-        const targetUrl = await tryLegacyEmailSignIn(email, password);
-        if (targetUrl) {
-          console.info(
-            JSON.stringify({ event: "legacy_email_handoff_success" }),
-          );
-          window.location.replace(targetUrl);
-          return;
+      if (result.error) {
+        if (isCreatingAccount) {
+          sessionStorage.removeItem(explicitSignupStorageKey);
+        } else if (allowLegacyHandoff) {
+          const targetUrl = await tryLegacyEmailSignIn(email, password);
+          if (targetUrl) {
+            console.info(
+              JSON.stringify({ event: "legacy_email_handoff_success" }),
+            );
+            window.location.replace(targetUrl);
+            return;
+          }
         }
+        setIsSubmitting(false);
+        console.error(
+          JSON.stringify({
+            event: isCreatingAccount
+              ? "email_sign_up_failed"
+              : "email_sign_in_failed",
+            errorCode: authErrorCode(result.error),
+          }),
+        );
+        setError(result.error.message ?? "Authentication failed");
+        return;
       }
       setIsSubmitting(false);
-      console.error(
+      console.info(
         JSON.stringify({
           event: isCreatingAccount
-            ? "email_sign_up_failed"
-            : "email_sign_in_failed",
-          errorCode: authErrorCode(result.error),
+            ? "email_sign_up_success"
+            : "email_sign_in_success",
         }),
       );
-      setError(result.error.message ?? "Authentication failed");
-      return;
-    }
-    setIsSubmitting(false);
-    console.info(
-      JSON.stringify({
-        event: isCreatingAccount
-          ? "email_sign_up_success"
-          : "email_sign_in_success",
-      }),
-    );
-    // During MCP OAuth the response is the next step of that flow, which
-    // the auth client follows, so it may not include the new user.
-    const signedUpUserId = (result.data as { user?: { id?: string } }).user?.id;
-    if (isCreatingAccount && signedUpUserId) {
-      trackRedditSignupPixel(signedUpUserId);
-      trackXSignupPixel(signedUpUserId);
+      // During MCP OAuth the response is the next step of that flow, which
+      // the auth client follows, so it may not include the new user.
+      const signedUpUserId = (result.data as { user?: { id?: string } }).user?.id;
+      if (isCreatingAccount && signedUpUserId) {
+        trackSignupConversion(signedUpUserId);
+      }
+    } catch {
+      console.error(JSON.stringify({
+        event: isCreatingAccount ? "email_sign_up_failed" : "email_sign_in_failed",
+        errorCode: "network_error",
+      }));
+      if (isCreatingAccount) sessionStorage.removeItem(explicitSignupStorageKey);
+      setIsSubmitting(false);
+      setError("Could not connect. Please try again.");
     }
   }
 
@@ -218,7 +234,7 @@ export function SignIn({
     window.location.assign(cellSwitchUrl(cell, new URL(window.location.href)));
   }
   const regionChoice =
-    allowRegionChoice && !isInvitation && cells?.current && cells.cells.length > 1
+    isCreatingAccount && allowRegionChoice && !isInvitation && cells?.current && cells.cells.length > 1
       ? { current: cells.current, options: cells.cells }
       : null;
 
@@ -241,20 +257,23 @@ export function SignIn({
         ) : null}
         <div className="authHeading">
         <h1>{heading}</h1>
-        <button
-          className="authSwitch"
-          disabled={isSubmitting || socialProvider !== null}
-          onClick={() => {
-            setError(null);
-            setShowPassword(false);
-            setIsCreatingAccount((value) => !value);
-          }}
-          type="button"
-        >
-          {isCreatingAccount
-            ? "Already have an account? Sign in"
-            : "Don’t have an account? Get started"}
-        </button>
+        <div className="authAccountSwitch">
+          <span className="authSwitchPrompt">
+            {isCreatingAccount ? "Already have an account?" : "Don’t have an account?"}
+          </span>{" "}
+          <button
+            className="authSwitch"
+            disabled={isSubmitting || socialProvider !== null}
+            onClick={() => {
+              setError(null);
+              setShowPassword(false);
+              setIsCreatingAccount((value) => !value);
+            }}
+            type="button"
+          >
+            {isCreatingAccount ? "Sign in" : "Get started"}
+          </button>
+        </div>
         </div>
         <p className={isInvitation || settingUpTemplate ? undefined : "authDescription"}>{description}</p>
       </div>
@@ -372,19 +391,27 @@ export function SignIn({
             </button>
           </span>
         </div>
-        {error ? <p className="authError">{error}</p> : null}
         <button
-          className="button button--primary authSubmit"
-          disabled={isSubmitting}
+          aria-busy={isSubmitting}
+          aria-label={isSubmitting
+            ? isCreatingAccount ? "Creating account…" : "Signing in…"
+            : isCreatingAccount ? "Create account" : "Sign in"}
+          className="button button--primary authSubmit authSubmit--animated"
+          disabled={isSubmitting || socialProvider !== null}
           type="submit"
         >
-          {isSubmitting
-            ? "Please wait…"
-            : isCreatingAccount
-              ? "Create account"
-              : "Sign in"}
+          <span aria-hidden="true" className="authSubmitIdle">
+            {isCreatingAccount ? "Create account" : "Sign in"}
+          </span>
+          <span aria-hidden="true" className="authSubmitPending">
+            {isSubmitting && <span className="dsSpinner" />}
+            {isCreatingAccount ? "Creating account…" : "Signing in…"}
+          </span>
         </button>
       </form>
+      <div className="authFeedback" aria-live="polite" aria-atomic="true">
+        {error ? <p className="authError">{error}</p> : null}
+      </div>
       <p className="authTerms">
         By {isCreatingAccount ? "creating an account" : "signing in"}, you agree to the <a href="/tos">Terms of Service</a> and{" "}
         <a href="/privacy">Privacy Policy</a>.
@@ -1030,8 +1057,7 @@ export function AuthGate({ children }: AuthGateProps) {
       window.history.replaceState(window.history.state, "", url);
     }
     if (intent.trackSocialSignup) {
-      trackRedditSignupPixel(signedInUserId);
-      trackXSignupPixel(signedInUserId);
+      trackSignupConversion(signedInUserId);
     }
     let cancelled = false;
     async function routeLegacyAccount() {
