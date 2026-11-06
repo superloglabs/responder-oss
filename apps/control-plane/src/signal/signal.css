@@ -96,6 +96,7 @@
 .signalPageHeader { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
 .signalPageHeader p { margin-top: 4px; font-size: 12px; }
 .signalUsage, .signalFindings { display: flex; flex-direction: column; gap: 24px; }
+.signalFindings { margin-top: 24px; }
 .signalListHeading { display: flex; align-items: center; gap: 8px; }
 .signalFilters { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .signalFilters .signalSearch { width: 230px; border: 0; box-shadow: 0 1px 1.5px #0000001a, 0 0 0 .5px #00000024; }
@@ -187,7 +188,7 @@
 }
 @media (max-width: 600px) {
   .appShell--signal .workspaceContent { max-width: none; }
-  .signalSetup { margin-top: 8px; }
+  .signalSetup, .signalFindings { margin-top: 8px; }
   .signalField { align-items: stretch; flex-direction: column; gap: 12px; }
   .signal .signalField select { width: 100%; }
   .signalConnection { padding: 16px 12px; gap: 12px; flex-wrap: wrap; }
