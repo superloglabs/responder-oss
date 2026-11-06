@@ -4,9 +4,8 @@ import { ArrowRightIcon } from "@phosphor-icons/react";
 import { authErrorCode } from "../auth-error-code";
 import { authClient } from "../auth-client";
 import { resetBrowserAnalytics } from "../browser-analytics";
-import { trackRedditSignupPixel } from "../reddit-pixel";
+import { trackSignupConversion } from "../signup-conversion";
 import { socialAuthErrorMessage, socialAuthUrls } from "../social-auth-url";
-import { trackXSignupPixel } from "../x-pixel";
 import {
   explicitSignupIntent,
   explicitSignupStorageKey,
@@ -215,13 +214,7 @@ export function SignIn({
       // the auth client follows, so it may not include the new user.
       const signedUpUserId = (result.data as { user?: { id?: string } }).user?.id;
       if (isCreatingAccount && signedUpUserId) {
-        for (const track of [trackRedditSignupPixel, trackXSignupPixel]) {
-          try {
-            track(signedUpUserId);
-          } catch {
-            console.error(JSON.stringify({ event: "signup_pixel_failed" }));
-          }
-        }
+        trackSignupConversion(signedUpUserId);
       }
     } catch {
       console.error(JSON.stringify({
@@ -1064,8 +1057,7 @@ export function AuthGate({ children }: AuthGateProps) {
       window.history.replaceState(window.history.state, "", url);
     }
     if (intent.trackSocialSignup) {
-      trackRedditSignupPixel(signedInUserId);
-      trackXSignupPixel(signedInUserId);
+      trackSignupConversion(signedInUserId);
     }
     let cancelled = false;
     async function routeLegacyAccount() {
