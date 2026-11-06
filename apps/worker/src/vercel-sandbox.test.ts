@@ -267,18 +267,21 @@ describe("runVercelCommand", () => {
       () => Promise.reject(headersTimeout),
       () => Promise.resolve(finished),
     );
-    await expect(runVercelCommand(sandbox, { cmd: "/bin/sh" }, noSleep)).resolves.toBe(finished);
-    expect(wait).toHaveBeenCalledTimes(2);
-    expect(error).not.toHaveBeenCalled();
-    expect(JSON.parse(String(warn.mock.calls[0]?.[0]))).toEqual({
-      attempt: 1,
-      cmdId: "cmd_1",
-      error: "fetch failed",
-      errorCode: "UND_ERR_HEADERS_TIMEOUT",
-      event: "vercel_command_wait_retry",
-    });
-    warn.mockRestore();
-    error.mockRestore();
+    try {
+      await expect(runVercelCommand(sandbox, { cmd: "/bin/sh" }, noSleep)).resolves.toBe(finished);
+      expect(wait).toHaveBeenCalledTimes(2);
+      expect(error).not.toHaveBeenCalled();
+      expect(JSON.parse(String(warn.mock.calls[0]?.[0]))).toEqual({
+        attempt: 1,
+        cmdId: "cmd_1",
+        error: "fetch failed",
+        errorCode: "UND_ERR_HEADERS_TIMEOUT",
+        event: "vercel_command_wait_retry",
+      });
+    } finally {
+      warn.mockRestore();
+      error.mockRestore();
+    }
   });
 
   it("does not wait again after a rejected request or a cancellation", async () => {
