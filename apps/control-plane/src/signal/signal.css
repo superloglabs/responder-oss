@@ -127,7 +127,7 @@
 .signal .signalError { color: #a61b1b; font-size: 13px; margin: 0; }
 .signal .signalNote { color: #666; font-size: 12px; margin: 0; }
 .signalPrompt summary { cursor: pointer; font-size: 13px; font-weight: 500; }
-.signalPrompt pre { margin: 8px 0 0; padding: 12px 14px; border: 1px solid #e5e5e5; border-radius: 6px; background: #fafafa; white-space: pre-wrap; font: 400 12px/20px ui-monospace, "SFMono-Regular", Consolas, monospace; }
+.signalPrompt pre { margin: 8px 0 0; padding: 12px 14px; border: 1px solid #e5e5e5; border-radius: 6px; background: #fafafa; white-space: pre-wrap; overflow-wrap: anywhere; font: 400 12px/20px ui-monospace, "SFMono-Regular", Consolas, monospace; }
 .signalListFooter { display: flex; justify-content: space-between; align-items: center; color: #666; font-size: 12px; }
 .signalEmpty { padding: 40px 16px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 12px; }
 .signalDetail { display: flex; flex-direction: column; gap: 32px; }
