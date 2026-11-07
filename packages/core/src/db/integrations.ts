@@ -873,23 +873,39 @@ export async function getIntegrationAccountByRegistration(input: {
   return rows.at(0) ?? null;
 }
 
+export type IntegrationRegistrationClaim =
+  | { status: "claimed"; integrationAccountId: string; merged: boolean }
+  | { status: "already_claimed" }
+  | null;
+
 // Records the external account a registration placeholder turned out to be.
 // When the organization already has a row for that account, the new
 // credentials move onto it and the placeholder goes, so the account keeps its
-// automations. The surviving row remembers the placeholder's ID so a setup
-// page polling the placeholder can follow it.
+// automations and its status. The surviving row remembers the placeholder's ID
+// so a setup page polling the placeholder can follow it.
+//
+// A placeholder claimed for another account can be claimed again until that
+// account is verified, so an unverified report cannot lock the link. The
+// checks run under the row lock, so concurrent deliveries cannot both pass.
 export async function claimIntegrationRegistration(input: {
   displayName: string;
   encryptedCredentials: string;
   externalAccountId: string;
+  externalAccountIdPrefix: string;
   organizationId: string;
   provider: IntegrationProvider;
   registrationAccountId: string;
   registrationHash: string;
-}): Promise<{ integrationAccountId: string; merged: boolean } | null> {
+}): Promise<IntegrationRegistrationClaim> {
   return getDatabase().transaction(async (tx) => {
     const [registration] = await tx
-      .select({ id: integrationAccounts.id })
+      .select({
+        id: integrationAccounts.id,
+        externalAccountId: integrationAccounts.externalAccountId,
+        mergedFrom: sql<string | null>`${integrationAccounts.metadata} ->> 'registrationAccountId'`,
+        registrationHash: sql<string | null>`${integrationAccounts.metadata} ->> 'registrationHash'`,
+        status: integrationAccounts.status,
+      })
       .from(integrationAccounts)
       .where(
         and(
@@ -899,7 +915,13 @@ export async function claimIntegrationRegistration(input: {
         ),
       )
       .for("update");
-    if (!registration) return null;
+    if (!registration || registration.registrationHash !== input.registrationHash) return null;
+    const unclaimed = registration.externalAccountId.startsWith(input.externalAccountIdPrefix);
+    const sameAccount = registration.externalAccountId === input.externalAccountId;
+    // A row this placeholder merged into is a real account; only its own
+    // account may claim it.
+    const replaceable = registration.status !== "connected" && registration.mergedFrom === null;
+    if (!unclaimed && !sameAccount && !replaceable) return { status: "already_claimed" };
 
     const [existing] = await tx
       .select({ id: integrationAccounts.id })
@@ -923,14 +945,13 @@ export async function claimIntegrationRegistration(input: {
             registrationAccountId: registration.id,
             registrationHash: input.registrationHash,
           })}::jsonb`,
-          status: "pending",
           updatedAt: new Date(),
         })
         .where(eq(integrationAccounts.id, existing.id));
       await tx
         .delete(integrationAccounts)
         .where(eq(integrationAccounts.id, registration.id));
-      return { integrationAccountId: existing.id, merged: true };
+      return { status: "claimed", integrationAccountId: existing.id, merged: true };
     }
 
     await tx
@@ -943,11 +964,11 @@ export async function claimIntegrationRegistration(input: {
         metadata: sql`${integrationAccounts.metadata} || ${JSON.stringify({
           registrationHash: input.registrationHash,
         })}::jsonb`,
-        status: "pending",
+        status: sameAccount ? registration.status : "pending",
         updatedAt: new Date(),
       })
       .where(eq(integrationAccounts.id, registration.id));
-    return { integrationAccountId: registration.id, merged: false };
+    return { status: "claimed", integrationAccountId: registration.id, merged: false };
   });
 }
 

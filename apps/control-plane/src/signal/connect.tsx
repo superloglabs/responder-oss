@@ -141,6 +141,7 @@ function useSetupIngestKey(organizationId: string | undefined) {
 function OpenTelemetryConnect({ organizationId, onBack, onDone }: PageProps) {
   const [existing, setExisting] = useState(true);
   const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
   const [promptOpen, setPromptOpen] = useState(false);
   const { token, error } = useSetupIngestKey(organizationId);
   const services = useRecentServices();
@@ -148,14 +149,20 @@ function OpenTelemetryConnect({ organizationId, onBack, onDone }: PageProps) {
   const prompt = (existing ? existingOpenTelemetryPrompt : openTelemetryPrompt)(window.location.origin, token ?? undefined);
 
   async function copy() {
-    await navigator.clipboard.writeText(prompt);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1600);
+    try {
+      await navigator.clipboard.writeText(prompt);
+      setCopyFailed(false);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
+    } catch {
+      setCopyFailed(true);
+    }
   }
 
   return <>
     <Intro provider="otel" title="Connect OpenTelemetry">Paste this prompt into your coding agent. It sends your logs, traces, and metrics to Superlog.</Intro>
     {error && <p className="signalError" role="alert">{error}</p>}
+    {copyFailed && <p className="signalError" role="alert">Could not copy the prompt. Select it below and copy it yourself.</p>}
     <div className="signalChoice">
       <span id="signal-otel-existing">Do you already use OpenTelemetry?</span>
       <div className="signalSegmented" role="radiogroup" aria-labelledby="signal-otel-existing">
@@ -389,21 +396,28 @@ function AwsConnect({ integration, organizationId, listPath, onBack, onDone }: P
   const [state, setState] = useState<AwsSetupState>({ status: "waiting" });
   const [error, setError] = useState("");
   const [launching, setLaunching] = useState(false);
+  const [pollFailed, setPollFailed] = useState(false);
   const connectUrl = integration?.connectUrl;
 
   useEffect(() => {
     if (!setupId || !connectUrl || state.status === "connected") return;
     let cancelled = false;
     const poll = async () => {
-      const response = await fetch(awsEndpoint(connectUrl, `/setup/${encodeURIComponent(setupId)}`));
-      if (cancelled) return;
-      if (response.status === 404) {
-        sessionStorage.removeItem(storageKey);
-        setSetupId(null);
-        return;
+      try {
+        const response = await fetch(awsEndpoint(connectUrl, `/setup/${encodeURIComponent(setupId)}`));
+        if (cancelled) return;
+        if (response.status === 404) {
+          sessionStorage.removeItem(storageKey);
+          setSetupId(null);
+          return;
+        }
+        const body = (await response.json().catch(() => null)) as AwsSetupState | null;
+        setPollFailed(!response.ok || !body?.status);
+        if (response.ok && body?.status) setState(body);
+      } catch {
+        // The next tick tries again; say so if it keeps failing.
+        if (!cancelled) setPollFailed(true);
       }
-      const body = (await response.json().catch(() => null)) as AwsSetupState | null;
-      if (response.ok && body?.status) setState(body);
     };
     void poll();
     const timer = setInterval(() => void poll(), 3_000);
@@ -462,6 +476,7 @@ function AwsConnect({ integration, organizationId, listPath, onBack, onDone }: P
     <Intro provider="aws" title="Connect AWS CloudWatch">{connected
       ? "Signal can now read CloudWatch logs, metrics, and alarms in this account."
       : "Finish creating the stack in AWS. This page updates on its own."}</Intro>
+    {pollFailed && !connected && <p className="signalError" role="alert">Could not check the stack. Retrying…</p>}
     {connected
       ? <section className="signalCard">
         <header className="signalCard__header signalCard__header--success">

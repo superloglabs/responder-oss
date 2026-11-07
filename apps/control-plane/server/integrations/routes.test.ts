@@ -1735,7 +1735,8 @@ describe("integration callback routing", () => {
         "param_RegistrationTopicArn",
       ),
     ).toBe(topicArn);
-    expect(body.template).toContain(`Default: '${topicArn}'`);
+    // The download can be deployed in any region, so it leaves the topic out.
+    expect(body.template).not.toContain(topicArn);
     expect(encryptCredentials).toHaveBeenCalledWith({
       externalId: "responder_abcdefghijklmnopqrstuvwxyz1234567890",
       registration: true,

@@ -146,10 +146,11 @@ export async function startAwsRegistration(
           templateUrl,
         })
       : null,
+    // The download has no topic: the topic only works from its own region,
+    // and a downloaded template can be deployed anywhere.
     template: awsParameterizedCloudFormationTemplate({
       externalId,
       principalArn,
-      registrationTopicArn,
     }),
   };
 }
@@ -196,17 +197,6 @@ async function registerAwsAccount(
     PhysicalResourceId: awsRegistrationPhysicalResourceId(awsAccountId),
     Status: "SUCCESS",
   };
-  const claimed = !account.externalAccountId.startsWith(
-    AWS_REGISTRATION_EXTERNAL_ACCOUNT_PREFIX,
-  );
-  if (claimed && account.externalAccountId !== awsAccountId) {
-    logRegistration({
-      awsAccountId,
-      organizationId: account.organizationId,
-      outcome: "already_claimed",
-    });
-    return failed(ALREADY_USED_REASON);
-  }
   // SNS can deliver a request more than once, and stack updates send it
   // again. A row that already holds these credentials needs no change, and
   // rewriting it would undo a finished connection.
@@ -214,7 +204,9 @@ async function registerAwsAccount(
     awsConnectionCredentialsSchema,
     account.encryptedCredentials,
   );
-  if (claimed && stored?.externalId === externalId.data) return success;
+  if (account.externalAccountId === awsAccountId && stored?.externalId === externalId.data) {
+    return success;
+  }
 
   const result = await claimIntegrationRegistration({
     displayName: `AWS · ${awsAccountId}`,
@@ -224,12 +216,21 @@ async function registerAwsAccount(
       roleArn,
     }),
     externalAccountId: awsAccountId,
+    externalAccountIdPrefix: AWS_REGISTRATION_EXTERNAL_ACCOUNT_PREFIX,
     organizationId: account.organizationId,
     provider: "aws",
     registrationAccountId: account.id,
     registrationHash,
   });
   if (!result) return failed(AWS_REGISTRATION_EXPIRED_REASON);
+  if (result.status === "already_claimed") {
+    logRegistration({
+      awsAccountId,
+      organizationId: account.organizationId,
+      outcome: "already_claimed",
+    });
+    return failed(ALREADY_USED_REASON);
+  }
   logRegistration({
     awsAccountId,
     integrationAccountId: result.integrationAccountId,
@@ -297,7 +298,7 @@ async function handleCloudFormationRequest(message: string): Promise<boolean> {
 const lastVerificationAttempts = new Map<string, number>();
 
 // Each poll may try AssumeRole, but no more than once per interval per
-// account, however many tabs or tasks poll it.
+// account in this process, however many tabs poll it.
 function claimVerificationAttempt(accountId: string, now = Date.now()): boolean {
   const last = lastVerificationAttempts.get(accountId);
   if (last !== undefined && now - last < VERIFY_INTERVAL_MS) return false;
@@ -405,8 +406,16 @@ export const awsRegistrationRoutes = new Hono()
     }
     try {
       await verifyAwsInvestigationRole(credentials);
-    } catch {
-      // IAM takes a few seconds to make a new role assumable. Keep polling.
+    } catch (error) {
+      // IAM takes a few seconds to make a new role assumable, so keep
+      // polling. A failure that lasts points at the role's trust policy.
+      logRegistration({
+        awsAccountId: credentials.accountId,
+        error: error instanceof Error ? error.message : "Unknown error",
+        integrationAccountId: account.id,
+        outcome: "not_assumable_yet",
+        stage: "verify",
+      });
       return context.json({ status: "verifying" as const, ...known });
     }
     const connected = await markIntegrationAccountConnected({

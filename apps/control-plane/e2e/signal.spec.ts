@@ -276,12 +276,14 @@ test("keeps the last chart tooltip inside a narrow desktop chart", async ({ page
 test("connects OpenTelemetry with one agent prompt and waits for data", async ({ page }) => {
   await workspace(page, { signal: fakeSignal(30, { setUp: false }) });
   let services: string[] = [];
+  const signals = new Set<string>();
   await page.route("**/api/telemetry/ingest-keys", (route) => route.fulfill({ json: {
     key: { id: "key-1", name: "Signal setup", prefix: "sl_ingest_tes", createdAt: new Date().toISOString(), lastUsedAt: null },
     token: "sl_ingest_test",
   } }));
   await page.route("**/api/telemetry/services?**", (route) => {
     const signal = new URL(route.request().url()).searchParams.get("signal");
+    if (signal) signals.add(signal);
     return route.fulfill({ json: { services: signal === "metrics" ? [] : services } });
   });
   await page.goto("/signal/setup/telemetry/otel");
@@ -299,6 +301,7 @@ test("connects OpenTelemetry with one agent prompt and waits for data", async ({
   services = ["checkout-api"];
   await expect(page.getByText("Receiving data")).toBeVisible({ timeout: 10_000 });
   await expect(page.getByRole("cell", { name: "checkout-api" })).toBeVisible();
+  expect([...signals].sort()).toEqual(expect.arrayContaining(["logs", "metrics", "traces"]));
   await expect(prompt).toHaveCount(0);
   await next.click();
   await expect(page).toHaveURL(/\/signal\/setup\/telemetry$/u);

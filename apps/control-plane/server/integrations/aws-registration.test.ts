@@ -236,7 +236,7 @@ describe("one-click AWS registration", () => {
         organizationId,
         status: "pending",
       });
-      vi.mocked(claimIntegrationRegistration).mockResolvedValue({
+      vi.mocked(claimIntegrationRegistration).mockResolvedValue({ status: "claimed",
         integrationAccountId: registrationAccountId,
         merged: false,
       });
@@ -253,6 +253,7 @@ describe("one-click AWS registration", () => {
         displayName: "AWS · 123456789012",
         encryptedCredentials: `enc:${JSON.stringify({ accountId: awsAccountId, externalId, roleArn })}`,
         externalAccountId: awsAccountId,
+        externalAccountIdPrefix: "registration:",
         organizationId,
         provider: "aws",
         registrationAccountId,
@@ -282,7 +283,7 @@ describe("one-click AWS registration", () => {
         organizationId,
         status: "pending",
       });
-      vi.mocked(claimIntegrationRegistration).mockResolvedValue({
+      vi.mocked(claimIntegrationRegistration).mockResolvedValue({ status: "claimed",
         integrationAccountId: existingAccountId,
         merged: true,
       });
@@ -346,12 +347,46 @@ describe("one-click AWS registration", () => {
         organizationId,
         status: "connected",
       });
+      vi.mocked(claimIntegrationRegistration).mockResolvedValue({ status: "already_claimed" });
 
       await deliver(customResourceNotification());
 
-      expect(claimIntegrationRegistration).not.toHaveBeenCalled();
+      expect(claimIntegrationRegistration).toHaveBeenCalledWith(
+        expect.objectContaining({ externalAccountId: awsAccountId, registrationAccountId }),
+      );
       expect(cloudFormationAnswers()).toEqual([
-        expect.objectContaining({ Status: "FAILED" }),
+        expect.objectContaining({
+          Reason: "This Superlog setup link was already used for another AWS account. Start again from Superlog.",
+          Status: "FAILED",
+        }),
+      ]);
+    });
+
+    it("lets the real stack replace an unverified report for another account", async () => {
+      vi.mocked(getIntegrationAccountByRegistration).mockResolvedValue({
+        encryptedCredentials: `enc:${JSON.stringify({
+          accountId: "999999999999",
+          externalId,
+          roleArn: "arn:aws:iam::999999999999:role/ResponderInvestigationRole",
+        })}`,
+        externalAccountId: "999999999999",
+        id: registrationAccountId,
+        organizationId,
+        status: "pending",
+      });
+      vi.mocked(claimIntegrationRegistration).mockResolvedValue({
+        status: "claimed",
+        integrationAccountId: registrationAccountId,
+        merged: false,
+      });
+
+      await deliver(customResourceNotification());
+
+      expect(claimIntegrationRegistration).toHaveBeenCalledWith(
+        expect.objectContaining({ externalAccountId: awsAccountId }),
+      );
+      expect(cloudFormationAnswers()).toEqual([
+        expect.objectContaining({ Status: "SUCCESS" }),
       ]);
     });
 

@@ -999,7 +999,7 @@ const SERVICE_SOURCES = [
   },
 ] as const;
 
-// Services seen in any signal, or only in logs or traces.
+// Services seen in any signal, or only in logs, traces, or metrics.
 export async function listServices(
   ch: ClickHouseClient,
   organizationId: string,

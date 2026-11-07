@@ -970,7 +970,8 @@ presigned S3 URL for CloudFormation Quick Create. Without those values, the UI
 offers a pre-filled template as a file download for manual upload.
 
 Signal setup can connect AWS with one click, without asking for the account ID.
-Set `AWS_INTEGRATION_REGISTRATION_TOPIC_ARN` to an SNS topic named
+One-click setup also needs the template bucket settings above, because Quick
+Create opens a presigned S3 URL. Set `AWS_INTEGRATION_REGISTRATION_TOPIC_ARN` to an SNS topic named
 `ResponderAwsRegistration` that any account may publish to, and subscribe
 `<public>/api/integrations/aws/registrations` to it over HTTPS. Quick Create then
 opens in the topic's region, and the stack's custom resource reports its account

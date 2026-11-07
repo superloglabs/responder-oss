@@ -174,7 +174,11 @@ export function SignalSetup() {
         organizationId={organizationId ?? undefined}
         listPath={returnTo}
         onBack={() => navigate(returnTo)}
-        onDone={() => navigate(returnTo)} />
+        onDone={() => {
+          // The connection may be new, so load the list again.
+          setAttempt(attempt + 1);
+          navigate(returnTo);
+        }} />
     </section>;
   }
 
