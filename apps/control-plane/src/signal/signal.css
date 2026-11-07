@@ -82,12 +82,14 @@
 .signal select { appearance: auto; border: .5px solid #ddd; border-radius: 4px; height: 28px; background: #fff; padding: 3px 8px; color: #161616; font: 500 13px/20px var(--ds-font-sans); box-shadow: 0 1px 1px #0000000d; }
 .signal select:disabled { opacity: .45; }
 .signalPlans { display: flex; gap: 16px; }
-.signalPlan { flex: 1; display: flex; flex-direction: column; gap: 16px; padding: 24px; border: .5px solid #e3e3e3; border-radius: 6px; background: #fafafa; }
-.signalPlan h3 { font-size: 15px; font-weight: 600; }
-.signalPlan .signalPlanPrice { font-size: 28px; line-height: 36px; color: #121212; }
-.signalPlanPrice span { font-size: 12px; color: #666; }
-.signalPlan > p:not(.signalPlanPrice) { display: flex; align-items: center; gap: 8px; font-size: 12px; }
-.signalPlan .dsButton { margin-top: 8px; align-self: flex-start; }
+.signalPlan { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 9px; padding: 24px; border: .5px solid #00000014; border-radius: 6px; background: #fafafa; }
+.signalPlan h3 { margin: 0; color: #202020; font-size: 13px; font-weight: 600; line-height: 20px; }
+.signal .signalPlanPrice { margin: 0; color: #121212; font-size: 24px; font-weight: 600; letter-spacing: -.02em; line-height: 32px; }
+.signalPlanPrice span { color: #666; font-size: 12px; font-weight: 400; letter-spacing: 0; }
+.signalPlanTerms { display: flex; flex-direction: column; gap: 4px; padding-top: 9px; }
+.signal .signalPlanTerms p { margin: 0; color: #202020; font-size: 13px; line-height: 20px; }
+.signal .signalPlanTerms p:first-child { color: #666; }
+.signalPlanAction { display: flex; padding-block: 9px; }
 .signalDialog { width: min(440px, calc(100vw - 32px)); padding: 24px; border: 1px solid #e3e3e3; border-radius: 8px; background: #fcfcfc; box-shadow: 0 12px 48px #0003; }
 .signalDialog::backdrop { background: #0004; }
 .signalDialog > header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }

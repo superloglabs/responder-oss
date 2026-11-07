@@ -17,6 +17,7 @@ import { publishSignalSettings } from "./setup-state";
 import { fetchServices } from "../telemetry-api";
 import { SignalConnect } from "./connect";
 import { connectPages, type ConnectPage } from "./connect-pages";
+import { SignalPlanStep } from "./plan";
 import { ConnectionRow, SignalLogo } from "./shared";
 
 interface Source { provider: string; name: string; description: string }
@@ -34,7 +35,7 @@ const context: Source[] = [
   { provider: "jira", name: "Jira", description: "Tickets, project history, and known issues" },
   { provider: "posthog", name: providerDisplayName("posthog"), description: "Product usage and customer impact" },
 ];
-const steps = ["telemetry", "code", "repositories", "slack", "context", "start"] as const;
+const steps = ["telemetry", "code", "repositories", "slack", "context", "plan"] as const;
 type Step = (typeof steps)[number];
 const headings: Record<Step, string> = {
   telemetry: "Connect your telemetry",
@@ -42,7 +43,7 @@ const headings: Record<Step, string> = {
   repositories: "Select your repositories",
   slack: "Connect Slack",
   context: "Add more context",
-  start: "Turn on Signal",
+  plan: "Choose your plan",
 };
 const descriptions: Record<Step, string> = {
   telemetry: "Signal investigates your telemetry and sends issues with real impact to Slack.",
@@ -50,9 +51,9 @@ const descriptions: Record<Step, string> = {
   repositories: "Signal reads these repositories to find the cause of a problem. It never changes them.",
   slack: "Choose where Signal sends findings.",
   context: "Signal skips problems already tracked in tickets, alerts, or Slack.",
-  start: "Signal starts with errors from now on and posts only problems that need someone to act.",
+  plan: "Start a monthly subscription to receive investigated findings in Slack.",
 };
-const stepNumber: Record<Step, number> = { telemetry: 1, code: 2, repositories: 2, slack: 3, context: 4, start: 5 };
+const stepNumber: Record<Step, number> = { telemetry: 1, code: 2, repositories: 2, slack: 3, context: 4, plan: 5 };
 
 export function SignalSetup() {
   const { step: stepParam = "telemetry", page: pageParam } = useParams();
@@ -237,13 +238,12 @@ export function SignalSetup() {
 
     {step === "context" && rows(context)}
 
-    {step === "start" && <div className="signalConnections">
-      <p className="signalNote">{settings.enabled
-        ? "Signal is on. It posts findings to Slack as it finds them."
-        : draft.slack ? "Signal will post findings to the channel you chose." : "Choose a Slack channel before turning Signal on."}</p>
-    </div>}
+    {step === "plan" && <SignalPlanStep settings={settings} slackChosen={Boolean(draft.slack)} saving={saving}
+      onBack={() => go("context")}
+      onTurnOn={() => save({ ...draft, enabled: true }, "findings")}
+      onTurnOff={() => save({ ...draft, enabled: false })} />}
 
-    <footer className={`signalSetupActions${step === "code" ? " signalSetupActions--inline" : ""}`}>
+    {step !== "plan" && <footer className={`signalSetupActions${step === "code" ? " signalSetupActions--inline" : ""}`}>
       {index > 0 ? <Button onClick={() => go(steps[index - 1]!)}>Back</Button> : <span />}
       {step === "code" && !connected("github")
         // Without GitHub, Signal explains problems from telemetry alone.
@@ -255,13 +255,10 @@ export function SignalSetup() {
           {draft.repositoryIds.length ? "Continue" : "Skip for now"}
         </Button>
         : step === "slack" ? <Button variant="primary" disabled={saving || !draft.slack} onClick={() => void save(draft, "context")}>Continue</Button>
-        : step === "start" ? (settings.enabled
-          ? <Button disabled={saving} onClick={() => void save({ ...draft, enabled: false })}>Turn off Signal</Button>
-          : <Button variant="primary" disabled={saving || !draft.slack} onClick={() => void save({ ...draft, enabled: true }, "findings")}>Turn on Signal</Button>)
         : <Button variant={step === "context" ? "secondary" : "primary"} onClick={() => go(steps[index + 1]!)}>
           {step === "context" && !context.some((source) => connected(source.provider)) ? "Skip for now" : "Continue"}
         </Button>}
-    </footer>
+    </footer>}
 
   </section>;
 }

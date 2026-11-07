@@ -5,7 +5,13 @@ interface FakeFinding {
   status: "new" | "accepted" | "irrelevant"; postedAt: string;
 }
 
-// A Signal API in memory: findings, usage, and settings, with every write recorded.
+const signalPlans = [
+  { id: "signal_pro", name: "Pro", price: 100, included: 50 },
+  { id: "signal_max", name: "Max", price: 200, included: 100 },
+];
+
+// A Signal API in memory: findings, usage, settings, and the plan, with
+// every write recorded.
 function fakeSignal(count = 30, options: { setUp?: boolean } = {}) {
   const now = Date.now();
   const findings: FakeFinding[] = Array.from({ length: count }, (_, index) => ({
@@ -26,6 +32,17 @@ function fakeSignal(count = 30, options: { setUp?: boolean } = {}) {
       slack: null as null | { integrationAccountId: string; channelId: string },
       repositoryIds: [] as string[],
     },
+    billing: {
+      enabled: true,
+      plan: null as null | { id: string; name: string; price: number; cancelsAtPeriodEnd: boolean },
+      included: 0,
+      used: 0,
+      remaining: 0,
+      resetsAt: Date.parse("2026-12-01T00:00:00Z") as number | null,
+      plans: signalPlans,
+    },
+    // Where checkout sends the member; null when the plan changes in place.
+    checkoutUrl: "/signal/setup/plan?checkout=success" as string | null,
     writes: [] as Array<{ method: string; path: string; body: unknown }>,
   };
   return state;
@@ -83,6 +100,18 @@ async function workspace(page: Page, options: { enabled?: boolean; signal?: Retu
       }
       return route.fulfill({ json: signal.settings });
     }
+    if (path === "/billing") return route.fulfill({ json: signal.billing });
+    if (path === "/billing/checkout") {
+      // Stands in for Stripe: the plan is recorded and checkout returns.
+      const plan = signalPlans.find((candidate) => candidate.id === body!.planId)!;
+      Object.assign(signal.billing, {
+        plan: { id: plan.id, name: plan.name, price: plan.price, cancelsAtPeriodEnd: false },
+        included: plan.included,
+        remaining: plan.included,
+      });
+      return route.fulfill({ json: { url: signal.checkoutUrl } });
+    }
+    if (path === "/billing/portal") return route.fulfill({ json: { url: "/settings" } });
     if (path === "/findings") {
       const days = Number(url.searchParams.get("days"));
       const search = (url.searchParams.get("search") ?? "").toLowerCase();
@@ -138,7 +167,7 @@ test("shows only setup until it is complete, then the rest of Signal", async ({ 
   await expect(navigation).toHaveText(["Setup", "Settings"]);
 });
 
-test("sets up Signal with the workspace's real connections and turns it on", async ({ page }) => {
+test("sets up Signal with the workspace's real connections and turns it on after checkout", async ({ page }) => {
   const signal = await workspace(page, { signal: fakeSignal(30, { setUp: false }) });
   await page.goto("/app");
   await expect(page).toHaveURL(/\/signal\/setup$/);
@@ -168,11 +197,77 @@ test("sets up Signal with the workspace's real connections and turns it on", asy
   await page.getByLabel("Findings channel").selectOption("C02");
   await next.click();
   await page.getByRole("button", { name: "Skip for now" }).click();
-  await page.getByRole("button", { name: "Turn on Signal" }).click();
+  await expect(page).toHaveURL(/\/signal\/setup\/plan$/);
+  await expect(page.getByRole("heading", { name: "Choose your plan" })).toBeVisible();
+  await expect(page.getByRole("article", { name: "Pro" })).toContainText("$100 / month");
+  await expect(page.getByRole("article", { name: "Pro" })).toContainText("Up to 50 investigated findings");
+  await expect(page.getByRole("article", { name: "Max" })).toContainText("$2 per finding");
+  await expect(page.getByRole("button", { name: "Turn on Signal" })).toHaveCount(0);
+  await page.screenshot({ path: "test-results/signal-plan.png" });
+  await page.getByRole("button", { name: "Choose Max ($200)" }).click();
   await expect(page).toHaveURL(/\/signal\/findings$/);
   await expect(navigation).toHaveText(["Setup", "Findings", "Usage", "Settings"]);
   expect(signal.settings).toEqual({ enabled: true, setupComplete: true, slack: { integrationAccountId: "slack-account", channelId: "C02" }, repositoryIds: ["repo-api"] });
-  expect(signal.writes.map((write) => write.method)).toEqual(["PUT", "PUT", "PUT"]);
+  expect(signal.writes.map((write) => `${write.method} ${write.path}`)).toEqual([
+    "PUT /settings", "PUT /settings", "POST /billing/checkout", "PUT /settings",
+  ]);
+  expect(signal.writes[2]!.body).toEqual({ planId: "signal_max" });
+});
+
+test("shows the current plan and its findings, and turns Signal off", async ({ page }) => {
+  const signal = fakeSignal();
+  signal.settings.slack = { integrationAccountId: "slack-account", channelId: "C02" };
+  Object.assign(signal.billing, {
+    plan: { id: "signal_pro", name: "Pro", price: 100, cancelsAtPeriodEnd: false }, included: 50, used: 12, remaining: 38,
+  });
+  await workspace(page, { signal });
+  await page.goto("/signal/setup/plan");
+  await expect(page.getByRole("article", { name: "Pro" }).getByRole("button", { name: "Current plan" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Switch to Max ($200)" })).toBeEnabled();
+  await expect(page.getByText("Pro plan: 12 of 50 findings used this month. Resets on 1 Dec. Signal is on.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Manage billing" })).toBeVisible();
+  await page.screenshot({ path: "test-results/signal-plan-current.png" });
+  await page.getByRole("button", { name: "Turn off Signal" }).click();
+  await expect(page.getByRole("button", { name: "Turn on Signal" })).toBeEnabled();
+  expect(signal.settings.enabled).toBe(false);
+});
+
+test("can turn Signal off after its plan ended", async ({ page }) => {
+  const signal = fakeSignal();
+  signal.settings.slack = { integrationAccountId: "slack-account", channelId: "C02" };
+  await workspace(page, { signal });
+  await page.goto("/signal/setup/plan");
+  await expect(page.getByRole("button", { name: "Choose Pro ($100)" })).toBeEnabled();
+  await page.getByRole("button", { name: "Turn off Signal" }).click();
+  await expect(page.getByRole("button", { name: "Turn on Signal" })).toHaveCount(0);
+  expect(signal.settings.enabled).toBe(false);
+});
+
+test("switching plans leaves Signal off when it was turned off", async ({ page }) => {
+  const signal = fakeSignal();
+  signal.settings.enabled = false;
+  signal.settings.slack = { integrationAccountId: "slack-account", channelId: "C02" };
+  Object.assign(signal.billing, {
+    plan: { id: "signal_pro", name: "Pro", price: 100, cancelsAtPeriodEnd: false }, included: 50, used: 3, remaining: 47,
+  });
+  signal.checkoutUrl = null;
+  await workspace(page, { signal });
+  await page.goto("/signal/setup/plan");
+  await page.getByRole("button", { name: "Switch to Max ($200)" }).click();
+  await expect(page.getByRole("article", { name: "Max" }).getByRole("button", { name: "Current plan" })).toBeDisabled();
+  await expect(page).toHaveURL(/\/signal\/setup\/plan$/);
+  expect(signal.settings.enabled).toBe(false);
+});
+
+test("waits for findings to reset once a plan's findings are used", async ({ page }) => {
+  const signal = fakeSignal();
+  signal.settings.slack = { integrationAccountId: "slack-account", channelId: "C02" };
+  Object.assign(signal.billing, {
+    plan: { id: "signal_pro", name: "Pro", price: 100, cancelsAtPeriodEnd: false }, included: 50, used: 50, remaining: 0,
+  });
+  await workspace(page, { signal });
+  await page.goto("/signal/setup/plan");
+  await expect(page.getByText("Pro plan: 50 of 50 findings used this month. Signal starts investigating again on 1 Dec.")).toBeVisible();
 });
 
 test("opens findings once setup is complete, also with Signal turned off", async ({ page }) => {
