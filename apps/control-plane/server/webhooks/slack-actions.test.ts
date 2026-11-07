@@ -125,10 +125,22 @@ describe("Slack actions", () => {
     vi.stubEnv("RESPONDER_EXTENSION_SLACK_ACTION_PREFIX", "example:");
     const fetch = vi.fn();
     vi.stubGlobal("fetch", fetch);
+    const payload = {
+      type: "block_actions",
+      team: { id: "T123" },
+      channel: { id: "C123" },
+      user: { id: "U123" },
+      response_url: "https://hooks.slack.com/actions/T123/B123/response-token",
+      actions: [{ action_id: "example:helpful", value: "16161616-1616-4616-8616-161616161616" }],
+    };
     const response = await app.request("/api/webhooks/slack/actions", {
       method: "POST",
-      body: new URLSearchParams({ payload: JSON.stringify({ type: "block_actions" }) }).toString(),
-      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ payload: JSON.stringify(payload) }).toString(),
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        "x-slack-request-timestamp": Math.floor(Date.now() / 1_000).toString(),
+        "x-slack-signature": "v0=0000000000000000000000000000000000000000000000000000000000000000",
+      },
     });
     expect(response.status).toBe(401);
     expect(fetch).not.toHaveBeenCalled();

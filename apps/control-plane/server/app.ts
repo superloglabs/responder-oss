@@ -355,7 +355,6 @@ instrumentedApp.use("/api/webhooks/*", legacyWebhookForwarder());
 instrumentedApp.use("/api/webhooks/*", cellWebhookRouter());
 instrumentedApp.use("/api/integrations/github/callback", legacyGitHubSetupRedirect());
 instrumentedApp.use("/api/integrations/:provider/callback", cellCallbackRouter());
-instrumentedApp.use("/api/*", extensionProxy());
 
 // Each lookup asks every other cell, so one person may look a few times a
 // minute.
@@ -678,6 +677,9 @@ export const app = instrumentedApp
         503,
       );
     }
-  });
+  })
+  // Last, so the application's own routes always take precedence over an
+  // extension's prefix.
+  .all("/api/*", extensionProxy());
 
 export type AppType = typeof app;

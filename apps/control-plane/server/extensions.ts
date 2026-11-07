@@ -7,14 +7,15 @@ import { getActiveTenant } from "./tenant.js";
 // forwards their requests with the member and workspace in headers, so the
 // extension never reads session cookies.
 export interface ExtensionConfig {
-  // The extension's base URL on the private network.
-  url: string;
+  // The extension's origin on the private network, such as
+  // `http://extension.internal:3100`.
+  origin: string;
   // Sent as a bearer token on every forwarded request.
   token: string;
   // Requests under this path are forwarded, such as `/api/example`.
   pathPrefix: string;
-  // Slack block actions whose action ID starts with this are forwarded to
-  // `<pathPrefix>/internal/slack-interactions`.
+  // Optional. Slack block actions whose action ID starts with this are
+  // forwarded to `<pathPrefix>/internal/slack-interactions`.
   slackActionPrefix: string | null;
 }
 
@@ -32,20 +33,48 @@ export function extensionConfig(environment: NodeJS.ProcessEnv = process.env): E
   const pathPrefix = environment.RESPONDER_EXTENSION_PATH_PREFIX?.trim().replace(/\/+$/u, "");
   if (!url || !token || !pathPrefix) return null;
   // An invalid setting turns the extension off rather than failing requests.
-  if (!/^\/api\/[a-z0-9-]+$/u.test(pathPrefix) || !/^https?:\/\/[^/]+/u.test(url)) {
+  const origin = extensionOrigin(url);
+  if (!/^\/api\/[a-z0-9-]+$/u.test(pathPrefix) || !origin) {
     console.error(JSON.stringify({ event: "extension_config_invalid" }));
     return null;
   }
   return {
-    url: url.replace(/\/+$/u, ""),
+    origin,
     token,
     pathPrefix,
     slackActionPrefix: environment.RESPONDER_EXTENSION_SLACK_ACTION_PREFIX?.trim() || null,
   };
 }
 
+// The URL must be a bare HTTP origin, so every forwarded path lands where it
+// was meant to.
+function extensionOrigin(value: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return null;
+  }
+  if (
+    (url.protocol !== "http:" && url.protocol !== "https:") ||
+    url.username || url.password || url.search || url.hash ||
+    (url.pathname !== "/" && url.pathname !== "")
+  ) {
+    return null;
+  }
+  return url.origin;
+}
+
 export function isExtensionPath(path: string, config: ExtensionConfig): boolean {
   return path === config.pathPrefix || path.startsWith(`${config.pathPrefix}/`);
+}
+
+// The URL parser has already resolved `.` and `..` segments, including
+// percent-encoded ones. Empty segments and encoded slashes or backslashes are
+// refused, since a server could read them as a different path from the one
+// checked here.
+function forwardablePath(pathname: string): string | null {
+  return /\/\/|%2f|%5c|\\/iu.test(pathname) ? null : pathname;
 }
 
 export interface ExtensionProxyDependencies {
@@ -68,9 +97,11 @@ export function extensionProxy(
 ): MiddlewareHandler {
   return async function extensionProxyRequest(context, next) {
     const config = dependencies.config();
-    if (!config || !isExtensionPath(context.req.path, config)) return next();
+    const url = new URL(context.req.url);
+    if (!config || !isExtensionPath(url.pathname, config)) return next();
+    const path = forwardablePath(url.pathname);
     // Its internal routes are reached only from inside the deployment.
-    if (context.req.path.startsWith(`${config.pathPrefix}/internal/`)) {
+    if (!path || isExtensionPath(path, { ...config, pathPrefix: `${config.pathPrefix}/internal` })) {
       return context.json({ error: "Not found" }, 404);
     }
 
@@ -86,10 +117,11 @@ export function extensionProxy(
       headers.set(extensionRoleHeader, tenant.role);
     }
 
-    const url = new URL(context.req.url);
+    const target = new URL(`${path}${url.search}`, config.origin);
+    if (target.origin !== config.origin) return context.json({ error: "Not found" }, 404);
     const method = context.req.method;
     try {
-      const response = await dependencies.fetch(`${config.url}${url.pathname}${url.search}`, {
+      const response = await dependencies.fetch(target, {
         method,
         headers,
         body: method === "GET" || method === "HEAD" ? undefined : await context.req.arrayBuffer(),
@@ -130,12 +162,16 @@ export async function forwardExtensionSlackAction(
   config: ExtensionConfig,
   fetchImpl: typeof fetch = fetch,
 ): Promise<void> {
-  const response = await fetchImpl(`${config.url}${config.pathPrefix}/internal/slack-interactions`, {
+  const target = new URL(`${config.pathPrefix}/internal/slack-interactions`, config.origin);
+  if (target.origin !== config.origin) throw new Error("The extension path is invalid");
+  const response = await fetchImpl(target.toString(), {
     method: "POST",
     headers: { authorization: `Bearer ${config.token}`, "content-type": "application/json" },
     body: JSON.stringify(payload),
     redirect: "manual",
     signal: AbortSignal.timeout(requestTimeoutMs),
   });
+  // Only the status matters; the body is released so the connection is reused.
+  await response.body?.cancel().catch(() => undefined);
   if (!response.ok) throw new Error(`The extension answered ${response.status}`);
 }

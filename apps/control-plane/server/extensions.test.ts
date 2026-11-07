@@ -11,7 +11,7 @@ import {
 vi.mock("./tenant.js", () => ({ getActiveTenant: vi.fn() }));
 
 const config: ExtensionConfig = {
-  url: "http://extension.internal:3100",
+  origin: "http://extension.internal:3100",
   token: "extension-token",
   pathPrefix: "/api/example",
   slackActionPrefix: "example:",
@@ -29,8 +29,9 @@ function proxied(tenant: unknown = member) {
     headers: { "content-type": "application/json", "set-cookie": "leak=1" },
   }));
   const app = new Hono();
-  app.use("/api/*", extensionProxy({ config: () => config, tenant: vi.fn().mockResolvedValue(tenant), fetch }));
   app.get("/api/other", (context) => context.text("application"));
+  app.get("/api/example/owned-by-application", (context) => context.text("application"));
+  app.all("/api/*", extensionProxy({ config: () => config, tenant: vi.fn().mockResolvedValue(tenant), fetch }));
   return { app, fetch };
 }
 
@@ -40,7 +41,7 @@ describe("extension configuration", () => {
     expect(extensionConfig({ RESPONDER_EXTENSION_URL: "http://x", RESPONDER_EXTENSION_TOKEN: "t" })).toBeNull();
     expect(extensionConfig({
       RESPONDER_EXTENSION_URL: "http://x:1/", RESPONDER_EXTENSION_TOKEN: "t", RESPONDER_EXTENSION_PATH_PREFIX: "/api/example/",
-    })).toEqual({ url: "http://x:1", token: "t", pathPrefix: "/api/example", slackActionPrefix: null });
+    })).toEqual({ origin: "http://x:1", token: "t", pathPrefix: "/api/example", slackActionPrefix: null });
   });
 
   it("turns off for a prefix outside /api or a URL that is not HTTP", () => {
@@ -49,12 +50,20 @@ describe("extension configuration", () => {
     expect(extensionConfig({ ...base, RESPONDER_EXTENSION_PATH_PREFIX: "/api/auth/../x" })).toBeNull();
     expect(extensionConfig({ ...base, RESPONDER_EXTENSION_URL: "file:///etc", RESPONDER_EXTENSION_PATH_PREFIX: "/api/example" })).toBeNull();
   });
+
+  it("turns off for a URL with a path, query, fragment, or credentials", () => {
+    const base = { RESPONDER_EXTENSION_TOKEN: "t", RESPONDER_EXTENSION_PATH_PREFIX: "/api/example" };
+    for (const url of ["http://x/base", "http://x/?a=1", "http://x/#a", "http://user:pass@x", "not a url"]) {
+      expect(extensionConfig({ ...base, RESPONDER_EXTENSION_URL: url })).toBeNull();
+    }
+  });
 });
 
 describe("extension proxy", () => {
-  it("leaves other paths to the application", async () => {
+  it("leaves other paths and the application's own routes to the application", async () => {
     const { app, fetch } = proxied();
     expect(await (await app.request("/api/other")).text()).toBe("application");
+    expect(await (await app.request("/api/example/owned-by-application")).text()).toBe("application");
     expect(await (await app.request("/api/examples")).status).toBe(404);
     expect(fetch).not.toHaveBeenCalled();
   });
@@ -74,7 +83,7 @@ describe("extension proxy", () => {
     expect(response.status).toBe(201);
     expect(response.headers.get("set-cookie")).toBeNull();
     const [url, init] = fetch.mock.calls[0]!;
-    expect(url).toBe("http://extension.internal:3100/api/example/findings?days=7");
+    expect(String(url)).toBe("http://extension.internal:3100/api/example/findings?days=7");
     const headers = init.headers as Headers;
     expect(headers.get("authorization")).toBe("Bearer extension-token");
     expect(headers.get("x-responder-user-id")).toBe(member.user.id);
@@ -92,9 +101,18 @@ describe("extension proxy", () => {
     expect(headers.get("authorization")).toBe("Bearer extension-token");
   });
 
-  it("keeps the extension's internal routes private", async () => {
+  it("keeps the extension's internal routes private however the path is written", async () => {
     const { app, fetch } = proxied();
-    expect((await app.request("/api/example/internal/slack-interactions", { method: "POST" })).status).toBe(404);
+    for (const path of [
+      "/api/example/internal/slack-interactions",
+      "/api/example//internal/slack-interactions",
+      "/api/example/x/../internal/slack-interactions",
+      "/api/example/%2e%2e/example/internal/slack-interactions",
+      "/api/example/%2Finternal/slack-interactions",
+      "/api/example/a%5c..%5cinternal",
+    ]) {
+      expect((await app.request(`http://localhost${path}`, { method: "POST" })).status, path).toBe(404);
+    }
     expect(fetch).not.toHaveBeenCalled();
   });
 
@@ -119,9 +137,23 @@ describe("extension Slack actions", () => {
     await forwardExtensionSlackAction({ type: "block_actions" }, config, fetch);
     expect(fetch).toHaveBeenCalledWith(
       "http://extension.internal:3100/api/example/internal/slack-interactions",
-      expect.objectContaining({ method: "POST", body: '{"type":"block_actions"}' }),
+      expect.objectContaining({
+        method: "POST",
+        body: '{"type":"block_actions"}',
+        headers: { authorization: "Bearer extension-token", "content-type": "application/json" },
+      }),
     );
-    fetch.mockResolvedValueOnce(new Response("", { status: 500 }));
-    await expect(forwardExtensionSlackAction({}, config, fetch)).rejects.toThrow("500");
+  });
+
+  it("releases the extension's response body", async () => {
+    for (const status of [200, 500]) {
+      const cancel = vi.fn().mockResolvedValue(undefined);
+      const body = new ReadableStream({ cancel });
+      const fetch = vi.fn().mockResolvedValue(new Response(body, { status }));
+      const forwarded = forwardExtensionSlackAction({}, config, fetch);
+      if (status === 500) await expect(forwarded).rejects.toThrow("500");
+      else await forwarded;
+      expect(cancel).toHaveBeenCalled();
+    }
   });
 });
