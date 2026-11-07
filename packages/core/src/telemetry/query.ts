@@ -999,17 +999,20 @@ const SERVICE_SOURCES = [
   },
 ] as const;
 
-// Services seen in any signal, or only in logs or traces.
+// Services seen in any signal, or only in logs, traces, or metrics.
 export async function listServices(
   ch: ClickHouseClient,
   organizationId: string,
   range?: TimeRange,
-  signal?: "logs" | "traces",
+  signal?: "logs" | "traces" | "metrics",
 ) {
   const { sinceSql, untilSql, sinceExpr, untilExpr } = resolveRange(range);
-  const sources = signal
-    ? SERVICE_SOURCES.filter((source) => source.table === `otel_${signal}`)
-    : SERVICE_SOURCES;
+  // Metrics live in one table per metric type.
+  const sources = signal === "metrics"
+    ? SERVICE_SOURCES.filter((source) => source.table.startsWith("otel_metrics_"))
+    : signal
+      ? SERVICE_SOURCES.filter((source) => source.table === `otel_${signal}`)
+      : SERVICE_SOURCES;
   const servicesBySource = await Promise.all(
     sources.map(async (source): Promise<string[]> => {
       // Logs are partitioned by TimestampTime. Keep the canonical nanosecond

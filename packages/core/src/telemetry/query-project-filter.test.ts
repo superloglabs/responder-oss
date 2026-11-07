@@ -28,6 +28,13 @@ test("log and trace services come only from their own table", async () => {
   }
 });
 
+test("metric services come only from the metric tables", async () => {
+  const queries: string[] = [];
+  await listServices(recordingClient(queries), "project-1", undefined, "metrics");
+  assert.ok(queries.length > 0);
+  for (const query of queries) assert.match(query, /\bFROM otel_metrics_\w+\b/);
+});
+
 test("raw telemetry queries filter through the materialized project column", async () => {
   const queries: string[] = [];
   const ch = recordingClient(queries);

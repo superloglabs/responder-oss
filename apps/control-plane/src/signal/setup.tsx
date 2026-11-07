@@ -1,11 +1,7 @@
-import { useEffect, useState, type ComponentType } from "react";
-import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { IconCheck, IconSearch } from "@tabler/icons-react";
 import { fetchAgentOptions, fetchIntegrations, type AgentOptions, type IntegrationSummary } from "../agents-api";
-import { AwsConnectionDialog } from "../components/aws-connection-dialog";
-import { DatadogConnectionDialog } from "../components/datadog-site-dialog";
-import { GrafanaConnectionDialog } from "../components/grafana-connection-dialog";
-import { PostHogConnectionDialog } from "../components/posthog-connection-dialog";
 import { providerDisplayName } from "../components/provider-glyphs";
 import { Button } from "../design-system";
 import { useDocumentTitle } from "../use-document-title";
@@ -17,6 +13,9 @@ import {
 } from "./model";
 import { authClient } from "../auth-client";
 import { publishSignalSettings } from "./setup-state";
+import { fetchServices } from "../telemetry-api";
+import { SignalConnect } from "./connect";
+import { connectPages, type ConnectPage } from "./connect-pages";
 import { ConnectionRow, SignalLogo } from "./shared";
 
 interface Source { provider: string; name: string; description: string }
@@ -54,19 +53,11 @@ const descriptions: Record<Step, string> = {
 };
 const stepNumber: Record<Step, number> = { telemetry: 1, code: 2, repositories: 2, slack: 3, context: 4, start: 5 };
 
-// Providers connected through a dialog of their own; the rest start OAuth.
-const connectionDialogs: Partial<Record<string, ComponentType<{
-  connectUrl: string; open: boolean; onCancel: () => void; returnTo: string;
-}>>> = {
-  aws: AwsConnectionDialog,
-  datadog: DatadogConnectionDialog,
-  grafana: GrafanaConnectionDialog,
-  posthog: PostHogConnectionDialog,
-};
-
 export function SignalSetup() {
-  const { step: stepParam = "telemetry" } = useParams();
+  const { step: stepParam = "telemetry", page: pageParam } = useParams();
   const step = steps.find((candidate) => candidate === stepParam);
+  const page = connectPages.find((candidate) => candidate === pageParam);
+  const [searchParams, setSearchParams] = useSearchParams();
   useDocumentTitle("Signal · Setup");
   const navigate = useNavigate();
   const organizationId = authClient.useSession().data?.session.activeOrganizationId;
@@ -75,7 +66,8 @@ export function SignalSetup() {
   const [settings, setSettings] = useState<SignalSettings | null>(null);
   const [draft, setDraft] = useState<SignalSettings | null>(null);
   const [search, setSearch] = useState("");
-  const [dialog, setDialog] = useState<string | null>(null);
+  // How many services sent OpenTelemetry data in the last day, once known.
+  const [otelServices, setOtelServices] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -99,11 +91,21 @@ export function SignalSetup() {
     return () => { current = false; };
   }, [attempt, organizationId]);
 
+  useEffect(() => {
+    if (step !== "telemetry" || page) return;
+    let current = true;
+    const until = Date.now();
+    fetchServices({ since: until - 86_400_000, until }, "all")
+      .then((services) => { if (current) setOtelServices(services?.length ?? 0); })
+      .catch(() => { if (current) setOtelServices(0); });
+    return () => { current = false; };
+  }, [step, page]);
+
   const channels = (options?.resources ?? [])
     .filter((resource) => resource.kind === "slack_channel")
     .sort((a, b) => a.displayName.localeCompare(b.displayName));
 
-  if (!step) return <Navigate replace to="/signal/setup" />;
+  if (!step || (pageParam && (!page || !["telemetry", "context"].includes(step)))) return <Navigate replace to="/signal/setup" />;
   if (!integrations || !options || !draft || !settings) {
     return loadError?.attempt === attempt
       ? <section className="signalEmpty"><p className="signalError" role="alert">{loadError.message}</p><Button onClick={() => setAttempt(attempt + 1)}>Try again</Button></section>
@@ -112,16 +114,14 @@ export function SignalSetup() {
 
   const returnTo = `/signal/setup/${step}`;
   const summary = (provider: string) => integrations.find((integration) => integration.id === provider);
-  const connected = (provider: string) => summary(provider)?.state === "connected";
+  const connected = (provider: string) => provider === "otel" ? Boolean(otelServices) : summary(provider)?.state === "connected";
   const index = steps.indexOf(step);
   const go = (target: Step) => navigate(`/signal/setup/${target}`);
 
   function connect(provider: string) {
-    if (provider === "otel") { navigate("/settings/ingest-keys"); return; }
-    if (provider === "gcp") { navigate("/settings"); return; }
+    if (connectPages.includes(provider as ConnectPage)) { navigate(`${returnTo}/${provider}`); return; }
     const connectUrl = summary(provider)?.connectUrl;
     if (!connectUrl) return;
-    if (connectionDialogs[provider]) { setDialog(provider); return; }
     window.location.assign(connectionStartUrl(connectUrl, returnTo));
   }
 
@@ -149,7 +149,9 @@ export function SignalSetup() {
       return <ConnectionRow key={source.provider}
         provider={source.provider}
         name={source.name}
-        description={source.provider === "jira" ? "Coming soon" : source.description}
+        description={source.provider === "jira" ? "Coming soon"
+          : source.provider === "otel" && otelServices ? `${otelServices} ${otelServices === 1 ? "service" : "services"} sending data`
+          : source.description}
         connected={connected(source.provider)}
         disabled={unavailable}
         onConnect={() => connect(source.provider)}
@@ -160,12 +162,34 @@ export function SignalSetup() {
   const repositories = options.repositories
     .filter((repository) => repository.fullName.toLowerCase().includes(search.toLowerCase()))
     .sort((a, b) => a.fullName.localeCompare(b.fullName));
-  const Dialog = dialog ? connectionDialogs[dialog] : undefined;
+  // A provider's own site sends people back here with the outcome.
+  const failedProvider = searchParams.get("status") === "error" ? searchParams.get("integration") : null;
+  const failedName = failedProvider ? [...telemetry, ...context].find((source) => source.provider === failedProvider)?.name ?? providerDisplayName(failedProvider) : null;
+
+  if (page) {
+    return <section className="signalSetup">
+      <header className="signalWelcome"><h1>Welcome to Signal</h1><p>Step {stepNumber[step]} out of 5</p></header>
+      <SignalConnect page={page}
+        integration={summary(page)}
+        organizationId={organizationId ?? undefined}
+        listPath={returnTo}
+        onBack={() => navigate(returnTo)}
+        onDone={() => {
+          // The connection may be new, so load the list again.
+          setAttempt(attempt + 1);
+          navigate(returnTo);
+        }} />
+    </section>;
+  }
 
   return <section className={`signalSetup${step === "repositories" ? " signalSetup--repositories" : ""}`}>
     <header className="signalWelcome"><h1>Welcome to Signal</h1><p>Step {stepNumber[step]} out of 5</p></header>
     <div className="signalIntro"><h2>{headings[step]}</h2><p>{descriptions[step]}</p></div>
     {error && <p className="signalError" role="alert">{error}</p>}
+    {failedName && <p className="signalError" role="alert">
+      Could not connect {failedName}. Try again{searchParams.get("reason") ? ` (${searchParams.get("reason")})` : ""}.{" "}
+      <button type="button" className="signalLinkButton" onClick={() => setSearchParams({}, { replace: true })}>Dismiss</button>
+    </p>}
 
     {step === "telemetry" && rows(telemetry)}
 
@@ -238,6 +262,5 @@ export function SignalSetup() {
         </Button>}
     </footer>
 
-    {Dialog && <Dialog connectUrl={summary(dialog!)?.connectUrl ?? ""} open onCancel={() => setDialog(null)} returnTo={returnTo} />}
   </section>;
 }

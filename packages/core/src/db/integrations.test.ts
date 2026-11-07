@@ -4,6 +4,7 @@ import { getTableConfig, PgDialect } from "drizzle-orm/pg-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getDatabase } from "./client.js";
 import {
+  claimIntegrationRegistration,
   createIntegrationConnectionState,
   consumeIntegrationConnectionState,
   deleteIntegrationAccount,
@@ -510,6 +511,162 @@ describe("integration account tenancy", () => {
         status: "not_found",
       });
       expect(deleted).toEqual([]);
+    });
+  });
+
+  describe("claiming a registration", () => {
+    const hash = "a".repeat(64);
+    interface RegistrationRow {
+      id: string;
+      externalAccountId: string;
+      mergedFrom: string | null;
+      registrationHash: string | null;
+      status: string;
+    }
+    const placeholder: RegistrationRow = {
+      id: "registration-1",
+      externalAccountId: `registration:${hash}`,
+      mergedFrom: null,
+      registrationHash: hash,
+      status: "pending",
+    };
+
+    function claimDouble(input: { existing?: string; registration?: RegistrationRow }) {
+      const updates: Array<{ id: unknown; values: Record<string, unknown> }> = [];
+      const deleted: unknown[] = [];
+      const selection = (rows: unknown[]) => ({
+        from: () => ({ where: () => ({ for: vi.fn().mockResolvedValue(rows) }) }),
+      });
+      const tx = {
+        select: vi
+          .fn()
+          .mockReturnValueOnce(selection(input.registration ? [input.registration] : []))
+          .mockReturnValueOnce(selection(input.existing ? [{ id: input.existing }] : [])),
+        update: vi.fn(() => ({
+          set: (values: Record<string, unknown>) => ({
+            where: vi.fn(async (id: unknown) => {
+              updates.push({ id, values });
+            }),
+          }),
+        })),
+        delete: vi.fn((table: unknown) => {
+          deleted.push(table);
+          return { where: vi.fn().mockResolvedValue(undefined) };
+        }),
+      };
+      vi.mocked(getDatabase).mockReturnValue({
+        transaction: vi.fn((run: (transaction: typeof tx) => unknown) => run(tx)),
+      } as never);
+      return { deleted, updates };
+    }
+
+    // The JSON merged into the row's metadata by the update.
+    function mergedMetadata(values: Record<string, unknown>) {
+      const query = new PgDialect().sqlToQuery(values.metadata as never);
+      return JSON.parse(String(query.params.at(-1))) as Record<string, string>;
+    }
+
+    const claim = {
+      displayName: "AWS · 123456789012",
+      encryptedCredentials: "new-credentials",
+      externalAccountId: "123456789012",
+      externalAccountIdPrefix: "registration:",
+      organizationId: account.organizationId,
+      provider: "aws" as const,
+      registrationAccountId: "registration-1",
+      registrationHash: hash,
+    };
+
+    it("turns the placeholder into the account it reported", async () => {
+      const { deleted, updates } = claimDouble({ registration: placeholder });
+
+      await expect(claimIntegrationRegistration(claim)).resolves.toEqual({
+        status: "claimed",
+        integrationAccountId: "registration-1",
+        merged: false,
+      });
+      expect(updates).toHaveLength(1);
+      expect(updates[0]?.values).toMatchObject({
+        displayName: "AWS · 123456789012",
+        encryptedCredentials: "new-credentials",
+        externalAccountId: "123456789012",
+        status: "pending",
+      });
+      expect(mergedMetadata(updates[0]!.values)).toEqual({ registrationHash: hash });
+      expect(deleted).toEqual([]);
+    });
+
+    it("moves the credentials onto an existing row and keeps its status", async () => {
+      const { deleted, updates } = claimDouble({ existing: "account-1", registration: placeholder });
+
+      await expect(claimIntegrationRegistration(claim)).resolves.toEqual({
+        status: "claimed",
+        integrationAccountId: "account-1",
+        merged: true,
+      });
+      expect(updates).toHaveLength(1);
+      expect(updates[0]?.values).toMatchObject({ encryptedCredentials: "new-credentials" });
+      expect(updates[0]?.values).not.toHaveProperty("externalAccountId");
+      expect(updates[0]?.values).not.toHaveProperty("status");
+      expect(mergedMetadata(updates[0]!.values)).toEqual({
+        registrationAccountId: "registration-1",
+        registrationHash: hash,
+      });
+      expect(deleted).toEqual([integrationAccounts]);
+    });
+
+    it("lets another report replace a claim that was never verified", async () => {
+      const { updates } = claimDouble({
+        registration: { ...placeholder, externalAccountId: "999999999999", status: "pending" },
+      });
+
+      await expect(claimIntegrationRegistration(claim)).resolves.toMatchObject({ status: "claimed" });
+      expect(updates[0]?.values).toMatchObject({ externalAccountId: "123456789012", status: "pending" });
+    });
+
+    it("keeps a verified claim for another account", async () => {
+      const { deleted, updates } = claimDouble({
+        registration: { ...placeholder, externalAccountId: "999999999999", status: "connected" },
+      });
+
+      await expect(claimIntegrationRegistration(claim)).resolves.toEqual({ status: "already_claimed" });
+      expect(updates).toEqual([]);
+      expect(deleted).toEqual([]);
+    });
+
+    it("keeps a row the placeholder merged into, even before it is verified", async () => {
+      const { updates } = claimDouble({
+        registration: {
+          ...placeholder,
+          id: "account-1",
+          externalAccountId: "999999999999",
+          mergedFrom: "registration-1",
+          status: "pending",
+        },
+      });
+
+      await expect(claimIntegrationRegistration({ ...claim, registrationAccountId: "account-1" }))
+        .resolves.toEqual({ status: "already_claimed" });
+      expect(updates).toEqual([]);
+    });
+
+    it("keeps the status of a repeated claim for the same account", async () => {
+      const { updates } = claimDouble({
+        registration: { ...placeholder, externalAccountId: "123456789012", status: "connected" },
+      });
+
+      await expect(claimIntegrationRegistration(claim)).resolves.toMatchObject({ status: "claimed" });
+      expect(updates[0]?.values).toMatchObject({ status: "connected" });
+    });
+
+    it("reports a placeholder that no longer exists or belongs to another link", async () => {
+      for (const registration of [undefined, { ...placeholder, registrationHash: "b".repeat(64) }]) {
+        const { deleted, updates } = claimDouble({ registration });
+
+        await expect(claimIntegrationRegistration(claim)).resolves.toBeNull();
+        expect(updates).toEqual([]);
+        expect(deleted).toEqual([]);
+      }
     });
   });
 

@@ -1,5 +1,10 @@
 import { chatConnectionRoutes } from "./chat-connection.js";
 import { customMcpToolRoutes } from "./custom-mcp-tools.js";
+import {
+  AWS_REGISTRATION_UNAVAILABLE_ERROR,
+  awsRegistrationRoutes,
+  startAwsRegistration,
+} from "./aws-registration.js";
 import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -272,8 +277,10 @@ import {
 } from "../../../../packages/core/src/integrations/supabase.js";
 
 const providerSchema = z.enum(productIntegrationIds);
+// Without an account ID, the connection starts one-click setup and the stack
+// reports its account.
 const awsConnectionSchema = z.object({
-  accountId: awsAccountIdSchema,
+  accountId: awsAccountIdSchema.optional(),
   returnTo: z.string().max(2_048).optional(),
 });
 const awsVerificationSchema = z.object({
@@ -1213,6 +1220,7 @@ export const integrationRoutes = new Hono()
   .route("/chat", chatConnectionRoutes)
   .route("/custom-mcp", customMcpToolRoutes)
   .route("/github/pull-request-author", githubPullRequestAuthorRoutes)
+  .route("/aws", awsRegistrationRoutes)
   .get("/", async (context) => {
     const tenant = await getActiveTenant(context.req.raw.headers);
     if (tenant.ok === false) {
@@ -1441,11 +1449,34 @@ export const integrationRoutes = new Hono()
     if (!parsed.success) {
       return context.json({ error: "Enter a 12-digit AWS account ID" }, 400);
     }
+    const awsAccountId = parsed.data.accountId;
+    if (awsAccountId === undefined) {
+      try {
+        const registration = await startAwsRegistration(tenant.organizationId);
+        if (!registration.available) {
+          return context.json({ error: AWS_REGISTRATION_UNAVAILABLE_ERROR }, 503);
+        }
+        return context.json({
+          accountId: registration.accountId,
+          cloudFormationUrl: registration.cloudFormationUrl,
+          template: registration.template,
+        });
+      } catch (error) {
+        logCallbackError("AWS", error, {
+          organizationId: tenant.organizationId,
+          stage: "registration",
+        });
+        return context.json(
+          { error: "Unable to prepare the AWS connection" },
+          502,
+        );
+      }
+    }
 
     try {
       const principalArn = awsIntegrationPrincipalArn();
       const existing = await getOrganizationIntegrationAccountByExternalId({
-        externalAccountId: parsed.data.accountId,
+        externalAccountId: awsAccountId,
         organizationId: tenant.organizationId,
         provider: "aws",
       });
@@ -1456,9 +1487,9 @@ export const integrationRoutes = new Hono()
         ? existingCredentials.data.externalId
         : createAwsExternalId();
       const credentials = {
-        accountId: parsed.data.accountId,
+        accountId: awsAccountId,
         externalId,
-        roleArn: awsInvestigationRoleArn(parsed.data.accountId),
+        roleArn: awsInvestigationRoleArn(awsAccountId),
       };
       const accountId =
         existing?.status === "connected" && existingCredentials?.success
@@ -1466,8 +1497,8 @@ export const integrationRoutes = new Hono()
           : await upsertIntegrationAccount({
               organizationId: tenant.organizationId,
               provider: "aws",
-              externalAccountId: parsed.data.accountId,
-              displayName: `AWS · ${parsed.data.accountId}`,
+              externalAccountId: awsAccountId,
+              displayName: `AWS · ${awsAccountId}`,
               encryptedCredentials: encryptCredentials(credentials),
               credentialKeyVersion: 1,
               metadata: {

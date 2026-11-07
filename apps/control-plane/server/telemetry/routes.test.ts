@@ -249,6 +249,14 @@ describe("telemetry routes", () => {
       expect.anything(),
       "traces",
     );
+
+    await app.request("/services?signal=metrics");
+    expect(dependencies.listServices).toHaveBeenLastCalledWith(
+      expect.anything(),
+      organizationId,
+      expect.anything(),
+      "metrics",
+    );
   });
 
   it("queries traces with the chosen filters and window", async () => {

@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { and, count, eq, gt, inArray, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm";
+import { and, count, eq, gt, inArray, isNotNull, isNull, like, lt, lte, ne, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { getDatabase } from "./client.js";
 import {
@@ -814,6 +814,211 @@ export async function updateIntegrationAccountCredentials(input: {
     )
     .returning({ id: integrationAccounts.id });
 
+  return updated.length > 0;
+}
+
+// The organization's open one-click setup, so repeated clicks reuse one
+// placeholder row instead of piling them up.
+export async function getPendingIntegrationRegistration(input: {
+  externalAccountIdPrefix: string;
+  organizationId: string;
+  provider: IntegrationProvider;
+}) {
+  const rows = await getDatabase()
+    .select({
+      id: integrationAccounts.id,
+      encryptedCredentials: integrationAccounts.encryptedCredentials,
+    })
+    .from(integrationAccounts)
+    .where(
+      and(
+        eq(integrationAccounts.organizationId, input.organizationId),
+        eq(integrationAccounts.provider, input.provider),
+        eq(integrationAccounts.status, "pending"),
+        like(integrationAccounts.externalAccountId, `${input.externalAccountIdPrefix}%`),
+      ),
+    )
+    .limit(1);
+  return rows.at(0) ?? null;
+}
+
+// Not scoped to an organization: the caller is a provider callback, and the
+// hash is a digest of a secret that only the setup link carried. A claimed
+// registration keeps the hash in its metadata so retried callbacks still
+// find it.
+export async function getIntegrationAccountByRegistration(input: {
+  externalAccountId: string;
+  provider: IntegrationProvider;
+  registrationHash: string;
+}) {
+  const rows = await getDatabase()
+    .select({
+      id: integrationAccounts.id,
+      encryptedCredentials: integrationAccounts.encryptedCredentials,
+      externalAccountId: integrationAccounts.externalAccountId,
+      organizationId: integrationAccounts.organizationId,
+      status: integrationAccounts.status,
+    })
+    .from(integrationAccounts)
+    .where(
+      and(
+        eq(integrationAccounts.provider, input.provider),
+        or(
+          eq(integrationAccounts.externalAccountId, input.externalAccountId),
+          sql`${integrationAccounts.metadata} ->> 'registrationHash' = ${input.registrationHash}`,
+        ),
+      ),
+    )
+    .limit(1);
+  return rows.at(0) ?? null;
+}
+
+export type IntegrationRegistrationClaim =
+  | { status: "claimed"; integrationAccountId: string; merged: boolean }
+  | { status: "already_claimed" }
+  | null;
+
+// Records the external account a registration placeholder turned out to be.
+// When the organization already has a row for that account, the new
+// credentials move onto it and the placeholder goes, so the account keeps its
+// automations and its status. The surviving row remembers the placeholder's ID
+// so a setup page polling the placeholder can follow it.
+//
+// A placeholder claimed for another account can be claimed again until that
+// account is verified, so an unverified report cannot lock the link. The
+// checks run under the row lock, so concurrent deliveries cannot both pass.
+export async function claimIntegrationRegistration(input: {
+  displayName: string;
+  encryptedCredentials: string;
+  externalAccountId: string;
+  externalAccountIdPrefix: string;
+  organizationId: string;
+  provider: IntegrationProvider;
+  registrationAccountId: string;
+  registrationHash: string;
+}): Promise<IntegrationRegistrationClaim> {
+  return getDatabase().transaction(async (tx) => {
+    const [registration] = await tx
+      .select({
+        id: integrationAccounts.id,
+        externalAccountId: integrationAccounts.externalAccountId,
+        mergedFrom: sql<string | null>`${integrationAccounts.metadata} ->> 'registrationAccountId'`,
+        registrationHash: sql<string | null>`${integrationAccounts.metadata} ->> 'registrationHash'`,
+        status: integrationAccounts.status,
+      })
+      .from(integrationAccounts)
+      .where(
+        and(
+          eq(integrationAccounts.id, input.registrationAccountId),
+          eq(integrationAccounts.organizationId, input.organizationId),
+          eq(integrationAccounts.provider, input.provider),
+        ),
+      )
+      .for("update");
+    if (!registration || registration.registrationHash !== input.registrationHash) return null;
+    const unclaimed = registration.externalAccountId.startsWith(input.externalAccountIdPrefix);
+    const sameAccount = registration.externalAccountId === input.externalAccountId;
+    // A row this placeholder merged into is a real account; only its own
+    // account may claim it.
+    const replaceable = registration.status !== "connected" && registration.mergedFrom === null;
+    if (!unclaimed && !sameAccount && !replaceable) return { status: "already_claimed" };
+
+    const [existing] = await tx
+      .select({ id: integrationAccounts.id })
+      .from(integrationAccounts)
+      .where(
+        and(
+          eq(integrationAccounts.organizationId, input.organizationId),
+          eq(integrationAccounts.provider, input.provider),
+          eq(integrationAccounts.externalAccountId, input.externalAccountId),
+          ne(integrationAccounts.id, registration.id),
+        ),
+      )
+      .for("update");
+    if (existing) {
+      await tx
+        .update(integrationAccounts)
+        .set({
+          encryptedCredentials: input.encryptedCredentials,
+          credentialKeyVersion: 1,
+          metadata: sql`${integrationAccounts.metadata} || ${JSON.stringify({
+            registrationAccountId: registration.id,
+            registrationHash: input.registrationHash,
+          })}::jsonb`,
+          updatedAt: new Date(),
+        })
+        .where(eq(integrationAccounts.id, existing.id));
+      await tx
+        .delete(integrationAccounts)
+        .where(eq(integrationAccounts.id, registration.id));
+      return { status: "claimed", integrationAccountId: existing.id, merged: true };
+    }
+
+    await tx
+      .update(integrationAccounts)
+      .set({
+        displayName: input.displayName,
+        encryptedCredentials: input.encryptedCredentials,
+        credentialKeyVersion: 1,
+        externalAccountId: input.externalAccountId,
+        metadata: sql`${integrationAccounts.metadata} || ${JSON.stringify({
+          registrationHash: input.registrationHash,
+        })}::jsonb`,
+        status: sameAccount ? registration.status : "pending",
+        updatedAt: new Date(),
+      })
+      .where(eq(integrationAccounts.id, registration.id));
+    return { status: "claimed", integrationAccountId: registration.id, merged: false };
+  });
+}
+
+// The row a registration placeholder was merged into.
+export async function getIntegrationAccountMergedFromRegistration(input: {
+  organizationId: string;
+  provider: IntegrationProvider;
+  registrationAccountId: string;
+}) {
+  const rows = await getDatabase()
+    .select({
+      id: integrationAccounts.id,
+      encryptedCredentials: integrationAccounts.encryptedCredentials,
+      metadata: integrationAccounts.metadata,
+      status: integrationAccounts.status,
+    })
+    .from(integrationAccounts)
+    .where(
+      and(
+        eq(integrationAccounts.organizationId, input.organizationId),
+        eq(integrationAccounts.provider, input.provider),
+        sql`${integrationAccounts.metadata} ->> 'registrationAccountId' = ${input.registrationAccountId}`,
+      ),
+    )
+    .limit(1);
+  return rows.at(0) ?? null;
+}
+
+// Connects an account whose credentials have not changed since they were
+// verified. Reports false when another request connected it first, so the
+// caller announces the connection once.
+export async function markIntegrationAccountConnected(input: {
+  encryptedCredentials: string;
+  integrationAccountId: string;
+  organizationId: string;
+  provider: IntegrationProvider;
+}): Promise<boolean> {
+  const updated = await getDatabase()
+    .update(integrationAccounts)
+    .set({ status: "connected", updatedAt: new Date() })
+    .where(
+      and(
+        eq(integrationAccounts.id, input.integrationAccountId),
+        eq(integrationAccounts.organizationId, input.organizationId),
+        eq(integrationAccounts.provider, input.provider),
+        eq(integrationAccounts.encryptedCredentials, input.encryptedCredentials),
+        ne(integrationAccounts.status, "connected"),
+      ),
+    )
+    .returning({ id: integrationAccounts.id });
   return updated.length > 0;
 }
 
