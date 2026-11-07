@@ -42,14 +42,14 @@ export function SignalConnect({ page, ...props }: PageProps & { page: ConnectPag
   }
 }
 
-function Intro({ provider, title, children }: { provider: string; title: string; children: ReactNode }) {
+export function Intro({ provider, title, children }: { provider: string; title: string; children: ReactNode }) {
   return <div className="signalIntro">
     <h2 className="signalConnectTitle"><span className="signalTitleLogo"><SignalLogo provider={provider} /></span>{title}</h2>
     <p>{children}</p>
   </div>;
 }
 
-function Actions({ onBack, children }: { onBack: () => void; children?: ReactNode }) {
+export function Actions({ onBack, children }: { onBack: () => void; children?: ReactNode }) {
   return <footer className="signalSetupActions">
     <Button onClick={onBack}>Back</Button>
     {children}
@@ -534,7 +534,9 @@ function GcpConnect({ integration, listPath, onBack, onDone }: PageProps) {
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const connectUrl = integration?.connectUrl;
-  const returnTo = `${listPath}/gcp`;
+  // Google sends people back to the project picker, even for a project added
+  // to a connected Google Cloud.
+  const returnTo = `${listPath}/gcp/connect`;
 
   useEffect(() => {
     if (!selectionState || !connectUrl) return;

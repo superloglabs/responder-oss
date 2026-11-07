@@ -1,0 +1,1 @@
+CREATE INDEX "issue_linear_tickets_integration_account_idx" ON "issue_linear_tickets" USING btree ("integration_account_id");

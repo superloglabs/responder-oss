@@ -166,7 +166,7 @@ export function App() {
         <Route element={<HomeRedirect />} path="/app" />
         <Route element={<SignalLayout />} path="/signal">
           <Route element={<SignalHome />} index />
-          <Route element={<SignalSetup />} path="setup/:step?/:page?" />
+          <Route element={<SignalSetup />} path="setup/:step?/:page?/:mode?" />
           <Route element={<SignalFindings />} path="findings" />
           <Route element={<SignalFindingDetail />} path="findings/:findingId" />
           <Route element={<SignalUsage />} path="usage" />

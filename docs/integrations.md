@@ -33,6 +33,21 @@ Providers with additional configuration or credential entry return
 collect their API keys or other secrets in the conversation. Provider application
 credentials remain server configuration, not tool arguments.
 
+## Manage a connection in Signal setup
+
+Each connected Signal source has a manage page in setup. It shows what the
+connection is, from the non-secret metadata saved when it connected, and opens
+the connect form again to replace keys or sign in again.
+
+**Disconnect** calls `DELETE /api/integrations/<provider>/accounts/<id>`, where
+`<provider>` is `aws`, `datadog`, `gcp`, `grafana`, `linear`, `posthog`, or
+`sentry`. It deletes the stored credentials but does not revoke access on the
+provider's side; each manage page says what to revoke there. Responder refuses
+with `409` while an active automation still uses the connection, or while
+records of Linear tickets created with it remain. OpenTelemetry has no connection to
+remove: services send data with ingest keys, managed in **Settings → Ingest
+keys**.
+
 ## Linear
 
 Create a Responder-owned Linear OAuth app. Responder requests the `read`,

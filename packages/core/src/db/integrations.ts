@@ -14,6 +14,7 @@ import {
   integrationProvider,
   integrationResourceKind,
   integrationResources,
+  issueLinearTickets,
   repositories,
   scanConfigurations,
   slackDirectMessageWelcomes,
@@ -327,7 +328,9 @@ export async function listRunningIntegrationAccountSetups(input: {
 export type IntegrationAccountRemoval =
   | { status: "removed" }
   | { status: "not_found" }
-  | { status: "in_use"; automationNames: string[] };
+  | { status: "in_use"; automationNames: string[] }
+  // Linear ticket records reference the account, whatever their status.
+  | { status: "has_linear_tickets" };
 
 export async function deleteIntegrationAccount(input: {
   integrationAccountId: string;
@@ -367,6 +370,12 @@ export async function deleteIntegrationAccount(input: {
         automationNames: [...new Set(users.map((user) => user.name))].sort(),
       };
     }
+
+    const [linear] = await tx
+      .select({ tickets: count() })
+      .from(issueLinearTickets)
+      .where(eq(issueLinearTickets.integrationAccountId, account.id));
+    if ((linear?.tickets ?? 0) > 0) return { status: "has_linear_tickets" };
 
     // Only superseded automation versions still point at the account. They
     // no longer run, so their references go with it.

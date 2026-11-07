@@ -2171,6 +2171,94 @@ describe("integration callback routing", () => {
     });
   });
 
+  it("removes a Signal source's connection for its own provider only", async () => {
+    vi.mocked(deleteIntegrationAccount).mockResolvedValue({ status: "removed" });
+
+    const response = await app.request(
+      "/api/integrations/datadog/accounts/30000000-0000-4000-8000-000000000000",
+      { method: "DELETE" },
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ removed: true });
+    expect(deleteIntegrationAccount).toHaveBeenCalledWith({
+      integrationAccountId: "30000000-0000-4000-8000-000000000000",
+      organizationId: tenant.organizationId,
+      provider: "datadog",
+    });
+  });
+
+  it("explains which automations keep a connection from being removed", async () => {
+    vi.mocked(deleteIntegrationAccount).mockResolvedValue({
+      automationNames: ["Nightly triage", "Sentry follow-up"],
+      status: "in_use",
+    });
+
+    const response = await app.request(
+      "/api/integrations/sentry/accounts/30000000-0000-4000-8000-000000000000",
+      { method: "DELETE" },
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error:
+        'This connection is used by the automations "Nightly triage", "Sentry follow-up". Remove it from those automations first.',
+    });
+  });
+
+  it("keeps a Linear connection that ticket records use and says to reconnect it", async () => {
+    vi.mocked(deleteIntegrationAccount).mockResolvedValue({ status: "has_linear_tickets" });
+
+    const response = await app.request(
+      "/api/integrations/linear/accounts/30000000-0000-4000-8000-000000000000",
+      { method: "DELETE" },
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: "Linear ticket records use this connection, so it can't be removed. Reconnect it instead.",
+    });
+  });
+
+  it("keeps connections Signal setup does not manage out of the removal route", async () => {
+    const github = await app.request(
+      "/api/integrations/github/accounts/30000000-0000-4000-8000-000000000000",
+      { method: "DELETE" },
+    );
+    const invalid = await app.request("/api/integrations/datadog/accounts/not-a-uuid", { method: "DELETE" });
+
+    expect(github.status).toBe(404);
+    expect(invalid.status).toBe(400);
+    expect(deleteIntegrationAccount).not.toHaveBeenCalled();
+  });
+
+  it("lists what each connected account is without its credentials", async () => {
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    vi.mocked(listOrganizationIntegrationAccounts).mockResolvedValue([
+      {
+        id: "30000000-0000-4000-8000-000000000000",
+        provider: "datadog",
+        externalAccountId: "datadog-org",
+        displayName: "Acme",
+        status: "connected",
+        metadata: { mcpUrl: "https://mcp.datadoghq.com", site: "datadoghq.com", siteName: "US1", userHandle: "ash@acme.com" },
+        updatedAt: new Date("2026-11-07T10:00:00Z"),
+        resourceCount: 0,
+      },
+    ]);
+
+    const response = await app.request("/api/integrations");
+
+    const body = await response.json();
+    const datadog = body.integrations.find((integration: { id: string }) => integration.id === "datadog");
+    expect(datadog.accounts).toEqual([
+      expect.objectContaining({
+        details: { site: "datadoghq.com", siteName: "US1", userHandle: "ash@acme.com" },
+      }),
+    ]);
+    expect(JSON.stringify(body)).not.toContain("mcp.datadoghq.com");
+  });
+
   it("starts Supabase OAuth with a server-generated project discovery scope", async () => {
     vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
     vi.mocked(encryptCredentials).mockReturnValue("encrypted-credentials");

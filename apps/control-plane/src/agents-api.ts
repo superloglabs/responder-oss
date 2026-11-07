@@ -149,15 +149,46 @@ export interface IntegrationSummary {
   state: "available" | "coming_soon" | "connected" | "setup_required";
   accountCount: number;
   resourceCount: number;
-  accounts?: Array<{
-    id: string;
-    displayName: string;
-    status: "connected" | "error" | "pending";
-    resourceCount: number;
-    updatedAt: string;
-  }>;
+  accounts?: IntegrationAccount[];
   connectUrl: string | null;
   configurationUrl: string | null;
+}
+
+export interface IntegrationAccount {
+  id: string;
+  displayName: string;
+  status: "connected" | "error" | "pending";
+  resourceCount: number;
+  updatedAt: string;
+  projectId?: string;
+  // What the account is, from the metadata saved when it connected.
+  details?: {
+    site?: string;
+    siteName?: string;
+    userHandle?: string;
+    serviceAccount?: boolean;
+    deployment?: "cloud" | "self_hosted";
+    url?: string;
+    organizationName?: string;
+    organizationSlug?: string;
+    awsAccountId?: string;
+    roleName?: string;
+    projectName?: string;
+    serviceAccountEmail?: string;
+    roles?: string[];
+    accessLevel?: string;
+  };
+}
+
+export async function removeIntegrationAccount(provider: string, accountId: string) {
+  const response = await fetch(
+    `/api/integrations/${encodeURIComponent(provider)}/accounts/${encodeURIComponent(accountId)}`,
+    { method: "DELETE" },
+  );
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as { error?: string } | null;
+    throw new Error(body?.error ?? "Could not disconnect.");
+  }
 }
 
 export interface AgentDetail {

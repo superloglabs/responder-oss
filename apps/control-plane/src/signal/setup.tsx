@@ -16,6 +16,8 @@ import { authClient } from "../auth-client";
 import { publishSignalSettings } from "./setup-state";
 import { fetchServices } from "../telemetry-api";
 import { SignalConnect } from "./connect";
+import { SignalManage } from "./manage";
+import { manageableAccounts } from "./manage-model";
 import { connectPages, type ConnectPage } from "./connect-pages";
 import { SignalPlanStep } from "./plan";
 import { ConnectionRow, SignalLogo } from "./shared";
@@ -56,7 +58,7 @@ const descriptions: Record<Step, string> = {
 const stepNumber: Record<Step, number> = { telemetry: 1, code: 2, repositories: 2, slack: 3, context: 4, plan: 5 };
 
 export function SignalSetup() {
-  const { step: stepParam = "telemetry", page: pageParam } = useParams();
+  const { step: stepParam = "telemetry", page: pageParam, mode } = useParams();
   const step = steps.find((candidate) => candidate === stepParam);
   const page = connectPages.find((candidate) => candidate === pageParam);
   const [searchParams, setSearchParams] = useSearchParams();
@@ -70,6 +72,8 @@ export function SignalSetup() {
   const [search, setSearch] = useState("");
   // How many services sent OpenTelemetry data in the last day, once known.
   const [otelServices, setOtelServices] = useState<number | null>(null);
+  // A failed lookup is not the same as no data: the manage page shows it.
+  const [otelLookupFailed, setOtelLookupFailed] = useState(false);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -94,12 +98,21 @@ export function SignalSetup() {
   }, [attempt, organizationId]);
 
   useEffect(() => {
-    if (step !== "telemetry" || page) return;
+    // The OpenTelemetry page needs them too, under any step.
+    if (step !== "telemetry" && page !== "otel") return;
     let current = true;
     const until = Date.now();
     fetchServices({ since: until - 86_400_000, until }, "all")
-      .then((services) => { if (current) setOtelServices(services?.length ?? 0); })
-      .catch(() => { if (current) setOtelServices(0); });
+      .then((services) => {
+        if (!current) return;
+        setOtelServices(services?.length ?? 0);
+        setOtelLookupFailed(false);
+      })
+      .catch(() => {
+        if (!current) return;
+        setOtelServices(0);
+        setOtelLookupFailed(true);
+      });
     return () => { current = false; };
   }, [step, page]);
 
@@ -107,7 +120,9 @@ export function SignalSetup() {
     .filter((resource) => resource.kind === "slack_channel")
     .sort((a, b) => a.displayName.localeCompare(b.displayName));
 
-  if (!step || (pageParam && (!page || !["telemetry", "context"].includes(step)))) return <Navigate replace to="/signal/setup" />;
+  if (!step || (pageParam && (!page || !["telemetry", "context"].includes(step))) || (mode && (!page || mode !== "connect"))) {
+    return <Navigate replace to="/signal/setup" />;
+  }
   if (!integrations || !options || !draft || !settings) {
     return loadError?.attempt === attempt
       ? <section className="signalEmpty"><p className="signalError" role="alert">{loadError.message}</p><Button onClick={() => setAttempt(attempt + 1)}>Try again</Button></section>
@@ -157,7 +172,7 @@ export function SignalSetup() {
         connected={connected(source.provider)}
         disabled={unavailable}
         onConnect={() => connect(source.provider)}
-        onManage={() => navigate("/settings")} />;
+        onManage={() => connectPages.includes(source.provider as ConnectPage) ? navigate(`${returnTo}/${source.provider}`) : navigate("/settings")} />;
     })}</div>;
   }
 
@@ -169,9 +184,26 @@ export function SignalSetup() {
   const failedName = failedProvider ? [...telemetry, ...context].find((source) => source.provider === failedProvider)?.name ?? providerDisplayName(failedProvider) : null;
 
   if (page) {
+    // A connected source opens on its manage page; "connect" opens the form
+    // again, to replace keys or sign in again.
+    if (page === "otel" && mode !== "connect" && otelServices === null) return <p className="signalLoading" role="status">Loading…</p>;
+    const managed = mode !== "connect" && (page === "otel" ? Boolean(otelServices) || otelLookupFailed : manageableAccounts(summary(page)?.accounts).length > 0);
+    const pagePath = `${returnTo}/${page}`;
     return <section className="signalSetup">
       <header className="signalWelcome"><h1>Welcome to Signal</h1><p>Step {stepNumber[step]} out of 5</p></header>
-      <SignalConnect page={page}
+      {managed ? <SignalManage page={page}
+        name={[...telemetry, ...context].find((source) => source.provider === page)?.name ?? providerDisplayName(page)}
+        integration={summary(page)}
+        onBack={() => navigate(returnTo)}
+        onReconnect={() => navigate(`${pagePath}/connect`)}
+        onOpenIngestKeys={() => navigate("/settings/ingest-keys")}
+        onRemoved={() => {
+          // Shows loading, or the load error, instead of the removed account.
+          setIntegrations(null);
+          setAttempt(attempt + 1);
+          navigate(returnTo);
+        }} />
+      : <SignalConnect page={page}
         integration={summary(page)}
         organizationId={organizationId ?? undefined}
         listPath={returnTo}
@@ -180,7 +212,7 @@ export function SignalSetup() {
           // The connection may be new, so load the list again.
           setAttempt(attempt + 1);
           navigate(returnTo);
-        }} />
+        }} />}
     </section>;
   }
 
