@@ -31,7 +31,7 @@
   --color-ring: var(--ring);
 }
 
-:is([data-slot^="dropdown-menu"], [data-slot^="popover"], [data-slot^="command"], [data-slot^="dialog"], [data-slot="button"], [data-slot="scroll-area-scrollbar"]) {
+:is([data-slot^="dropdown-menu"], [data-slot^="popover"], [data-slot^="command"], [data-slot^="dialog"], [data-slot="button"], [data-slot="scroll-area-viewport"], [data-slot="scroll-area-scrollbar"]) {
   --radius: 0.625rem;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
