@@ -6,7 +6,7 @@ interface FakeFinding {
 }
 
 // A Signal API in memory: findings, usage, and settings, with every write recorded.
-function fakeSignal(count = 30) {
+function fakeSignal(count = 30, options: { setUp?: boolean } = {}) {
   const now = Date.now();
   const findings: FakeFinding[] = Array.from({ length: count }, (_, index) => ({
     id: `SIG-${String(count - index).padStart(3, "0")}`,
@@ -20,7 +20,12 @@ function fakeSignal(count = 30) {
   }));
   const state = {
     findings,
-    settings: { enabled: false, slack: null as null | { integrationAccountId: string; channelId: string }, repositoryIds: [] as string[] },
+    settings: {
+      enabled: options.setUp ?? true,
+      setupComplete: options.setUp ?? true,
+      slack: null as null | { integrationAccountId: string; channelId: string },
+      repositoryIds: [] as string[],
+    },
     writes: [] as Array<{ method: string; path: string; body: unknown }>,
   };
   return state;
@@ -72,7 +77,10 @@ async function workspace(page: Page, options: { enabled?: boolean; signal?: Retu
     const body = request.postData() ? JSON.parse(request.postData()!) as Record<string, unknown> : null;
     if (request.method() !== "GET") signal.writes.push({ method: request.method(), path, body });
     if (path === "/settings") {
-      if (request.method() === "PUT") Object.assign(signal.settings, body);
+      if (request.method() === "PUT") {
+        Object.assign(signal.settings, body);
+        if (signal.settings.enabled) signal.settings.setupComplete = true;
+      }
       return route.fulfill({ json: signal.settings });
     }
     if (path === "/findings") {
@@ -118,11 +126,24 @@ test("requires the capability for direct Signal routes", async ({ page }) => {
   await expect(page.getByRole("navigation", { name: "Primary navigation" }).getByRole("link", { name: "Findings" })).toHaveCount(0);
 });
 
+test("shows only setup until it is complete, then the rest of Signal", async ({ page }) => {
+  await workspace(page, { signal: fakeSignal(30, { setUp: false }) });
+  const navigation = page.getByRole("navigation", { name: "Primary navigation" }).getByRole("link");
+  await page.goto("/signal/findings");
+  await expect(page).toHaveURL(/\/signal\/setup$/u);
+  await expect(navigation).toHaveText(["Setup", "Settings"]);
+  await page.goto("/signal/usage");
+  await expect(page).toHaveURL(/\/signal\/setup$/u);
+  await page.goto("/settings/workspace");
+  await expect(navigation).toHaveText(["Setup", "Settings"]);
+});
+
 test("sets up Signal with the workspace's real connections and turns it on", async ({ page }) => {
-  const signal = await workspace(page);
+  const signal = await workspace(page, { signal: fakeSignal(30, { setUp: false }) });
   await page.goto("/app");
   await expect(page).toHaveURL(/\/signal\/setup$/);
-  await expect(page.getByRole("navigation", { name: "Primary navigation" }).getByRole("link")).toHaveText(["Setup", "Findings", "Usage", "Settings"]);
+  const navigation = page.getByRole("navigation", { name: "Primary navigation" }).getByRole("link");
+  await expect(navigation).toHaveText(["Setup", "Settings"]);
   await expect(page.getByRole("button", { name: "Manage Sentry" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Connect Datadog" })).toBeEnabled();
   await page.screenshot({ path: "test-results/signal-setup.png" });
@@ -146,16 +167,18 @@ test("sets up Signal with the workspace's real connections and turns it on", asy
   await page.getByRole("button", { name: "Skip for now" }).click();
   await page.getByRole("button", { name: "Turn on Signal" }).click();
   await expect(page).toHaveURL(/\/signal\/findings$/);
-  expect(signal.settings).toEqual({ enabled: true, slack: { integrationAccountId: "slack-account", channelId: "C02" }, repositoryIds: ["repo-api"] });
+  await expect(navigation).toHaveText(["Setup", "Findings", "Usage", "Settings"]);
+  expect(signal.settings).toEqual({ enabled: true, setupComplete: true, slack: { integrationAccountId: "slack-account", channelId: "C02" }, repositoryIds: ["repo-api"] });
   expect(signal.writes.map((write) => write.method)).toEqual(["PUT", "PUT", "PUT"]);
 });
 
-test("opens findings once Signal is on", async ({ page }) => {
+test("opens findings once setup is complete, also with Signal turned off", async ({ page }) => {
   const signal = fakeSignal();
-  signal.settings.enabled = true;
+  signal.settings.enabled = false;
   await workspace(page, { signal });
   await page.goto("/app");
   await expect(page).toHaveURL(/\/signal\/findings$/);
+  await expect(page.getByRole("navigation", { name: "Primary navigation" }).getByRole("link")).toHaveText(["Setup", "Findings", "Usage", "Settings"]);
 });
 
 test("keeps a failed settings lookup on Signal's home with a retry", async ({ page }) => {
@@ -166,7 +189,7 @@ test("keeps a failed settings lookup on Signal's home with a retry", async ({ pa
     ? route.fulfill({ json: { enabled: true, slack: null, repositoryIds: [] } })
     : route.fulfill({ status: 503, json: { error: "This service is unavailable. Try again shortly." } })));
   await page.goto("/app");
-  await expect(page.getByRole("alert")).toHaveText("This service is unavailable. Try again shortly.");
+  await expect(page.getByRole("alert")).toHaveText("Could not load Signal. Try again shortly.");
   await expect(page).toHaveURL(/\/signal$/u);
   available = true;
   await page.getByRole("button", { name: "Try again" }).click();

@@ -186,3 +186,14 @@ describe("Signal home", () => {
     expect(homePath(["automations"])).not.toBe("/signal");
   });
 });
+
+describe("Signal navigation", () => {
+  it("shows only setup and settings until setup is complete", () => {
+    expect(primaryNavigation({ automations: false, simplified: false, signal: true, signalSetupComplete: false })
+      .map((item) => item.label)).toEqual(["Setup", "Settings"]);
+    expect(primaryNavigation({ automations: false, simplified: false, signal: true, signalSetupComplete: true })
+      .map((item) => item.label)).toEqual(["Setup", "Findings", "Usage", "Settings"]);
+    expect(primaryNavigation({ automations: false, simplified: false, signal: true })
+      .map((item) => item.label)).toEqual(["Setup", "Findings", "Usage", "Settings"]);
+  });
+});

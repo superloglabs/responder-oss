@@ -15,6 +15,8 @@ import {
   saveSignalSettings,
   type SignalSettings,
 } from "./model";
+import { authClient } from "../auth-client";
+import { publishSignalSettings } from "./setup-state";
 import { ConnectionRow, SignalLogo } from "./shared";
 
 interface Source { provider: string; name: string; description: string }
@@ -67,6 +69,7 @@ export function SignalSetup() {
   const step = steps.find((candidate) => candidate === stepParam);
   useDocumentTitle("Signal · Setup");
   const navigate = useNavigate();
+  const organizationId = authClient.useSession().data?.session.activeOrganizationId;
   const [integrations, setIntegrations] = useState<IntegrationSummary[] | null>(null);
   const [options, setOptions] = useState<AgentOptions | null>(null);
   const [settings, setSettings] = useState<SignalSettings | null>(null);
@@ -88,12 +91,13 @@ export function SignalSetup() {
         setOptions(loadedOptions);
         setSettings(loadedSettings);
         setDraft(loadedSettings);
+        if (organizationId) publishSignalSettings(organizationId, loadedSettings);
       })
       .catch((failure: unknown) => {
         if (current) setLoadError({ attempt, message: failure instanceof Error ? failure.message : "Could not load setup." });
       });
     return () => { current = false; };
-  }, [attempt]);
+  }, [attempt, organizationId]);
 
   const channels = (options?.resources ?? [])
     .filter((resource) => resource.kind === "slack_channel")
@@ -128,6 +132,7 @@ export function SignalSetup() {
       const saved = await saveSignalSettings(next);
       setSettings(saved);
       setDraft(saved);
+      if (organizationId) publishSignalSettings(organizationId, saved);
       if (then === "findings") navigate("/signal/findings");
       else if (then) go(then);
     } catch (failure) {

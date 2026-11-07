@@ -2,6 +2,7 @@ import { NavigationIcon } from "./navigation-icon";
 import { Fragment, type ReactNode, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { authErrorCode } from "../auth-error-code";
+import { useSignalSetupState } from "../signal/setup-state";
 import { authClient } from "../auth-client";
 import { resetBrowserAnalytics } from "../browser-analytics";
 import { useOrganizationCapabilities } from "../organization-capabilities";
@@ -71,9 +72,15 @@ export function AppShell({
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [switchingTo, setSwitchingTo] = useState<string | null>(null);
   const [menuError, setMenuError] = useState<string | null>(null);
+  // A Signal workspace sees only setup until setup is complete. While the
+  // state loads, Findings and Usage stay hidden too, so a new workspace never
+  // sees them flash; a finished one sees them appear once it loads. A failed
+  // lookup shows everything, and the pages show the error.
+  const signalSetup = useSignalSetupState(session.data?.session.activeOrganizationId, Boolean(options.signal) && !guest);
   const navigation = primaryNavigation({
     ...options,
     automations: options.automations || Boolean(guest),
+    signalSetupComplete: signalSetup === null || signalSetup === "complete" || signalSetup === "unknown",
   });
   const activeSection = activeNavigationSection(active, settingsInSidebar(options));
   const menuRef = useRef<HTMLDivElement>(null);

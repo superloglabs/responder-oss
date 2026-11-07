@@ -23,7 +23,11 @@ those requests fail and the pages show their errors.
   its status.
 - **Usage** charts posted and accepted findings per day.
 
-`/app` opens findings once Signal is on, and setup until then.
+Until setup is complete, the workspace sees only Setup and Settings, and
+Findings and Usage open setup. If the settings lookup fails, the sidebar shows
+every item and each page shows its own error. Setup is complete once Signal has been turned
+on, even if it is turned off later. `/app` opens findings after that, and
+setup until then.
 
 ## Verification
 

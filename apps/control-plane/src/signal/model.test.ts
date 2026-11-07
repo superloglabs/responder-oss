@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { chartMax, dayLabel, foundLabel, groupFindingsByDay, usageTotals } from "./model";
+import { setupComplete } from "./setup-state";
 
 const now = new Date("2026-11-07T15:00:00Z");
 
@@ -39,5 +40,14 @@ describe("Signal presentation", () => {
     expect(chartMax([0, 0])).toBe(3);
     expect(chartMax([1, 2])).toBe(3);
     expect(chartMax([4, 7])).toBe(9);
+  });
+});
+
+describe("Signal setup", () => {
+  it("is complete once Signal has been turned on, even if it is off now", () => {
+    expect(setupComplete({ enabled: false, setupComplete: false })).toBe(false);
+    expect(setupComplete({ enabled: false, setupComplete: true })).toBe(true);
+    expect(setupComplete({ enabled: true })).toBe(true);
+    expect(setupComplete({ enabled: false })).toBe(false);
   });
 });
