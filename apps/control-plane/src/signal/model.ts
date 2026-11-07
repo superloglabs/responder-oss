@@ -43,6 +43,25 @@ export interface SignalSettings {
   repositoryIds: string[];
 }
 
+export interface SignalPlan {
+  id: string;
+  name: string;
+  price: number;
+  included: number;
+}
+
+export interface SignalBilling {
+  // False where the deployment does not bill, such as local development.
+  enabled: boolean;
+  plan: { id: string; name: string; price: number; cancelsAtPeriodEnd: boolean } | null;
+  included: number;
+  used: number;
+  remaining: number;
+  // Milliseconds since the epoch.
+  resetsAt: number | null;
+  plans: SignalPlan[];
+}
+
 export const signalPeriods = [7, 14, 30] as const;
 export type SignalPeriod = (typeof signalPeriods)[number];
 export const findingsPageSize = 25;
@@ -90,6 +109,25 @@ export function fetchSignalSettings() {
 
 export function saveSignalSettings(settings: SignalSettings) {
   return signalJson<SignalSettings>("/settings", jsonBody("PUT", settings));
+}
+
+export function fetchSignalBilling() {
+  return signalJson<SignalBilling>("/billing");
+}
+
+// Returns the checkout page, or no URL when the plan changed without one.
+export function startSignalCheckout(planId: string) {
+  return signalJson<{ url: string | null }>("/billing/checkout", jsonBody("POST", { planId }));
+}
+
+export function openSignalBillingPortal() {
+  return signalJson<{ url: string }>("/billing/portal", { method: "POST" });
+}
+
+// Signal can be turned on with a plan, with findings granted by hand, or
+// where the deployment does not bill.
+export function canTurnOnSignal(billing: SignalBilling) {
+  return !billing.enabled || billing.plan !== null || billing.included > 0;
 }
 
 export function shortDate(date: Date) {

@@ -16,7 +16,12 @@ those requests fail and the pages show their errors.
   connection dialog open it here; OAuth providers return to the same step.
   Google Cloud and OpenTelemetry link to their settings pages. Repositories and
   the findings channel come from the workspace's GitHub and Slack connections
-  and are saved to Signal's settings. The last step turns Signal on or off.
+  and are saved to Signal's settings. The last step is the plan: Pro ($100 a
+  month, up to 50 findings) or Max ($200 a month, up to 100). Choosing one
+  opens checkout from `/api/signal/billing/checkout`, and Signal turns on when
+  checkout returns. With a plan, the step shows the findings used this
+  period, switches plans, opens the billing portal, and turns Signal off and
+  on. Where the deployment does not bill, it only turns Signal on and off.
 - **Findings** lists posted findings by day, with search, a 7, 14, or 30 day
   range, and paging. A finding shows its impact, root cause, suggested fix,
   and evidence. Copy prompt accepts it; Mark as irrelevant and Restore change
@@ -33,6 +38,7 @@ setup until then.
 
 `pnpm exec playwright test signal.spec.ts` runs the pages against a fake
 Signal API: capability-off access, setup with real connection data and the
-saved settings, opening findings once on, search, ranges, paging, prompt copy
+saved settings, choosing a plan and returning from checkout, the current
+plan and its used findings, opening findings once on, search, ranges, paging, prompt copy
 and status changes with the requests they send, usage periods, keyboard account
 navigation, and mobile layout.
