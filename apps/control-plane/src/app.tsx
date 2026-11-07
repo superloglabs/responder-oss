@@ -83,7 +83,7 @@ import { blogArticlePath } from "./public-routes";
 import { usePageMetadata } from "./use-page-metadata";
 import { useOrganizationCapabilities } from "./organization-capabilities";
 import { homePath } from "./primary-navigation";
-import { SignalLayout } from "./signal/layout";
+import { SignalHome, SignalLayout } from "./signal/layout";
 import { SignalSetup } from "./signal/setup";
 import { SignalFindings, SignalFindingDetail } from "./signal/findings";
 import { SignalUsage } from "./signal/usage";
@@ -165,7 +165,7 @@ export function App() {
       <Route element={<ProtectedApp />}>
         <Route element={<HomeRedirect />} path="/app" />
         <Route element={<SignalLayout />} path="/signal">
-          <Route element={<Navigate replace to="setup" />} index />
+          <Route element={<SignalHome />} index />
           <Route element={<SignalSetup />} path="setup/:step?" />
           <Route element={<SignalFindings />} path="findings" />
           <Route element={<SignalFindingDetail />} path="findings/:findingId" />

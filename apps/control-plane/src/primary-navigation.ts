@@ -158,6 +158,8 @@ export function activeNavigationSection(
 
 // Where the application opens for a signed-in member: the first sidebar entry.
 export function homePath(capabilities: readonly string[]): string {
+  // Signal's home opens findings once Signal is on, and setup until then.
+  if (capabilities.includes("signal")) return "/signal";
   return primaryNavigation(navigationOptions(capabilities))[0].to;
 }
 

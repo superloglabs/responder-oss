@@ -1,32 +1,43 @@
 import { describe, expect, it } from "vitest";
-import { homePath, navigationOptions, newWorkspacePath, primaryNavigation, settingsInSidebar } from "../primary-navigation";
-import { dailyFindings, periodData, sampleFindings } from "./model";
+import { chartMax, dayLabel, foundLabel, groupFindingsByDay, usageTotals } from "./model";
 
-describe("Signal preview", () => {
-  it("is absent without its capability and opens setup when enabled", () => {
-    expect(primaryNavigation(navigationOptions(["automations", "telemetry"])).some((item) => item.section.startsWith("signal"))).toBe(false);
-    expect(homePath(["signal"])).toBe("/signal/setup");
-    expect(newWorkspacePath(["signal"])).toBe("/signal/setup");
+const now = new Date("2026-11-07T15:00:00Z");
+
+describe("Signal presentation", () => {
+  it("labels when a finding was found", () => {
+    expect(foundLabel(new Date("2026-11-07T14:59:40Z"), now)).toBe("Just now");
+    expect(foundLabel(new Date("2026-11-07T14:52:00Z"), now)).toBe("8m ago");
+    expect(foundLabel(new Date("2026-11-07T12:10:00Z"), now)).toBe("2h ago");
+    expect(foundLabel(new Date("2026-11-06T23:00:00Z"), now)).toBe("Yesterday");
+    expect(foundLabel(new Date("2026-10-30T10:00:00Z"), now)).toBe("30 Oct");
   });
-  it("keeps the Signal navigation isolated even with other capabilities", () => {
-    const options = navigationOptions(["signal", "automations", "telemetry", "simplified_navigation"]);
-    expect(primaryNavigation(options).map((item) => item.label)).toEqual(["Setup", "Findings", "Usage", "Settings"]);
-    expect(settingsInSidebar(options)).toBe(false);
+
+  it("groups findings by the day they were posted, keeping their order", () => {
+    const groups = groupFindingsByDay([
+      { id: "a", postedAt: "2026-11-07T14:00:00Z" },
+      { id: "b", postedAt: "2026-11-07T09:00:00Z" },
+      { id: "c", postedAt: "2026-11-06T09:00:00Z" },
+      { id: "d", postedAt: "2026-11-02T09:00:00Z" },
+    ], now);
+    expect(groups.map((group) => [group.label, group.findings.map((finding) => finding.id)])).toEqual([
+      ["Today", ["a", "b"]],
+      ["Yesterday", ["c"]],
+      ["2 Nov", ["d"]],
+    ]);
+    expect(dayLabel(new Date("2026-11-07T00:00:00Z"), now)).toBe("Today");
   });
-  it("keeps list, daily chart, and whole-period totals consistent", () => {
-    expect(sampleFindings).toHaveLength(42);
-    expect(sampleFindings.filter((f) => f.accepted)).toHaveLength(27);
-    for (const day of dailyFindings) {
-      const findings = sampleFindings.filter((f) => f.date.getTime() === day.date.getTime());
-      expect(findings).toHaveLength(day.total);
-      expect(findings.filter((f) => f.accepted)).toHaveLength(day.accepted);
-    }
-    expect(new Set(sampleFindings.map((f) => f.id)).size).toBe(42);
+
+  it("totals usage and its accepted share", () => {
+    expect(usageTotals([
+      { date: "2026-11-06", total: 3, accepted: 1 },
+      { date: "2026-11-07", total: 1, accepted: 1 },
+    ])).toEqual({ total: 4, accepted: 2, acceptedPercent: 50 });
+    expect(usageTotals([]).acceptedPercent).toBe(0);
   });
-  it("includes zero days for the full selected period", () => {
-    expect(periodData(30)).toHaveLength(30);
-    expect(periodData(30)[0].date.toISOString()).toBe("2026-10-08T00:00:00.000Z");
-    expect(periodData(7)).toHaveLength(7);
-    expect(periodData(30).reduce((n, p) => n + p.total, 0)).toBe(42);
+
+  it("rounds the chart scale up to a multiple of three", () => {
+    expect(chartMax([0, 0])).toBe(3);
+    expect(chartMax([1, 2])).toBe(3);
+    expect(chartMax([4, 7])).toBe(9);
   });
 });

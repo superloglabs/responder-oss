@@ -120,6 +120,11 @@
 .signalSeverity i { width: 5px; height: 5px; background: #e58a50; border-radius: 50%; }
 .signalSeverity--3 { color: #806c0b; }
 .signalSeverity--3 i { background: #ddbe36; }
+.signalSeverity--1 { color: #a61b1b; }
+.signalSeverity--1 i { background: #e04848; }
+.signalLoading { color: #666; font-size: 13px; padding: 24px 0; }
+.signalError { color: #a61b1b; font-size: 13px; margin: 0; }
+.signalNote { color: #666; font-size: 12px; margin: 0; }
 .signalListFooter { display: flex; justify-content: space-between; align-items: center; color: #666; font-size: 12px; }
 .signalEmpty { padding: 40px 16px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 12px; }
 .signalDetail { display: flex; flex-direction: column; gap: 32px; }

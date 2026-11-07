@@ -1,72 +1,153 @@
-import { createContext, useContext, type Dispatch, type SetStateAction } from "react";
+import { apiErrorMessage } from "../agents-api";
 
-export interface SignalPreview {
-  connections: string[];
-  repositories: string[];
-  channel: string;
-  plan: "Pro" | "Max" | null;
-  irrelevant: string[];
-}
-export const initialPreview: SignalPreview = {
-  connections: [], repositories: [], channel: "signal-findings", plan: null, irrelevant: [],
-};
-export const SignalContext = createContext<{
-  preview: SignalPreview;
-  setPreview: Dispatch<SetStateAction<SignalPreview>>;
-} | null>(null);
-export function useSignalPreview() {
-  const context = useContext(SignalContext);
-  if (!context) throw new Error("Signal preview must be inside SignalLayout");
-  return context;
+export type SignalSeverity = "SEV-1" | "SEV-2" | "SEV-3";
+export type SignalFindingStatus = "new" | "accepted" | "irrelevant";
+
+export interface SignalFindingSummary {
+  id: string;
+  title: string;
+  subtitle: string;
+  severity: SignalSeverity;
+  service: string | null;
+  status: SignalFindingStatus;
+  postedAt: string;
 }
 
-export const dailyFindings = [1, 3, 2, 4, 2, 3, 1, 4, 2, 3, 4, 4, 3, 6].map((total, i) => ({
-  date: new Date(Date.UTC(2026, 9, 24 + i)),
-  total,
-  accepted: [1, 2, 1, 3, 1, 2, 1, 3, 1, 2, 3, 3, 2, 2][i],
-}));
-export function periodData(days: number) {
-  if (days <= dailyFindings.length) return dailyFindings.slice(-days);
-  return [
-    ...Array.from({ length: days - dailyFindings.length }, (_, i) => ({
-      date: new Date(Date.UTC(2026, 10, 7 - days + i)), total: 0, accepted: 0,
-    })),
-    ...dailyFindings,
-  ];
+export interface SignalEvidence {
+  kind: "logs" | "traces" | "metrics" | "code" | "provider";
+  title: string;
+  detail: string;
 }
+
+export interface SignalFindingDetail extends SignalFindingSummary {
+  impact: string;
+  affectedUsers: number | null;
+  affectedRequests: number | null;
+  rootCause: string;
+  suggestedFix: string;
+  evidence: SignalEvidence[];
+  prompt: string;
+  slackChannelId: string | null;
+}
+
+export interface SignalUsageDay {
+  date: string;
+  total: number;
+  accepted: number;
+}
+
+export interface SignalSettings {
+  enabled: boolean;
+  slack: { integrationAccountId: string; channelId: string } | null;
+  repositoryIds: string[];
+}
+
+export const signalPeriods = [7, 14, 30] as const;
+export type SignalPeriod = (typeof signalPeriods)[number];
+export const findingsPageSize = 25;
+
+async function signalJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`/api/signal${path}`, init);
+  const body = (await response.json().catch(() => null)) as T | null;
+  if (!response.ok) throw new Error(apiErrorMessage(body, response.status));
+  return body as T;
+}
+
+function jsonBody(method: string, body: unknown): RequestInit {
+  return { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) };
+}
+
+export function fetchFindings(input: { days: SignalPeriod; search: string; offset: number }) {
+  const query = new URLSearchParams({
+    days: String(input.days),
+    limit: String(findingsPageSize),
+    offset: String(input.offset),
+    ...(input.search.trim() ? { search: input.search.trim() } : {}),
+  });
+  return signalJson<{ total: number; findings: SignalFindingSummary[] }>(`/findings?${query}`);
+}
+
+export function fetchFinding(id: string) {
+  return signalJson<SignalFindingDetail>(`/findings/${encodeURIComponent(id)}`);
+}
+
+export function setFindingStatus(id: string, status: SignalFindingStatus) {
+  return signalJson<{ status: SignalFindingStatus }>(`/findings/${encodeURIComponent(id)}/status`, jsonBody("POST", { status }));
+}
+
+export function recordPromptCopied(id: string) {
+  return signalJson<{ status: SignalFindingStatus }>(`/findings/${encodeURIComponent(id)}/copied`, { method: "POST" });
+}
+
+export function fetchUsage(days: SignalPeriod) {
+  return signalJson<{ daily: SignalUsageDay[] }>(`/usage?days=${days}`);
+}
+
+export function fetchSignalSettings() {
+  return signalJson<SignalSettings>("/settings");
+}
+
+export function saveSignalSettings(settings: SignalSettings) {
+  return signalJson<SignalSettings>("/settings", jsonBody("PUT", settings));
+}
+
 export function shortDate(date: Date) {
   return date.toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
 }
-const examples = [
-  ["Checkout requests time out after the payment client retry change", "18 checkout attempts from 11 customers timed out in the last 2 hours.", "Commit a4f29c1 increased the client to three 10-second attempts. Under elevated payment latency, that 30-second retry budget exceeds the gateway’s 20-second deadline.", "checkout-api"],
-  ["Webhook retries create duplicate subscription invoices", "Four customers received duplicate invoices after webhook retries.", "The webhook handler inserts an invoice before recording the event ID. A retry during that window processes the same event twice.", "billing-api"],
-  ["Connection pool exhaustion blocks account sign-ins", "23 sign-in requests failed while waiting for a database connection.", "The account lookup holds a connection while calling the identity provider. Slow responses consume all available connections.", "auth-api"],
-  ["Receipt delivery stops when the email provider rate-limits", "32 order receipts remain undelivered.", "Rate-limited email requests are acknowledged without being returned to the retry queue.", "notification-worker"],
-  ["Product image uploads fail for files larger than 10 MB", "Nine image uploads failed for seven customers.", "The proxy body limit is lower than the upload size accepted by the web application.", "media-api"],
-  ["A stale cache serves the previous plan after an upgrade", "Five upgraded workspaces still see their previous limits.", "The plan update invalidates the billing cache but leaves the entitlement cache unchanged.", "workspace-api"],
-  ["Payment confirmation events are dropped during deploys", "Three completed payments have no confirmation event.", "The worker shuts down before its in-flight event batch is acknowledged.", "payment-worker"],
-  ["Search requests time out for large workspaces", "12 searches exceeded the request deadline.", "The new search filter prevents the query from using the workspace index.", "search-api"],
-  ["Expired download links prevent invoice exports", "Six invoice exports returned an expired link.", "The export cache outlives the signed download URL it stores.", "billing-api"],
-] as const;
-export interface Finding {
-  id: string; title: string; summary: string; cause: string; service: string;
-  severity: 2 | 3; date: Date; found: string; accepted: boolean;
+
+function utcDay(date: Date) {
+  return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
 }
-let next = 42;
-export const sampleFindings: Finding[] = [...dailyFindings].reverse().flatMap((day, dayIndex) =>
-  Array.from({ length: day.total }, (_, index) => {
-    const id = next--;
-    const example = examples[(42 - id) % examples.length];
-    return {
-      id: `SIG-${String(id).padStart(3, "0")}`, title: example[0], summary: example[1], cause: example[2], service: example[3],
-      severity: (42 - id) % 9 < 3 || (42 - id) % 9 === 6 ? 2 : 3,
-      date: day.date,
-      found: dayIndex === 0 ? ["8m ago", "24m ago", "1h ago", "2h ago", "3h ago", "5h ago"][index]
-        : dayIndex === 1 ? "Yesterday" : shortDate(day.date),
-      accepted: index >= day.total - day.accepted,
-    };
-  }),
-);
-export function findingPrompt(finding: Finding) {
-  return `Investigate ${finding.id}: ${finding.title}\n\nImpact: ${finding.summary}\n\nRoot cause: ${finding.cause}\n\nService: ${finding.service}\nSource: Datadog\n\nVerify the evidence and propose a fix with tests.`;
+
+// "Today", "Yesterday", or a short date, by UTC day.
+export function dayLabel(date: Date, now: Date) {
+  const days = Math.round((utcDay(now) - utcDay(date)) / 86_400_000);
+  return days === 0 ? "Today" : days === 1 ? "Yesterday" : shortDate(date);
+}
+
+// How long ago a finding was posted: minutes and hours today, then the day.
+export function foundLabel(date: Date, now: Date) {
+  const minutes = Math.max(0, Math.floor((now.getTime() - date.getTime()) / 60_000));
+  if (utcDay(date) === utcDay(now)) {
+    if (minutes < 1) return "Just now";
+    if (minutes < 60) return `${minutes}m ago`;
+    return `${Math.floor(minutes / 60)}h ago`;
+  }
+  return dayLabel(date, now);
+}
+
+// Findings in the order given, grouped by the UTC day they were posted.
+export function groupFindingsByDay<T extends { postedAt: string }>(findings: readonly T[], now: Date) {
+  const groups: Array<{ key: string; label: string; findings: T[] }> = [];
+  for (const finding of findings) {
+    const posted = new Date(finding.postedAt);
+    const key = posted.toISOString().slice(0, 10);
+    const group = groups.at(-1);
+    if (group?.key === key) group.findings.push(finding);
+    else groups.push({ key, label: dayLabel(posted, now), findings: [finding] });
+  }
+  return groups;
+}
+
+export function usageTotals(daily: readonly SignalUsageDay[]) {
+  const total = daily.reduce((sum, day) => sum + day.total, 0);
+  const accepted = daily.reduce((sum, day) => sum + day.accepted, 0);
+  return { total, accepted, acceptedPercent: total ? accepted / total * 100 : 0 };
+}
+
+// A round axis maximum, so small counts do not fill the whole chart.
+export function chartMax(values: readonly number[]) {
+  const highest = Math.max(0, ...values);
+  return highest <= 3 ? 3 : Math.ceil(highest / 3) * 3;
+}
+
+export function findingStatusLabel(status: SignalFindingStatus) {
+  return status === "accepted" ? "Accepted" : status === "irrelevant" ? "Irrelevant" : "New";
+}
+
+// The OAuth start of a provider, coming back to the given setup page.
+export function connectionStartUrl(connectUrl: string, returnTo: string) {
+  const url = new URL(connectUrl, window.location.origin);
+  url.searchParams.set("returnTo", returnTo);
+  return `${url.pathname}${url.search}`;
 }
