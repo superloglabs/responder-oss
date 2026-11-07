@@ -31,7 +31,7 @@
   --color-ring: var(--ring);
 }
 
-:is([data-slot^="dropdown-menu"], [data-slot^="popover"], [data-slot^="command"], [data-slot^="dialog"], [data-slot="button"]) {
+:is([data-slot^="dropdown-menu"], [data-slot^="popover"], [data-slot^="command"], [data-slot^="dialog"], [data-slot="button"], [data-slot="scroll-area-viewport"], [data-slot="scroll-area-scrollbar"]) {
   --radius: 0.625rem;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
@@ -55,23 +55,23 @@
 
 /* The app does not load Tailwind preflight; shadcn components assume it. */
 @layer base {
-  :is([data-slot^="dropdown-menu"], [data-slot^="popover"], [data-slot^="command"], [data-slot^="dialog"], [data-slot="button"]),
-  :is([data-slot^="dropdown-menu"], [data-slot^="popover"], [data-slot^="command"], [data-slot^="dialog"], [data-slot="button"]) *,
-  :is([data-slot^="dropdown-menu"], [data-slot^="popover"], [data-slot^="command"], [data-slot^="dialog"], [data-slot="button"]) ::before,
-  :is([data-slot^="dropdown-menu"], [data-slot^="popover"], [data-slot^="command"], [data-slot^="dialog"], [data-slot="button"]) ::after {
+  :is([data-slot^="dropdown-menu"], [data-slot^="popover"], [data-slot^="command"], [data-slot^="dialog"], [data-slot="button"], [data-slot="scroll-area-scrollbar"]),
+  :is([data-slot^="dropdown-menu"], [data-slot^="popover"], [data-slot^="command"], [data-slot^="dialog"], [data-slot="button"], [data-slot="scroll-area-scrollbar"]) *,
+  :is([data-slot^="dropdown-menu"], [data-slot^="popover"], [data-slot^="command"], [data-slot^="dialog"], [data-slot="button"], [data-slot="scroll-area-scrollbar"]) ::before,
+  :is([data-slot^="dropdown-menu"], [data-slot^="popover"], [data-slot^="command"], [data-slot^="dialog"], [data-slot="button"], [data-slot="scroll-area-scrollbar"]) ::after {
     box-sizing: border-box;
     margin: 0;
     padding: 0;
     border: 0 solid var(--border);
     outline-color: color-mix(in oklab, var(--ring) 50%, transparent);
   }
-  :is([data-slot^="dropdown-menu"], [data-slot^="popover"], [data-slot^="command"], [data-slot^="dialog"], [data-slot="button"]) :is(input, button),
+  :is([data-slot^="dropdown-menu"], [data-slot^="popover"], [data-slot^="command"], [data-slot^="dialog"], [data-slot="button"], [data-slot="scroll-area-scrollbar"]) :is(input, button),
   [data-slot="button"] {
     font: inherit;
     color: inherit;
     background-color: transparent;
   }
-  :is([data-slot^="dropdown-menu"], [data-slot^="popover"], [data-slot^="command"], [data-slot^="dialog"], [data-slot="button"]) :is(img, svg) {
+  :is([data-slot^="dropdown-menu"], [data-slot^="popover"], [data-slot^="command"], [data-slot^="dialog"], [data-slot="button"], [data-slot="scroll-area-scrollbar"]) :is(img, svg) {
     display: block;
     vertical-align: middle;
   }

@@ -3,6 +3,7 @@ import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-r
 import { IconCheck, IconSearch } from "@tabler/icons-react";
 import { fetchAgentOptions, fetchIntegrations, type AgentOptions, type IntegrationSummary } from "../agents-api";
 import { providerDisplayName } from "../components/provider-glyphs";
+import { ScrollArea } from "../components/ui/scroll-area";
 import { Button } from "../design-system";
 import { useDocumentTitle } from "../use-document-title";
 import {
@@ -198,7 +199,7 @@ export function SignalSetup() {
         <label className="signalSearch"><IconSearch size={14} /><input aria-label="Search repositories" placeholder="Search repositories…" value={search} onChange={(e) => setSearch(e.target.value)} /></label>
         <span>{draft.repositoryIds.length} selected</span>
       </div>
-      <div className="signalRepoList">
+      <ScrollArea className="signalRepoList">
         {repositories.map((repository) => <label className="signalRepoRow" key={repository.id}>
           <span className="signalRepoCheckbox">
             <input type="checkbox" checked={draft.repositoryIds.includes(repository.id)} onChange={(e) => setDraft({
@@ -213,7 +214,7 @@ export function SignalSetup() {
         </label>)}
         {options.repositories.length === 0 && <p className="signalEmpty"><Link to="/signal/setup/code">Connect GitHub</Link> to select repositories.</p>}
         {options.repositories.length > 0 && repositories.length === 0 && <p className="signalEmpty">No repositories match “{search}”.</p>}
-      </div>
+      </ScrollArea>
     </div>}
 
     {step === "slack" && <div className="signalConnections signalSlack">
