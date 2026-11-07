@@ -90,6 +90,66 @@ describe("Slack actions", () => {
     vi.unstubAllGlobals();
   });
 
+  it("hands the extension's buttons to the extension and acknowledges Slack", async () => {
+    vi.stubEnv("RESPONDER_EXTENSION_URL", "http://extension.internal:3100");
+    vi.stubEnv("RESPONDER_EXTENSION_TOKEN", "extension-token");
+    vi.stubEnv("RESPONDER_EXTENSION_PATH_PREFIX", "/api/example");
+    vi.stubEnv("RESPONDER_EXTENSION_SLACK_ACTION_PREFIX", "example:");
+    const fetch = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", fetch);
+    const payload = {
+      type: "block_actions",
+      team: { id: "T123" },
+      channel: { id: "C123" },
+      user: { id: "U123" },
+      response_url: "https://hooks.slack.com/actions/T123/B123/response-token",
+      container: { message_ts: "1785500001.000200" },
+      actions: [{ action_id: "example:helpful", value: "16161616-1616-4616-8616-161616161616" }],
+    };
+
+    const response = await signedActionRequest(payload);
+
+    expect(response.status).toBe(200);
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+    const [url, init] = fetch.mock.calls[0]!;
+    expect(url).toBe("http://extension.internal:3100/api/example/internal/slack-interactions");
+    expect(JSON.parse(init.body)).toEqual(payload);
+    expect(init.headers.authorization).toBe("Bearer extension-token");
+    expect(mocks.getInvestigationForSlackAction).not.toHaveBeenCalled();
+  });
+
+  it("does not forward unsigned extension buttons", async () => {
+    vi.stubEnv("RESPONDER_EXTENSION_URL", "http://extension.internal:3100");
+    vi.stubEnv("RESPONDER_EXTENSION_TOKEN", "extension-token");
+    vi.stubEnv("RESPONDER_EXTENSION_PATH_PREFIX", "/api/example");
+    vi.stubEnv("RESPONDER_EXTENSION_SLACK_ACTION_PREFIX", "example:");
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    const payload = {
+      type: "block_actions",
+      team: { id: "T123" },
+      channel: { id: "C123" },
+      user: { id: "U123" },
+      response_url: "https://hooks.slack.com/actions/T123/B123/response-token",
+      actions: [{ action_id: "example:helpful", value: "16161616-1616-4616-8616-161616161616" }],
+    };
+    const body = new URLSearchParams({ payload: JSON.stringify(payload) }).toString();
+    const contentType = { "content-type": "application/x-www-form-urlencoded" };
+    const unsigned = await app.request("/api/webhooks/slack/actions", { method: "POST", body, headers: contentType });
+    expect(unsigned.status).toBe(401);
+    const forged = await app.request("/api/webhooks/slack/actions", {
+      method: "POST",
+      body,
+      headers: {
+        ...contentType,
+        "x-slack-request-timestamp": Math.floor(Date.now() / 1_000).toString(),
+        "x-slack-signature": "v0=0000000000000000000000000000000000000000000000000000000000000000",
+      },
+    });
+    expect(forged.status).toBe(401);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("captures investigation feedback with workspace and user context", async () => {
     const investigationId = "16161616-1616-4616-8616-161616161616";
     const response = await signedActionRequest({
