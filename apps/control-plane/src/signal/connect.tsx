@@ -409,6 +409,7 @@ function AwsConnect({ integration, organizationId, listPath, onBack, onDone }: P
         if (response.status === 404) {
           sessionStorage.removeItem(storageKey);
           setSetupId(null);
+          setPollFailed(false);
           return;
         }
         const body = (await response.json().catch(() => null)) as AwsSetupState | null;
@@ -427,6 +428,7 @@ function AwsConnect({ integration, organizationId, listPath, onBack, onDone }: P
   async function launch() {
     if (!connectUrl || launching) return;
     setError("");
+    setPollFailed(false);
     setLaunching(true);
     // Opened before the request so the browser does not block it as a pop-up.
     const tab = window.open("about:blank", "_blank");
@@ -505,7 +507,7 @@ function AwsConnect({ integration, organizationId, listPath, onBack, onDone }: P
         </li>
       </ol>}
     <Actions onBack={() => {
-      if (!connected) { sessionStorage.removeItem(storageKey); setSetupId(null); return; }
+      if (!connected) { sessionStorage.removeItem(storageKey); setSetupId(null); setPollFailed(false); return; }
       onBack();
     }}>
       <Button variant="primary" disabled={!connected} onClick={() => { sessionStorage.removeItem(storageKey); onDone(); }}>Continue</Button>
