@@ -47,3 +47,40 @@ describe("Signal setup state", () => {
     expect(signalSetupSnapshot()?.state).toBe("complete");
   });
 });
+
+describe("Signal setup state ordering", () => {
+  beforeEach(() => {
+    resetSignalSetupState();
+    fetchSignalSettings.mockReset();
+  });
+
+  it("ignores a load that finishes after newer settings were published", async () => {
+    let finish: (value: unknown) => void = () => undefined;
+    fetchSignalSettings.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+    const loading = loadSignalSetupState("org-a");
+    publishSignalSettings("org-a", { enabled: true, setupComplete: true });
+    finish({ enabled: false, setupComplete: false });
+    await loading;
+    expect(signalSetupSnapshot()?.state).toBe("complete");
+  });
+
+  it("keeps a finished setup when an older response only says Signal is off", () => {
+    publishSignalSettings("org-a", { enabled: true });
+    publishSignalSettings("org-a", { enabled: false });
+    expect(signalSetupSnapshot()?.state).toBe("complete");
+    publishSignalSettings("org-b", { enabled: false });
+    expect(signalSetupSnapshot()?.state).toBe("incomplete");
+  });
+
+  it("shows loading while a retry runs", async () => {
+    fetchSignalSettings.mockRejectedValueOnce(new Error("unavailable"));
+    await loadSignalSetupState("org-a");
+    let finish: (value: unknown) => void = () => undefined;
+    fetchSignalSettings.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+    const retry = loadSignalSetupState("org-a", { retry: true });
+    expect(signalSetupSnapshot()?.state).toBe("loading");
+    finish({ enabled: true });
+    await retry;
+    expect(signalSetupSnapshot()?.state).toBe("complete");
+  });
+});

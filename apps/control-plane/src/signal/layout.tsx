@@ -46,7 +46,7 @@ export function SignalHome() {
   if (setup === "unknown") {
     return <section className="signalEmpty">
       <p className="signalError" role="alert">Could not load Signal. Try again shortly.</p>
-      <Button onClick={() => { if (organizationId) void loadSignalSetupState(organizationId); }}>Try again</Button>
+      <Button onClick={() => { if (organizationId) void loadSignalSetupState(organizationId, { retry: true }); }}>Try again</Button>
     </section>;
   }
   return <p className="signalLoading" role="status">Loading…</p>;

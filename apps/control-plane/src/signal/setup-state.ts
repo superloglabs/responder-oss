@@ -6,10 +6,14 @@ import { fetchSignalSettings, type SignalSettings } from "./model";
 export type SignalSetupState = "loading" | "incomplete" | "complete" | "unknown";
 
 let current: { organizationId: string; state: SignalSetupState } | null = null;
+// Counts publications, so a load can tell that newer settings arrived while
+// it was in flight.
+let version = 0;
 const listeners = new Set<() => void>();
 const requests = new Map<string, Promise<void>>();
 
 function publish(organizationId: string, state: SignalSetupState) {
+  version += 1;
   current = { organizationId, state };
   for (const listener of listeners) listener();
 }
@@ -21,13 +25,16 @@ export function setupComplete(settings: Pick<SignalSettings, "enabled" | "setupC
 }
 
 // Loads the state once at a time per workspace; concurrent callers share the
-// request.
-export function loadSignalSetupState(organizationId: string): Promise<void> {
+// request. A retry shows loading while it runs. A result is dropped when
+// newer settings were published meanwhile, such as by a save.
+export function loadSignalSetupState(organizationId: string, options: { retry?: boolean } = {}): Promise<void> {
   const pending = requests.get(organizationId);
   if (pending) return pending;
+  if (options.retry) publish(organizationId, "loading");
+  const started = version;
   const request = fetchSignalSettings()
-    .then((settings) => publishSignalSettings(organizationId, settings))
-    .catch(() => publish(organizationId, "unknown"))
+    .then((settings) => { if (version === started) publishSignalSettings(organizationId, settings); })
+    .catch(() => { if (version === started) publish(organizationId, "unknown"); })
     .finally(() => requests.delete(organizationId));
   requests.set(organizationId, request);
   return request;
@@ -35,7 +42,11 @@ export function loadSignalSetupState(organizationId: string): Promise<void> {
 
 // Settings loaded or saved elsewhere, such as on the setup page.
 export function publishSignalSettings(organizationId: string, settings: Pick<SignalSettings, "enabled" | "setupComplete">) {
-  publish(organizationId, setupComplete(settings) ? "complete" : "incomplete");
+  // An older server reports only `enabled`; a setup already known to be
+  // complete stays complete when Signal is turned off.
+  const alreadyComplete = settings.setupComplete === undefined &&
+    current?.organizationId === organizationId && current.state === "complete";
+  publish(organizationId, alreadyComplete || setupComplete(settings) ? "complete" : "incomplete");
 }
 
 export function signalSetupSnapshot() {
@@ -45,6 +56,7 @@ export function signalSetupSnapshot() {
 // For tests: forget what was loaded.
 export function resetSignalSetupState() {
   current = null;
+  version = 0;
   requests.clear();
 }
 
