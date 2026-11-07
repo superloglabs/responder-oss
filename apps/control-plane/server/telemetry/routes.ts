@@ -188,7 +188,7 @@ export type TelemetryRouteDependencies = {
     client: ClickHouseClient,
     organizationId: string,
     range: TimeRange,
-    signal: TelemetrySignal | undefined,
+    signal: TelemetrySignal | "metrics" | undefined,
   ) => Promise<unknown>;
   now: () => Date;
   // What each service sent over the window.
@@ -311,7 +311,7 @@ export type TelemetrySignal = (typeof signals)[number];
 
 // "all" includes services that only send metrics.
 const servicesSchema = windowSchema.extend({
-  signal: z.enum([...signals, "all"]).default("logs"),
+  signal: z.enum([...signals, "metrics", "all"]).default("logs"),
 });
 
 // Shortest total duration, in milliseconds, up to one hour.
