@@ -1,0 +1,34 @@
+# Signal
+
+Signal is an optional product area behind the organization capability named
+`signal`. A workspace with it sees Setup, Findings, and Usage under Signal,
+with Settings in a separate Workspace group; Automations and telemetry are not
+in its navigation. Direct Signal URLs also require the capability.
+
+For a newly created local workspace, set
+`RESPONDER_NEW_ORGANIZATION_CAPABILITIES=signal` before creating it.
+
+The pages read and write `/api/signal/*`, which a deployment serves through its
+extension service (`RESPONDER_EXTENSION_*`, see `.env.example`). Without one,
+those requests fail and the pages show their errors.
+
+- **Setup** shows the workspace's real connections. Providers with their own
+  connection dialog open it here; OAuth providers return to the same step.
+  Google Cloud and OpenTelemetry link to their settings pages. Repositories and
+  the findings channel come from the workspace's GitHub and Slack connections
+  and are saved to Signal's settings. The last step turns Signal on or off.
+- **Findings** lists posted findings by day, with search, a 7, 14, or 30 day
+  range, and paging. A finding shows its impact, root cause, suggested fix,
+  and evidence. Copy prompt accepts it; Mark as irrelevant and Restore change
+  its status.
+- **Usage** charts posted and accepted findings per day.
+
+`/app` opens findings once Signal is on, and setup until then.
+
+## Verification
+
+`pnpm exec playwright test signal.spec.ts` runs the pages against a fake
+Signal API: capability-off access, setup with real connection data and the
+saved settings, opening findings once on, search, ranges, paging, prompt copy
+and status changes with the requests they send, usage periods, keyboard account
+navigation, and mobile layout.

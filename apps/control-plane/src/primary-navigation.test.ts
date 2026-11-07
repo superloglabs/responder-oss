@@ -178,3 +178,11 @@ describe("newWorkspacePath", () => {
     expect(newWorkspacePath(null)).toBe("/app");
   });
 });
+
+describe("Signal home", () => {
+  it("opens Signal's home, which chooses findings or setup", () => {
+    expect(homePath(["signal"])).toBe("/signal");
+    expect(homePath(["signal", "automations"])).toBe("/signal");
+    expect(homePath(["automations"])).not.toBe("/signal");
+  });
+});
