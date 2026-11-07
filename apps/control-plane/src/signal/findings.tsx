@@ -191,7 +191,7 @@ export function SignalFindingDetail() {
         </section>
         <details className="signalPrompt">
           <summary>Prompt</summary>
-          <pre className="signalLog"><code>{finding.prompt}</code></pre>
+          <pre><code>{finding.prompt}</code></pre>
         </details>
       </div>
       <aside className="signalProperties"><h2>Properties</h2><dl>
