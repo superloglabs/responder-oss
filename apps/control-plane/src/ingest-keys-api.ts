@@ -92,3 +92,24 @@ export function openTelemetryPrompt(origin: string, token: string = ingestKeyPla
     "Run the project's checks, then summarize what you changed and how to set the variables where the app is deployed.",
   ].join("\n");
 }
+
+// A prompt for a coding agent in a project that already exports OpenTelemetry
+// somewhere else. Superlog becomes one more destination; nothing is replaced.
+export function existingOpenTelemetryPrompt(origin: string, token: string = ingestKeyPlaceholder): string {
+  return [
+    "This project already uses OpenTelemetry. Add Superlog as one more destination for its logs, traces and metrics, and keep every existing exporter working.",
+    "",
+    "1. Find where OpenTelemetry is configured: SDK setup code, OTEL_* environment variables, or an OpenTelemetry Collector config.",
+    "2. Add an OTLP/HTTP exporter with protobuf that sends all three signals to Superlog:",
+    "",
+    `   endpoint: ${origin.replace(/\/+$/u, "")}/api/ingest`,
+    `   header:   x-api-key=${token}`,
+    "",
+    "   - With a Collector: add an otlphttp/superlog exporter and add it to the traces, metrics and logs pipelines.",
+    "   - With SDKs only: add a second exporter next to the existing one in each service.",
+    "3. Make sure every service sets the service.name and deployment.environment.name resource attributes.",
+    "4. Read the key from a SUPERLOG_INGEST_KEY environment variable. Never commit it.",
+    "",
+    "Run the project's checks, then summarize what you changed and how to set the variable where the app is deployed.",
+  ].join("\n");
+}

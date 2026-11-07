@@ -148,8 +148,11 @@ test("sets up Signal with the workspace's real connections and turns it on", asy
   await expect(page.getByRole("button", { name: "Connect Datadog" })).toBeEnabled();
   await page.screenshot({ path: "test-results/signal-setup.png" });
   await page.getByRole("button", { name: "Connect Datadog" }).click();
-  await expect(page.getByRole("dialog")).toBeVisible();
-  await page.keyboard.press("Escape");
+  await expect(page).toHaveURL(/\/signal\/setup\/telemetry\/datadog$/u);
+  await expect(page.getByRole("heading", { name: "Connect Datadog" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Connect Datadog" })).toBeDisabled();
+  await page.getByRole("button", { name: "Back" }).click();
+  await expect(page).toHaveURL(/\/signal\/setup\/telemetry$/u);
   const next = page.getByRole("button", { name: "Continue", exact: true });
   await next.click();
   await expect(page).toHaveURL(/\/signal\/setup\/code$/);
@@ -268,6 +271,67 @@ test("keeps the last chart tooltip inside a narrow desktop chart", async ({ page
   expect(canvas).not.toBeNull();
   expect(tooltip!.x).toBeGreaterThanOrEqual(canvas!.x);
   expect(tooltip!.x + tooltip!.width).toBeLessThanOrEqual(canvas!.x + canvas!.width + 1);
+});
+
+test("connects OpenTelemetry with one agent prompt and waits for data", async ({ page }) => {
+  await workspace(page, { signal: fakeSignal(30, { setUp: false }) });
+  let services: string[] = [];
+  await page.route("**/api/telemetry/ingest-keys", (route) => route.fulfill({ json: {
+    key: { id: "key-1", name: "Signal setup", prefix: "sl_ingest_tes", createdAt: new Date().toISOString(), lastUsedAt: null },
+    token: "sl_ingest_test",
+  } }));
+  await page.route("**/api/telemetry/services?**", (route) => {
+    const signal = new URL(route.request().url()).searchParams.get("signal");
+    return route.fulfill({ json: { services: signal === "metrics" ? [] : services } });
+  });
+  await page.goto("/signal/setup/telemetry/otel");
+  await expect(page.getByRole("heading", { name: "Connect OpenTelemetry" })).toBeVisible();
+  const prompt = page.locator(".signalPromptBody");
+  await expect(prompt).toContainText("keep every existing exporter working");
+  await expect(prompt).toContainText("x-api-key=sl_ingest_test");
+  await page.getByRole("radio", { name: "No, or I don't know" }).click();
+  await expect(prompt).toContainText("Instrument this project with OpenTelemetry");
+  await expect(page.getByText("Waiting for data")).toBeVisible();
+  const next = page.getByRole("button", { name: "Continue", exact: true });
+  await expect(next).toBeDisabled();
+  await page.screenshot({ path: "test-results/signal-otel.png" });
+
+  services = ["checkout-api"];
+  await expect(page.getByText("Receiving data")).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole("cell", { name: "checkout-api" })).toBeVisible();
+  await expect(prompt).toHaveCount(0);
+  await next.click();
+  await expect(page).toHaveURL(/\/signal\/setup\/telemetry$/u);
+});
+
+test("connects AWS with one launch and finishes when the stack reports back", async ({ page, context }) => {
+  await workspace(page, { signal: fakeSignal(30, { setUp: false }) });
+  await page.route("**/api/integrations", (route) => route.fulfill({ json: { integrations: [
+    { id: "aws", name: "AWS", description: "", state: "available", accountCount: 0, resourceCount: 0, connectUrl: "/api/integrations/aws/connect", configurationUrl: null },
+  ] } }));
+  let launchBody: unknown = null;
+  await page.route("**/api/integrations/aws/connect", (route) => {
+    launchBody = route.request().postDataJSON();
+    return route.fulfill({ json: { accountId: "setup-1", cloudFormationUrl: "https://eu-west-3.console.aws.amazon.com/cloudformation/home", template: "" } });
+  });
+  let setup: Record<string, string> = { status: "waiting" };
+  await page.route("**/api/integrations/aws/setup/setup-1", (route) => route.fulfill({ json: setup }));
+  await context.route("https://eu-west-3.console.aws.amazon.com/**", (route) => route.fulfill({ body: "AWS" }));
+
+  await page.goto("/signal/setup/telemetry/aws");
+  await expect(page.getByRole("heading", { name: "Connect AWS CloudWatch" })).toBeVisible();
+  const popup = context.waitForEvent("page");
+  await page.getByRole("button", { name: "Launch stack in AWS" }).click();
+  await expect((await popup)).toHaveURL(/eu-west-3\.console\.aws\.amazon\.com/u);
+  expect(launchBody).toEqual({ returnTo: "/signal/setup/telemetry" });
+  await expect(page.getByRole("heading", { name: "Waiting for the stack" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Continue", exact: true })).toBeDisabled();
+
+  setup = { status: "connected", awsAccountId: "123456789012", roleArn: "arn:aws:iam::123456789012:role/ResponderInvestigationRole" };
+  await expect(page.getByRole("heading", { name: "AWS account 123456789012 connected" })).toBeVisible({ timeout: 10_000 });
+  await page.screenshot({ path: "test-results/signal-aws-connected.png" });
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+  await expect(page).toHaveURL(/\/signal\/setup\/telemetry$/u);
 });
 
 test("Signal workspace settings do not load unrelated product APIs", async ({ page }) => {

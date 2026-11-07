@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { defaultIngestKeyName, ingestKeyPlaceholder, ingestKeyUsage, openTelemetryPrompt, otlpEnvironment } from "./ingest-keys-api";
+import { defaultIngestKeyName, existingOpenTelemetryPrompt, ingestKeyPlaceholder, ingestKeyUsage, openTelemetryPrompt, otlpEnvironment } from "./ingest-keys-api";
 
 describe("otlpEnvironment", () => {
   it("points an SDK at this cell's ingest endpoint with the key", () => {
@@ -25,6 +25,21 @@ describe("openTelemetryPrompt", () => {
 
   it("uses a placeholder until a key exists", () => {
     expect(openTelemetryPrompt("https://superlog.sh")).toContain(`x-api-key=${ingestKeyPlaceholder}`);
+  });
+});
+
+describe("existingOpenTelemetryPrompt", () => {
+  it("adds Superlog next to the exporters a project already has", () => {
+    const prompt = existingOpenTelemetryPrompt("https://superlog.sh/", "sl_ingest_x");
+
+    expect(prompt).toContain("keep every existing exporter working");
+    expect(prompt).toContain("   endpoint: https://superlog.sh/api/ingest");
+    expect(prompt).toContain("   header:   x-api-key=sl_ingest_x");
+    expect(prompt).toContain("otlphttp/superlog");
+  });
+
+  it("uses a placeholder until a key exists", () => {
+    expect(existingOpenTelemetryPrompt("https://superlog.sh")).toContain(`x-api-key=${ingestKeyPlaceholder}`);
   });
 });
 
