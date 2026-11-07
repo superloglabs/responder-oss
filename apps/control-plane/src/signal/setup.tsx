@@ -95,7 +95,8 @@ export function SignalSetup() {
   }, [attempt, organizationId]);
 
   useEffect(() => {
-    if (step !== "telemetry") return;
+    // The OpenTelemetry page needs them too, under any step.
+    if (step !== "telemetry" && page !== "otel") return;
     let current = true;
     const until = Date.now();
     fetchServices({ since: until - 86_400_000, until }, "all")
@@ -186,6 +187,8 @@ export function SignalSetup() {
         onReconnect={() => navigate(`${pagePath}/connect`)}
         onOpenIngestKeys={() => navigate("/settings/ingest-keys")}
         onRemoved={() => {
+          // Shows loading, or the load error, instead of the removed account.
+          setIntegrations(null);
           setAttempt(attempt + 1);
           navigate(returnTo);
         }} />

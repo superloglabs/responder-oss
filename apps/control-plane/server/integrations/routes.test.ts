@@ -2206,6 +2206,20 @@ describe("integration callback routing", () => {
     });
   });
 
+  it("keeps a Linear connection that created tickets and says to reconnect it", async () => {
+    vi.mocked(deleteIntegrationAccount).mockResolvedValue({ status: "has_linear_tickets" });
+
+    const response = await app.request(
+      "/api/integrations/linear/accounts/30000000-0000-4000-8000-000000000000",
+      { method: "DELETE" },
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: "This connection created Linear tickets, and Responder keeps their records, so it can't be removed. Reconnect it instead.",
+    });
+  });
+
   it("keeps connections Signal setup does not manage out of the removal route", async () => {
     const github = await app.request(
       "/api/integrations/github/accounts/30000000-0000-4000-8000-000000000000",

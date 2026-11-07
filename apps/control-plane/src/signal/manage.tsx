@@ -127,6 +127,9 @@ function ManagedAccount({ provider, name, account, several, onReconnect, onRemov
 // OpenTelemetry has no account: services send data with an ingest key.
 function OpenTelemetryStatus({ onShowPrompt, onOpenIngestKeys }: { onShowPrompt: () => void; onOpenIngestKeys: () => void }) {
   const [services, setServices] = useState<string[] | null>(null);
+  // Bumped by "Try again"; a failed load is not the same as no data.
+  const [attempt, setAttempt] = useState(0);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [copied, setCopied] = useState(false);
   const endpoint = `${window.location.origin}/api/ingest`;
 
@@ -135,9 +138,9 @@ function OpenTelemetryStatus({ onShowPrompt, onOpenIngestKeys }: { onShowPrompt:
     const until = Date.now();
     fetchServices({ since: until - 86_400_000, until }, "all")
       .then((names) => { if (current) setServices([...names].sort()); })
-      .catch(() => { if (current) setServices([]); });
+      .catch(() => { if (current) setLoadFailed(true); });
     return () => { current = false; };
-  }, []);
+  }, [attempt]);
 
   async function copyEndpoint() {
     try {
@@ -149,6 +152,12 @@ function OpenTelemetryStatus({ onShowPrompt, onOpenIngestKeys }: { onShowPrompt:
     }
   }
 
+  if (loadFailed) {
+    return <Status failed title="Could not check for data"
+      action={<Button onClick={() => { setLoadFailed(false); setAttempt(attempt + 1); }}>Try again</Button>}>
+      Signal could not load the services sending data.
+    </Status>;
+  }
   if (!services) return <p className="signalLoading" role="status">Loading…</p>;
   const count = `${services.length} ${services.length === 1 ? "service" : "services"}`;
   return <>

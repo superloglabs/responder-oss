@@ -44,7 +44,7 @@ export function manageView(provider: string, name: string, account: IntegrationA
             action: "Replace keys",
           },
         ],
-        disconnect: `Signal deletes the stored keys and stops reading Datadog. ${pastFindings}`,
+        disconnect: `Signal deletes the stored keys and stops reading Datadog. To stop the keys working, revoke them in Datadog. ${pastFindings}`,
       };
     }
     case "grafana": {
@@ -105,7 +105,7 @@ export function manageView(provider: string, name: string, account: IntegrationA
       return {
         connectedTo: `the ${account.displayName} workspace`,
         rows: [{ label: "Workspace", value: account.displayName, action: "Reconnect" }],
-        disconnect: `Signal deletes its access and stops reading Linear. ${pastFindings}`,
+        disconnect: `Signal deletes its access and stops reading Linear. To remove the app too, revoke it in Linear's workspace settings. ${pastFindings}`,
       };
     case "posthog":
       return {
@@ -115,7 +115,7 @@ export function manageView(provider: string, name: string, account: IntegrationA
           value: details.accessLevel === "read_write" ? "Read and write" : "Read only",
           action: "Reconnect",
         }],
-        disconnect: `Signal deletes its access and stops reading PostHog. ${pastFindings}`,
+        disconnect: `Signal deletes its access and stops reading PostHog. To remove the authorization too, revoke it in PostHog. ${pastFindings}`,
       };
     default:
       return {

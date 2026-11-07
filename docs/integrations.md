@@ -39,11 +39,12 @@ Each connected Signal source has a manage page in setup. It shows what the
 connection is, from the non-secret metadata saved when it connected, and opens
 the connect form again to replace keys or sign in again.
 
-**Disconnect** calls `DELETE /api/integrations/<provider>/accounts/<id>` for
-AWS, Datadog, Google Cloud, Grafana, Linear, PostHog, or Sentry. It deletes the
-stored credentials but does not revoke access on the provider's side; the page
-says what to remove there. Responder refuses with `409` while an active
-automation still uses the connection. OpenTelemetry has no connection to
+**Disconnect** calls `DELETE /api/integrations/<provider>/accounts/<id>`, where
+`<provider>` is `aws`, `datadog`, `gcp`, `grafana`, `linear`, `posthog`, or
+`sentry`. It deletes the stored credentials but does not revoke access on the
+provider's side; each manage page says what to revoke there. Responder refuses
+with `409` while an active automation still uses the connection, or while
+records of Linear tickets created with it remain. OpenTelemetry has no connection to
 remove: services send data with ingest keys, managed in **Settings → Ingest
 keys**.
 

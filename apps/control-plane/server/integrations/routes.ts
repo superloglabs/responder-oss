@@ -1246,6 +1246,14 @@ async function removeIntegrationAccount(input: {
   if (removal.status === "not_found") {
     return Response.json({ error: input.notFound }, { status: 404 });
   }
+  if (removal.status === "has_linear_tickets") {
+    return Response.json(
+      {
+        error: `This ${input.noun} created Linear tickets, and Responder keeps their records, so it can't be removed. Reconnect it instead.`,
+      },
+      { status: 409 },
+    );
+  }
   if (removal.status === "in_use") {
     const one = removal.automationNames.length === 1;
     const names = removal.automationNames.map((name) => `"${name}"`).join(", ");

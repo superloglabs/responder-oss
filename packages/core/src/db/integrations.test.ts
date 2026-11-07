@@ -442,7 +442,7 @@ describe("integration account tenancy", () => {
   });
 
   describe("removing an account", () => {
-    function removalDouble(input: { automationNames: string[]; found?: boolean }) {
+    function removalDouble(input: { automationNames: string[]; found?: boolean; linearTickets?: number }) {
       const deleted: unknown[] = [];
       const tx = {
         select: vi
@@ -463,6 +463,11 @@ describe("integration account tenancy", () => {
                   input.automationNames.map((name) => ({ name })),
                 ),
               }),
+            }),
+          })
+          .mockReturnValueOnce({
+            from: () => ({
+              where: vi.fn().mockResolvedValue([{ tickets: input.linearTickets ?? 0 }]),
             }),
           }),
         delete: vi.fn((table: unknown) => {
@@ -502,6 +507,15 @@ describe("integration account tenancy", () => {
         status: "removed",
       });
       expect(deleted).toEqual([automationVersionIntegrationAccounts, integrationAccounts]);
+    });
+
+    it("keeps an account that Linear tickets were created with", async () => {
+      const { deleted } = removalDouble({ automationNames: [], linearTickets: 2 });
+
+      await expect(deleteIntegrationAccount({ ...removal, provider: "linear" })).resolves.toEqual({
+        status: "has_linear_tickets",
+      });
+      expect(deleted).toEqual([]);
     });
 
     it("reports an account from another organization as missing", async () => {

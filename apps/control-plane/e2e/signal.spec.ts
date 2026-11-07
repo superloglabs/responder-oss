@@ -219,6 +219,24 @@ test("shows why a connection cannot be removed", async ({ page }) => {
   await expect(page).toHaveURL(/\/signal\/setup\/telemetry\/sentry$/u);
 });
 
+test("tells a failed services lookup apart from no OpenTelemetry data", async ({ page }) => {
+  await workspace(page, { signal: fakeSignal(30, { setUp: false }) });
+  // Setup's lookup succeeds, then the manage page's fails until "Try again".
+  // StrictMode runs each page's effect twice in development.
+  let calls = 0;
+  let retried = false;
+  await page.route("**/api/telemetry/services?**", (route) => (calls += 1) > 2 && !retried
+    ? route.fulfill({ status: 500, json: { error: "ClickHouse is unavailable" } })
+    : route.fulfill({ json: { services: ["checkout-api"] } }));
+  // The page loads its services on any step, not only telemetry.
+  await page.goto("/signal/setup/context/otel");
+  await expect(page.getByRole("heading", { name: "Could not check for data" })).toBeVisible();
+  await expect(page.getByText("No data in the last 24 hours")).toHaveCount(0);
+  retried = true;
+  await page.getByRole("button", { name: "Try again" }).click();
+  await expect(page.getByRole("heading", { name: "Receiving data from 1 service" })).toBeVisible();
+});
+
 test("opens findings once setup is complete, also with Signal turned off", async ({ page }) => {
   const signal = fakeSignal();
   signal.settings.enabled = false;
