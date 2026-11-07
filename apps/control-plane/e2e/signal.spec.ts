@@ -221,11 +221,9 @@ test("shows why a connection cannot be removed", async ({ page }) => {
 
 test("tells a failed services lookup apart from no OpenTelemetry data", async ({ page }) => {
   await workspace(page, { signal: fakeSignal(30, { setUp: false }) });
-  // Setup's lookup succeeds, then the manage page's fails until "Try again".
-  // StrictMode runs each page's effect twice in development.
-  let calls = 0;
+  // Every lookup fails until "Try again", including setup's own.
   let retried = false;
-  await page.route("**/api/telemetry/services?**", (route) => (calls += 1) > 2 && !retried
+  await page.route("**/api/telemetry/services?**", (route) => !retried
     ? route.fulfill({ status: 500, json: { error: "ClickHouse is unavailable" } })
     : route.fulfill({ json: { services: ["checkout-api"] } }));
   // The page loads its services on any step, not only telemetry.

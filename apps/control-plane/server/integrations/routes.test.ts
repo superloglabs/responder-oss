@@ -2206,7 +2206,7 @@ describe("integration callback routing", () => {
     });
   });
 
-  it("keeps a Linear connection that created tickets and says to reconnect it", async () => {
+  it("keeps a Linear connection that ticket records use and says to reconnect it", async () => {
     vi.mocked(deleteIntegrationAccount).mockResolvedValue({ status: "has_linear_tickets" });
 
     const response = await app.request(
@@ -2216,7 +2216,7 @@ describe("integration callback routing", () => {
 
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toEqual({
-      error: "This connection created Linear tickets, and Responder keeps their records, so it can't be removed. Reconnect it instead.",
+      error: "Linear ticket records use this connection, so it can't be removed. Reconnect it instead.",
     });
   });
 

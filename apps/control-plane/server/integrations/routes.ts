@@ -1249,7 +1249,7 @@ async function removeIntegrationAccount(input: {
   if (removal.status === "has_linear_tickets") {
     return Response.json(
       {
-        error: `This ${input.noun} created Linear tickets, and Responder keeps their records, so it can't be removed. Reconnect it instead.`,
+        error: `Linear ticket records use this ${input.noun}, so it can't be removed. Reconnect it instead.`,
       },
       { status: 409 },
     );

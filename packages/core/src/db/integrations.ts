@@ -329,7 +329,7 @@ export type IntegrationAccountRemoval =
   | { status: "removed" }
   | { status: "not_found" }
   | { status: "in_use"; automationNames: string[] }
-  // Records of Linear tickets created with the account need it to stay.
+  // Linear ticket records reference the account, whatever their status.
   | { status: "has_linear_tickets" };
 
 export async function deleteIntegrationAccount(input: {

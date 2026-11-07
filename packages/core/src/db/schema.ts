@@ -2715,6 +2715,8 @@ export const issueLinearTickets = pgTable(
   (table) => [
     uniqueIndex("issue_linear_tickets_issue_idx").on(table.issueId),
     index("issue_linear_tickets_investigation_idx").on(table.investigationId),
+    // Removing an integration account checks for its ticket records.
+    index("issue_linear_tickets_integration_account_idx").on(table.integrationAccountId),
     index("issue_linear_tickets_status_created_idx").on(
       table.status,
       table.createdAt,

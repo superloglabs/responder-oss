@@ -71,6 +71,8 @@ export function SignalSetup() {
   const [search, setSearch] = useState("");
   // How many services sent OpenTelemetry data in the last day, once known.
   const [otelServices, setOtelServices] = useState<number | null>(null);
+  // A failed lookup is not the same as no data: the manage page shows it.
+  const [otelLookupFailed, setOtelLookupFailed] = useState(false);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -100,8 +102,16 @@ export function SignalSetup() {
     let current = true;
     const until = Date.now();
     fetchServices({ since: until - 86_400_000, until }, "all")
-      .then((services) => { if (current) setOtelServices(services?.length ?? 0); })
-      .catch(() => { if (current) setOtelServices(0); });
+      .then((services) => {
+        if (!current) return;
+        setOtelServices(services?.length ?? 0);
+        setOtelLookupFailed(false);
+      })
+      .catch(() => {
+        if (!current) return;
+        setOtelServices(0);
+        setOtelLookupFailed(true);
+      });
     return () => { current = false; };
   }, [step, page]);
 
@@ -176,7 +186,7 @@ export function SignalSetup() {
     // A connected source opens on its manage page; "connect" opens the form
     // again, to replace keys or sign in again.
     if (page === "otel" && mode !== "connect" && otelServices === null) return <p className="signalLoading" role="status">Loading…</p>;
-    const managed = mode !== "connect" && (page === "otel" ? Boolean(otelServices) : manageableAccounts(summary(page)?.accounts).length > 0);
+    const managed = mode !== "connect" && (page === "otel" ? Boolean(otelServices) || otelLookupFailed : manageableAccounts(summary(page)?.accounts).length > 0);
     const pagePath = `${returnTo}/${page}`;
     return <section className="signalSetup">
       <header className="signalWelcome"><h1>Welcome to Signal</h1><p>Step {stepNumber[step]} out of 5</p></header>

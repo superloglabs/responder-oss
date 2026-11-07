@@ -105,7 +105,7 @@ export function manageView(provider: string, name: string, account: IntegrationA
       return {
         connectedTo: `the ${account.displayName} workspace`,
         rows: [{ label: "Workspace", value: account.displayName, action: "Reconnect" }],
-        disconnect: `Signal deletes its access and stops reading Linear. To remove the app too, revoke it in Linear's workspace settings. ${pastFindings}`,
+        disconnect: `Signal deletes its access and stops reading Linear. A connection with Linear ticket records can only be reconnected. To remove the app too, revoke it in Linear's workspace settings. ${pastFindings}`,
       };
     case "posthog":
       return {
