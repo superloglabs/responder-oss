@@ -60,6 +60,7 @@ import { createIngestRoutes } from "./telemetry/ingest-routes.js";
 import { createSourceRoutes } from "./telemetry/source-routes.js";
 import { createTelemetryRoutes } from "./telemetry/routes.js";
 import { queueInvestigation } from "./investigations/queue.js";
+import { extensionProxy } from "./extensions.js";
 import { getActiveTenant } from "./tenant.js";
 import { githubWebhookRoutes } from "./webhooks/github.js";
 import { sentryWebhookRoutes } from "./webhooks/sentry.js";
@@ -354,6 +355,7 @@ instrumentedApp.use("/api/webhooks/*", legacyWebhookForwarder());
 instrumentedApp.use("/api/webhooks/*", cellWebhookRouter());
 instrumentedApp.use("/api/integrations/github/callback", legacyGitHubSetupRedirect());
 instrumentedApp.use("/api/integrations/:provider/callback", cellCallbackRouter());
+instrumentedApp.use("/api/*", extensionProxy());
 
 // Each lookup asks every other cell, so one person may look a few times a
 // minute.

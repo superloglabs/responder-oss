@@ -146,6 +146,14 @@ types. `drizzle/` contains the ordered schema history.
   created by Responder. Comment text is untrusted input, human comments are
   ignored, and the controlled publisher can only fast-forward the existing PR
   branch, reply to the supplied thread IDs, and resolve those threads.
+- A deployment may run one extension service on its private network. The
+  control plane forwards requests under the extension's path prefix to it with
+  a shared bearer token; for a signed-in member of the active workspace it
+  adds the member, workspace, and role in `x-responder-*` headers, and drops
+  any such headers, cookies, and authorization the browser sent. The
+  extension's `internal/` routes are not reachable from outside. Verified
+  Slack button presses whose action ID has the extension's prefix are
+  acknowledged and forwarded to it; it answers through Slack's response URL.
 - Tenant trace responses omit the initial composed runtime instructions. The
   raw stored trace retains them for an operator's private diagnostics.
 - The management API (`/api/v1`) and MCP server (`/api/mcp`) accept

@@ -1,4 +1,5 @@
 import { pressErrorNotificationButton } from "./slack-error-notifications.js";
+import { extensionConfig, forwardExtensionSlackAction, isExtensionSlackAction } from "../extensions.js";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -1653,6 +1654,17 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
 
   if (!action.data.response_url.startsWith("https://hooks.slack.com/actions/")) {
     return context.json({ error: "Invalid Slack response URL" }, 400);
+  }
+
+  const extension = extensionConfig();
+  if (isExtensionSlackAction(action.data.actions, extension)) {
+    void forwardExtensionSlackAction(parseJson(form.get("payload") ?? ""), extension).catch((error: unknown) => {
+      console.error(JSON.stringify({
+        event: "slack_extension_action_failed",
+        errorName: error instanceof Error ? error.name : typeof error,
+      }));
+    });
+    return context.json({ ok: true });
   }
 
   const errorButton = action.data.actions.find((item) =>
