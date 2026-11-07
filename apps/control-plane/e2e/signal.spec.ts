@@ -52,7 +52,7 @@ async function workspace(page: Page, options: { enabled?: boolean; signal?: Retu
   await page.route("**/api/agents", (route) => route.fulfill({ json: { agents: [] } }));
   await page.route("**/api/billing", (route) => route.fulfill({ json: { configured: false, enabled: false } }));
   await page.route("**/api/integrations", (route) => route.fulfill({ json: { integrations: [
-    { id: "sentry", name: "Sentry", description: "", state: "connected", accountCount: 1, resourceCount: 0, connectUrl: "/api/integrations/sentry/start", configurationUrl: null },
+    { id: "sentry", name: "Sentry", description: "", state: "connected", accountCount: 1, resourceCount: 12, connectUrl: "/api/integrations/sentry/start", configurationUrl: null, accounts: [{ id: "33333333-3333-4333-8333-333333333333", displayName: "acme", status: "connected", resourceCount: 12, updatedAt: now, details: { organizationSlug: "acme" } }] },
     { id: "datadog", name: "Datadog", description: "", state: "available", accountCount: 0, resourceCount: 0, connectUrl: "/api/integrations/datadog/connect", configurationUrl: null },
     { id: "github", name: "GitHub", description: "", state: "connected", accountCount: 1, resourceCount: 0, connectUrl: "/api/integrations/github/start", configurationUrl: null },
     { id: "slack", name: "Slack", description: "", state: "connected", accountCount: 1, resourceCount: 2, connectUrl: "/api/integrations/slack/start", configurationUrl: null, accounts: [{ id: "slack-account", displayName: "Acme", status: "connected", resourceCount: 2, updatedAt: now }] },
@@ -173,6 +173,50 @@ test("sets up Signal with the workspace's real connections and turns it on", asy
   await expect(navigation).toHaveText(["Setup", "Findings", "Usage", "Settings"]);
   expect(signal.settings).toEqual({ enabled: true, setupComplete: true, slack: { integrationAccountId: "slack-account", channelId: "C02" }, repositoryIds: ["repo-api"] });
   expect(signal.writes.map((write) => write.method)).toEqual(["PUT", "PUT", "PUT"]);
+});
+
+test("manages a connected source and disconnects it after confirming", async ({ page }) => {
+  await workspace(page, { signal: fakeSignal(30, { setUp: false }) });
+  const removals: string[] = [];
+  await page.route("**/api/integrations/*/accounts/*", (route) => {
+    removals.push(`${route.request().method()} ${new URL(route.request().url()).pathname}`);
+    return route.fulfill({ json: { removed: true } });
+  });
+  await page.goto("/signal/setup/telemetry");
+  await page.getByRole("button", { name: "Manage Sentry" }).click();
+  await expect(page).toHaveURL(/\/signal\/setup\/telemetry\/sentry$/u);
+  await expect(page.getByRole("heading", { name: "Connected to the acme organization" })).toBeVisible();
+  await expect(page.getByText("12 projects")).toBeVisible();
+  await page.screenshot({ path: "test-results/signal-manage.png" });
+
+  await page.getByRole("button", { name: "Reconnect" }).click();
+  await expect(page).toHaveURL(/\/signal\/setup\/telemetry\/sentry\/connect$/u);
+  await expect(page.getByRole("heading", { name: "Connect Sentry" })).toBeVisible();
+  await page.goBack();
+
+  await page.getByRole("button", { name: "Disconnect", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Disconnect Sentry?" })).toBeVisible();
+  await page.getByRole("button", { name: "Cancel" }).click();
+  await expect(page.getByRole("heading", { name: "Disconnect Sentry", exact: true })).toBeVisible();
+  expect(removals).toEqual([]);
+
+  await page.getByRole("button", { name: "Disconnect", exact: true }).click();
+  await page.getByRole("button", { name: "Disconnect Sentry" }).click();
+  await expect(page).toHaveURL(/\/signal\/setup\/telemetry$/u);
+  expect(removals).toEqual(["DELETE /api/integrations/sentry/accounts/33333333-3333-4333-8333-333333333333"]);
+});
+
+test("shows why a connection cannot be removed", async ({ page }) => {
+  await workspace(page, { signal: fakeSignal(30, { setUp: false }) });
+  await page.route("**/api/integrations/*/accounts/*", (route) => route.fulfill({
+    status: 409,
+    json: { error: 'This connection is used by the automation "Nightly triage". Remove it from that automation first.' },
+  }));
+  await page.goto("/signal/setup/telemetry/sentry");
+  await page.getByRole("button", { name: "Disconnect", exact: true }).click();
+  await page.getByRole("button", { name: "Disconnect Sentry" }).click();
+  await expect(page.getByRole("alert")).toHaveText(/used by the automation "Nightly triage"/u);
+  await expect(page).toHaveURL(/\/signal\/setup\/telemetry\/sentry$/u);
 });
 
 test("opens findings once setup is complete, also with Signal turned off", async ({ page }) => {
@@ -305,6 +349,13 @@ test("connects OpenTelemetry with one agent prompt and waits for data", async ({
   await expect(prompt).toHaveCount(0);
   await next.click();
   await expect(page).toHaveURL(/\/signal\/setup\/telemetry$/u);
+
+  await page.getByRole("button", { name: "Manage OpenTelemetry" }).click();
+  await expect(page.getByRole("heading", { name: "Receiving data from 1 service" })).toBeVisible();
+  await expect(page.getByText("/api/ingest")).toBeVisible();
+  await page.getByRole("button", { name: "Show prompt" }).click();
+  await expect(page).toHaveURL(/\/signal\/setup\/telemetry\/otel\/connect$/u);
+  await expect(page.getByRole("heading", { name: "Connect OpenTelemetry" })).toBeVisible();
 });
 
 test("connects AWS with one launch and finishes when the stack reports back", async ({ page, context }) => {

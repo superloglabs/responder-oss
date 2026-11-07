@@ -1,3 +1,4 @@
+import { integrationAccountDetails } from "./account-details.js";
 import { chatConnectionRoutes } from "./chat-connection.js";
 import { customMcpToolRoutes } from "./custom-mcp-tools.js";
 import {
@@ -1216,6 +1217,48 @@ export async function startIntegrationConnection(input: {
   return Response.json({ error: "Integration is not available yet" }, { status: 501 });
 }
 
+// Connections Signal setup can remove. Removing one deletes the stored
+// credentials; it does not revoke access on the provider's side.
+const removableProviderSchema = z.enum(["aws", "datadog", "gcp", "grafana", "linear", "posthog", "sentry"]);
+
+async function removeIntegrationAccount(input: {
+  headers: Headers;
+  provider: z.infer<typeof removableProviderSchema>;
+  integrationAccountId: string | undefined;
+  // What people call the account, e.g. "project" or "connection".
+  noun: string;
+  invalid: string;
+  notFound: string;
+}) {
+  const tenant = await getActiveTenant(input.headers);
+  if (tenant.ok === false) {
+    return Response.json({ error: tenant.error }, { status: tenant.status });
+  }
+  const accountId = z.uuid().safeParse(input.integrationAccountId);
+  if (!accountId.success) {
+    return Response.json({ error: input.invalid }, { status: 400 });
+  }
+  const removal = await deleteIntegrationAccount({
+    integrationAccountId: accountId.data,
+    organizationId: tenant.organizationId,
+    provider: input.provider,
+  });
+  if (removal.status === "not_found") {
+    return Response.json({ error: input.notFound }, { status: 404 });
+  }
+  if (removal.status === "in_use") {
+    const one = removal.automationNames.length === 1;
+    const names = removal.automationNames.map((name) => `"${name}"`).join(", ");
+    return Response.json(
+      {
+        error: `This ${input.noun} is used by ${one ? "the automation" : "the automations"} ${names}. Remove it from ${one ? "that automation" : "those automations"} first.`,
+      },
+      { status: 409 },
+    );
+  }
+  return Response.json({ removed: true });
+}
+
 export const integrationRoutes = new Hono()
   .route("/chat", chatConnectionRoutes)
   .route("/custom-mcp", customMcpToolRoutes)
@@ -1276,6 +1319,7 @@ export const integrationRoutes = new Hono()
                 : account.status,
             resourceCount: account.resourceCount,
             updatedAt: account.updatedAt,
+            details: integrationAccountDetails(account),
             // Older Linear connections act as the person who connected them,
             // or lack the scopes that let people mention the app. Reconnecting
             // switches them to the mentionable Linear app identity.
@@ -1595,33 +1639,28 @@ export const integrationRoutes = new Hono()
       );
     }
   })
-  .delete("/gcp/:integrationAccountId", async (context) => {
-    const tenant = await getActiveTenant(context.req.raw.headers);
-    if (tenant.ok === false) {
-      return context.json({ error: tenant.error }, tenant.status);
-    }
-    const accountId = z.uuid().safeParse(context.req.param("integrationAccountId"));
-    if (!accountId.success) {
-      return context.json({ error: "The Google Cloud account is invalid" }, 400);
-    }
-    const removal = await deleteIntegrationAccount({
-      integrationAccountId: accountId.data,
-      organizationId: tenant.organizationId,
+  .delete("/gcp/:integrationAccountId", (context) =>
+    removeIntegrationAccount({
+      headers: context.req.raw.headers,
       provider: "gcp",
+      integrationAccountId: context.req.param("integrationAccountId"),
+      noun: "project",
+      invalid: "The Google Cloud account is invalid",
+      notFound: "Google Cloud project connection not found",
+    }))
+  .delete("/:provider/accounts/:integrationAccountId", (context) => {
+    const provider = removableProviderSchema.safeParse(context.req.param("provider"));
+    if (!provider.success) {
+      return context.json({ error: "This connection cannot be removed here" }, 404);
+    }
+    return removeIntegrationAccount({
+      headers: context.req.raw.headers,
+      provider: provider.data,
+      integrationAccountId: context.req.param("integrationAccountId"),
+      noun: "connection",
+      invalid: "The connection is invalid",
+      notFound: "Connection not found",
     });
-    if (removal.status === "not_found") {
-      return context.json({ error: "Google Cloud project connection not found" }, 404);
-    }
-    if (removal.status === "in_use") {
-      const names = removal.automationNames.map((name) => `"${name}"`).join(", ");
-      return context.json(
-        {
-          error: `This project is used by ${removal.automationNames.length === 1 ? "the automation" : "the automations"} ${names}. Remove it from ${removal.automationNames.length === 1 ? "that automation" : "those automations"} first.`,
-        },
-        409,
-      );
-    }
-    return context.json({ removed: true });
   })
   .get("/gcp/callback", async (context) => {
     const state = context.req.query("state");
