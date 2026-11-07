@@ -6,6 +6,7 @@ import { Button } from "../design-system";
 import { useOrganizationCapabilities } from "../organization-capabilities";
 import { homePath } from "../primary-navigation";
 import { fetchSignalSettings } from "./model";
+import { setupComplete, useSignalSetupState } from "./setup-state";
 import "./signal.css";
 
 export function SignalLayout() {
@@ -16,6 +17,10 @@ export function SignalLayout() {
 }
 function SignalWorkspace() {
   const { pathname } = useLocation();
+  const session = authClient.useSession();
+  const setup = useSignalSetupState(session.data?.session.activeOrganizationId, true);
+  // Until setup is complete, every Signal page is setup.
+  const blocked = !pathname.startsWith("/signal/setup") && pathname !== "/signal";
   const contentRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     contentRef.current?.closest(".workspaceSurface")?.scrollTo({ top: 0 });
@@ -23,7 +28,11 @@ function SignalWorkspace() {
   const active = pathname.startsWith("/signal/usage") ? "signal-usage"
     : pathname.startsWith("/signal/findings") ? "signal-findings" : "signal-setup";
   return <AppShell active={active} redesigned>
-    <div className="signal" ref={contentRef}><Outlet /></div>
+    <div className="signal" ref={contentRef}>
+      {blocked && setup === "incomplete" ? <Navigate replace to="/signal/setup" />
+        : blocked && setup === "loading" ? <p className="signalLoading" role="status">Loading…</p>
+        : <Outlet />}
+    </div>
   </AppShell>;
 }
 
@@ -35,7 +44,7 @@ export function SignalHome() {
   useEffect(() => {
     let current = true;
     fetchSignalSettings()
-      .then((settings) => { if (current) setResult({ attempt, target: settings.enabled ? "/signal/findings" : "/signal/setup" }); })
+      .then((settings) => { if (current) setResult({ attempt, target: setupComplete(settings) ? "/signal/findings" : "/signal/setup" }); })
       .catch((failure: unknown) => {
         if (current) setResult({ attempt, error: failure instanceof Error ? failure.message : "Could not load Signal." });
       });

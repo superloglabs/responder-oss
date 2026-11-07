@@ -37,6 +37,8 @@ export interface SignalUsageDay {
 
 export interface SignalSettings {
   enabled: boolean;
+  // True once Signal has been turned on, even if it is off now.
+  setupComplete?: boolean;
   slack: { integrationAccountId: string; channelId: string } | null;
   repositoryIds: string[];
 }
