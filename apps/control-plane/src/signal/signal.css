@@ -122,9 +122,12 @@
 .signalSeverity--3 i { background: #ddbe36; }
 .signalSeverity--1 { color: #a61b1b; }
 .signalSeverity--1 i { background: #e04848; }
-.signalLoading { color: #666; font-size: 13px; padding: 24px 0; }
-.signalError { color: #a61b1b; font-size: 13px; margin: 0; }
-.signalNote { color: #666; font-size: 12px; margin: 0; }
+/* Matches the specificity of .signal p, which would otherwise win. */
+.signal .signalLoading { color: #666; font-size: 13px; padding: 24px 0; }
+.signal .signalError { color: #a61b1b; font-size: 13px; margin: 0; }
+.signal .signalNote { color: #666; font-size: 12px; margin: 0; }
+.signalPrompt summary { cursor: pointer; font-size: 13px; font-weight: 500; }
+.signalPrompt pre { margin-top: 8px; white-space: pre-wrap; }
 .signalListFooter { display: flex; justify-content: space-between; align-items: center; color: #666; font-size: 12px; }
 .signalEmpty { padding: 40px 16px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 12px; }
 .signalDetail { display: flex; flex-direction: column; gap: 32px; }
@@ -215,3 +218,4 @@
 
 .signal .signalAws { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0; font-size: 16px; font-weight: 600; letter-spacing: -.05em; line-height: 18px; }
 .signal .signalAws > svg { height: 8px; width: 28px; }
+.signalSetupChoice { display: flex; gap: 8px; }

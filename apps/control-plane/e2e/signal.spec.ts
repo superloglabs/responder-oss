@@ -15,7 +15,8 @@ function fakeSignal(count = 30) {
     severity: index % 4 === 0 ? "SEV-1" : "SEV-2",
     service: index === 0 ? "checkout-api" : "worker",
     status: "new",
-    postedAt: new Date(now - index * 5 * 3_600_000).toISOString(),
+    // Nine hours apart, so the 30 findings span 11 days: 19 in the last 7.
+    postedAt: new Date(now - index * 9 * 3_600_000).toISOString(),
   }));
   const state = {
     findings,
@@ -93,7 +94,7 @@ async function workspace(page: Page, options: { enabled?: boolean; signal?: Retu
         ...finding, impact: "11 customers could not pay.", affectedUsers: 11, affectedRequests: 18,
         rootCause: "The retry budget is longer than the gateway deadline.", suggestedFix: "Lower the client timeout.",
         evidence: [{ kind: "traces", title: "Checkout 504s", detail: "18 spans with status 504 in the last 2 hours" }],
-        prompt: `Investigate Superlog finding ${finding.id} and propose a fix with tests.`, slackChannelId: "C01",
+        prompt: `Investigate Superlog finding ${finding.id} and propose a fix with tests.`,
       } });
     }
     if (path === "/usage") {
@@ -132,6 +133,7 @@ test("sets up Signal with the workspace's real connections and turns it on", asy
   await next.click();
   await expect(page).toHaveURL(/\/signal\/setup\/code$/);
   await next.click();
+  await expect(page.getByRole("button", { name: "Skip for now" })).toBeVisible();
   await page.getByLabel("Search repositories").fill("api");
   await page.getByRole("checkbox", { name: "acme / api" }).check();
   await page.getByLabel("Search repositories").fill("");
@@ -156,6 +158,21 @@ test("opens findings once Signal is on", async ({ page }) => {
   await expect(page).toHaveURL(/\/signal\/findings$/);
 });
 
+test("keeps a failed settings lookup on Signal's home with a retry", async ({ page }) => {
+  await workspace(page);
+  // Fails until the test retries; development runs effects twice.
+  let available = false;
+  await page.route("**/api/signal/settings", (route) => (available
+    ? route.fulfill({ json: { enabled: true, slack: null, repositoryIds: [] } })
+    : route.fulfill({ status: 503, json: { error: "This service is unavailable. Try again shortly." } })));
+  await page.goto("/app");
+  await expect(page.getByRole("alert")).toHaveText("This service is unavailable. Try again shortly.");
+  await expect(page).toHaveURL(/\/signal$/u);
+  available = true;
+  await page.getByRole("button", { name: "Try again" }).click();
+  await expect(page).toHaveURL(/\/signal\/findings$/u);
+});
+
 test("searches, pages, and acts on findings", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   const signal = await workspace(page);
@@ -166,7 +183,7 @@ test("searches, pages, and acts on findings", async ({ page, context }) => {
   await page.getByRole("button", { name: "Load more" }).click();
   await expect(page.getByText("Showing 30 of 30 findings")).toBeVisible();
   await page.getByLabel("Date range").selectOption("7");
-  await expect(page.getByText("Showing 25 of 30 findings")).toBeVisible();
+  await expect(page.getByText("Showing 19 of 19 findings")).toBeVisible();
   await page.getByLabel("Search findings").fill("nonsense");
   await expect(page.getByRole("heading", { name: "No matching findings" })).toBeVisible();
   await page.getByRole("button", { name: "Clear filters" }).click();
@@ -174,7 +191,7 @@ test("searches, pages, and acts on findings", async ({ page, context }) => {
   await expect(page.getByRole("heading", { name: "Evidence", exact: true })).toBeVisible();
   await expect(page.getByText("18 spans with status 504")).toBeVisible();
   await page.getByRole("button", { name: "Copy prompt" }).click();
-  await expect(page.getByText("Prompt copied")).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: "Prompt copied" })).toBeVisible();
   expect(await page.evaluate(() => navigator.clipboard.readText())).toContain("SIG-030");
   await expect(page.locator(".signalProperties")).toContainText("Accepted");
   await page.getByRole("button", { name: "Mark as irrelevant" }).click();

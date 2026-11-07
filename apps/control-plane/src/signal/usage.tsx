@@ -20,7 +20,7 @@ export function SignalUsage() {
   }, [days]);
 
   const error = result?.days === days ? result.error : undefined;
-  const daily = result?.daily;
+  const daily = result?.days === days ? result.daily : undefined;
   if (!daily) {
     return error ? <p className="signalError" role="alert">{error}</p> : <p className="signalLoading" role="status">Loading…</p>;
   }

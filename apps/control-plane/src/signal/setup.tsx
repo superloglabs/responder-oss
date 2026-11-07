@@ -1,7 +1,7 @@
 import { useEffect, useState, type ComponentType } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { IconCheck, IconSearch } from "@tabler/icons-react";
-import { fetchAgentOptions, type AgentOptions, type IntegrationSummary } from "../agents-api";
+import { fetchAgentOptions, fetchIntegrations, type AgentOptions, type IntegrationSummary } from "../agents-api";
 import { AwsConnectionDialog } from "../components/aws-connection-dialog";
 import { DatadogConnectionDialog } from "../components/datadog-site-dialog";
 import { GrafanaConnectionDialog } from "../components/grafana-connection-dialog";
@@ -62,12 +62,6 @@ const connectionDialogs: Partial<Record<string, ComponentType<{
   posthog: PostHogConnectionDialog,
 };
 
-async function fetchIntegrationSummaries(): Promise<IntegrationSummary[]> {
-  const response = await fetch("/api/integrations");
-  if (!response.ok) throw new Error("Could not load connections.");
-  return ((await response.json()) as { integrations: IntegrationSummary[] }).integrations;
-}
-
 export function SignalSetup() {
   const { step: stepParam = "telemetry" } = useParams();
   const step = steps.find((candidate) => candidate === stepParam);
@@ -87,7 +81,7 @@ export function SignalSetup() {
   const [loadError, setLoadError] = useState<{ attempt: number; message: string } | null>(null);
   useEffect(() => {
     let current = true;
-    Promise.all([fetchIntegrationSummaries(), fetchAgentOptions(), fetchSignalSettings()])
+    Promise.all([fetchIntegrations(), fetchAgentOptions(), fetchSignalSettings()])
       .then(([loadedIntegrations, loadedOptions, loadedSettings]) => {
         if (!current) return;
         setIntegrations(loadedIntegrations);
@@ -222,8 +216,14 @@ export function SignalSetup() {
     <footer className={`signalSetupActions${step === "code" ? " signalSetupActions--inline" : ""}`}>
       {index > 0 ? <Button onClick={() => go(steps[index - 1]!)}>Back</Button> : <span />}
       {step === "code" && !connected("github")
-        ? <Button className="signalGithubButton" variant="primary" disabled={!summary("github")?.connectUrl} onClick={() => connect("github")}><SignalLogo provider="github" />Connect GitHub</Button>
-        : step === "repositories" ? <Button variant="primary" disabled={saving} onClick={() => void save(draft, "slack")}>Continue</Button>
+        // Without GitHub, Signal explains problems from telemetry alone.
+        ? <div className="signalSetupChoice">
+          <Button onClick={() => go("slack")}>Skip for now</Button>
+          <Button className="signalGithubButton" variant="primary" disabled={!summary("github")?.connectUrl} onClick={() => connect("github")}><SignalLogo provider="github" />Connect GitHub</Button>
+        </div>
+        : step === "repositories" ? <Button variant={draft.repositoryIds.length ? "primary" : "secondary"} disabled={saving} onClick={() => void save(draft, "slack")}>
+          {draft.repositoryIds.length ? "Continue" : "Skip for now"}
+        </Button>
         : step === "slack" ? <Button variant="primary" disabled={saving || !draft.slack} onClick={() => void save(draft, "context")}>Continue</Button>
         : step === "start" ? (settings.enabled
           ? <Button disabled={saving} onClick={() => void save({ ...draft, enabled: false })}>Turn off Signal</Button>

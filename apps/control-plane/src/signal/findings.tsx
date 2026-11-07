@@ -34,14 +34,17 @@ export function SignalFindings() {
   // Results keep the filters and offset they were loaded for, so changing a
   // filter starts again from the first page and shows loading until it lands.
   const filters = `${days}|${query}`;
-  const [requested, setRequested] = useState({ filters, offset: 0 });
+  // A request is the filters, the offset to load from, and an attempt
+  // counter that "Try again" bumps to repeat a failed load.
+  const [requested, setRequested] = useState({ filters, offset: 0, attempt: 0 });
   // New filters always start from the first page, also when they match
   // filters used before.
-  if (requested.filters !== filters) setRequested({ filters, offset: 0 });
+  if (requested.filters !== filters) setRequested({ filters, offset: 0, attempt: 0 });
   const offset = requested.filters === filters ? requested.offset : 0;
+  const attempt = requested.filters === filters ? requested.attempt : 0;
   const [page, setPage] = useState<{
-    filters: string; offset: number; findings: SignalFindingSummary[]; total: number; error?: string;
-  }>({ filters: "", offset: -1, findings: [], total: 0 });
+    filters: string; offset: number; attempt: number; findings: SignalFindingSummary[]; total: number; error?: string;
+  }>({ filters: "", offset: -1, attempt: 0, findings: [], total: 0 });
   useEffect(() => {
     let current = true;
     fetchFindings({ days, search: query, offset })
@@ -50,20 +53,27 @@ export function SignalFindings() {
         setPage((previous) => ({
           filters,
           offset,
+          attempt,
           total: loaded.total,
           findings: offset > 0 && previous.filters === filters ? [...previous.findings, ...loaded.findings] : loaded.findings,
         }));
       })
       .catch((failure: unknown) => {
         if (!current) return;
+        // Rows already shown for these filters stay; rows from other filters go.
         setPage((previous) => ({
-          ...previous, filters, offset, error: failure instanceof Error ? failure.message : "Could not load findings.",
+          filters,
+          offset,
+          attempt,
+          findings: previous.filters === filters ? previous.findings : [],
+          total: previous.filters === filters ? previous.total : 0,
+          error: failure instanceof Error ? failure.message : "Could not load findings.",
         }));
       });
     return () => { current = false; };
-  }, [days, query, filters, offset]);
+  }, [days, query, filters, offset, attempt]);
 
-  const loading = page.filters !== filters || page.offset !== offset;
+  const loading = page.filters !== filters || page.offset !== offset || page.attempt !== attempt;
   const findings = page.filters === filters ? page.findings : [];
   const total = page.filters === filters ? page.total : 0;
   const error = loading ? "" : page.error ?? "";
@@ -95,7 +105,9 @@ export function SignalFindings() {
     </div>}
     <footer className="signalListFooter">
       <span role="status">{loading ? "Loading…" : `Showing ${findings.length} of ${total} findings`}</span>
-      {!loading && findings.length < total && <Button onClick={() => setRequested({ filters, offset: findings.length })}>Load more</Button>}
+      {!loading && error
+        ? <Button onClick={() => setRequested({ filters, offset, attempt: attempt + 1 })}>Try again</Button>
+        : !loading && findings.length < total && <Button onClick={() => setRequested({ filters, offset: findings.length, attempt: 0 })}>Load more</Button>}
     </footer>
   </section>;
 }
@@ -137,6 +149,8 @@ export function SignalFindingDetail() {
     try {
       const { status } = await setFindingStatus(finding.id, irrelevant ? "new" : "irrelevant");
       setFinding({ ...finding, status });
+    } catch (failure) {
+      setCopyStatus(failure instanceof Error ? `Could not change the status: ${failure.message}` : "Could not change the status.");
     } finally {
       setSaving(false);
     }
@@ -147,7 +161,7 @@ export function SignalFindingDetail() {
       await navigator.clipboard.writeText(finding.prompt);
       setCopyStatus("Prompt copied");
     } catch {
-      setCopyStatus("Could not copy. Select and copy the prompt below instead.");
+      setCopyStatus("Could not copy. Select and copy the prompt under Evidence instead.");
       return;
     }
     const { status } = await recordPromptCopied(finding.id).catch(() => ({ status: finding.status }));
@@ -175,6 +189,10 @@ export function SignalFindingDetail() {
             <pre className="signalLog"><code>{item.detail}</code></pre>
           </section>)}
         </section>
+        <details className="signalPrompt">
+          <summary>Prompt</summary>
+          <pre className="signalLog"><code>{finding.prompt}</code></pre>
+        </details>
       </div>
       <aside className="signalProperties"><h2>Properties</h2><dl>
         <dt>Severity</dt><dd><Severity level={finding.severity} /></dd>

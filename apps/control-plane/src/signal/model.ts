@@ -27,7 +27,6 @@ export interface SignalFindingDetail extends SignalFindingSummary {
   suggestedFix: string;
   evidence: SignalEvidence[];
   prompt: string;
-  slackChannelId: string | null;
 }
 
 export interface SignalUsageDay {
