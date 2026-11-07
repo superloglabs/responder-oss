@@ -969,6 +969,16 @@ bucket and configure `AWS_INTEGRATION_TEMPLATE_BUCKET` and
 presigned S3 URL for CloudFormation Quick Create. Without those values, the UI
 offers a pre-filled template as a file download for manual upload.
 
+Signal setup can connect AWS with one click, without asking for the account ID.
+Set `AWS_INTEGRATION_REGISTRATION_TOPIC_ARN` to an SNS topic named
+`ResponderAwsRegistration` that any account may publish to, and subscribe
+`<public>/api/integrations/aws/registrations` to it over HTTPS. Quick Create then
+opens in the topic's region, and the stack's custom resource reports its account
+through the topic. The endpoint checks the SNS signature and answers
+CloudFormation; the connection completes only after Responder assumes the new
+role. Without the topic, one-click setup is unavailable and the account ID flow
+still works.
+
 Self-hosted deployments must also set `AWS_INTEGRATION_PRINCIPAL_ARN` to a
 stable broker role that the runtime can assume. The broker must allow
 `sts:AssumeRole` only on customer roles named `ResponderInvestigationRole`.

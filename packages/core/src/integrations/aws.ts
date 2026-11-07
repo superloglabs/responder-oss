@@ -21,6 +21,21 @@ export function isAwsCommercialRegion(region: string): boolean {
   return AWS_COMMERCIAL_REGION_PATTERN.test(region);
 }
 
+export interface SnsTopic {
+  accountId: string;
+  name: string;
+  region: string;
+}
+
+export function parseSnsTopicArn(topicArn: string): SnsTopic | null {
+  const match = /^arn:aws:sns:([a-z0-9-]+):(\d{12}):([A-Za-z0-9_-]{1,256})$/.exec(
+    topicArn,
+  );
+  if (!match?.[1] || !match[2] || !match[3]) return null;
+  if (!isAwsCommercialRegion(match[1])) return null;
+  return { region: match[1], accountId: match[2], name: match[3] };
+}
+
 export const awsAccountIdSchema = z.string().length(12).regex(/^\d{12}$/);
 export const awsConnectionCredentialsSchema = z.object({
   accountId: awsAccountIdSchema,
@@ -65,15 +80,33 @@ export function awsCloudFormationTemplate(): string {
   return cloudFormationTemplate;
 }
 
+function requireSnsTopicArn(topicArn: string): SnsTopic {
+  const topic = parseSnsTopicArn(topicArn);
+  if (!topic) {
+    throw new AwsIntegrationConfigurationError(
+      "The AWS registration topic must be an SNS topic ARN in a commercial region",
+    );
+  }
+  return topic;
+}
+
 export function awsParameterizedCloudFormationTemplate(input: {
   externalId: string;
   principalArn: string;
+  registrationTopicArn?: string;
 }): string {
   const externalId = z.string().min(32).max(256).parse(input.externalId);
   const principalArn = z.string().regex(
     /^arn:aws:iam::\d{12}:role\/[A-Za-z0-9+=,.@_/-]+$/,
   ).parse(input.principalArn);
-  return cloudFormationTemplate
+  if (input.registrationTopicArn) requireSnsTopicArn(input.registrationTopicArn);
+  const template = input.registrationTopicArn
+    ? cloudFormationTemplate.replace(
+        "    Default: \"\"\n    Description: SNS topic that tells Responder which account ran this stack",
+        `    Default: '${input.registrationTopicArn}'\n    Description: SNS topic that tells Responder which account ran this stack`,
+      )
+    : cloudFormationTemplate;
+  return template
     .replace(
       "    Description: Responder's AWS integration broker role ARN",
       `    Description: Responder's AWS integration broker role ARN\n    Default: '${principalArn}'`,
@@ -113,6 +146,7 @@ function isSupportedCloudFormationTemplateUrl(templateUrl: URL): boolean {
 export function awsCloudFormationQuickCreateUrl(input: {
   externalId: string;
   principalArn: string;
+  registrationTopicArn?: string;
   templateUrl: string;
 }): string {
   const templateUrl = new URL(input.templateUrl);
@@ -127,7 +161,14 @@ export function awsCloudFormationQuickCreateUrl(input: {
     param_ResponderPrincipalArn: input.principalArn,
     param_ExternalId: input.externalId,
   });
-  return `https://console.aws.amazon.com/cloudformation/home#/stacks/create/review?${parameters}`;
+  if (!input.registrationTopicArn) {
+    return `https://console.aws.amazon.com/cloudformation/home#/stacks/create/review?${parameters}`;
+  }
+  // A custom resource's SNS ServiceToken must be in the stack's own region,
+  // so the console opens in the topic's region.
+  const { region } = requireSnsTopicArn(input.registrationTopicArn);
+  parameters.set("param_RegistrationTopicArn", input.registrationTopicArn);
+  return `https://${region}.console.aws.amazon.com/cloudformation/home?region=${region}#/stacks/create/review?${parameters}`;
 }
 
 interface StsTemporaryCredentials {

@@ -8,7 +8,11 @@ import {
   awsIntegrationPrincipalArn,
   awsInvestigationRoleArn,
   isAwsCommercialRegion,
+  parseSnsTopicArn,
 } from "./aws.js";
+
+const registrationTopicArn =
+  "arn:aws:sns:eu-west-3:111122223333:ResponderAwsRegistration";
 
 describe("AWS integration", () => {
   it("builds the fixed customer role ARN", () => {
@@ -129,5 +133,77 @@ describe("AWS integration", () => {
           "arn:aws:iam::111122223333:role/ResponderAwsIntegrationBroker",
       }),
     ).toBe("arn:aws:iam::111122223333:role/ResponderAwsIntegrationBroker");
+  });
+  it("reports the account only when a registration topic is set", () => {
+    const template = awsCloudFormationTemplate();
+    expect(template).toMatch(
+      / {2}RegistrationTopicArn:\n {4}Type: String\n {4}Default: ""\n/,
+    );
+    expect(template).toContain(
+      'RegisterWithResponder: !Not [!Equals [!Ref RegistrationTopicArn, ""]]',
+    );
+    const resource = template.slice(
+      template.indexOf("  ResponderRegistration:"),
+      template.indexOf("Outputs:"),
+    );
+    expect(resource).toContain("Type: Custom::ResponderRegistration");
+    expect(resource).toContain("Condition: RegisterWithResponder");
+    expect(resource).toContain("DependsOn: InvestigationRole");
+    expect(resource).toContain("ServiceToken: !Ref RegistrationTopicArn");
+    expect(resource).toContain("ExternalId: !Ref ExternalId");
+    expect(resource).toContain("RoleArn: !GetAtt InvestigationRole.Arn");
+    // Every other resource is unconditional, so an empty topic leaves the
+    // stack as it was before registration existed.
+    expect(template.match(/^ {4}Condition: /gm)).toEqual(["    Condition: "]);
+  });
+
+  it("leaves the registration topic empty unless one is given", () => {
+    const input = {
+      externalId: "responder_abcdefghijklmnopqrstuvwxyz1234567890",
+      principalArn: "arn:aws:iam::111122223333:role/ResponderAwsIntegrationBroker",
+    };
+    expect(awsParameterizedCloudFormationTemplate(input)).toContain('    Default: ""\n');
+    const template = awsParameterizedCloudFormationTemplate({
+      ...input,
+      registrationTopicArn,
+    });
+    expect(template).toContain(`Default: '${registrationTopicArn}'`);
+    expect(template).not.toContain('    Default: ""\n');
+    expect(() =>
+      awsParameterizedCloudFormationTemplate({
+        ...input,
+        registrationTopicArn: "arn:aws:sns:eu-west-3:111122223333:bad'topic",
+      }),
+    ).toThrow("SNS topic ARN");
+  });
+
+  it("opens one-click quick create in the registration topic's region", () => {
+    const url = new URL(
+      awsCloudFormationQuickCreateUrl({
+        externalId: "responder_abcdefghijklmnopqrstuvwxyz1234567890",
+        principalArn: "arn:aws:iam::111122223333:role/ResponderAwsIntegrationBroker",
+        registrationTopicArn,
+        templateUrl:
+          "https://responder-templates.s3.eu-west-3.amazonaws.com/responder-aws-access.yaml",
+      }),
+    );
+    expect(url.hostname).toBe("eu-west-3.console.aws.amazon.com");
+    expect(url.searchParams.get("region")).toBe("eu-west-3");
+    const parameters = new URLSearchParams(url.hash.split("?")[1]);
+    expect(url.hash.startsWith("#/stacks/create/review?")).toBe(true);
+    expect(parameters.get("param_RegistrationTopicArn")).toBe(registrationTopicArn);
+    expect(parameters.get("param_ExternalId")).toBe(
+      "responder_abcdefghijklmnopqrstuvwxyz1234567890",
+    );
+  });
+
+  it("parses only commercial SNS topic ARNs", () => {
+    expect(parseSnsTopicArn(registrationTopicArn)).toEqual({
+      accountId: "111122223333",
+      name: "ResponderAwsRegistration",
+      region: "eu-west-3",
+    });
+    expect(parseSnsTopicArn("arn:aws:sns:us-gov-west-1:111122223333:x")).toBeNull();
+    expect(parseSnsTopicArn("arn:aws:sqs:eu-west-3:111122223333:x")).toBeNull();
   });
 });

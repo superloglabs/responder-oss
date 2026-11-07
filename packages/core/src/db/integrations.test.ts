@@ -4,6 +4,7 @@ import { getTableConfig, PgDialect } from "drizzle-orm/pg-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getDatabase } from "./client.js";
 import {
+  claimIntegrationRegistration,
   createIntegrationConnectionState,
   consumeIntegrationConnectionState,
   deleteIntegrationAccount,
@@ -509,6 +510,95 @@ describe("integration account tenancy", () => {
       await expect(deleteIntegrationAccount(removal)).resolves.toEqual({
         status: "not_found",
       });
+      expect(deleted).toEqual([]);
+    });
+  });
+
+  describe("claiming a registration", () => {
+    function claimDouble(input: { existing?: string; registration?: string }) {
+      const updates: Array<{ id: unknown; values: Record<string, unknown> }> = [];
+      const deleted: unknown[] = [];
+      const selection = (rows: Array<{ id: string }>) => ({
+        from: () => ({ where: () => ({ for: vi.fn().mockResolvedValue(rows) }) }),
+      });
+      const tx = {
+        select: vi
+          .fn()
+          .mockReturnValueOnce(
+            selection(input.registration ? [{ id: input.registration }] : []),
+          )
+          .mockReturnValueOnce(
+            selection(input.existing ? [{ id: input.existing }] : []),
+          ),
+        update: vi.fn(() => ({
+          set: (values: Record<string, unknown>) => ({
+            where: vi.fn(async (id: unknown) => {
+              updates.push({ id, values });
+            }),
+          }),
+        })),
+        delete: vi.fn((table: unknown) => {
+          deleted.push(table);
+          return { where: vi.fn().mockResolvedValue(undefined) };
+        }),
+      };
+      vi.mocked(getDatabase).mockReturnValue({
+        transaction: vi.fn((run: (transaction: typeof tx) => unknown) => run(tx)),
+      } as never);
+      return { deleted, updates };
+    }
+
+    const claim = {
+      displayName: "AWS · 123456789012",
+      encryptedCredentials: "new-credentials",
+      externalAccountId: "123456789012",
+      organizationId: account.organizationId,
+      provider: "aws" as const,
+      registrationAccountId: "registration-1",
+      registrationHash: "a".repeat(64),
+    };
+
+    it("turns the placeholder into the account it reported", async () => {
+      const { deleted, updates } = claimDouble({ registration: "registration-1" });
+
+      await expect(claimIntegrationRegistration(claim)).resolves.toEqual({
+        integrationAccountId: "registration-1",
+        merged: false,
+      });
+      expect(updates).toHaveLength(1);
+      expect(updates[0]?.values).toMatchObject({
+        displayName: "AWS · 123456789012",
+        encryptedCredentials: "new-credentials",
+        externalAccountId: "123456789012",
+        status: "pending",
+      });
+      expect(deleted).toEqual([]);
+    });
+
+    it("moves the credentials onto an existing row for the account", async () => {
+      const { deleted, updates } = claimDouble({
+        existing: "account-1",
+        registration: "registration-1",
+      });
+
+      await expect(claimIntegrationRegistration(claim)).resolves.toEqual({
+        integrationAccountId: "account-1",
+        merged: true,
+      });
+      expect(updates).toHaveLength(1);
+      expect(updates[0]?.values).toMatchObject({
+        encryptedCredentials: "new-credentials",
+        status: "pending",
+      });
+      expect(updates[0]?.values).not.toHaveProperty("externalAccountId");
+      expect(deleted).toEqual([integrationAccounts]);
+    });
+
+    it("reports a placeholder that no longer exists", async () => {
+      const { deleted, updates } = claimDouble({});
+
+      await expect(claimIntegrationRegistration(claim)).resolves.toBeNull();
+      expect(updates).toEqual([]);
       expect(deleted).toEqual([]);
     });
   });

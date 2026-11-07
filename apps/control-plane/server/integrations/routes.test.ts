@@ -12,6 +12,7 @@ import {
   getOrganizationIntegrationAccount,
   getOrganizationIntegrationAccountByExternalId,
   getPendingIntegrationConnectionState,
+  getPendingIntegrationRegistration,
   getRecoverableSentryIntegrationAccount,
   listConnectedSentryIntegrationAccounts,
   listOrganizationIntegrationAccounts,
@@ -89,13 +90,18 @@ vi.mock("../../../../packages/core/src/credentials/encryption.js", () => ({
 }));
 
 vi.mock("../../../../packages/core/src/db/integrations.js", () => ({
+  claimIntegrationRegistration: vi.fn(),
   consumeIntegrationConnectionState: vi.fn(),
   createIntegrationConnectionState: vi.fn(),
   deleteIntegrationAccount: vi.fn(),
+  getIntegrationAccountByRegistration: vi.fn(),
+  getIntegrationAccountMergedFromRegistration: vi.fn(),
   getIntegrationConnectionState: vi.fn(),
   getOrganizationIntegrationAccount: vi.fn(),
   getOrganizationIntegrationAccountByExternalId: vi.fn(),
   getPendingIntegrationConnectionState: vi.fn(),
+  getPendingIntegrationRegistration: vi.fn(),
+  markIntegrationAccountConnected: vi.fn(),
   getRecoverableSentryIntegrationAccount: vi.fn(),
   listConnectedSentryIntegrationAccounts: vi.fn(),
   listOrganizationIntegrationAccounts: vi.fn(),
@@ -1691,6 +1697,144 @@ describe("integration callback routing", () => {
       cloudFormationUrl: null,
       template: expect.stringContaining("ResponderInvestigationRole"),
     });
+  });
+
+  it("prepares one-click AWS setup without an account ID", async () => {
+    const topicArn = "arn:aws:sns:eu-west-3:111122223333:ResponderAwsRegistration";
+    vi.stubEnv("AWS_INTEGRATION_REGISTRATION_TOPIC_ARN", topicArn);
+    vi.stubEnv(
+      "AWS_INTEGRATION_PRINCIPAL_ARN",
+      "arn:aws:iam::111122223333:role/ResponderAwsIntegrationBroker",
+    );
+    vi.mocked(getPendingIntegrationRegistration).mockResolvedValue(null);
+    vi.mocked(createAwsExternalId).mockReturnValue(
+      "responder_abcdefghijklmnopqrstuvwxyz1234567890",
+    );
+    vi.mocked(createAwsCloudFormationTemplateUrl).mockResolvedValue(
+      "https://responder-templates.s3.eu-west-3.amazonaws.com/responder-aws-access.yaml?X-Amz-Signature=test",
+    );
+    vi.mocked(encryptCredentials).mockReturnValue("encrypted-registration");
+    vi.mocked(upsertIntegrationAccount).mockResolvedValue(
+      "30000000-0000-4000-8000-000000000000",
+    );
+
+    const response = await app.request("/api/integrations/aws/connect", {
+      body: JSON.stringify({ returnTo: "/signal/setup/telemetry/aws" }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.accountId).toBe("30000000-0000-4000-8000-000000000000");
+    const cloudFormationUrl = new URL(body.cloudFormationUrl);
+    expect(cloudFormationUrl.origin).toBe("https://eu-west-3.console.aws.amazon.com");
+    expect(cloudFormationUrl.searchParams.get("region")).toBe("eu-west-3");
+    expect(
+      new URLSearchParams(cloudFormationUrl.hash.split("?")[1]).get(
+        "param_RegistrationTopicArn",
+      ),
+    ).toBe(topicArn);
+    expect(body.template).toContain(`Default: '${topicArn}'`);
+    expect(encryptCredentials).toHaveBeenCalledWith({
+      externalId: "responder_abcdefghijklmnopqrstuvwxyz1234567890",
+      registration: true,
+    });
+    expect(upsertIntegrationAccount).toHaveBeenCalledWith(
+      expect.objectContaining({
+        encryptedCredentials: "encrypted-registration",
+        externalAccountId: expect.stringMatching(/^registration:[0-9a-f]{64}$/),
+        organizationId: tenant.organizationId,
+        provider: "aws",
+        status: "pending",
+      }),
+    );
+    expect(getOrganizationIntegrationAccountByExternalId).not.toHaveBeenCalled();
+  });
+
+  it("reuses the organization's open one-click AWS setup", async () => {
+    vi.stubEnv(
+      "AWS_INTEGRATION_REGISTRATION_TOPIC_ARN",
+      "arn:aws:sns:eu-west-3:111122223333:ResponderAwsRegistration",
+    );
+    vi.stubEnv(
+      "AWS_INTEGRATION_PRINCIPAL_ARN",
+      "arn:aws:iam::111122223333:role/ResponderAwsIntegrationBroker",
+    );
+    vi.mocked(getPendingIntegrationRegistration).mockResolvedValue({
+      encryptedCredentials: "encrypted-registration",
+      id: "30000000-0000-4000-8000-000000000000",
+    });
+    vi.mocked(decryptCredentials).mockReturnValue({
+      externalId: "responder_existing_external_id_1234567890",
+      registration: true,
+    });
+    vi.mocked(createAwsCloudFormationTemplateUrl).mockResolvedValue(null);
+
+    const response = await app.request("/api/integrations/aws/connect", {
+      body: JSON.stringify({}),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).toMatchObject({
+      accountId: "30000000-0000-4000-8000-000000000000",
+      cloudFormationUrl: null,
+    });
+    expect(body.template).toContain(
+      "Default: 'responder_existing_external_id_1234567890'",
+    );
+    expect(getPendingIntegrationRegistration).toHaveBeenCalledWith({
+      externalAccountIdPrefix: "registration:",
+      organizationId: tenant.organizationId,
+      provider: "aws",
+    });
+    expect(createAwsExternalId).not.toHaveBeenCalled();
+    expect(upsertIntegrationAccount).not.toHaveBeenCalled();
+  });
+
+  it("reports one-click AWS setup as unavailable without a registration topic", async () => {
+    vi.stubEnv("AWS_INTEGRATION_REGISTRATION_TOPIC_ARN", "");
+    vi.stubEnv(
+      "AWS_INTEGRATION_PRINCIPAL_ARN",
+      "arn:aws:iam::111122223333:role/ResponderAwsIntegrationBroker",
+    );
+
+    const response = await app.request("/api/integrations/aws/connect", {
+      body: JSON.stringify({ returnTo: "/signal/setup/telemetry/aws" }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: "One-click AWS setup is not available in this region",
+    });
+    expect(upsertIntegrationAccount).not.toHaveBeenCalled();
+  });
+
+  it("still rejects an invalid AWS account ID", async () => {
+    const response = await app.request("/api/integrations/aws/connect", {
+      body: JSON.stringify({ accountId: "1234" }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(400);
+    expect(getPendingIntegrationRegistration).not.toHaveBeenCalled();
+  });
+
+  it("accepts AWS registration deliveries without a session", async () => {
+    const response = await app.request("/api/integrations/aws/registrations", {
+      body: "not json",
+      headers: { "content-type": "text/plain; charset=UTF-8" },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(400);
+    expect(getActiveTenant).not.toHaveBeenCalled();
   });
 
   it("verifies the customer role before connecting AWS", async () => {
