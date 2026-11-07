@@ -17,11 +17,17 @@ those requests fail and the pages show their errors.
   Google Cloud and OpenTelemetry link to their settings pages. Repositories and
   the findings channel come from the workspace's GitHub and Slack connections
   and are saved to Signal's settings. The last step is the plan: Pro ($100 a
-  month, up to 50 findings) or Max ($200 a month, up to 100). Choosing one
-  opens checkout from `/api/signal/billing/checkout`, and Signal turns on when
-  checkout returns. With a plan, the step shows the findings used this
-  period, switches plans, opens the billing portal, and turns Signal off and
-  on. Where the deployment does not bill, it only turns Signal on and off.
+  month, up to 50 findings) or Max ($200 a month, up to 100). A Slack channel
+  must be chosen first. Choosing a plan opens checkout from
+  `/api/signal/billing/checkout`. When checkout returns, the step waits up to
+  10 seconds for the plan to be recorded and turns Signal on the first time;
+  if the plan is not recorded by then, Signal stays off and the step says the
+  payment is still being confirmed. With a plan, the step shows the findings
+  used this period, switches plans without turning Signal on, opens the
+  billing portal, and turns Signal off and on. A workspace with findings
+  granted without a plan, or a deployment that does not bill, turns Signal on
+  and off directly. Signal can always be turned off, also after its plan
+  ended.
 - **Findings** lists posted findings by day, with search, a 7, 14, or 30 day
   range, and paging. A finding shows its impact, root cause, suggested fix,
   and evidence. Copy prompt accepts it; Mark as irrelevant and Restore change

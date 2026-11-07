@@ -65,13 +65,17 @@ export function SignalPlanStep({ settings, slackChosen, saving, onBack, onTurnOn
     };
   }, [attempt, returning]);
 
+  // Signal turns on by itself only when a plan finishes setup. A workspace
+  // that turned it off later keeps it off when it changes plans.
+  const turnOnAfterCheckout = !settings.enabled && !settings.setupComplete && slackChosen;
+
   // Back from checkout with a plan: turn Signal on once.
   useEffect(() => {
     if (!returning || !billing?.plan || turnedOn.current) return;
     turnedOn.current = true;
     setSearchParams({}, { replace: true });
-    if (!settings.enabled) void onTurnOn();
-  }, [returning, billing, settings.enabled, onTurnOn, setSearchParams]);
+    if (turnOnAfterCheckout) void onTurnOn();
+  }, [returning, billing, turnOnAfterCheckout, onTurnOn, setSearchParams]);
 
   async function choose(plan: SignalPlan) {
     setBusy(plan.id);
@@ -84,8 +88,8 @@ export function SignalPlanStep({ settings, slackChosen, saving, onBack, onTurnOn
       }
       // Changed without a payment page, for example with a card on file.
       setBilling(await fetchSignalBilling());
-      if (!settings.enabled) await onTurnOn();
       setBusy(null);
+      if (turnOnAfterCheckout) await onTurnOn();
     } catch (failure) {
       setError(failureMessage(failure, "Could not start checkout."));
       setBusy(null);
@@ -123,7 +127,7 @@ export function SignalPlanStep({ settings, slackChosen, saving, onBack, onTurnOn
           <p className="signalPlanPrice">${plan.price}<span> / month</span></p>
           <div className="signalPlanTerms">
             <p>Up to {plan.included} investigated findings</p>
-            <p>${plan.price / plan.included} per finding</p>
+            <p>{perFinding(plan)} per finding</p>
           </div>
           <div className="signalPlanAction">
             {isCurrent
@@ -143,14 +147,21 @@ export function SignalPlanStep({ settings, slackChosen, saving, onBack, onTurnOn
 
     <footer className="signalSetupActions">
       <Button onClick={onBack}>Back</Button>
-      {billing && (current || ready) && <div className="signalSetupChoice">
+      {billing && (current || ready || settings.enabled) && <div className="signalSetupChoice">
         {current && <Button disabled={busy !== null} onClick={() => void manage()}>Manage billing</Button>}
-        {ready && (settings.enabled
+        {/* Turning off never needs a plan, so a workspace whose plan ended can still stop Signal. */}
+        {settings.enabled
           ? <Button disabled={saving || busy !== null} onClick={() => void onTurnOff()}>Turn off Signal</Button>
-          : <Button variant="primary" disabled={saving || busy !== null || !slackChosen} onClick={() => void onTurnOn()}>Turn on Signal</Button>)}
+          : ready && <Button variant="primary" disabled={saving || busy !== null || !slackChosen} onClick={() => void onTurnOn()}>Turn on Signal</Button>}
       </div>}
     </footer>
   </>;
+}
+
+// Whole dollars where the price divides evenly, otherwise cents.
+function perFinding(plan: SignalPlan) {
+  const price = plan.price / plan.included;
+  return `$${Number.isInteger(price) ? price : price.toFixed(2)}`;
 }
 
 function PlanStatus({ billing, settings, slackChosen }: {
@@ -168,7 +179,8 @@ function PlanStatus({ billing, settings, slackChosen }: {
     else if (resets) lines.push(`Resets on ${resets}.`);
   }
   if (!canTurnOnSignal(billing)) {
-    if (!slackChosen) lines.push("Choose a Slack channel before choosing a plan.");
+    if (settings.enabled) lines.push("Signal has no plan, so it does not investigate. Choose a plan or turn Signal off.");
+    else if (!slackChosen) lines.push("Choose a Slack channel before choosing a plan.");
   } else if (settings.enabled) {
     lines.push("Signal is on. It posts findings to Slack as it finds them.");
   } else {

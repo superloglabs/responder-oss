@@ -41,6 +41,8 @@ function fakeSignal(count = 30, options: { setUp?: boolean } = {}) {
       resetsAt: Date.parse("2026-12-01T00:00:00Z") as number | null,
       plans: signalPlans,
     },
+    // Where checkout sends the member; null when the plan changes in place.
+    checkoutUrl: "/signal/setup/plan?checkout=success" as string | null,
     writes: [] as Array<{ method: string; path: string; body: unknown }>,
   };
   return state;
@@ -107,7 +109,7 @@ async function workspace(page: Page, options: { enabled?: boolean; signal?: Retu
         included: plan.included,
         remaining: plan.included,
       });
-      return route.fulfill({ json: { url: "/signal/setup/plan?checkout=success" } });
+      return route.fulfill({ json: { url: signal.checkoutUrl } });
     }
     if (path === "/billing/portal") return route.fulfill({ json: { url: "/settings" } });
     if (path === "/findings") {
@@ -227,6 +229,33 @@ test("shows the current plan and its findings, and turns Signal off", async ({ p
   await page.screenshot({ path: "test-results/signal-plan-current.png" });
   await page.getByRole("button", { name: "Turn off Signal" }).click();
   await expect(page.getByRole("button", { name: "Turn on Signal" })).toBeEnabled();
+  expect(signal.settings.enabled).toBe(false);
+});
+
+test("can turn Signal off after its plan ended", async ({ page }) => {
+  const signal = fakeSignal();
+  signal.settings.slack = { integrationAccountId: "slack-account", channelId: "C02" };
+  await workspace(page, { signal });
+  await page.goto("/signal/setup/plan");
+  await expect(page.getByRole("button", { name: "Choose Pro ($100)" })).toBeEnabled();
+  await page.getByRole("button", { name: "Turn off Signal" }).click();
+  await expect(page.getByRole("button", { name: "Turn on Signal" })).toHaveCount(0);
+  expect(signal.settings.enabled).toBe(false);
+});
+
+test("switching plans leaves Signal off when it was turned off", async ({ page }) => {
+  const signal = fakeSignal();
+  signal.settings.enabled = false;
+  signal.settings.slack = { integrationAccountId: "slack-account", channelId: "C02" };
+  Object.assign(signal.billing, {
+    plan: { id: "signal_pro", name: "Pro", price: 100, cancelsAtPeriodEnd: false }, included: 50, used: 3, remaining: 47,
+  });
+  signal.checkoutUrl = null;
+  await workspace(page, { signal });
+  await page.goto("/signal/setup/plan");
+  await page.getByRole("button", { name: "Switch to Max ($200)" }).click();
+  await expect(page.getByRole("article", { name: "Max" }).getByRole("button", { name: "Current plan" })).toBeDisabled();
+  await expect(page).toHaveURL(/\/signal\/setup\/plan$/);
   expect(signal.settings.enabled).toBe(false);
 });
 
