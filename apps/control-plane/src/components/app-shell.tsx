@@ -72,7 +72,9 @@ export function AppShell({
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [switchingTo, setSwitchingTo] = useState<string | null>(null);
   const [menuError, setMenuError] = useState<string | null>(null);
-  // A Signal workspace sees only setup until setup is complete. A failed
+  // A Signal workspace sees only setup until setup is complete. While the
+  // state loads, Findings and Usage stay hidden too, so a new workspace never
+  // sees them flash; a finished one sees them appear once it loads. A failed
   // lookup shows everything, and the pages show the error.
   const signalSetup = useSignalSetupState(session.data?.session.activeOrganizationId, Boolean(options.signal) && !guest);
   const navigation = primaryNavigation({

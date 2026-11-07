@@ -20,17 +20,26 @@ export function setupComplete(settings: Pick<SignalSettings, "enabled" | "setupC
   return settings.setupComplete ?? settings.enabled;
 }
 
-function load(organizationId: string) {
-  if (requests.has(organizationId)) return;
+// Loads the state once at a time per workspace; concurrent callers share the
+// request.
+export function loadSignalSetupState(organizationId: string): Promise<void> {
+  const pending = requests.get(organizationId);
+  if (pending) return pending;
   const request = fetchSignalSettings()
-    .then((settings) => publish(organizationId, setupComplete(settings) ? "complete" : "incomplete"))
+    .then((settings) => publishSignalSettings(organizationId, settings))
     .catch(() => publish(organizationId, "unknown"))
     .finally(() => requests.delete(organizationId));
   requests.set(organizationId, request);
+  return request;
 }
 
-export function markSignalSetupComplete(organizationId: string) {
-  publish(organizationId, "complete");
+// Settings loaded or saved elsewhere, such as on the setup page.
+export function publishSignalSettings(organizationId: string, settings: Pick<SignalSettings, "enabled" | "setupComplete">) {
+  publish(organizationId, setupComplete(settings) ? "complete" : "incomplete");
+}
+
+export function signalSetupSnapshot() {
+  return current;
 }
 
 // For tests: forget what was loaded.
@@ -49,7 +58,7 @@ export function useSignalSetupState(organizationId: string | null | undefined, s
   const snapshot = useSyncExternalStore(subscribe, () => current, () => null);
   const known = Boolean(signal && organizationId && snapshot?.organizationId === organizationId);
   useEffect(() => {
-    if (signal && organizationId && !known) load(organizationId);
+    if (signal && organizationId && !known) void loadSignalSetupState(organizationId);
   }, [signal, organizationId, known]);
   if (!signal || !organizationId) return null;
   return known ? snapshot!.state : "loading";

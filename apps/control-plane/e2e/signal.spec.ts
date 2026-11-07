@@ -189,7 +189,7 @@ test("keeps a failed settings lookup on Signal's home with a retry", async ({ pa
     ? route.fulfill({ json: { enabled: true, slack: null, repositoryIds: [] } })
     : route.fulfill({ status: 503, json: { error: "This service is unavailable. Try again shortly." } })));
   await page.goto("/app");
-  await expect(page.getByRole("alert")).toHaveText("This service is unavailable. Try again shortly.");
+  await expect(page.getByRole("alert")).toHaveText("Could not load Signal. Try again shortly.");
   await expect(page).toHaveURL(/\/signal$/u);
   available = true;
   await page.getByRole("button", { name: "Try again" }).click();

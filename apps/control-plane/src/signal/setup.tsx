@@ -16,7 +16,7 @@ import {
   type SignalSettings,
 } from "./model";
 import { authClient } from "../auth-client";
-import { markSignalSetupComplete } from "./setup-state";
+import { publishSignalSettings } from "./setup-state";
 import { ConnectionRow, SignalLogo } from "./shared";
 
 interface Source { provider: string; name: string; description: string }
@@ -91,12 +91,13 @@ export function SignalSetup() {
         setOptions(loadedOptions);
         setSettings(loadedSettings);
         setDraft(loadedSettings);
+        if (organizationId) publishSignalSettings(organizationId, loadedSettings);
       })
       .catch((failure: unknown) => {
         if (current) setLoadError({ attempt, message: failure instanceof Error ? failure.message : "Could not load setup." });
       });
     return () => { current = false; };
-  }, [attempt]);
+  }, [attempt, organizationId]);
 
   const channels = (options?.resources ?? [])
     .filter((resource) => resource.kind === "slack_channel")
@@ -131,7 +132,7 @@ export function SignalSetup() {
       const saved = await saveSignalSettings(next);
       setSettings(saved);
       setDraft(saved);
-      if (saved.enabled && organizationId) markSignalSetupComplete(organizationId);
+      if (organizationId) publishSignalSettings(organizationId, saved);
       if (then === "findings") navigate("/signal/findings");
       else if (then) go(then);
     } catch (failure) {
