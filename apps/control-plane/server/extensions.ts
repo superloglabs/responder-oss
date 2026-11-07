@@ -69,12 +69,16 @@ export function isExtensionPath(path: string, config: ExtensionConfig): boolean 
   return path === config.pathPrefix || path.startsWith(`${config.pathPrefix}/`);
 }
 
-// The URL parser has already resolved `.` and `..` segments, including
-// percent-encoded ones. Empty segments and encoded slashes or backslashes are
-// refused, since a server could read them as a different path from the one
-// checked here.
+// The URL parser has already resolved `.` and `..` segments. Only plain path
+// characters are forwarded: a percent-encoded character or an empty segment
+// could be read by the extension as a different path from the one checked
+// here, such as `%69nternal` for `internal`.
 function forwardablePath(pathname: string): string | null {
-  return /\/\/|%2f|%5c|\\/iu.test(pathname) ? null : pathname;
+  return /^(?:\/[A-Za-z0-9._~-]+)+\/?$/u.test(pathname) ? pathname : null;
+}
+
+function isInternalPath(path: string, config: ExtensionConfig): boolean {
+  return isExtensionPath(path.toLowerCase(), { ...config, pathPrefix: `${config.pathPrefix}/internal` });
 }
 
 export interface ExtensionProxyDependencies {
@@ -101,7 +105,7 @@ export function extensionProxy(
     if (!config || !isExtensionPath(url.pathname, config)) return next();
     const path = forwardablePath(url.pathname);
     // Its internal routes are reached only from inside the deployment.
-    if (!path || isExtensionPath(path, { ...config, pathPrefix: `${config.pathPrefix}/internal` })) {
+    if (!path || isInternalPath(path, config)) {
       return context.json({ error: "Not found" }, 404);
     }
 

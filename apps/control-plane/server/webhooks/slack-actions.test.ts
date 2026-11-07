@@ -133,16 +133,20 @@ describe("Slack actions", () => {
       response_url: "https://hooks.slack.com/actions/T123/B123/response-token",
       actions: [{ action_id: "example:helpful", value: "16161616-1616-4616-8616-161616161616" }],
     };
-    const response = await app.request("/api/webhooks/slack/actions", {
+    const body = new URLSearchParams({ payload: JSON.stringify(payload) }).toString();
+    const contentType = { "content-type": "application/x-www-form-urlencoded" };
+    const unsigned = await app.request("/api/webhooks/slack/actions", { method: "POST", body, headers: contentType });
+    expect(unsigned.status).toBe(401);
+    const forged = await app.request("/api/webhooks/slack/actions", {
       method: "POST",
-      body: new URLSearchParams({ payload: JSON.stringify(payload) }).toString(),
+      body,
       headers: {
-        "content-type": "application/x-www-form-urlencoded",
+        ...contentType,
         "x-slack-request-timestamp": Math.floor(Date.now() / 1_000).toString(),
         "x-slack-signature": "v0=0000000000000000000000000000000000000000000000000000000000000000",
       },
     });
-    expect(response.status).toBe(401);
+    expect(forged.status).toBe(401);
     expect(fetch).not.toHaveBeenCalled();
   });
 

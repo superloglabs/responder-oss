@@ -110,6 +110,9 @@ describe("extension proxy", () => {
       "/api/example/%2e%2e/example/internal/slack-interactions",
       "/api/example/%2Finternal/slack-interactions",
       "/api/example/a%5c..%5cinternal",
+      "/api/example/%69nternal/slack-interactions",
+      "/api/example/Internal/slack-interactions",
+      "/api/example/findings%3Fx",
     ]) {
       expect((await app.request(`http://localhost${path}`, { method: "POST" })).status, path).toBe(404);
     }
