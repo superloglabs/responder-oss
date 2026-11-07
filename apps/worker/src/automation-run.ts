@@ -1478,7 +1478,9 @@ export async function processAutomationRun(
                 ? "runtime_limit_exceeded"
                 : allowanceExhausted
                   ? "usage_limit_reached"
-                  : "execution_failed",
+                  : organizationRefusal
+                    ? "subscription_refused"
+                    : "execution_failed",
               failureMessage: message,
             }),
         leaseId: run.leaseId,

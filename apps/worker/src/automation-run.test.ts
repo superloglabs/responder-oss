@@ -2456,7 +2456,7 @@ describe("automation run processor", () => {
     });
   });
 
-  it("does not report a refusal the organization can fix to Sentry", async () => {
+  it("records a refusal the organization can fix apart from Responder failures", async () => {
     vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
     vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
     const deps = dependencies();
@@ -2471,7 +2471,7 @@ describe("automation run processor", () => {
 
     expect(deps.reportException).not.toHaveBeenCalled();
     expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({
-      failureCategory: "execution_failed",
+      failureCategory: "subscription_refused",
       failureMessage: refusal,
       status: "failed",
     }));
@@ -2504,6 +2504,7 @@ describe("automation run processor", () => {
 
     expect(deps.reportException).not.toHaveBeenCalled();
     expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({
+      failureCategory: "subscription_refused",
       failureMessage: refusal,
       status: "failed",
     }));
