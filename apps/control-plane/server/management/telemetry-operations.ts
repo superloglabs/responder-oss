@@ -1,4 +1,10 @@
 import { z } from "zod";
+import { agentEvents } from "../../../../packages/core/src/agent-events.js";
+import {
+  createLogWatch,
+  LogWatchLimitError,
+  maximumLogWatchesPerWorkspace,
+} from "../../../../packages/core/src/db/log-watches.js";
 import { organizationHasCapability } from "../../../../packages/core/src/db/organization-capabilities.js";
 import {
   getTelemetryClient,
@@ -136,6 +142,55 @@ async function read<T>(context: ManagementContext, query: (client: TelemetryClie
 }
 
 export const telemetryOperations = [
+  defineOperation({
+    name: "watch_logs",
+    summary: "Watch logs",
+    description:
+      `Watches the workspace's new logs that match the filters, from this conversation, for \`minutes\`. About every 30 seconds, new matches arrive as one batch with their count, the time window they are in, and the newest line. Logs are read about 30 seconds behind real time. Give at least one filter. A workspace can run ${maximumLogWatchesPerWorkspace} watches at once.`,
+    mcpOnly: true,
+    method: "POST",
+    path: "/telemetry/logs/watch",
+    tag: "Telemetry",
+    effect: "read",
+    input: z.object({
+      attributes: z
+        .array(attributeFilter)
+        .max(20)
+        .optional()
+        .describe("Exact matches on log record attributes, such as `event.name`."),
+      minutes: z.number().int().min(5).max(1_440).default(60).describe("How long to watch, from 5 minutes to 24 hours."),
+      resourceAttributes,
+      search: z.string().max(500).optional().describe("Case-insensitive text in the log body or event name."),
+      service,
+      severity: z.string().trim().max(40).optional().describe("A level such as `ERROR` or `WARN`."),
+    }),
+    output: z.object({ watch: z.object({ expiresAt: z.string(), id: z.uuid() }) }),
+    async run(context, input) {
+      await telemetryClient(context);
+      if (!agentEvents().wake.enabled) {
+        throw new ManagementError(503, "Watching logs is not available on this Superlog server.", "log_watch_unavailable");
+      }
+      const filters = {
+        ...(input.attributes?.length ? { attributes: input.attributes } : {}),
+        ...(input.resourceAttributes?.length ? { resourceAttributes: input.resourceAttributes } : {}),
+        ...(input.search ? { search: input.search } : {}),
+        ...(input.service ? { service: input.service } : {}),
+        ...(input.severity ? { severity: input.severity } : {}),
+      };
+      if (Object.keys(filters).length === 0) {
+        throw new ManagementError(400, "Give at least one filter: service, severity, search, or an attribute.", "filter_required");
+      }
+      try {
+        const watch = await createLogWatch({
+          filters, minutes: input.minutes, now: new Date(), organizationId: context.organizationId, userId: context.user.id,
+        });
+        return { watch: { expiresAt: watch.expiresAt.toISOString(), id: watch.id } };
+      } catch (error) {
+        if (error instanceof LogWatchLimitError) throw new ManagementError(409, error.message, "too_many_log_watches");
+        throw error;
+      }
+    },
+  }),
   defineOperation({
     name: "query_logs",
     summary: "Search logs",

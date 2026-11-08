@@ -10,6 +10,7 @@ export function wakingTools(events: AgentEvents) {
     start_integration_connection: [events.integrationConnected],
     watch_alert: [events.alertChanged],
     watch_error_issues: [events.errorIssueOpened],
+    watch_logs: [events.logsMatched],
     watch_synthetic_check: [events.syntheticCheckChanged],
   };
 }
@@ -61,6 +62,14 @@ export async function subscribeCaller(input: {
     case "watch_alert":
       await call.subscribe(events.alertChanged, { alert: String(nested(body, "alert").id) }, { once });
       return;
+    case "watch_logs": {
+      // The watch ID is new, so replaying finds only this watch's batches;
+      // the subscription lasts as long as the watch.
+      const watch = nested(body, "watch");
+      const minutes = Number(input.input.minutes ?? 60);
+      await call.subscribe(events.logsMatched, { watch: String(watch.id) }, { replay: "10m", ttl: `${minutes}m` });
+      return;
+    }
     case "watch_synthetic_check":
       await call.subscribe(events.syntheticCheckChanged, { check: String(nested(body, "check").id) }, { once });
       return;

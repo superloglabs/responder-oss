@@ -63,6 +63,19 @@ export function defineAgentEvents(wake: Wakeshift) {
       text: ({ name, reason, state }) =>
         state === "failing" ? `Synthetic check "${name}" is failing: ${reason ?? "the run failed"}.` : `Synthetic check "${name}" recovered.`,
     }),
+    logsMatched: wake.defineEvent("logs.matched", {
+      description: "New logs matched a log watch: their count, the time window they are in, and the newest line.",
+      args: z.object({ watch: z.string() }),
+      payload: z.object({
+        count: z.number().int(),
+        latest: z.object({ body: z.string(), service: z.string(), severity: z.string() }),
+        more: z.boolean().describe("More logs matched than count."),
+        since: z.string(),
+        until: z.string(),
+      }),
+      text: ({ count, latest, more }) =>
+        `${count}${more ? "+" : ""} new matching log${count === 1 && !more ? "" : "s"}; newest: ${latest.severity ? `${latest.severity} ` : ""}${latest.service}: ${latest.body}`,
+    }),
   };
 }
 
@@ -178,4 +191,59 @@ export function notifySyntheticCheckChanged(input: {
     { name: short(input.name), reason: input.reason ? short(input.reason) : null, state: input.state },
     { id: `synthetic-check-episode-${input.episodeId}-${input.state}` },
   ));
+}
+
+const logBodyLimit = 100;
+
+// Emits one batch of a log watch's matches. Unlike the other events, the
+// worker needs Wakeshift's answer: no matched subscription means nobody is
+// listening any more. Null when Wakeshift is off or the emit failed.
+export async function notifyLogsMatched(input: {
+  count: number;
+  latest: { body: string; service: string; severity: string };
+  more: boolean;
+  since: Date;
+  until: Date;
+  watchId: string;
+}): Promise<{ matched: number } | null> {
+  const events = agentEvents();
+  if (!events.wake.enabled) return null;
+  const body = input.latest.body.replace(/\s+/gu, " ").trim();
+  try {
+    const emitted = await events.logsMatched.emit(
+      { watch: input.watchId },
+      {
+        count: input.count,
+        latest: {
+          body: body.length > logBodyLimit ? `${body.slice(0, logBodyLimit - 1)}…` : body,
+          service: short(input.latest.service),
+          severity: input.latest.severity.slice(0, 20),
+        },
+        more: input.more,
+        since: input.since.toISOString(),
+        until: input.until.toISOString(),
+      },
+      { id: `log-watch-${input.watchId}-${input.until.getTime()}` },
+    );
+    return { matched: emitted.matched };
+  } catch (error) {
+    console.warn(JSON.stringify({
+      error: error instanceof Error ? error.name : typeof error,
+      event: "agent_event_emit_failed",
+      name: "logs.matched",
+    }));
+    return null;
+  }
+}
+
+// How many conversations still listen to a log watch. Null when Wakeshift is
+// off or could not answer.
+export async function logWatchSubscribers(watchId: string): Promise<number | null> {
+  const events = agentEvents();
+  if (!events.wake.enabled) return null;
+  try {
+    return (await events.logsMatched.status({ watch: watchId })).subscriptions;
+  } catch {
+    return null;
+  }
 }

@@ -110,6 +110,7 @@ import { defaultAlertAutomationDependencies, startAlertAutomations } from "./tel
 import { checkDueTelemetryAlerts, defaultTelemetryAlertDependencies } from "./telemetry-alerts.js";
 import { processErrorNotifications } from "./error-notifications.js";
 import { ingestErrorIssues } from "./error-issues.js";
+import { checkDueLogWatches } from "./log-watches.js";
 import { purgeSourceMaps } from "@responder/core/db/source-maps";
 import { defaultErrorIssueAutomationDependencies, startErrorIssueAutomations } from "./error-issue-automations.js";
 import {
@@ -177,6 +178,7 @@ const pollers: {
   sourceMapPurge?: NodeJS.Timeout;
   syntheticChecks?: NodeJS.Timeout;
   telemetryAlerts?: NodeJS.Timeout;
+  logWatches?: NodeJS.Timeout;
 } = {};
 
 let telemetryAlertPass: Promise<void> | undefined;
@@ -221,6 +223,20 @@ function purgeSyntheticChecks(): void {
   purgeSyntheticCheckRuns().catch((error: unknown) => {
     void reportWorkerException(error, { operation: "synthetic_checks" });
   });
+}
+
+// Runs at most one log watch pass at a time; a slow pass delays the next.
+let logWatchPass: Promise<void> | undefined;
+function checkLogWatches(): Promise<void> {
+  logWatchPass ??= checkDueLogWatches()
+    .then(() => undefined)
+    .catch((error: unknown) => {
+      void reportWorkerException(error, { operation: "log_watches" });
+    })
+    .finally(() => {
+      logWatchPass = undefined;
+    });
+  return logWatchPass;
 }
 
 // Runs at most one alert pass at a time; a slow pass delays the next.
@@ -1321,6 +1337,8 @@ pollers.remediationRecovery = setInterval(
 pollers.remediationRecovery.unref();
 pollers.telemetryAlerts = setInterval(() => void checkTelemetryAlerts(), 15_000);
 pollers.telemetryAlerts.unref();
+pollers.logWatches = setInterval(() => void checkLogWatches(), 10_000);
+pollers.logWatches.unref();
 pollers.errorIssues = setInterval(() => void groupErrorIssues(), 10_000);
 pollers.errorIssues.unref();
 pollers.syntheticChecks = setInterval(runSyntheticChecks, 5_000);

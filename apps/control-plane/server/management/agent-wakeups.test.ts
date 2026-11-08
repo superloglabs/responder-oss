@@ -12,6 +12,7 @@ const alertId = "61616161-6161-4161-8161-616161616161";
 const token = `slk_${"a".repeat(43)}`;
 
 const mocks = vi.hoisted(() => ({
+  createLogWatch: vi.fn(),
   findAlert: vi.fn(),
   getAutomation: vi.fn(),
   queueFollowUp: vi.fn(),
@@ -42,6 +43,10 @@ vi.mock("../../../../packages/core/src/db/automations.js", async (importOriginal
 vi.mock("../../../../packages/core/src/db/telemetry-alerts.js", async (importOriginal) => ({
   ...(await importOriginal()),
   findTelemetryAlert: mocks.findAlert,
+}));
+vi.mock("../../../../packages/core/src/db/log-watches.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  createLogWatch: mocks.createLogWatch,
 }));
 vi.mock("../../../../packages/core/src/telemetry/client.js", () => ({
   getTelemetryClient: vi.fn().mockReturnValue({}),
@@ -192,5 +197,32 @@ describe("agent wakeups", () => {
       event: "error_issue.opened",
       once: false,
     })]);
+  });
+
+  it("starts a log watch and subscribes its conversation for as long as it runs", async () => {
+    const watchId = "a1a1a1a1-a1a1-41a1-81a1-a1a1a1a1a1a1";
+    mocks.createLogWatch.mockResolvedValue({ expiresAt: new Date("2026-11-08T13:00:00.000Z"), id: watchId });
+
+    const result = await callTool("watch_logs", { minutes: 30, service: "checkout", severity: "ERROR" });
+
+    expect(JSON.parse(result.content[0]!.text)).toEqual({ watch: { expiresAt: "2026-11-08T13:00:00.000Z", id: watchId } });
+    expect(mocks.createLogWatch).toHaveBeenCalledWith(expect.objectContaining({
+      filters: { service: "checkout", severity: "ERROR" }, minutes: 30, organizationId, userId,
+    }));
+    expect(wake.subscriptions).toEqual([expect.objectContaining({
+      args: { watch: watchId }, event: "logs.matched", once: false, ttl: 1_800,
+    })]);
+  });
+
+  it("refuses a log watch without filters, or past the workspace's limit", async () => {
+    const unfiltered = await callTool("watch_logs", {});
+    expect(JSON.parse(unfiltered.content[0]!.text)).toMatchObject({ code: "filter_required" });
+
+    const { LogWatchLimitError } = await import("../../../../packages/core/src/db/log-watches.js");
+    mocks.createLogWatch.mockRejectedValue(new LogWatchLimitError());
+    const full = await callTool("watch_logs", { search: "timeout" });
+    expect(full.isError).toBe(true);
+    expect(JSON.parse(full.content[0]!.text)).toMatchObject({ code: "too_many_log_watches" });
+    expect(wake.subscriptions).toEqual([]);
   });
 });

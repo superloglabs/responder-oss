@@ -26,6 +26,7 @@ export interface WorkerErrorContext {
     | "slack_delivery"
     | "synthetic_checks"
     | "telemetry_alerts"
+    | "log_watches"
     | "worker";
   investigationId?: string;
   jobId?: string;

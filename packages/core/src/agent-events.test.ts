@@ -3,6 +3,8 @@ import { createTestClient, type TestClient } from "@wakeshift/sdk/testing";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   defineAgentEvents,
+  logWatchSubscribers,
+  notifyLogsMatched,
   notifyAlertChanged,
   notifyAutomationRunFinished,
   notifyErrorIssueOpened,
@@ -103,5 +105,34 @@ describe("agent events", () => {
     await expect(notifyAutomationRunFinished({ completedAt: new Date(), runId, status: "succeeded" })).resolves.toBeUndefined();
 
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("agent_event_emit_failed"));
+  });
+
+  it("emits a log watch's batch with a short newest line, and reports who it reached", async () => {
+    const watchId = "a1a1a1a1-a1a1-41a1-81a1-a1a1a1a1a1a1";
+    const since = new Date("2026-11-08T11:59:00.000Z");
+    const until = new Date("2026-11-08T11:59:30.000Z");
+
+    const result = await notifyLogsMatched({
+      count: 20,
+      latest: { body: `payment\n  failed ${"x".repeat(300)}`, service: "checkout", severity: "ERROR" },
+      more: true,
+      since,
+      until,
+      watchId,
+    });
+
+    expect(result).toEqual({ matched: 0 });
+    const [emit] = wake.emits;
+    expect(emit).toMatchObject({
+      args: { watch: watchId },
+      event: "logs.matched",
+      id: `log-watch-${watchId}-${until.getTime()}`,
+      payload: { count: 20, more: true, since: since.toISOString(), until: until.toISOString() },
+    });
+    const body = (emit!.payload as { latest: { body: string } }).latest.body;
+    expect(body).toHaveLength(100);
+    expect(body.startsWith("payment failed x")).toBe(true);
+    expect(emit!.text).toMatch(/^20\+ new matching logs; newest: ERROR checkout: payment failed x+…$/u);
+    expect(await logWatchSubscribers(watchId)).toBe(0);
   });
 });
