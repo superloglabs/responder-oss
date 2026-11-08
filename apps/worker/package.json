@@ -7,6 +7,9 @@
   "engines": {
     "node": ">=24"
   },
+  "exports": {
+    "./context-servers": "./src/context-servers.ts"
+  },
   "scripts": {
     "sandbox:snapshot": "node --import tsx src/build-sandbox-snapshot.ts",
     "start": "node --import tsx src/index.ts",

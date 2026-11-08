@@ -1440,19 +1440,9 @@ export interface RuntimeVercelConnection {
 }
 
 export async function getRuntimeVercelConnections(
-  versionId: string,
+  scope: ContextScope,
 ): Promise<RuntimeVercelConnection[]> {
-  const configRows = await getDatabase()
-    .select({
-      contextAccountIds: agentConfigVersions.contextAccountIds,
-      contextResourceIds: agentConfigVersions.contextResourceIds,
-      organizationId: agents.organizationId,
-    })
-    .from(agentConfigVersions)
-    .innerJoin(agents, eq(agents.id, agentConfigVersions.agentId))
-    .where(eq(agentConfigVersions.id, versionId))
-    .limit(1);
-  const config = configRows[0];
+  const config = await contextConfig(scope);
   if (!config?.contextAccountIds.length || !config.contextResourceIds.length) {
     return [];
   }
@@ -1658,6 +1648,88 @@ export class ContextConnectionUnavailableError extends Error {
   }
 }
 
+
+// Whose connections a loader reads: an automation's configured context, by
+// its config version ID, or every connected account and available resource
+// in a workspace, for a reader that is not an automation.
+export type ContextScope = string | { organizationId: string };
+
+type ContextConfig = {
+  organizationId: string;
+  contextAccountIds: string[];
+  contextResourceIds: string[];
+} & (
+  | {
+      trigger: (typeof agentConfigVersions.$inferSelect)["trigger"];
+      triggerConfig: (typeof agentConfigVersions.$inferSelect)["triggerConfig"];
+    }
+  | { trigger: null; triggerConfig: null }
+);
+
+// Names the scope in logs and errors.
+export function contextScopeId(scope: ContextScope): string {
+  return typeof scope === "string" ? scope : `workspace:${scope.organizationId}`;
+}
+
+// A workspace's accounts and resources are read once per scope object, so
+// loading every provider for one reader does not repeat the same queries.
+const workspaceConfigs = new WeakMap<object, Promise<ContextConfig>>();
+
+async function contextConfig(scope: ContextScope): Promise<ContextConfig | undefined> {
+  if (typeof scope !== "string") {
+    let config = workspaceConfigs.get(scope);
+    if (!config) {
+      config = workspaceConfig(scope.organizationId);
+      workspaceConfigs.set(scope, config);
+      // A failed read is not kept, so the next load tries again.
+      config.catch(() => workspaceConfigs.delete(scope));
+    }
+    return config;
+  }
+  const [config] = await getDatabase()
+    .select({
+      contextAccountIds: agentConfigVersions.contextAccountIds,
+      contextResourceIds: agentConfigVersions.contextResourceIds,
+      organizationId: agents.organizationId,
+      trigger: agentConfigVersions.trigger,
+      triggerConfig: agentConfigVersions.triggerConfig,
+    })
+    .from(agentConfigVersions)
+    .innerJoin(agents, eq(agents.id, agentConfigVersions.agentId))
+    .where(eq(agentConfigVersions.id, scope))
+    .limit(1);
+  return config;
+}
+
+async function workspaceConfig(organizationId: string): Promise<ContextConfig> {
+  const database = getDatabase();
+  const [accounts, resources] = await Promise.all([
+    database
+      .select({ id: integrationAccounts.id })
+      .from(integrationAccounts)
+      .where(and(
+        eq(integrationAccounts.organizationId, organizationId),
+        eq(integrationAccounts.status, "connected"),
+      )),
+    database
+      .select({ id: integrationResources.id })
+      .from(integrationResources)
+      .innerJoin(integrationAccounts, eq(integrationAccounts.id, integrationResources.integrationAccountId))
+      .where(and(
+        eq(integrationAccounts.organizationId, organizationId),
+        eq(integrationAccounts.status, "connected"),
+        eq(integrationResources.available, true),
+      )),
+  ]);
+  return {
+    organizationId,
+    contextAccountIds: accounts.map((account) => account.id),
+    contextResourceIds: resources.map((resource) => resource.id),
+    trigger: null,
+    triggerConfig: null,
+  };
+}
+
 export interface ContextConnectionLoadOptions {
   onUnavailable?: (error: ContextConnectionUnavailableError) => void;
 }
@@ -1731,18 +1803,9 @@ export interface RuntimeAwsConnection {
 }
 
 export async function getRuntimeAwsConnections(
-  versionId: string,
+  scope: ContextScope,
 ): Promise<RuntimeAwsConnection[]> {
-  const configRows = await getDatabase()
-    .select({
-      contextAccountIds: agentConfigVersions.contextAccountIds,
-      organizationId: agents.organizationId,
-    })
-    .from(agentConfigVersions)
-    .innerJoin(agents, eq(agents.id, agentConfigVersions.agentId))
-    .where(eq(agentConfigVersions.id, versionId))
-    .limit(1);
-  const config = configRows[0];
+  const config = await contextConfig(scope);
   if (!config?.contextAccountIds.length) return [];
 
   const accountRows = await getDatabase()
@@ -1788,18 +1851,9 @@ export interface RuntimeGcpConnection {
 }
 
 export async function getRuntimeGcpConnections(
-  versionId: string,
+  scope: ContextScope,
 ): Promise<RuntimeGcpConnection[]> {
-  const configRows = await getDatabase()
-    .select({
-      contextAccountIds: agentConfigVersions.contextAccountIds,
-      organizationId: agents.organizationId,
-    })
-    .from(agentConfigVersions)
-    .innerJoin(agents, eq(agents.id, agentConfigVersions.agentId))
-    .where(eq(agentConfigVersions.id, versionId))
-    .limit(1);
-  const config = configRows[0];
+  const config = await contextConfig(scope);
   if (!config?.contextAccountIds.length) return [];
 
   const accountRows = await getDatabase()
@@ -1858,20 +1912,12 @@ function mcpOAuthRedirectUrl(
 }
 
 async function getRuntimeMcpConnections(
-  versionId: string,
+  scope: ContextScope,
   provider: "axiom" | "custom_mcp" | "linear",
   options: ContextConnectionLoadOptions & { selectedAccountId?: string } = {},
 ): Promise<RuntimeCustomMcpConnection[]> {
-  const configRows = await getDatabase()
-    .select({
-      contextAccountIds: agentConfigVersions.contextAccountIds,
-      organizationId: agents.organizationId,
-    })
-    .from(agentConfigVersions)
-    .innerJoin(agents, eq(agents.id, agentConfigVersions.agentId))
-    .where(eq(agentConfigVersions.id, versionId))
-    .limit(1);
-  const config = configRows[0];
+  const versionId = contextScopeId(scope);
+  const config = await contextConfig(scope);
   if (!config?.contextAccountIds.length) return [];
 
   const accountRows = await getDatabase()
@@ -2123,28 +2169,18 @@ async function getRuntimeMcpConnections(
 }
 
 export function getRuntimeCustomMcpConnections(
-  versionId: string,
+  versionId: ContextScope,
   options: ContextConnectionLoadOptions = {},
 ): Promise<RuntimeCustomMcpConnection[]> {
   return getRuntimeMcpConnections(versionId, "custom_mcp", options);
 }
 
 export async function getRuntimeDash0Connections(
-  versionId: string,
+  scope: ContextScope,
   options: ContextConnectionLoadOptions = {},
 ): Promise<RuntimeDash0Connection[]> {
-  const configRows = await getDatabase()
-    .select({
-      contextAccountIds: agentConfigVersions.contextAccountIds,
-      organizationId: agents.organizationId,
-      trigger: agentConfigVersions.trigger,
-      triggerConfig: agentConfigVersions.triggerConfig,
-    })
-    .from(agentConfigVersions)
-    .innerJoin(agents, eq(agents.id, agentConfigVersions.agentId))
-    .where(eq(agentConfigVersions.id, versionId))
-    .limit(1);
-  const config = configRows[0];
+  const versionId = contextScopeId(scope);
+  const config = await contextConfig(scope);
   if (!config) return [];
   const triggerAccountId =
     config.trigger === "dash0_alert"
@@ -2224,21 +2260,11 @@ export async function getRuntimeDash0Connections(
 }
 
 export async function getRuntimePostHogConnections(
-  versionId: string,
+  scope: ContextScope,
   options: ContextConnectionLoadOptions = {},
 ): Promise<RuntimePostHogConnection[]> {
-  const configRows = await getDatabase()
-    .select({
-      contextAccountIds: agentConfigVersions.contextAccountIds,
-      organizationId: agents.organizationId,
-      trigger: agentConfigVersions.trigger,
-      triggerConfig: agentConfigVersions.triggerConfig,
-    })
-    .from(agentConfigVersions)
-    .innerJoin(agents, eq(agents.id, agentConfigVersions.agentId))
-    .where(eq(agentConfigVersions.id, versionId))
-    .limit(1);
-  const config = configRows[0];
+  const versionId = contextScopeId(scope);
+  const config = await contextConfig(scope);
   if (!config) return [];
   const accountIds = [...new Set(config.contextAccountIds)];
   if (accountIds.length === 0) return [];
@@ -2310,19 +2336,11 @@ export async function getRuntimePostHogConnections(
 }
 
 export async function getRuntimeCloudflareConnections(
-  versionId: string,
+  scope: ContextScope,
   options: ContextConnectionLoadOptions = {},
 ): Promise<RuntimeCloudflareConnection[]> {
-  const configRows = await getDatabase()
-    .select({
-      contextAccountIds: agentConfigVersions.contextAccountIds,
-      organizationId: agents.organizationId,
-    })
-    .from(agentConfigVersions)
-    .innerJoin(agents, eq(agents.id, agentConfigVersions.agentId))
-    .where(eq(agentConfigVersions.id, versionId))
-    .limit(1);
-  const config = configRows[0];
+  const versionId = contextScopeId(scope);
+  const config = await contextConfig(scope);
   if (!config) return [];
   const accountIds = [...new Set(config.contextAccountIds)];
   if (accountIds.length === 0) return [];
@@ -2402,19 +2420,11 @@ export async function getRuntimeCloudflareConnections(
 }
 
 export async function getRuntimeRailwayConnections(
-  versionId: string,
+  scope: ContextScope,
   options: ContextConnectionLoadOptions = {},
 ): Promise<RuntimeRailwayConnection[]> {
-  const configRows = await getDatabase()
-    .select({
-      contextAccountIds: agentConfigVersions.contextAccountIds,
-      organizationId: agents.organizationId,
-    })
-    .from(agentConfigVersions)
-    .innerJoin(agents, eq(agents.id, agentConfigVersions.agentId))
-    .where(eq(agentConfigVersions.id, versionId))
-    .limit(1);
-  const config = configRows[0];
+  const versionId = contextScopeId(scope);
+  const config = await contextConfig(scope);
   if (!config) return [];
   const accountIds = [...new Set(config.contextAccountIds)];
   if (accountIds.length === 0) return [];
@@ -2495,7 +2505,7 @@ export async function getRuntimeRailwayConnections(
 }
 
 export async function getRuntimeLinearConnection(
-  versionId: string,
+  versionId: ContextScope,
   accountId?: string,
   options: ContextConnectionLoadOptions = {},
 ): Promise<RuntimeCustomMcpConnection | null> {
@@ -2751,21 +2761,11 @@ export async function freshSentryCredentials(input: {
 }
 
 export async function getRuntimeSentryConnection(
-  versionId: string,
+  scope: ContextScope,
   investigationInput?: InvestigationInput,
 ): Promise<RuntimeSentryConnection | null> {
-  const configRows = await getDatabase()
-    .select({
-      contextAccountIds: agentConfigVersions.contextAccountIds,
-      organizationId: agents.organizationId,
-      trigger: agentConfigVersions.trigger,
-      triggerConfig: agentConfigVersions.triggerConfig,
-    })
-    .from(agentConfigVersions)
-    .innerJoin(agents, eq(agents.id, agentConfigVersions.agentId))
-    .where(eq(agentConfigVersions.id, versionId))
-    .limit(1);
-  const config = configRows[0];
+  const versionId = contextScopeId(scope);
+  const config = await contextConfig(scope);
   if (!config) return null;
 
   const sentryTrigger =
@@ -2864,18 +2864,9 @@ export async function getRuntimeSentryConnection(
 }
 
 export async function getRuntimeDatadogConnection(
-  versionId: string,
+  scope: ContextScope,
 ): Promise<RuntimeDatadogConnection | null> {
-  const configRows = await getDatabase()
-    .select({
-      contextAccountIds: agentConfigVersions.contextAccountIds,
-      organizationId: agents.organizationId,
-    })
-    .from(agentConfigVersions)
-    .innerJoin(agents, eq(agents.id, agentConfigVersions.agentId))
-    .where(eq(agentConfigVersions.id, versionId))
-    .limit(1);
-  const config = configRows[0];
+  const config = await contextConfig(scope);
   if (!config?.contextAccountIds.length) return null;
 
   const accountRows = await getDatabase()
@@ -2995,7 +2986,7 @@ export async function getRuntimeDatadogConnection(
 }
 
 export async function getRuntimeAxiomConnection(
-  versionId: string,
+  versionId: ContextScope,
   options: ContextConnectionLoadOptions = {},
 ): Promise<RuntimeAxiomConnection | null> {
   const [connection] = await getRuntimeMcpConnections(versionId, "axiom", options);
@@ -3005,18 +2996,9 @@ export async function getRuntimeAxiomConnection(
 }
 
 export async function getRuntimeUpstashConnection(
-  versionId: string,
+  scope: ContextScope,
 ): Promise<RuntimeUpstashConnection | null> {
-  const configRows = await getDatabase()
-    .select({
-      contextAccountIds: agentConfigVersions.contextAccountIds,
-      organizationId: agents.organizationId,
-    })
-    .from(agentConfigVersions)
-    .innerJoin(agents, eq(agents.id, agentConfigVersions.agentId))
-    .where(eq(agentConfigVersions.id, versionId))
-    .limit(1);
-  const config = configRows[0];
+  const config = await contextConfig(scope);
   if (!config?.contextAccountIds.length) return null;
 
   const accountRows = await getDatabase()
@@ -3050,19 +3032,11 @@ export async function getRuntimeUpstashConnection(
 }
 
 export async function getRuntimeGrafanaConnections(
-  versionId: string,
+  scope: ContextScope,
   options: ContextConnectionLoadOptions = {},
 ): Promise<RuntimeGrafanaConnection[]> {
-  const configRows = await getDatabase()
-    .select({
-      contextAccountIds: agentConfigVersions.contextAccountIds,
-      organizationId: agents.organizationId,
-    })
-    .from(agentConfigVersions)
-    .innerJoin(agents, eq(agents.id, agentConfigVersions.agentId))
-    .where(eq(agentConfigVersions.id, versionId))
-    .limit(1);
-  const config = configRows[0];
+  const versionId = contextScopeId(scope);
+  const config = await contextConfig(scope);
   if (!config?.contextAccountIds.length) return [];
 
   const accountRows = await getDatabase()
@@ -3141,18 +3115,9 @@ export async function getRuntimeGrafanaConnections(
 }
 
 export async function getRuntimeLangfuseConnections(
-  versionId: string,
+  scope: ContextScope,
 ): Promise<RuntimeLangfuseConnection[]> {
-  const configRows = await getDatabase()
-    .select({
-      contextAccountIds: agentConfigVersions.contextAccountIds,
-      organizationId: agents.organizationId,
-    })
-    .from(agentConfigVersions)
-    .innerJoin(agents, eq(agents.id, agentConfigVersions.agentId))
-    .where(eq(agentConfigVersions.id, versionId))
-    .limit(1);
-  const config = configRows[0];
+  const config = await contextConfig(scope);
   if (!config?.contextAccountIds.length) return [];
 
   const accountRows = await getDatabase()
@@ -3191,19 +3156,11 @@ export async function getRuntimeLangfuseConnections(
 }
 
 export async function getRuntimeSupabaseConnections(
-  versionId: string,
+  scope: ContextScope,
   options: ContextConnectionLoadOptions = {},
 ): Promise<RuntimeSupabaseConnection[]> {
-  const configRows = await getDatabase()
-    .select({
-      contextAccountIds: agentConfigVersions.contextAccountIds,
-      organizationId: agents.organizationId,
-    })
-    .from(agentConfigVersions)
-    .innerJoin(agents, eq(agents.id, agentConfigVersions.agentId))
-    .where(eq(agentConfigVersions.id, versionId))
-    .limit(1);
-  const config = configRows[0];
+  const versionId = contextScopeId(scope);
+  const config = await contextConfig(scope);
   if (!config?.contextAccountIds.length) return [];
 
   const accountRows = await getDatabase()
@@ -3272,18 +3229,10 @@ export async function getRuntimeSupabaseConnections(
 }
 
 export async function getRuntimeSlackConnection(
-  versionId: string,
+  scope: ContextScope,
 ): Promise<RuntimeSlackConnection | null> {
-  const configRows = await getDatabase()
-    .select({
-      contextResourceIds: agentConfigVersions.contextResourceIds,
-      organizationId: agents.organizationId,
-    })
-    .from(agentConfigVersions)
-    .innerJoin(agents, eq(agents.id, agentConfigVersions.agentId))
-    .where(eq(agentConfigVersions.id, versionId))
-    .limit(1);
-  const config = configRows[0];
+  const versionId = contextScopeId(scope);
+  const config = await contextConfig(scope);
   if (!config?.contextResourceIds.length) return null;
 
   const resourceRows = await getDatabase()
@@ -3367,18 +3316,9 @@ export async function getRuntimeSlackConnection(
 }
 
 export async function getRuntimeClickStackConnection(
-  versionId: string,
+  scope: ContextScope,
 ): Promise<RuntimeClickStackConnection | null> {
-  const configRows = await getDatabase()
-    .select({
-      contextAccountIds: agentConfigVersions.contextAccountIds,
-      organizationId: agents.organizationId,
-    })
-    .from(agentConfigVersions)
-    .innerJoin(agents, eq(agents.id, agentConfigVersions.agentId))
-    .where(eq(agentConfigVersions.id, versionId))
-    .limit(1);
-  const config = configRows[0];
+  const config = await contextConfig(scope);
   if (!config?.contextAccountIds.length) return null;
 
   const accountRows = await getDatabase()

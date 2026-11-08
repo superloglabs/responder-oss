@@ -1,3 +1,4 @@
+import { PgDialect } from "drizzle-orm/pg-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { encryptCredentials } from "../credentials/encryption.js";
 import { getDatabase } from "./client.js";
@@ -107,6 +108,59 @@ describe("custom MCP runtime connections", () => {
       { accessToken: "billing-token", accountId: "account-oauth", allowedTools: ["get_invoice"] },
       { accessToken: "search-token", accountId: "account-open", allowedTools: null },
     ]);
+  });
+});
+
+describe("workspace runtime connections", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it("loads every connected account in the workspace", async () => {
+    vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 4).toString("base64"));
+    const accountsQuery = {
+      from: vi.fn(),
+      where: vi.fn().mockResolvedValue([{ id: "account-orders" }, { id: "account-billing" }, { id: "account-slack" }]),
+    };
+    accountsQuery.from.mockReturnValue(accountsQuery);
+    const resourcesQuery = { from: vi.fn(), innerJoin: vi.fn(), where: vi.fn().mockResolvedValue([{ id: "resource-1" }]) };
+    resourcesQuery.from.mockReturnValue(resourcesQuery);
+    resourcesQuery.innerJoin.mockReturnValue(resourcesQuery);
+    const accountQuery = {
+      from: vi.fn(),
+      where: vi.fn().mockResolvedValue(["orders", "billing"].map((name) => ({
+        displayName: `${name} API`,
+        encryptedCredentials: encryptCredentials({
+          apiToken: `${name}-token`,
+          authType: "api_token",
+          mcpUrl: `https://mcp.example.com/${name}`,
+        }),
+        id: `account-${name}`,
+        metadata: {},
+      }))),
+    };
+    accountQuery.from.mockReturnValue(accountQuery);
+    const select = vi.fn()
+      .mockReturnValueOnce(accountsQuery)
+      .mockReturnValueOnce(resourcesQuery)
+      .mockReturnValue(accountQuery);
+    vi.mocked(getDatabase).mockReturnValue({ select } as never);
+    vi.spyOn(console, "info").mockImplementation(() => {});
+
+    const scope = { organizationId: "organization-1" };
+    const connections = await getRuntimeCustomMcpConnections(scope);
+    expect(connections.map((connection) => connection.accountId)).toEqual(["account-orders", "account-billing"]);
+    // The provider query is limited to the workspace's connected accounts.
+    const { params } = new PgDialect().sqlToQuery(accountQuery.where.mock.calls[0]![0]);
+    expect(params).toEqual(expect.arrayContaining(["organization-1", "account-orders", "account-billing", "account-slack"]));
+    // No automation config is read for a workspace.
+    expect(accountsQuery.where).toHaveBeenCalledTimes(1);
+
+    // A second loader with the same scope reuses the workspace's accounts.
+    await getRuntimeCustomMcpConnections(scope);
+    expect(accountsQuery.where).toHaveBeenCalledTimes(1);
+    expect(resourcesQuery.where).toHaveBeenCalledTimes(1);
   });
 });
 
