@@ -76,7 +76,9 @@ import {
 } from "./repositories.js";
 import {
   discoverRepositoryAgentDocs,
+  forgetRepositorySkills,
   loadRepositorySkills,
+  repositorySkillsPath,
 } from "./repository-skills.js";
 import { createRepositoryInspectionTools } from "./repository-inspection.js";
 import {
@@ -1094,6 +1096,7 @@ export async function runInvestigationAgent(
     }
     const agentDocs = await discoverRepositoryAgentDocs(session, repositories);
     const repositorySkills = await loadRepositorySkills(session, agentDocs.skills);
+    forgetRepositorySkills(session);
     await materializeWorkspaceMemories(session, workspaceMemories);
     const repositoryInstructions = agentDocs.instructions.map(
       (instruction) => `${instruction.repository}: ${instruction.path}`,
@@ -1279,7 +1282,9 @@ export async function runInvestigationAgent(
       instructions,
       capabilities: [
         ...investigationCapabilities(replay),
-        ...(repositorySkills ? [skills({ from: repositorySkills })] : []),
+        ...(repositorySkills
+          ? [skills({ from: repositorySkills, skillsPath: repositorySkillsPath })]
+          : []),
       ],
       // MCP servers are tenant-configurable and may expose the same generic
       // tool names (for example, `search` or `execute`). Prefix each tool

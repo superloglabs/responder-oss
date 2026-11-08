@@ -1,8 +1,11 @@
 import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
+import { dir, file, Manifest, skills } from "@openai/agents/sandbox";
 import { describe, expect, it, vi } from "vitest";
 import {
   discoverRepositoryAgentDocs,
+  forgetRepositorySkills,
   loadRepositorySkills,
+  repositorySkillsPath,
   repositoryAgentDocsInstructions,
   type RepositorySkill,
 } from "./repository-skills.js";
@@ -159,5 +162,33 @@ describe("repository skill loading", () => {
     ).rejects.toThrow(
         `Unable to read repository skill file ${repository.path}/.agents/skills/example/SKILL.md: permission denied`,
       );
+  });
+});
+
+describe("repository skills on a resumed thread session", () => {
+  it("lets the skills capability add its folder again on the next turn", () => {
+    const capability = () =>
+      skills({
+        from: dir({ children: { example: dir({ children: {} }) } }),
+        skillsPath: repositorySkillsPath,
+      });
+    // The first turn's capability lists its folder in the saved manifest.
+    const manifest = capability().processManifest(
+      new Manifest({
+        entries: { ".responder/memory/MEMORY.md": file({ content: "notes" }) },
+      }),
+    );
+    const session = { state: { manifest } } as unknown as DaytonaSandboxSession;
+    expect(() => capability().processManifest(manifest)).toThrow(
+      "skills path overlaps existing manifest entries: .agents",
+    );
+
+    forgetRepositorySkills(session);
+
+    const next = capability().processManifest(session.state.manifest);
+    expect(Object.keys(next.entries).sort()).toEqual([
+      ".agents",
+      ".responder/memory/MEMORY.md",
+    ]);
   });
 });

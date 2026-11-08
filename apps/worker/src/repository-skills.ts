@@ -238,6 +238,25 @@ async function readDirectoryEntry(
   return dir({ children });
 }
 
+// The skills capability's folder in the sandbox workspace, the SDK default.
+export const repositorySkillsPath = ".agents";
+
+// The skills capability adds its folder to the session's manifest, and a
+// thread saves that manifest with the session. On the thread's next turn the
+// capability refuses to add a folder that is already listed, so the resumed
+// session forgets it first and gets this turn's skills again.
+export function forgetRepositorySkills(session: SandboxSession): void {
+  const entries = session.state.manifest.entries;
+  for (const path of Object.keys(entries)) {
+    if (
+      path === repositorySkillsPath ||
+      path.startsWith(`${repositorySkillsPath}/`)
+    ) {
+      delete entries[path];
+    }
+  }
+}
+
 // Copies the discovered skills for an investigation agent's skills capability.
 export async function loadRepositorySkills(
   session: SandboxSession,
