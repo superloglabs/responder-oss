@@ -820,6 +820,13 @@
       "when": 1794162301872,
       "tag": "0116_sandbox_install_dependencies",
       "breakpoints": true
+    },
+    {
+      "idx": 117,
+      "version": "7",
+      "when": 1794171552814,
+      "tag": "0117_log_watches",
+      "breakpoints": true
     }
   ]
 }

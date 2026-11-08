@@ -1,4 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
+import { createTestClient } from "@wakeshift/sdk/testing";
+import { defineAgentEvents, setAgentEvents } from "@responder/core/agent-events";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DueTelemetryAlert, OpenTelemetryAlertEpisode } from "@responder/core/db/telemetry-alerts";
 import { checkDueTelemetryAlerts, checkTelemetryAlert, type TelemetryAlertDependencies } from "./telemetry-alerts.js";
 
@@ -323,5 +325,52 @@ describe("alert graph delivery", () => {
     await checkTelemetryAlert(alert, {} as never, deps);
     await checkTelemetryAlert({ ...alert, notificationsPaused: true }, {} as never, deps);
     expect(deps.renderChart).not.toHaveBeenCalled();
+  });
+});
+
+describe("agents watching an alert", () => {
+  afterEach(() => setAgentEvents(undefined));
+
+  function watching() {
+    const wake = createTestClient();
+    setAgentEvents(defineAgentEvents(wake));
+    return wake;
+  }
+
+  it("hears when it fires and when it recovers", async () => {
+    const wake = watching();
+    await checkTelemetryAlert(alert, {} as never, dependencies());
+    await checkTelemetryAlert(alert, {} as never, dependencies({
+      openEpisodes: vi.fn(async () => [episode()]),
+      values: vi.fn(async () => [{ group: "", value: 4 }]),
+    }));
+
+    await vi.waitFor(() => expect(wake.emits).toHaveLength(2));
+    expect(wake.emits.map(({ args, id, payload }) => ({ args, id, payload }))).toEqual([
+      { args: { alert: "alert-1" }, id: "alert-episode-episode-1-firing", payload: { group: "", name: "Checkout errors", state: "firing", value: 25 } },
+      { args: { alert: "alert-1" }, id: "alert-episode-episode-1-resolved", payload: { group: "", name: "Checkout errors", state: "resolved", value: 4 } },
+    ]);
+  });
+
+  it("hears no recovery of an episode that opened while notifications were paused", async () => {
+    const wake = watching();
+    await checkTelemetryAlert(alert, {} as never, dependencies({
+      openEpisodes: vi.fn(async () => [episode({ notificationsPaused: true })]),
+      values: vi.fn(async () => [{ group: "", value: 4 }]),
+    }));
+
+    await wake.close();
+    expect(wake.emits).toEqual([]);
+  });
+
+  it("hears nothing while the workspace's notifications are paused", async () => {
+    const wake = watching();
+    await checkTelemetryAlert({ ...alert, notificationsPaused: true }, {} as never, dependencies());
+    await checkTelemetryAlert(alert, {} as never, dependencies({
+      openEpisode: vi.fn(async () => episode({ notificationsPaused: true, slackMessageTs: null })),
+    }));
+
+    await wake.close();
+    expect(wake.emits).toEqual([]);
   });
 });

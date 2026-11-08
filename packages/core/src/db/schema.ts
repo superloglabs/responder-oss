@@ -1005,6 +1005,14 @@ export const aiModelPriceOverrides = pgTable(
 );
 
 // A threshold rule on the workspace's telemetry.
+export type LogWatchFilters = {
+  attributes?: { key: string; value: string }[];
+  resourceAttributes?: { key: string; op?: "eq" | "neq" | "not_contains"; value: string }[];
+  search?: string;
+  service?: string;
+  severity?: string;
+};
+
 export const telemetryAlerts = pgTable(
   "telemetry_alerts",
   {
@@ -1047,6 +1055,37 @@ export const telemetryAlerts = pgTable(
   (table) => [
     index("telemetry_alerts_organization_idx").on(table.organizationId),
     index("telemetry_alerts_due_idx").on(table.lastEvaluatedAt).where(sql`${table.enabled}`),
+  ],
+);
+
+// A live tail an agent started over MCP: the worker reads the workspace's new
+// logs that match the filters and wakes the agent's conversation through
+// Wakeshift. Logs up to checkedThrough have been read. A worker claims a due
+// watch by moving nextCheckAt past the length of a check.
+export const logWatches = pgTable(
+  "log_watches",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    createdBy: uuid("created_by").references(() => user.id, { onDelete: "set null" }),
+    filters: jsonb("filters").$type<LogWatchFilters>().notNull(),
+    checkedThrough: timestamp("checked_through", { withTimezone: true }).notNull(),
+    nextCheckAt: timestamp("next_check_at", { withTimezone: true }).notNull(),
+    // When the worker last asked Wakeshift whether a conversation still
+    // listens.
+    subscribersCheckedAt: timestamp("subscribers_checked_at", { withTimezone: true }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+    endReason: text("end_reason").$type<"expired" | "unsubscribed">(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("log_watches_due_idx").on(table.nextCheckAt).where(sql`${table.endedAt} is null`),
+    index("log_watches_organization_idx").on(table.organizationId).where(sql`${table.endedAt} is null`),
+    index("log_watches_expiry_idx").on(table.expiresAt).where(sql`${table.endedAt} is null`),
+    index("log_watches_ended_idx").on(table.endedAt).where(sql`${table.endedAt} is not null`),
   ],
 );
 

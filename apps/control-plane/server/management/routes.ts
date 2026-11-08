@@ -52,6 +52,7 @@ const routes = new Hono()
   );
 
 for (const operation of managementOperations) {
+  if (operation.mcpOnly) continue;
   routes.on(operation.method, honoPath(operation.path), async (context) => {
     const caller = await authenticateManagementRequest(context.req.raw.headers, "api");
     if (!caller) {

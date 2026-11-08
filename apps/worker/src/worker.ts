@@ -110,6 +110,8 @@ import { defaultAlertAutomationDependencies, startAlertAutomations } from "./tel
 import { checkDueTelemetryAlerts, defaultTelemetryAlertDependencies } from "./telemetry-alerts.js";
 import { processErrorNotifications } from "./error-notifications.js";
 import { ingestErrorIssues } from "./error-issues.js";
+import { purgeEndedLogWatches } from "@responder/core/db/log-watches";
+import { checkDueLogWatches } from "./log-watches.js";
 import { purgeSourceMaps } from "@responder/core/db/source-maps";
 import { defaultErrorIssueAutomationDependencies, startErrorIssueAutomations } from "./error-issue-automations.js";
 import {
@@ -177,6 +179,8 @@ const pollers: {
   sourceMapPurge?: NodeJS.Timeout;
   syntheticChecks?: NodeJS.Timeout;
   telemetryAlerts?: NodeJS.Timeout;
+  logWatches?: NodeJS.Timeout;
+  logWatchPurge?: NodeJS.Timeout;
 } = {};
 
 let telemetryAlertPass: Promise<void> | undefined;
@@ -221,6 +225,26 @@ function purgeSyntheticChecks(): void {
   purgeSyntheticCheckRuns().catch((error: unknown) => {
     void reportWorkerException(error, { operation: "synthetic_checks" });
   });
+}
+
+function purgeLogWatches(): void {
+  purgeEndedLogWatches(new Date()).catch((error: unknown) => {
+    void reportWorkerException(error, { operation: "log_watches" });
+  });
+}
+
+// Runs at most one log watch pass at a time; a slow pass delays the next.
+let logWatchPass: Promise<void> | undefined;
+function checkLogWatches(): Promise<void> {
+  logWatchPass ??= checkDueLogWatches()
+    .then(() => undefined)
+    .catch((error: unknown) => {
+      void reportWorkerException(error, { operation: "log_watches" });
+    })
+    .finally(() => {
+      logWatchPass = undefined;
+    });
+  return logWatchPass;
 }
 
 // Runs at most one alert pass at a time; a slow pass delays the next.
@@ -682,6 +706,8 @@ async function shutdown(signal: string): Promise<void> {
     new Promise((resolve) => setTimeout(resolve, 5_000).unref()),
   ]);
   if (pollers.telemetryAlerts) clearInterval(pollers.telemetryAlerts);
+  if (pollers.logWatches) clearInterval(pollers.logWatches);
+  if (pollers.logWatchPurge) clearInterval(pollers.logWatchPurge);
   if (pollers.errorIssues) clearInterval(pollers.errorIssues);
   if (pollers.automationSuggestions) clearInterval(pollers.automationSuggestions);
   if (pollers.gcpTelemetry) clearInterval(pollers.gcpTelemetry);
@@ -694,6 +720,7 @@ async function shutdown(signal: string): Promise<void> {
   await linearTicketDrain;
   await remediationRecoveryDrain;
   await telemetryAlertPass;
+  await logWatchPass;
   await errorIssuePass;
   // A pass that sent data saves its cursors before the worker exits.
   await gcpTelemetryPass;
@@ -1321,6 +1348,10 @@ pollers.remediationRecovery = setInterval(
 pollers.remediationRecovery.unref();
 pollers.telemetryAlerts = setInterval(() => void checkTelemetryAlerts(), 15_000);
 pollers.telemetryAlerts.unref();
+pollers.logWatches = setInterval(() => void checkLogWatches(), 10_000);
+pollers.logWatches.unref();
+pollers.logWatchPurge = setInterval(purgeLogWatches, 60 * 60 * 1_000);
+pollers.logWatchPurge.unref();
 pollers.errorIssues = setInterval(() => void groupErrorIssues(), 10_000);
 pollers.errorIssues.unref();
 pollers.syntheticChecks = setInterval(runSyntheticChecks, 5_000);

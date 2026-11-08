@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import { html } from "hono/html";
 import { z } from "zod";
+import { notifyIntegrationConnected } from "../../../../packages/core/src/agent-events.js";
 import { encryptCredentials, decryptCredentials } from "../../../../packages/core/src/credentials/encryption.js";
 import { listOrganizationIntegrationAccounts } from "../../../../packages/core/src/db/integrations.js";
 import { getActiveTenant } from "../tenant.js";
@@ -107,6 +108,9 @@ export const chatConnectionRoutes = new Hono()
     const accounts = await listOrganizationIntegrationAccounts(ticket.organizationId);
     const connected = context.req.query("status") === "connected" && accounts.some((account) =>
       account.provider === ticket.provider && account.status === "connected");
+    void notifyIntegrationConnected({
+      attemptId: ticket.id, connected, organizationId: ticket.organizationId, provider: ticket.provider,
+    });
     const name = getIntegrationDefinition(ticket.provider)?.name ?? "Integration";
     if (connected && returnUrl) {
       deleteCookie(context, cookieName, { path: "/api/integrations/chat" });

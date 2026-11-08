@@ -1,3 +1,4 @@
+import { notifyAlertChanged } from "@responder/core/agent-events";
 import type { AutomationNotification } from "@responder/core/automations/config";
 import {
   claimDueTelemetryAlerts,
@@ -194,13 +195,28 @@ export async function checkTelemetryAlert(
           slack: alert.slack,
           value: evaluation.value,
         });
-        if (opened) await announce(opened, evaluation.value);
+        if (opened) {
+          if (!alert.notificationsPaused && !opened.notificationsPaused) {
+            void notifyAlertChanged({
+              alertId: alert.id, episodeId: opened.id, group: opened.groupKey, name: alert.name,
+              state: "firing", value: evaluation.value,
+            });
+          }
+          await announce(opened, evaluation.value);
+        }
       } else if (transition === "continued" && episode) {
         await dependencies.continueEpisode(episode, alert.comparator, evaluation.value);
         // An announcement that failed before is retried.
         await announce(episode, evaluation.value);
       } else if (transition === "recovered" && episode) {
         if (await dependencies.resolveEpisode(episode.id, evaluation.value)) {
+          // An episode that opened while paused was never announced.
+          if (!alert.notificationsPaused && !episode.notificationsPaused) {
+            void notifyAlertChanged({
+              alertId: alert.id, episodeId: episode.id, group: episode.groupKey, name: alert.name,
+              state: "resolved", value: evaluation.value,
+            });
+          }
           await announceRecovery({ ...episode, endedAt: now }, evaluation.value);
         }
       }

@@ -502,7 +502,7 @@ describe("management API", () => {
     expect(JSON.stringify(await response.json())).not.toContain("10.0.0.1");
   });
 
-  it("publishes an OpenAPI document for every operation", async () => {
+  it("publishes an OpenAPI document for every operation with a REST route", async () => {
     const response = await app.request("/api/v1/openapi.json");
     const document = await response.json() as {
       paths: Record<string, Record<string, { operationId: string }>>;
@@ -513,7 +513,7 @@ describe("management API", () => {
       .flatMap((methods) => Object.values(methods))
       .map((operation) => operation.operationId);
     expect(operationIds.sort()).toEqual(
-      managementOperations.map((operation) => operation.name).sort(),
+      managementOperations.filter((operation) => !operation.mcpOnly).map((operation) => operation.name).sort(),
     );
     expect(new Set(operationIds).size).toBe(operationIds.length);
   });

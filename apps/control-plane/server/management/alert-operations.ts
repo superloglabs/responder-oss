@@ -162,6 +162,24 @@ async function checkSlack(context: ManagementContext, slack: AlertSlackTarget | 
 
 export const alertOperations = [
   defineOperation({
+    name: "watch_alert",
+    summary: "Watch an alert",
+    description: "Watches an alert from this conversation: each time it, or one of its groups, starts firing or recovers.",
+    mcpOnly: true,
+    method: "POST",
+    path: "/alerts/{alertId}/watch",
+    tag: "Alerts",
+    effect: "read",
+    input: z.object({ alertId, once: z.boolean().default(false).describe("Stop watching after the first change.") }),
+    output: z.object({ alert: z.object({ id: z.uuid(), name: z.string() }) }),
+    async run(context, input) {
+      await requireAlerts(context);
+      const alert = await findTelemetryAlert(context.organizationId, input.alertId);
+      if (!alert) throw alertNotFound();
+      return { alert: { id: alert.id, name: alert.name } };
+    },
+  }),
+  defineOperation({
     name: "list_alerts",
     summary: "List alerts",
     description: "Lists the workspace's alerts by name, with each one's rule, Slack channel, and how many groups are firing now.",
