@@ -124,7 +124,9 @@ types. `drizzle/` contains the ordered schema history.
   their installers and CDNs, Debian's package mirrors, and GitHub on the
   list. A restricted sandbox reaches only the listed domains,
   the public application host (model broker and context servers), and the
-  allowed hosts of the secrets it mounts. Vercel enforces
+  allowed hosts of the secrets it mounts. On Vercel it also reaches
+  `mise-versions.jdx.dev`, where mise looks up the runtime versions that
+  repositories ask for in their version files. Vercel enforces
   this with a custom firewall policy; Daytona with a domain allowlist, which
   needs Daytona Tier 3 or higher and holds at most 100 domains. The worker
   applies the list after every sandbox start and resume, so a change reaches

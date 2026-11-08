@@ -67,6 +67,8 @@ function dependencies() {
   const session = {
     execCommand: vi.fn().mockResolvedValue("Process exited with code 0"),
     materializeEntry: vi.fn().mockResolvedValue(undefined),
+    // The image has mise, as one built from the current base snapshot does.
+    pathExists: vi.fn(async (path: string) => path === "/usr/local/bin/mise"),
     readFile: vi.fn().mockRejectedValue(new Error("not found")),
     state: { environment: {} },
   } as unknown as DaytonaSandboxSession;
@@ -1939,10 +1941,11 @@ describe("automation run processor", () => {
     expect(deps.runCodex.mock.calls[0]![1].prompt).toContain(
       "Your working directory is the acme/app repository, checked out at /home/daytona/workspace/repositories/acme/app.",
     );
-    // The agent opens pull requests with a tool while it works.
+    // The agent opens pull requests with a tool while it works. The server
+    // runs on the image's Node.js, whatever the repository asks mise for.
     expect(deps.runCodex.mock.calls[0]![1].toolServer).toEqual({
-      args: ["/home/daytona/workspace/.responder/tools/server.mjs"],
-      command: "node",
+      args: ["MISE_DISABLE_TOOLS=node", "node", "/home/daytona/workspace/.responder/tools/server.mjs"],
+      command: "env",
       name: "superlog",
     });
     expect(deps.createToolHandler).toHaveBeenCalledWith(expect.objectContaining({
@@ -1961,6 +1964,28 @@ describe("automation run processor", () => {
       usage: { actionCount: 1, harnessOutputBytes: 9 },
     }));
     expect(deps.revokeGrant).toHaveBeenCalledWith(expect.objectContaining({ runId }));
+    expect(deps.runCodex.mock.calls[0]![1].prompt).not.toContain("mise");
+  });
+
+  it("tells the agent in a Vercel sandbox that runtimes follow the repository's version files", async () => {
+    vi.stubEnv("SANDBOX_PROVIDER", "vercel");
+    vi.stubEnv("VERCEL_PROJECT_ID", "prj_1");
+    vi.stubEnv("VERCEL_SANDBOX_REGION", "cdg1");
+    vi.stubEnv("VERCEL_SANDBOX_SNAPSHOT_ID", "snap_base");
+    vi.stubEnv("VERCEL_TEAM_ID", "team_1");
+    vi.stubEnv("VERCEL_TOKEN", "vercel-token");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+
+    await expect(processAutomationRun("job-1", {
+      kind: "automation_run",
+      queuedAt: "2026-09-22T19:00:00.000Z",
+      runId,
+    }, process.env, deps)).resolves.toEqual({ runId });
+
+    expect(deps.runCodex.mock.calls[0]![1].prompt).toContain(
+      "The sandbox installs language runtimes with mise: in a repository, node and python use the version its .nvmrc, .node-version, .python-version, .tool-versions, or mise.toml asks for. To run a command on another version, use `mise exec <tool>@<version> -- <command>`, which changes no files; don't commit mise config the repository didn't have.",
+    );
   });
 
   it("fails closed when the selected organization credential is unavailable", async () => {

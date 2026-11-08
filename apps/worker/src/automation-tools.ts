@@ -26,9 +26,11 @@ const responsesDirectory = `${toolsRoot}/responses`;
 export const automationToolServerWaitMs = 100_000;
 const requestsMaxBytes = 1_000_000;
 
+// The harnesses start the server in the repository, where mise would run the
+// Node.js version the repository asks for. The server needs the image's.
 export const automationToolServer: AutomationToolServer = {
-  args: [serverPath],
-  command: "node",
+  args: ["MISE_DISABLE_TOOLS=node", "node", serverPath],
+  command: "env",
   name: automationToolServerName,
 };
 

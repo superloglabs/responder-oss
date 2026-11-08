@@ -2,15 +2,18 @@ import type {
   VercelSandboxClient,
   VercelSandboxSession,
 } from "@openai/agents-extensions/sandbox/vercel";
+import { Manifest } from "@openai/agents/sandbox";
 import { Sandbox } from "@vercel/sandbox";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { encryptCredentials } from "@responder/core/credentials/encryption";
 import type { VercelSandboxConfig } from "@responder/core/sandbox-config";
 import { resumeSandbox, serializeSandboxSession } from "./sandbox-runtime.js";
+import { miseVersionsHost, vercelSandboxPath } from "./sandbox-snapshot.js";
 import { containsDaytonaSecretPlaceholder } from "./secret-safety.js";
 import {
   applyVercelSandboxSecrets,
   createVercelSandboxSession,
+  resumeVercelSandbox,
   resumedSameVercelSandbox,
   runVercelCommand,
   secretNetworkPolicy,
@@ -61,13 +64,15 @@ describe("secretNetworkPolicy for a restricted workspace", () => {
     { allowedDomains: ["superlog.sh", "*.npmjs.org"] },
   ) as { allow: Record<string, unknown[]> };
 
-  it("allows only the listed domains and the secrets' hosts", () => {
+  it("allows only the listed domains, the secrets' hosts, and mise's version list", () => {
     expect(Object.keys(policy.allow).sort()).toEqual([
       "*.npmjs.org",
       "api.example.com",
+      "mise-versions.jdx.dev",
       "npmjs.org",
       "superlog.sh",
     ]);
+    expect(miseVersionsHost).toBe("mise-versions.jdx.dev");
     expect(policy.allow["superlog.sh"]).toEqual([]);
   });
 
@@ -134,15 +139,17 @@ describe("applyVercelSandboxSecrets", () => {
   });
 
   it("removes secrets a later turn no longer uses", async () => {
-    const session = sessionWith({ OLD_KEY: "dtn_secret_old", PLAIN: "kept" });
+    const session = sessionWith({ OLD_KEY: "dtn_secret_old", PATH: vercelSandboxPath, PLAIN: "kept" });
     await applyVercelSandboxSecrets(session, config, []);
-    expect(session.state.environment).toEqual({ PLAIN: "kept" });
+    expect(session.state.environment).toEqual({ PATH: vercelSandboxPath, PLAIN: "kept" });
     expect(updateNetworkPolicy).toHaveBeenCalledWith({ allow: { "*": [] } });
   });
 
   it("restricts a sandbox that has no secrets", async () => {
     await applyVercelSandboxSecrets(sessionWith({}), config, [], { allowedDomains: ["superlog.sh"] });
-    expect(updateNetworkPolicy).toHaveBeenCalledWith({ allow: { "superlog.sh": [] } });
+    expect(updateNetworkPolicy).toHaveBeenCalledWith({
+      allow: { "mise-versions.jdx.dev": [], "superlog.sh": [] },
+    });
   });
 
   it("makes no request when there are no secrets to apply or remove", async () => {
@@ -186,6 +193,34 @@ describe("createVercelSandboxSession", () => {
     }));
     expect(session.state.sandboxId).toBe("sbx-new");
     expect(session.state.workspacePersistence).toBe("tar");
+  });
+
+  it("puts mise's shims first on the commands' PATH", async () => {
+    vi.mocked(Sandbox.create).mockResolvedValue(started());
+    const session = await createVercelSandboxSession(config, "tar", undefined, noSleep);
+    expect(session.state.environment).toEqual({ PATH: vercelSandboxPath });
+  });
+
+  it("gives a resumed sandbox the current PATH and keeps its other variables", async () => {
+    vi.mocked(Sandbox.create).mockResolvedValue(started());
+    const persisted = {
+      environment: { PATH: "/usr/bin:/bin", SERVICE_KEY: "dtn_secret_1" },
+      sandboxId: "sbx-old",
+      snapshotId: "snap_paused",
+      snapshotSandboxId: "sbx-old",
+      workspacePersistence: "snapshot",
+    };
+    const client = {
+      deserializeSessionState: vi.fn().mockResolvedValue({
+        ...persisted,
+        manifest: new Manifest({ root: "/vercel/sandbox" }),
+      }),
+    } as unknown as VercelSandboxClient;
+    const session = await resumeVercelSandbox(client, persisted, config);
+    expect(Sandbox.create).toHaveBeenCalledWith(expect.objectContaining({
+      source: { snapshotId: "snap_paused", type: "snapshot" },
+    }));
+    expect(session.state.environment).toEqual({ PATH: vercelSandboxPath, SERVICE_KEY: "dtn_secret_1" });
   });
 
   it("runs the session's commands detached", async () => {

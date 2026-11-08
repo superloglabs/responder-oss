@@ -57,6 +57,7 @@ import { modelProvider, type ModelProviderId } from "@responder/core/automations
 import { publicApplicationUrl } from "@responder/core/sandbox-network";
 import { workspaceSandboxNetwork } from "./sandbox-network.js";
 import { workspaceSandbox } from "./sandbox-image.js";
+import { sandboxHasMise, sandboxRuntimeInstructions } from "./sandbox-snapshot.js";
 import { subscriptionSecretHosts, parseSubscriptionAuth, subscriptionAuthForSandbox } from "@responder/core/automations/chatgpt-subscription";
 import { getAutomationRuntimeWorkspaceSecrets, type RuntimeWorkspaceSecret } from "@responder/core/db/workspace-secrets";
 import { getAutomationRuntimeSkills, type RuntimeWorkspaceSkill } from "@responder/core/db/workspace-skills";
@@ -447,7 +448,10 @@ function conversationPrompt(
 }
 
 // The first repository is the working directory; the others sit beside it.
-function repositoryInstructions(repositories: Array<{ path: string; repository: string }>): string {
+function repositoryInstructions(
+  repositories: Array<{ path: string; repository: string }>,
+  runtimeVersions: boolean,
+): string {
   const [main, ...others] = repositories;
   if (!main) return "No repositories are checked out for this run.";
   return [
@@ -457,6 +461,7 @@ function repositoryInstructions(repositories: Array<{ path: string; repository: 
           .map((repository) => `- ${repository.repository}: ${repository.path}`)
           .join("\n")}`]
       : []),
+    ...sandboxRuntimeInstructions(runtimeVersions),
   ].join("\n");
 }
 
@@ -612,6 +617,8 @@ function automationPrompt(
   extensions: {
     dependencyInstalls: DependencyInstallResult[];
     memories: RuntimeWorkspaceMemory[];
+    // Whether the sandbox's image has mise to pick runtime versions.
+    runtimeVersions?: boolean;
     secrets: RuntimeWorkspaceSecret[];
     skills: RuntimeWorkspaceSkill[];
   },
@@ -631,7 +638,7 @@ function automationPrompt(
     automationActionInstructions(notificationChannels.names, workspace, notificationChannels.inThread),
     ...(issueCatalog ? [issueCatalogInstructions()] : []),
     ...(telemetry ? [telemetryToolInstructions()] : []),
-    repositoryInstructions(repositories),
+    repositoryInstructions(repositories, extensions.runtimeVersions ?? false),
     ...repositoryAgentDocsInstructions(agentDocs, repositories[0]?.repository),
     ...(dependencyInstructions ? [dependencyInstructions] : []),
     ...contextInstructions(connections),
@@ -1241,6 +1248,8 @@ export async function processAutomationRun(
             sandboxSignal ? { signal: sandboxSignal } : {},
           )
           : [];
+        // Only the repository part of the prompt mentions mise.
+        const runtimeVersions = repositories.length > 0 && await sandboxHasMise(session);
         if (dependencyInstalls.length > 0) {
           console.log(JSON.stringify({
             event: "repository_dependencies_installed",
@@ -1298,7 +1307,7 @@ export async function processAutomationRun(
                   firstTurn,
                   notificationChannels,
                   connections,
-                  { dependencyInstalls, memories, secrets: workspaceSecrets, skills },
+                  { dependencyInstalls, memories, runtimeVersions, secrets: workspaceSecrets, skills },
                   workspaceTools.length > 0 ? { integrationsUrl } : undefined,
                   reviewCheckout,
                   issueCatalog !== null,

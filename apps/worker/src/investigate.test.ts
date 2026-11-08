@@ -219,6 +219,27 @@ describe("sandbox agent configuration", () => {
     expect(instructions).toContain("search_observability_suggestions");
   });
 
+  it("tells agents in a Vercel sandbox that runtimes follow the repositories' version files", () => {
+    const input = {
+      agentPrompt: "Inspect the reported failure.",
+      clickStackConnected: false,
+      datadogConnected: false,
+      repositories: [{
+        branch: "main",
+        path: "/vercel/sandbox/repositories/acme/service",
+        repository: "acme/service",
+        sha: "a".repeat(40),
+        workspaceBaseSha: "b".repeat(40),
+      }],
+      sentryConnected: true,
+    };
+    expect(investigationInstructions(input)).not.toContain("mise");
+    expect(investigationInstructions({ ...input, runtimeVersions: true })).toContain(
+      "The sandbox installs language runtimes with mise: in a repository, node and python use the version its .nvmrc, .node-version, .python-version, .tool-versions, or mise.toml asks for. To run a command on another version, use `mise exec <tool>@<version> -- <command>`, which changes no files; don't commit mise config the repository didn't have.",
+    );
+    expect(investigationInstructions({ ...input, repositories: [], runtimeVersions: true })).not.toContain("mise");
+  });
+
   it("keeps proactive scans read-only while retaining issue deduplication", () => {
     const instructions = investigationInstructions({
       agentPrompt: "Inspect connected production context.",
