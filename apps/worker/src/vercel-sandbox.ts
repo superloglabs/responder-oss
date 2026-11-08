@@ -30,7 +30,9 @@ const pausedSnapshotLifetimeMs = 24 * 60 * 60 * 1_000;
 const vercelCreateAttempts = 3;
 const vercelCreateRetryDelayMs = 5_000;
 const uploadChunkBytes = 32 * 1024 * 1024;
-// Enough waits to outlast the sandbox even when each one drops early.
+// Enough waits to outlast the sandbox even when each one drops early. Vercel
+// sends no response until the command ends, so each wait for a command that
+// runs longer than five minutes ends with a headers timeout.
 const commandWaitAttempts = 50;
 const commandWaitRetryDelayMs = 2_000;
 
@@ -72,6 +74,7 @@ const droppedConnectionCodes = new Set([
   "ECONNRESET",
   "ETIMEDOUT",
   "UND_ERR_BODY_TIMEOUT",
+  "UND_ERR_HEADERS_TIMEOUT",
   "UND_ERR_SOCKET",
 ]);
 
@@ -86,6 +89,12 @@ function isDroppedVercelWait(error: unknown): boolean {
     error.message === "fetch failed" ||
     droppedConnectionCodes.has(String((error as { code?: unknown }).code)) ||
     droppedConnectionCodes.has(String(cause?.code));
+}
+
+function errorCode(error: unknown): string | undefined {
+  const code = (error as { code?: unknown } | undefined)?.code ??
+    ((error as { cause?: { code?: unknown } } | undefined)?.cause)?.code;
+  return typeof code === "string" ? code : undefined;
 }
 
 function defaultSleep(delayMs: number): Promise<void> {
@@ -113,10 +122,12 @@ export async function runVercelCommand(
       ) {
         throw error;
       }
-      console.error(JSON.stringify({
+      // Expected for long commands. A wait that cannot recover throws above.
+      console.warn(JSON.stringify({
         attempt,
         cmdId: command.cmdId,
         error: error instanceof Error ? error.message : String(error),
+        errorCode: errorCode(error),
         event: "vercel_command_wait_retry",
       }));
       await sleep(commandWaitRetryDelayMs);
