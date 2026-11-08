@@ -106,15 +106,19 @@ export function proposedPullRequestContent(
 
 // Proposed diffs are written by the model, which often miscounts the lines in
 // a hunk header, ends a hunk without trailing context, or adds outer context
-// lines that are not in the file. `--recount` and `--unidiff-zero` relax only
-// those header checks, and `-C3` lets git drop outer context beyond three
-// lines on each side. Every removed line and the context nearest each change
-// must still match the checked-out code.
+// lines that are not in the file. It also retypes long lines, such as padded
+// Markdown table rows, with a different amount of whitespace. `--recount` and
+// `--unidiff-zero` relax only those header checks, `-C3` lets git drop outer
+// context beyond three lines on each side, and `--ignore-whitespace` lets runs
+// of whitespace differ in length when git looks for the context. Every removed
+// line and the context nearest each change must still match the checked-out
+// code apart from whitespace, and context lines keep the file's whitespace.
 const gitApplyCommands = [
   "git apply --whitespace=nowarn",
   "git apply --whitespace=nowarn --recount",
   "git apply --whitespace=nowarn --recount --unidiff-zero",
   "git apply --whitespace=nowarn --recount --unidiff-zero -C3",
+  "git apply --whitespace=nowarn --recount --unidiff-zero -C3 --ignore-whitespace",
 ] as const;
 
 function commandSucceeded(output: string): boolean {
