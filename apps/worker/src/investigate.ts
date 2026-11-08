@@ -76,7 +76,7 @@ import {
 } from "./repositories.js";
 import {
   discoverRepositoryAgentDocs,
-  forgetRepositorySkills,
+  clearRepositorySkills,
   loadRepositorySkills,
   repositorySkillsPath,
 } from "./repository-skills.js";
@@ -1096,7 +1096,7 @@ export async function runInvestigationAgent(
     }
     const agentDocs = await discoverRepositoryAgentDocs(session, repositories);
     const repositorySkills = await loadRepositorySkills(session, agentDocs.skills);
-    forgetRepositorySkills(session);
+    await clearRepositorySkills(session);
     await materializeWorkspaceMemories(session, workspaceMemories);
     const repositoryInstructions = agentDocs.instructions.map(
       (instruction) => `${instruction.repository}: ${instruction.path}`,
