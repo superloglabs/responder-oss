@@ -3,6 +3,8 @@ import type { SandboxSession } from "./sandbox-session.js";
 import { z } from "zod";
 import type { CheckedOutRepository } from "./repositories.js";
 
+const LIST_FILES_PAGE_SIZE = 500;
+
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'\\''`)}'`;
 }
@@ -81,29 +83,44 @@ export function createRepositoryInspectionTools(input: {
 
   const listRepositoryFiles = tool({
     name: "list_repository_files",
-    description:
-      "List files in an attached repository without changing the workspace.",
+    description: `List files in an attached repository without changing the workspace. Returns at most ${LIST_FILES_PAGE_SIZE} files per call in path order; when the result is cut off it says so and gives the offset for the next call.`,
     parameters: z.object({
       repository: repositoryParameter,
       path: relativePathParameter,
+      offset: z
+        .number()
+        .int()
+        .min(0)
+        .default(0)
+        .describe("Number of files to skip, taken from a previous truncation notice"),
     }),
-    async execute({ repository: repositoryName, path: relativePath }) {
+    async execute({ repository: repositoryName, path: relativePath, offset }) {
       const target = repositoryPath(
         input.repositories,
         repositoryName,
         relativePath,
       );
-      return runInspectionCommand(
+      // One line past the page tells us whether more files exist; sed quits
+      // there so rg stops producing output.
+      const lastLine = offset + LIST_FILES_PAGE_SIZE + 1;
+      const output = await runInspectionCommand(
         input.session,
         {
           cmd: [
             checkedTargetScript(target.repository.path, target.path),
-            "rg --files --hidden --glob '!.git/**' -- \"$target\" | head -n 500",
+            [
+              "rg --files --hidden --glob '!.git/**' --sort path -- \"$target\"",
+              `sed -n '${offset + 1},${lastLine}p;${lastLine}q'`,
+            ].join(" | "),
           ].join("\n"),
           workdir: target.repository.path,
         },
         "Unable to list repository files",
       );
+      const files = output.split("\n");
+      if (files.length <= LIST_FILES_PAGE_SIZE) return output;
+      const nextOffset = offset + LIST_FILES_PAGE_SIZE;
+      return `${files.slice(0, LIST_FILES_PAGE_SIZE).join("\n")}\n[truncated: showing files ${offset + 1}-${nextOffset}; call list_repository_files again with offset=${nextOffset} for more]`;
     },
   });
 

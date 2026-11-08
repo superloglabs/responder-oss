@@ -109,6 +109,47 @@ describe("repository inspection tools", () => {
     );
   });
 
+  it("pages repository file lists and says when the list was cut off", async () => {
+    const files = Array.from({ length: 501 }, (_, index) => `src/file-${index}.ts`);
+    const session = {
+      execCommand: vi.fn().mockResolvedValue(sandboxOutput(files.join("\n"))),
+      readFile: vi.fn(),
+    } as unknown as DaytonaSandboxSession;
+    const tools = createRepositoryInspectionTools({
+      repositories: [repository],
+      session,
+    });
+
+    const result = await tools[0]!.invoke(
+      undefined as never,
+      JSON.stringify({ repository: "acme/service", offset: 500 }),
+    );
+
+    expect(session.execCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cmd: expect.stringContaining("--sort path -- \"$target\" | sed -n '501,1001p;1001q'"),
+      }),
+    );
+    expect(String(result).split("\n")).toHaveLength(501);
+    expect(result).not.toContain("src/file-500.ts");
+    expect(result).toContain("offset=1000");
+  });
+
+  it("leaves lists under the page size untouched", async () => {
+    const session = {
+      execCommand: vi.fn().mockResolvedValue(sandboxOutput("a.ts\nb.ts")),
+      readFile: vi.fn(),
+    } as unknown as DaytonaSandboxSession;
+    const tools = createRepositoryInspectionTools({
+      repositories: [repository],
+      session,
+    });
+
+    await expect(
+      tools[0]!.invoke(undefined as never, JSON.stringify({ repository: "acme/service" })),
+    ).resolves.toBe("a.ts\nb.ts");
+  });
+
   it("turns command failures into tool errors", async () => {
     const session = {
       execCommand: vi
