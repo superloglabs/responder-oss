@@ -32,7 +32,7 @@ function log(body: string) {
 
 function dependencies(logs: ReturnType<typeof log>[] = [], overrides: Partial<LogWatchDependencies> = {}) {
   const deps: LogWatchDependencies = {
-    advance: vi.fn(async () => undefined),
+    advance: vi.fn(async () => true),
     claim: vi.fn(async () => [watch()]),
     client: () => ({}) as never,
     enabled: () => true,
@@ -65,7 +65,10 @@ describe("checkLogWatch", () => {
       until,
       watchId: watch().id,
     });
-    expect(deps.advance).toHaveBeenCalledWith({ checkedThrough: until, id: watch().id, subscribersCheckedAt: now });
+    expect(deps.advance).toHaveBeenCalledWith({
+      checkedThrough: until, from: minutesAgo(1), id: watch().id, nextCheckAt: new Date(now.getTime() + 30_000),
+      subscribersCheckedAt: now,
+    });
   });
 
   it("says there are more when a batch is full", async () => {
@@ -76,15 +79,29 @@ describe("checkLogWatch", () => {
     expect(deps.notify).toHaveBeenCalledWith(expect.objectContaining({ count: 20, more: true }));
   });
 
-  it("reads at most ten minutes after falling behind", async () => {
+  it("catches up ten minutes at a time after falling behind, without skipping any", async () => {
     const deps = dependencies();
 
     await checkLogWatch(watch({ checkedThrough: minutesAgo(90) }), {} as never, deps);
 
-    const until = now.getTime() - 30_000;
     expect(deps.search).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.objectContaining({
-      since: new Date(until - 10 * 60_000).toISOString(),
+      since: minutesAgo(90).toISOString(), until: minutesAgo(80).toISOString(),
     }), now);
+    expect(deps.advance).toHaveBeenCalledWith({
+      checkedThrough: minutesAgo(80), from: minutesAgo(90), id: watch().id, nextCheckAt: now,
+    });
+  });
+
+  it("checks a new watch again one interval on when there is nothing to read yet", async () => {
+    const deps = dependencies();
+    const created = new Date(now.getTime() - 30_000);
+
+    await checkLogWatch(watch({ checkedThrough: created, createdAt: created }), {} as never, deps);
+
+    expect(deps.search).not.toHaveBeenCalled();
+    expect(deps.advance).toHaveBeenCalledWith({
+      checkedThrough: created, from: created, id: watch().id, nextCheckAt: new Date(now.getTime() + 30_000),
+    });
   });
 
   it("moves on without waking anyone when nothing matched", async () => {
@@ -94,7 +111,10 @@ describe("checkLogWatch", () => {
 
     expect(deps.notify).not.toHaveBeenCalled();
     expect(deps.subscribers).not.toHaveBeenCalled();
-    expect(deps.advance).toHaveBeenCalledWith({ checkedThrough: new Date(now.getTime() - 30_000), id: watch().id });
+    expect(deps.advance).toHaveBeenCalledWith({
+      checkedThrough: new Date(now.getTime() - 30_000), from: minutesAgo(1), id: watch().id,
+      nextCheckAt: new Date(now.getTime() + 30_000),
+    });
   });
 
   it("ends a quiet watch nobody listens to any more", async () => {
@@ -126,7 +146,10 @@ describe("checkLogWatch", () => {
   it("reads the same logs again after a failed emit or query", async () => {
     const failedEmit = dependencies([log("payment failed")], { notify: vi.fn(async () => null) });
     await checkLogWatch(watch(), {} as never, failedEmit);
-    expect(failedEmit.advance).not.toHaveBeenCalled();
+    const retry = {
+      checkedThrough: minutesAgo(1), from: minutesAgo(1), id: watch().id, nextCheckAt: new Date(now.getTime() + 30_000),
+    };
+    expect(failedEmit.advance).toHaveBeenCalledWith(retry);
 
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const timedOut = dependencies([], {
@@ -135,7 +158,7 @@ describe("checkLogWatch", () => {
       }),
     });
     await checkLogWatch(watch(), {} as never, timedOut);
-    expect(timedOut.advance).not.toHaveBeenCalled();
+    expect(timedOut.advance).toHaveBeenCalledWith(retry);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("log_watch_query_failed"));
     warn.mockRestore();
   });

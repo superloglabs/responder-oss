@@ -1,5 +1,5 @@
 {
-  "id": "2bd32c37-9b1e-416b-a2fd-f05546f0877f",
+  "id": "d8021629-0991-4060-af4e-5f40a8c41f4c",
   "prevId": "212096fa-759f-474c-bfaf-13291a8324fa",
   "version": "7",
   "dialect": "postgresql",
@@ -8359,6 +8359,38 @@
           ],
           "isUnique": false,
           "where": "\"log_watches\".\"ended_at\" is null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "log_watches_expiry_idx": {
+          "name": "log_watches_expiry_idx",
+          "columns": [
+            {
+              "expression": "expires_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"log_watches\".\"ended_at\" is null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "log_watches_ended_idx": {
+          "name": "log_watches_ended_idx",
+          "columns": [
+            {
+              "expression": "ended_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"log_watches\".\"ended_at\" is not null",
           "concurrently": false,
           "method": "btree",
           "with": {}

@@ -10,6 +10,7 @@ import {
   endLogWatch,
   LogWatchLimitError,
   maximumLogWatchesPerWorkspace,
+  purgeEndedLogWatches,
 } from "./log-watches.js";
 import { logWatches } from "./schema.js";
 
@@ -46,11 +47,24 @@ describe.skipIf(!testUrl)("log watches (PostgreSQL)", () => {
     expect(await claimDueLogWatches(10, at(10))).toEqual([]);
     const [first, second] = await Promise.all([claimDueLogWatches(10, at(30)), claimDueLogWatches(10, at(30))]);
     expect([...first!, ...second!].map((row) => row.id)).toEqual([watch.id]);
-    expect([...first!, ...second!][0]!.nextCheckAt).toEqual(at(60));
+    expect([...first!, ...second!][0]!.nextCheckAt).toEqual(at(150));
 
-    await advanceLogWatch({ checkedThrough: at(0), id: watch.id, subscribersCheckedAt: at(30) });
+    // A check whose claim ran out never moves the cursor back.
+    expect(await advanceLogWatch({ checkedThrough: at(10), from: start, id: watch.id, nextCheckAt: at(60) })).toBe(true);
+    expect(await advanceLogWatch({ checkedThrough: at(5), from: start, id: watch.id, nextCheckAt: at(60) })).toBe(false);
+    const [row] = await getDatabase().select().from(logWatches).where(eq(logWatches.id, watch.id));
+    expect(row).toMatchObject({ checkedThrough: at(10), nextCheckAt: at(60) });
+
     await endLogWatch(watch.id, "unsubscribed", at(31));
     expect(await claimDueLogWatches(10, at(120))).toEqual([]);
+  });
+
+  it("deletes ended watches after a week", async () => {
+    const watch = await create(at(1_000));
+    await endLogWatch(watch.id, "unsubscribed", at(1_000));
+    expect(await purgeEndedLogWatches(at(1_000 + 6 * 86_400))).toBe(0);
+    expect(await purgeEndedLogWatches(at(1_001 + 7 * 86_400))).toBeGreaterThanOrEqual(1);
+    expect(await getDatabase().select().from(logWatches).where(eq(logWatches.id, watch.id))).toEqual([]);
   });
 
   it("ends expired watches and limits how many a workspace runs at once", async () => {

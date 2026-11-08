@@ -22,13 +22,13 @@ import {
   isLegacyMcpForward,
   legacyMcpForwardRefusedBody,
 } from "./legacy-mcp-forward.js";
-import { subscribeCaller, wakingTools } from "./agent-wakeups.js";
+import { subscribeCaller, subscribeCallerFirst, wakingTools } from "./agent-wakeups.js";
 import { jsonSchema } from "./openapi.js";
 import type { ManagementContext, ManagementOperation } from "./operation.js";
 import { managementOperations } from "./operations.js";
 
 const instructions =
-  "These tools read and change one Superlog workspace: automations and their runs, tag mode, model access, workspace secrets, and memories. They also read the workspace's logs, traces, and metrics, build dashboards and alerts over them, and run synthetic checks against URLs. To send telemetry from an app, create an ingest key with create_ingest_key and put the returned settings in the app's environment, never in a committed file. For telemetry, call list_services to find service names, start with a short window and filters, and follow a trace ID with get_trace. If a telemetry query times out, retry it with a shorter window or more filters. Error issues group the workspace's exceptions by fingerprint: start with list_error_issues, read one with get_error_issue, and follow its sample's trace ID with get_trace. When you work on an error issue, claim it with claim_error_issue first and skip issues someone else has claimed; post the root cause, progress, and the pull request with post_error_issue_update; and resolve it with update_error_issue once the fix is merged, or release it with release_error_issue if you stop. Workspace owners and admins can post new and regressed error issues to a Slack channel with update_error_notifications. Before adding a dashboard widget, query the data it will chart to check that the service, metric, and attribute names exist. To change a dashboard or widget, read it with get_dashboard first, since variables and widget config are replaced as a whole. Share the dashboard's url when you are done. Before creating an alert, check its rule and threshold with preview_alert. To post an alert, synthetic check, or error notifications to Slack, take the channel ID and integration ID from list_slack_channels. export_terraform returns Terraform configuration for alerts, dashboards, and synthetic checks. Call list_integrations before creating or changing an automation or tag mode, and use the repository, integration, and resource IDs it returns; secret IDs come from list_secrets. Make only the changes the user asks for, then say exactly what changed. Memories are facts members save for agents, read by every automation run and tag mode thread: to import memories from Claude Code or Codex, call list_memories, then import_memories with the ones about the team's systems and work, leaving out personal preferences and credentials. Change a memory that already exists with update_memory. To connect an integration, ask which integrations the person's goal needs, check list_available_integrations, and call start_integration_connection for one provider at a time. When the connection card is shown, don't repeat its link in your reply; without a card, show the exact returned URL as a link and never construct or shorten it. Consent links are personal: don't fetch, log, or share them. For OAuth integrations, the person approves access in their browser; for secure setup, they finish setup in Superlog. Afterward use list_integrations to verify the connection and select resources, and refresh_integrations to reload Slack channels or GitHub repositories. A started connection is not connected until list_integrations shows it. Never collect integration credentials in chat. To follow logs as they arrive, start watch_logs with filters, and read each batch with query_logs over its since and until. watch_alert, watch_synthetic_check, and watch_error_issues report when an alert or synthetic check changes or an error issue opens. End a watch with unsubscribe_events. Members, billing, new API keys, and secret values are managed in the app.";
+  "These tools read and change one Superlog workspace: automations and their runs, tag mode, model access, workspace secrets, and memories. They also read the workspace's logs, traces, and metrics, build dashboards and alerts over them, and run synthetic checks against URLs. To send telemetry from an app, create an ingest key with create_ingest_key and put the returned settings in the app's environment, never in a committed file. For telemetry, call list_services to find service names, start with a short window and filters, and follow a trace ID with get_trace. If a telemetry query times out, retry it with a shorter window or more filters. Error issues group the workspace's exceptions by fingerprint: start with list_error_issues, read one with get_error_issue, and follow its sample's trace ID with get_trace. When you work on an error issue, claim it with claim_error_issue first and skip issues someone else has claimed; post the root cause, progress, and the pull request with post_error_issue_update; and resolve it with update_error_issue once the fix is merged, or release it with release_error_issue if you stop. Workspace owners and admins can post new and regressed error issues to a Slack channel with update_error_notifications. Before adding a dashboard widget, query the data it will chart to check that the service, metric, and attribute names exist. To change a dashboard or widget, read it with get_dashboard first, since variables and widget config are replaced as a whole. Share the dashboard's url when you are done. Before creating an alert, check its rule and threshold with preview_alert. To post an alert, synthetic check, or error notifications to Slack, take the channel ID and integration ID from list_slack_channels. export_terraform returns Terraform configuration for alerts, dashboards, and synthetic checks. Call list_integrations before creating or changing an automation or tag mode, and use the repository, integration, and resource IDs it returns; secret IDs come from list_secrets. Make only the changes the user asks for, then say exactly what changed. Memories are facts members save for agents, read by every automation run and tag mode thread: to import memories from Claude Code or Codex, call list_memories, then import_memories with the ones about the team's systems and work, leaving out personal preferences and credentials. Change a memory that already exists with update_memory. To connect an integration, ask which integrations the person's goal needs, check list_available_integrations, and call start_integration_connection for one provider at a time. When the connection card is shown, don't repeat its link in your reply; without a card, show the exact returned URL as a link and never construct or shorten it. Consent links are personal: don't fetch, log, or share them. For OAuth integrations, the person approves access in their browser; for secure setup, they finish setup in Superlog. Afterward use list_integrations to verify the connection and select resources, and refresh_integrations to reload Slack channels or GitHub repositories. A started connection is not connected until list_integrations shows it. Never collect integration credentials in chat. To follow logs as they arrive, start watch_logs with filters, and read each batch with query_logs over its since and until, with the same filters. watch_alert, watch_synthetic_check, and watch_error_issues report when an alert or synthetic check changes or an error issue opens. End a watch with unsubscribe_events. Members, billing, new API keys, and secret values are managed in the app.";
 
 // Operations that take a secret value are left out so it never passes
 // through a model.
@@ -104,25 +104,52 @@ export function createManagementMcpServer(
         };
       }
       const args = request.params.arguments ?? {};
-      const result = await executeOperation(operation, context, args);
-      if (result.status < 400 && operation.name in wrap) {
-        // The work is done, so a subscription that fails is only logged: the
-        // agent can still check with the read tools.
+      const waking = operation.name in wrap;
+      // A subscription that fails is only logged: the work goes ahead, and
+      // the agent can still check with the read tools.
+      const subscribe = async (run: () => Promise<void>) => {
         try {
-          await subscribeCaller({
-            body: result.body as Record<string, unknown>,
-            call: events.wake.currentCall(extra),
-            context,
-            events,
-            input: args,
-            tool: operation.name,
-          });
+          await run();
         } catch (error) {
           console.warn(JSON.stringify({
             error: error instanceof Error ? error.name : typeof error,
             event: "mcp_wakeup_subscribe_failed",
             tool: operation.name,
           }));
+        }
+      };
+      if (waking) {
+        await subscribe(() => subscribeCallerFirst({
+          call: events.wake.currentCall(extra), context, events, input: args, tool: operation.name,
+        }));
+      }
+      const result = await executeOperation(operation, context, args);
+      if (waking && result.status < 400) {
+        const subscribed = subscribeCaller({
+          body: result.body as Record<string, unknown>,
+          call: events.wake.currentCall(extra),
+          context,
+          events,
+          input: args,
+          tool: operation.name,
+        });
+        // A watch tool does nothing but subscribe, so it fails with it.
+        if (operation.name.startsWith("watch_")) {
+          try {
+            await subscribed;
+          } catch (error) {
+            console.warn(JSON.stringify({
+              error: error instanceof Error ? error.name : typeof error,
+              event: "mcp_wakeup_subscribe_failed",
+              tool: operation.name,
+            }));
+            return {
+              content: [{ text: JSON.stringify(watchUnavailableBody), type: "text" }],
+              isError: true,
+            };
+          }
+        } else {
+          await subscribe(() => subscribed);
         }
       }
       return {
@@ -146,6 +173,11 @@ export function createManagementMcpServer(
   });
   return server;
 }
+
+const watchUnavailableBody = {
+  code: "watch_unavailable",
+  error: "Could not start watching from this conversation. Try again.",
+};
 
 export const mcpUnauthorizedBody = {
   code: "unauthorized",

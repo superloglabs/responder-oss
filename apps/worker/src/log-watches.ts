@@ -3,6 +3,7 @@ import {
   advanceLogWatch,
   claimDueLogWatches,
   endLogWatch,
+  logWatchCheckIntervalMs,
   type LogWatch,
 } from "@responder/core/db/log-watches";
 import { getTelemetryClient, type TelemetryClient } from "@responder/core/telemetry/client";
@@ -14,8 +15,8 @@ const watchesPerPass = 10;
 const concurrentChecks = 2;
 // Logs arrive in batches, so a check reads only up to this far behind now.
 const ingestLagMs = 30_000;
-// A check that fell behind, after a worker restart say, reads at most this
-// much, so one check never scans a long window.
+// One check reads at most this much. A watch that fell behind, after a worker
+// restart say, catches up in windows this long, checked one after another.
 const maximumWindowMs = 10 * 60_000;
 // Matching logs read per check: the count goes up to this, then says "more".
 const logsPerCheck = 20;
@@ -62,9 +63,24 @@ export async function checkLogWatch(
   dependencies: LogWatchDependencies,
 ): Promise<void> {
   const now = dependencies.now();
-  const until = new Date(now.getTime() - ingestLagMs);
-  const since = new Date(Math.max(watch.checkedThrough.getTime(), until.getTime() - maximumWindowMs));
-  if (until <= since) return;
+  const since = watch.checkedThrough;
+  const latest = now.getTime() - ingestLagMs;
+  const behind = latest - since.getTime() > maximumWindowMs;
+  const until = new Date(behind ? since.getTime() + maximumWindowMs : latest);
+  // A watch that is behind is checked again at once, until it catches up.
+  const nextCheckAt = new Date(now.getTime() + (behind ? 0 : logWatchCheckIntervalMs));
+  // Keeps the cursor, and checks the same logs again one interval on.
+  const retry = () => dependencies.advance({
+    checkedThrough: since, from: since, id: watch.id, nextCheckAt: new Date(now.getTime() + logWatchCheckIntervalMs),
+  });
+  const advance = (subscribersCheckedAt?: Date) => dependencies.advance({
+    checkedThrough: until, from: since, id: watch.id, nextCheckAt,
+    ...(subscribersCheckedAt ? { subscribersCheckedAt } : {}),
+  });
+  if (until <= since) {
+    await retry();
+    return;
+  }
   const started = now.getTime() - watch.createdAt.getTime() >= startGraceMs;
 
   let logs: Awaited<ReturnType<typeof searchTelemetryLogs>>["logs"];
@@ -79,6 +95,7 @@ export async function checkLogWatch(
   } catch (error) {
     if (!(error instanceof TelemetryReadError)) throw error;
     console.warn(JSON.stringify({ error: errorText(error), event: "log_watch_query_failed", watchId: watch.id }));
+    await retry();
     return;
   }
 
@@ -92,12 +109,15 @@ export async function checkLogWatch(
       until,
       watchId: watch.id,
     });
-    if (!delivered) return;
+    if (!delivered) {
+      await retry();
+      return;
+    }
     if (delivered.matched === 0 && started) {
       await dependencies.end(watch.id, "unsubscribed", now);
       return;
     }
-    await dependencies.advance({ checkedThrough: until, id: watch.id, subscribersCheckedAt: now });
+    await advance(now);
     return;
   }
 
@@ -108,14 +128,10 @@ export async function checkLogWatch(
       await dependencies.end(watch.id, "unsubscribed", now);
       return;
     }
-    await dependencies.advance({
-      checkedThrough: until,
-      id: watch.id,
-      ...(subscribers === null ? {} : { subscribersCheckedAt: now }),
-    });
+    await advance(subscribers === null ? undefined : now);
     return;
   }
-  await dependencies.advance({ checkedThrough: until, id: watch.id });
+  await advance();
 }
 
 // Checks the watches that are due, a few at a time. Does nothing without

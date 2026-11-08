@@ -70,7 +70,7 @@ describe("agent events", () => {
     const [emit] = wake.emits;
     expect(emit).toMatchObject({ args: { workspace: organizationId }, event: "error_issue.opened" });
     expect((emit!.payload as { title: string }).title).toHaveLength(160);
-    expect(emit!.text).toMatch(/^Regressed error issue in checkout: x+…$/u);
+    expect(emit!.text).toBe("A regressed error issue opened in checkout.");
   });
 
   it("emits alert and synthetic check changes per episode", async () => {
@@ -132,7 +132,22 @@ describe("agent events", () => {
     const body = (emit!.payload as { latest: { body: string } }).latest.body;
     expect(body).toHaveLength(100);
     expect(body.startsWith("payment failed x")).toBe(true);
-    expect(emit!.text).toMatch(/^20\+ new matching logs; newest: ERROR checkout: payment failed x+…$/u);
+    expect(emit!.text).toBe("20+ new logs matched the watch in checkout.");
     expect(await logWatchSubscribers(watchId)).toBe(0);
+  });
+
+  it("never splits a character when it shortens a log line", async () => {
+    await notifyLogsMatched({
+      count: 1,
+      latest: { body: "🔥".repeat(150), service: "checkout", severity: "ERROR" },
+      more: false,
+      since: new Date("2026-11-08T11:59:00.000Z"),
+      until: new Date("2026-11-08T11:59:30.000Z"),
+      watchId: "a1a1a1a1-a1a1-41a1-81a1-a1a1a1a1a1a1",
+    });
+
+    const body = (wake.emits[0]!.payload as { latest: { body: string } }).latest.body;
+    expect(Array.from(body)).toHaveLength(100);
+    expect(body).toBe(`${"🔥".repeat(99)}…`);
   });
 });

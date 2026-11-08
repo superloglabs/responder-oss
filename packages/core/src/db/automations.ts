@@ -1421,6 +1421,16 @@ async function summarizeRunsInferenceUsage(
   }]));
 }
 
+// Whether a run belongs to the workspace, without reading the run.
+export async function automationRunInWorkspace(organizationId: string, runId: string): Promise<boolean> {
+  const rows = await getDatabase()
+    .select({ id: automationRuns.id })
+    .from(automationRuns)
+    .where(and(eq(automationRuns.id, runId), eq(automationRuns.organizationId, organizationId)))
+    .limit(1);
+  return rows.length > 0;
+}
+
 export async function getAutomationRun(
   organizationId: string,
   runId: string,

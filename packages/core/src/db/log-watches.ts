@@ -1,4 +1,4 @@
-import { and, count, eq, gt, inArray, isNull, lte, sql } from "drizzle-orm";
+import { and, count, eq, gt, inArray, isNull, lt, lte, sql } from "drizzle-orm";
 import { getDatabase } from "./client.js";
 import { logWatches, type LogWatchFilters } from "./schema.js";
 
@@ -10,6 +10,11 @@ export type LogWatch = typeof logWatches.$inferSelect;
 // check interval, and the read-only store has few query slots.
 export const maximumLogWatchesPerWorkspace = 5;
 export const logWatchCheckIntervalMs = 30_000;
+// How long a claimed watch stays with its worker: longer than a check's query
+// and emit with their retries. The check sets the next check time itself.
+export const logWatchClaimMs = 2 * 60_000;
+// Ended watches are kept this long, then deleted with their filters.
+export const endedLogWatchRetentionMs = 7 * 86_400_000;
 
 export class LogWatchLimitError extends Error {
   constructor() {
@@ -54,8 +59,8 @@ export async function createLogWatch(input: {
   });
 }
 
-// Ends expired watches, then claims the due ones and moves their next check
-// one interval on, so another worker skips them.
+// Ends expired watches, then claims the due ones until their claim runs out,
+// so another worker skips them.
 export async function claimDueLogWatches(limit: number, now: Date): Promise<LogWatch[]> {
   const db = getDatabase();
   await db
@@ -73,24 +78,32 @@ export async function claimDueLogWatches(limit: number, now: Date): Promise<LogW
     if (due.length === 0) return [];
     return tx
       .update(logWatches)
-      .set({ nextCheckAt: new Date(now.getTime() + logWatchCheckIntervalMs) })
+      .set({ nextCheckAt: new Date(now.getTime() + logWatchClaimMs) })
       .where(inArray(logWatches.id, due.map((row) => row.id)))
       .returning();
   });
 }
 
+// Records a check: the cursor moves from `from`, the cursor the check read
+// from, to `checkedThrough`. A check whose claim ran out, and another worker
+// has since moved the cursor, changes nothing, so the cursor never goes back.
 export async function advanceLogWatch(input: {
   checkedThrough: Date;
+  from: Date;
   id: string;
+  nextCheckAt: Date;
   subscribersCheckedAt?: Date;
-}): Promise<void> {
-  await getDatabase()
+}): Promise<boolean> {
+  const rows = await getDatabase()
     .update(logWatches)
     .set({
       checkedThrough: input.checkedThrough,
+      nextCheckAt: input.nextCheckAt,
       ...(input.subscribersCheckedAt ? { subscribersCheckedAt: input.subscribersCheckedAt } : {}),
     })
-    .where(eq(logWatches.id, input.id));
+    .where(and(eq(logWatches.id, input.id), eq(logWatches.checkedThrough, input.from)))
+    .returning({ id: logWatches.id });
+  return rows.length > 0;
 }
 
 export async function endLogWatch(id: string, reason: "expired" | "unsubscribed", now: Date): Promise<void> {
@@ -98,4 +111,12 @@ export async function endLogWatch(id: string, reason: "expired" | "unsubscribed"
     .update(logWatches)
     .set({ endReason: reason, endedAt: now })
     .where(and(eq(logWatches.id, id), isNull(logWatches.endedAt)));
+}
+
+export async function purgeEndedLogWatches(now: Date): Promise<number> {
+  const rows = await getDatabase()
+    .delete(logWatches)
+    .where(lt(logWatches.endedAt, new Date(now.getTime() - endedLogWatchRetentionMs)))
+    .returning({ id: logWatches.id });
+  return rows.length;
 }

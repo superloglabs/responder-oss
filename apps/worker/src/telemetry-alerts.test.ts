@@ -352,6 +352,17 @@ describe("agents watching an alert", () => {
     ]);
   });
 
+  it("hears no recovery of an episode that opened while notifications were paused", async () => {
+    const wake = watching();
+    await checkTelemetryAlert(alert, {} as never, dependencies({
+      openEpisodes: vi.fn(async () => [episode({ notificationsPaused: true })]),
+      values: vi.fn(async () => [{ group: "", value: 4 }]),
+    }));
+
+    await wake.close();
+    expect(wake.emits).toEqual([]);
+  });
+
   it("hears nothing while the workspace's notifications are paused", async () => {
     const wake = watching();
     await checkTelemetryAlert({ ...alert, notificationsPaused: true }, {} as never, dependencies());

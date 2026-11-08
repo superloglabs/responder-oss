@@ -210,7 +210,8 @@ export async function checkTelemetryAlert(
         await announce(episode, evaluation.value);
       } else if (transition === "recovered" && episode) {
         if (await dependencies.resolveEpisode(episode.id, evaluation.value)) {
-          if (!alert.notificationsPaused) {
+          // An episode that opened while paused was never announced.
+          if (!alert.notificationsPaused && !episode.notificationsPaused) {
             void notifyAlertChanged({
               alertId: alert.id, episodeId: episode.id, group: episode.groupKey, name: alert.name,
               state: "resolved", value: evaluation.value,

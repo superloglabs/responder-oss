@@ -15,4 +15,6 @@ CREATE TABLE "log_watches" (
 ALTER TABLE "log_watches" ADD CONSTRAINT "log_watches_organization_id_organization_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "log_watches" ADD CONSTRAINT "log_watches_created_by_user_id_fk" FOREIGN KEY ("created_by") REFERENCES "public"."user"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "log_watches_due_idx" ON "log_watches" USING btree ("next_check_at") WHERE "log_watches"."ended_at" is null;--> statement-breakpoint
-CREATE INDEX "log_watches_organization_idx" ON "log_watches" USING btree ("organization_id") WHERE "log_watches"."ended_at" is null;
+CREATE INDEX "log_watches_organization_idx" ON "log_watches" USING btree ("organization_id") WHERE "log_watches"."ended_at" is null;--> statement-breakpoint
+CREATE INDEX "log_watches_expiry_idx" ON "log_watches" USING btree ("expires_at") WHERE "log_watches"."ended_at" is null;--> statement-breakpoint
+CREATE INDEX "log_watches_ended_idx" ON "log_watches" USING btree ("ended_at") WHERE "log_watches"."ended_at" is not null;

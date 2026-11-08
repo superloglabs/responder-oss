@@ -1058,10 +1058,10 @@ export const telemetryAlerts = pgTable(
   ],
 );
 
-// One continuous breach of an alert, per group.
 // A live tail an agent started over MCP: the worker reads the workspace's new
 // logs that match the filters and wakes the agent's conversation through
-// Wakeshift. Logs up to checkedThrough have been read.
+// Wakeshift. Logs up to checkedThrough have been read. A worker claims a due
+// watch by moving nextCheckAt past the length of a check.
 export const logWatches = pgTable(
   "log_watches",
   {
@@ -1084,9 +1084,12 @@ export const logWatches = pgTable(
   (table) => [
     index("log_watches_due_idx").on(table.nextCheckAt).where(sql`${table.endedAt} is null`),
     index("log_watches_organization_idx").on(table.organizationId).where(sql`${table.endedAt} is null`),
+    index("log_watches_expiry_idx").on(table.expiresAt).where(sql`${table.endedAt} is null`),
+    index("log_watches_ended_idx").on(table.endedAt).where(sql`${table.endedAt} is not null`),
   ],
 );
 
+// One continuous breach of an alert, per group.
 export const telemetryAlertEpisodes = pgTable(
   "telemetry_alert_episodes",
   {

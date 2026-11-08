@@ -37,8 +37,10 @@ export function defineAgentEvents(wake: Wakeshift) {
         title: z.string(),
         transition: z.enum(["new", "regressed"]),
       }),
-      text: ({ service, title, transition }) =>
-        `${transition === "new" ? "New" : "Regressed"} error issue${service ? ` in ${service}` : ""}: ${title}`,
+      // Titles come from the workspace's telemetry, so they stay in the
+      // payload, out of the line the agent reads first.
+      text: ({ service, transition }) =>
+        `${transition === "new" ? "A new" : "A regressed"} error issue opened${service ? ` in ${service}` : ""}.`,
     }),
     alertChanged: wake.defineEvent("alert.changed", {
       description: "An alert started firing, or recovered.",
@@ -73,8 +75,10 @@ export function defineAgentEvents(wake: Wakeshift) {
         since: z.string(),
         until: z.string(),
       }),
+      // Log lines come from the workspace's telemetry, so the newest one stays
+      // in the payload, out of the line the agent reads first.
       text: ({ count, latest, more }) =>
-        `${count}${more ? "+" : ""} new matching log${count === 1 && !more ? "" : "s"}; newest: ${latest.severity ? `${latest.severity} ` : ""}${latest.service}: ${latest.body}`,
+        `${count}${more ? "+" : ""} new log${count === 1 && !more ? "" : "s"} matched the watch${latest.service ? ` in ${latest.service}` : ""}.`,
     }),
   };
 }
@@ -97,8 +101,15 @@ export function setAgentEvents(events: AgentEvents | undefined): void {
 
 const textLimit = 160;
 
+// Cuts by code points, so a character outside the Basic Multilingual Plane
+// is never split.
+function truncate(value: string, limit: number): string {
+  const characters = Array.from(value);
+  return characters.length > limit ? `${characters.slice(0, limit - 1).join("")}…` : value;
+}
+
 function short(value: string): string {
-  return value.length > textLimit ? `${value.slice(0, textLimit - 1)}…` : value;
+  return truncate(value, textLimit);
 }
 
 // Waking agents never fails or delays the work it reports: the emit runs in
@@ -215,7 +226,7 @@ export async function notifyLogsMatched(input: {
       {
         count: input.count,
         latest: {
-          body: body.length > logBodyLimit ? `${body.slice(0, logBodyLimit - 1)}…` : body,
+          body: truncate(body, logBodyLimit),
           service: short(input.latest.service),
           severity: input.latest.severity.slice(0, 20),
         },

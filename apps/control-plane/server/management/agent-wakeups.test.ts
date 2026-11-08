@@ -1,7 +1,12 @@
 import { createTestClient, type TestClient } from "@wakeshift/sdk/testing";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { defineAgentEvents, setAgentEvents } from "../../../../packages/core/src/agent-events.js";
+import {
+  defineAgentEvents,
+  logWatchSubscribers,
+  notifyLogsMatched,
+  setAgentEvents,
+} from "../../../../packages/core/src/agent-events.js";
 import { managementMcpRoutes } from "./mcp.js";
 
 const organizationId = "15151515-1515-4515-8515-151515151515";
@@ -12,10 +17,15 @@ const alertId = "61616161-6161-4161-8161-616161616161";
 const token = `slk_${"a".repeat(43)}`;
 
 const mocks = vi.hoisted(() => ({
+  automationRunInWorkspace: vi.fn(),
   createLogWatch: vi.fn(),
+  endLogWatch: vi.fn(),
+  findCheck: vi.fn(),
+  startConnection: vi.fn(),
   findAlert: vi.fn(),
   getAutomation: vi.fn(),
   queueFollowUp: vi.fn(),
+  getAutomationRun: vi.fn(),
   queueRun: vi.fn(),
 }));
 
@@ -38,7 +48,9 @@ vi.mock("../../../../packages/core/src/db/organization-capabilities.js", () => (
 }));
 vi.mock("../../../../packages/core/src/db/automations.js", async (importOriginal) => ({
   ...(await importOriginal()),
+  automationRunInWorkspace: mocks.automationRunInWorkspace,
   getAutomation: mocks.getAutomation,
+  getAutomationRun: mocks.getAutomationRun,
 }));
 vi.mock("../../../../packages/core/src/db/telemetry-alerts.js", async (importOriginal) => ({
   ...(await importOriginal()),
@@ -47,6 +59,22 @@ vi.mock("../../../../packages/core/src/db/telemetry-alerts.js", async (importOri
 vi.mock("../../../../packages/core/src/db/log-watches.js", async (importOriginal) => ({
   ...(await importOriginal()),
   createLogWatch: mocks.createLogWatch,
+  endLogWatch: mocks.endLogWatch,
+}));
+vi.mock("../../../../packages/core/src/db/synthetic-checks.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  findSyntheticCheck: mocks.findCheck,
+}));
+vi.mock("../integrations/catalog.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  integrationIsConfigured: () => true,
+}));
+vi.mock("../integrations/routes.js", () => ({
+  startIntegrationConnection: mocks.startConnection,
+}));
+vi.mock("../integrations/chat-connection.js", () => ({
+  chatConnectionHandoffUrl: (_ticket: string, url: string) => `http://localhost:3000/api/integrations/chat/open?to=${encodeURIComponent(url)}`,
+  createChatConnectionTicket: () => ({ returnTo: "/api/integrations/chat/complete?ticket=t", token: "t" }),
 }));
 vi.mock("../../../../packages/core/src/telemetry/client.js", () => ({
   getTelemetryClient: vi.fn().mockReturnValue({}),
@@ -128,17 +156,35 @@ describe("agent wakeups", () => {
     expect(wake.subscriptions[0]!.replay).toBeGreaterThan(0);
   });
 
-  it("subscribes a follow-up's conversation to the next turn, without replaying the last one", async () => {
-    mocks.queueFollowUp.mockResolvedValue({ jobId: "job" });
+  it("subscribes a follow-up's conversation before queueing the next turn, without replaying the last one", async () => {
+    mocks.automationRunInWorkspace.mockResolvedValue(true);
+    let subscribedWhenQueued = 0;
+    mocks.queueFollowUp.mockImplementation(async () => {
+      subscribedWhenQueued = wake.subscriptions.length;
+      return { jobId: "job" };
+    });
 
     await callTool("send_automation_run_message", { message: "And the logs?", runId: runId.toUpperCase() });
 
+    expect(mocks.automationRunInWorkspace).toHaveBeenCalledWith(organizationId, runId);
+    expect(subscribedWhenQueued).toBe(1);
     expect(wake.subscriptions).toEqual([expect.objectContaining({
       args: { run: runId },
       event: "automation_run.finished",
       once: true,
     })]);
     expect(wake.subscriptions[0]!.replay).toBeUndefined();
+  });
+
+  it("does not subscribe to a run outside the caller's workspace", async () => {
+    mocks.automationRunInWorkspace.mockResolvedValue(false);
+    mocks.queueFollowUp.mockResolvedValue(null);
+    mocks.getAutomationRun.mockResolvedValue(null);
+
+    const result = await callTool("send_automation_run_message", { message: "And the logs?", runId });
+
+    expect(result.isError).toBe(true);
+    expect(wake.subscriptions).toEqual([]);
   });
 
   it("subscribes nothing when the tool fails", async () => {
@@ -224,5 +270,74 @@ describe("agent wakeups", () => {
     expect(full.isError).toBe(true);
     expect(JSON.parse(full.content[0]!.text)).toMatchObject({ code: "too_many_log_watches" });
     expect(wake.subscriptions).toEqual([]);
+  });
+
+  it("subscribes a consent link's conversation to the person coming back, for an hour", async () => {
+    mocks.startConnection.mockResolvedValue(new Response(null, {
+      headers: { location: "https://sentry.io/oauth/authorize/?state=s" }, status: 302,
+    }));
+
+    const result = await callTool("start_integration_connection", { provider: "sentry" });
+
+    expect(JSON.parse(result.content[0]!.text)).toMatchObject({ provider: "sentry", status: "awaiting_consent" });
+    expect(wake.subscriptions).toEqual([expect.objectContaining({
+      args: { provider: "sentry", workspace: organizationId },
+      event: "integration.connected",
+      once: true,
+      ttl: 3_600,
+    })]);
+  });
+
+  it("has nothing to wait for when a connection is recovered", async () => {
+    mocks.startConnection.mockResolvedValue(new Response(null, {
+      headers: { location: "http://localhost:3000/settings?status=connected" }, status: 302,
+    }));
+
+    const result = await callTool("start_integration_connection", { provider: "sentry" });
+
+    expect(JSON.parse(result.content[0]!.text)).toMatchObject({ status: "connected" });
+    expect(wake.subscriptions).toEqual([]);
+  });
+
+  it("watches a synthetic check the workspace owns, by its stored ID", async () => {
+    const checkId = "91919191-9191-4191-8191-919191919191";
+    mocks.findCheck.mockResolvedValue({ id: checkId, name: "Homepage" });
+
+    await callTool("watch_synthetic_check", { checkId: checkId.toUpperCase() });
+
+    expect(mocks.findCheck).toHaveBeenCalledWith(organizationId, checkId.toUpperCase());
+    expect(wake.subscriptions).toEqual([expect.objectContaining({
+      args: { check: checkId },
+      event: "synthetic_check.changed",
+      once: false,
+    })]);
+  });
+
+  it("reaches a log watch's conversation with each batch", async () => {
+    const watchId = "a1a1a1a1-a1a1-41a1-81a1-a1a1a1a1a1a1";
+    mocks.createLogWatch.mockResolvedValue({ expiresAt: new Date("2026-11-08T13:00:00.000Z"), id: watchId });
+    await callTool("watch_logs", { severity: "ERROR" });
+
+    const delivered = await notifyLogsMatched({
+      count: 1, latest: { body: "payment failed", service: "checkout", severity: "ERROR" }, more: false,
+      since: new Date("2026-11-08T12:00:00.000Z"), until: new Date("2026-11-08T12:00:30.000Z"), watchId,
+    });
+
+    expect(delivered).toEqual({ matched: 1 });
+    expect(await logWatchSubscribers(watchId)).toBe(1);
+  });
+
+  it("ends a log watch and fails the tool when its conversation can't be subscribed", async () => {
+    const watchId = "a1a1a1a1-a1a1-41a1-81a1-a1a1a1a1a1a1";
+    mocks.createLogWatch.mockResolvedValue({ expiresAt: new Date("2026-11-08T13:00:00.000Z"), id: watchId });
+    wake.failNext("subscribe", "unreachable");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const result = await callTool("watch_logs", { severity: "ERROR" });
+
+    expect(result.isError).toBe(true);
+    expect(JSON.parse(result.content[0]!.text)).toMatchObject({ code: "watch_unavailable" });
+    expect(mocks.endLogWatch).toHaveBeenCalledWith(watchId, "unsubscribed", expect.any(Date));
+    warn.mockRestore();
   });
 });
