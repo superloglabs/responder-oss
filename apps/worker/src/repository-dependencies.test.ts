@@ -176,7 +176,7 @@ describe("repository dependency installs", () => {
     });
     execCommand.mockImplementation(async ({ cmd }: { cmd: string }) => {
       if (cmd.includes("find .")) return commandResponse("package-lock.json\nuv.lock\napi/pnpm-lock.yaml\nweb/bun.lock\nweb/uv.lock\n");
-      if (cmd.includes("dir='/home/daytona/workspace/repositories/acme/app/web'") && cmd.includes("lock='uv.lock'")) {
+      if (cmd.includes(`dir='${root}/web'`) && cmd.includes("lock='uv.lock'")) {
         return commandResponse("responder-install: exit 137\n");
       }
       const lockfile = /^lock='([^']*)'$/mu.exec(cmd)?.[1] ?? "";
