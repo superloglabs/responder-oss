@@ -1,8 +1,15 @@
-import { ROOT_CONTEXT, SpanKind, trace, TraceFlags } from "@opentelemetry/api";
+import { ROOT_CONTEXT, SpanKind, SpanStatusCode, trace, TraceFlags } from "@opentelemetry/api";
 import type { Logger, LogRecord } from "@opentelemetry/api-logs";
-import { SamplingDecision, type Sampler } from "@opentelemetry/sdk-trace-base";
+import {
+  BasicTracerProvider,
+  InMemorySpanExporter,
+  SamplingDecision,
+  SimpleSpanProcessor,
+  type Sampler,
+} from "@opentelemetry/sdk-trace-base";
 import { describe, expect, it } from "vitest";
 import {
+  BetterAuthClientErrorProcessor,
   consoleLogRecord,
   DetachedSpanSampler,
   forwardConsoleToLogger,
@@ -123,6 +130,50 @@ describe("DetachedSpanSampler", () => {
     expect(
       sampler.shouldSample(ROOT_CONTEXT, traceId, "investigation", SpanKind.CONSUMER, {}, []).decision,
     ).toBe(SamplingDecision.RECORD_AND_SAMPLED);
+  });
+});
+
+// What Better Auth's tracer does when an endpoint throws.
+function endWithError(scope: string, error: Error) {
+  const exporter = new InMemorySpanExporter();
+  const provider = new BasicTracerProvider({
+    spanProcessors: [new BetterAuthClientErrorProcessor(), new SimpleSpanProcessor(exporter)],
+  });
+  const span = provider.getTracer(scope).startSpan("handler /sign-in/email");
+  span.recordException(error);
+  span.setStatus({ code: SpanStatusCode.ERROR, message: error.message });
+  span.end();
+  return exporter.getFinishedSpans()[0]!;
+}
+
+function apiError(message: string, statusCode: number): Error {
+  return Object.assign(new Error(message), { name: "APIError", statusCode });
+}
+
+describe("BetterAuthClientErrorProcessor", () => {
+  it("keeps a Better Auth 4xx answer out of exceptions", () => {
+    const span = endWithError("better-auth", apiError("Invalid email or password", 401));
+    expect(span.events).toEqual([]);
+    expect(span.status.code).toBe(SpanStatusCode.UNSET);
+    expect(span.attributes["http.response.status_code"]).toBe(401);
+  });
+
+  it("records Better Auth server errors", () => {
+    const span = endWithError("better-auth", apiError("Failed to get session", 500));
+    expect(span.events.map((event) => event.name)).toEqual(["exception"]);
+    expect(span.status).toEqual({ code: SpanStatusCode.ERROR, message: "Failed to get session" });
+  });
+
+  it("records other errors on Better Auth spans", () => {
+    const span = endWithError("better-auth", new TypeError("connection reset"));
+    expect(span.events.map((event) => event.name)).toEqual(["exception"]);
+    expect(span.status.code).toBe(SpanStatusCode.ERROR);
+  });
+
+  it("leaves spans from other libraries alone", () => {
+    const span = endWithError("hono", apiError("Unauthorized", 401));
+    expect(span.events.map((event) => event.name)).toEqual(["exception"]);
+    expect(span.status.code).toBe(SpanStatusCode.ERROR);
   });
 });
 
