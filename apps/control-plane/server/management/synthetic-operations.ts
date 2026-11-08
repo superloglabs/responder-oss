@@ -180,6 +180,24 @@ function sameSlack(a: SyntheticSlackTarget | null, b: SyntheticSlackTarget | nul
 
 export const syntheticOperations = [
   defineOperation({
+    name: "watch_synthetic_check",
+    summary: "Watch a synthetic check",
+    description: "Watches a synthetic check from this conversation: each time it starts failing or recovers.",
+    mcpOnly: true,
+    method: "POST",
+    path: "/synthetic-checks/{checkId}/watch",
+    tag: "Synthetics",
+    effect: "read",
+    input: z.object({ checkId, once: z.boolean().default(false).describe("Stop watching after the first change.") }),
+    output: z.object({ check: z.object({ id: z.uuid(), name: z.string() }) }),
+    async run(context, input) {
+      await requireSynthetics(context);
+      const check = await findSyntheticCheck(context.organizationId, input.checkId);
+      if (!check) throw checkNotFound();
+      return { check: { id: check.id, name: check.name } };
+    },
+  }),
+  defineOperation({
     name: "list_synthetic_checks",
     summary: "List synthetic checks",
     description: "Lists the workspace's synthetic checks by name, with each one's request, assertions, last status, and uptime over the last day.",

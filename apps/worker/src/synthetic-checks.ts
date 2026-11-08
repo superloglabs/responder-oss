@@ -1,3 +1,4 @@
+import { notifySyntheticCheckChanged } from "@responder/core/agent-events";
 import type { AutomationNotification } from "@responder/core/automations/config";
 import {
   claimDueSyntheticChecks,
@@ -201,11 +202,19 @@ export async function processSyntheticCheck(
         reason,
         slack: check.slack,
       });
-      if (opened) await announce(opened, reason, failures);
+      if (opened) {
+        void notifySyntheticCheckChanged({
+          checkId: check.id, episodeId: opened.id, name: check.name, reason, state: "failing",
+        });
+        await announce(opened, reason, failures);
+      }
     }
     return;
   }
   if (episode && (await dependencies.resolveEpisode(episode.id))) {
+    void notifySyntheticCheckChanged({
+      checkId: check.id, episodeId: episode.id, name: check.name, reason: null, state: "resolved",
+    });
     await announceRecovery({ ...episode, endedAt: now });
   }
   for (const recovery of await dependencies.unannouncedRecoveries(check.id)) {

@@ -10,6 +10,7 @@ import {
   type Tool,
 } from "@modelcontextprotocol/sdk/types.js";
 import { Hono } from "hono";
+import { agentEvents } from "../../../../packages/core/src/agent-events.js";
 import { controlPlaneBaseUrl } from "../integrations/urls.js";
 import { mcpWwwAuthenticate } from "../mcp-oauth.js";
 import {
@@ -21,6 +22,7 @@ import {
   isLegacyMcpForward,
   legacyMcpForwardRefusedBody,
 } from "./legacy-mcp-forward.js";
+import { subscribeCaller, wakingTools } from "./agent-wakeups.js";
 import { jsonSchema } from "./openapi.js";
 import type { ManagementContext, ManagementOperation } from "./operation.js";
 import { managementOperations } from "./operations.js";
@@ -84,12 +86,16 @@ export function createManagementMcpServer(
   const operations = new Map(
     available.map((operation) => [operation.name, operation]),
   );
+  const events = agentEvents();
+  const wrap = Object.fromEntries(
+    Object.entries(wakingTools(events)).filter(([name]) => operations.has(name)),
+  );
   server.setRequestHandler(ListToolsRequestSchema, () => ({
     tools: available.map(mcpTool),
   }));
   server.setRequestHandler(
     CallToolRequestSchema,
-    async (request): Promise<CallToolResult> => {
+    async (request, extra): Promise<CallToolResult> => {
       const operation = operations.get(request.params.name);
       if (!operation) {
         return {
@@ -97,11 +103,28 @@ export function createManagementMcpServer(
           isError: true,
         };
       }
-      const result = await executeOperation(
-        operation,
-        context,
-        request.params.arguments ?? {},
-      );
+      const args = request.params.arguments ?? {};
+      const result = await executeOperation(operation, context, args);
+      if (result.status < 400 && operation.name in wrap) {
+        // The work is done, so a subscription that fails is only logged: the
+        // agent can still check with the read tools.
+        try {
+          await subscribeCaller({
+            body: result.body as Record<string, unknown>,
+            call: events.wake.currentCall(extra),
+            context,
+            events,
+            input: args,
+            tool: operation.name,
+          });
+        } catch (error) {
+          console.warn(JSON.stringify({
+            error: error instanceof Error ? error.name : typeof error,
+            event: "mcp_wakeup_subscribe_failed",
+            tool: operation.name,
+          }));
+        }
+      }
       return {
         content: [{ text: JSON.stringify(result.body), type: "text" }],
         ...(result.status < 400 ? { structuredContent: result.body } : {}),
@@ -109,6 +132,18 @@ export function createManagementMcpServer(
       };
     },
   );
+  // Wakeshift adds its arguments to the tools that subscribe, and its own
+  // tools to list and end subscriptions. The caller is always a signed-in
+  // member; an OAuth client's registered name tells Wakeshift which agent
+  // program is calling.
+  events.wake.attach(server, {
+    identify: () => ({
+      user: context.user.id,
+      ...(context.oauthClientId && context.clientName ? { client: context.clientName } : {}),
+    }),
+    requireUser: true,
+    wrap,
+  });
   return server;
 }
 

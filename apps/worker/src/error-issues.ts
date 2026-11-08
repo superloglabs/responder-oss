@@ -1,3 +1,4 @@
+import { notifyErrorIssueOpened } from "@responder/core/agent-events";
 import { type ErrorIssueStore, withErrorIssueStore } from "@responder/core/db/error-issues";
 import { loadSourceMaps } from "@responder/core/db/source-maps";
 import { getTelemetryClient, type TelemetryClient } from "@responder/core/telemetry/client";
@@ -85,6 +86,7 @@ export async function ingestErrorIssues(
     const organizationIds = await store.organizationIds();
     const paused = await store.pausedOrganizationIds();
     const opened: ErrorIssueChange[] = [];
+    const notices: Parameters<typeof notifyErrorIssueOpened>[0][] = [];
     for (const kind of errorIssueKinds) {
       const window = errorCandidateWindow(await store.cursor(kind), dependencies.now());
       const rows = await dependencies.candidates(client, {
@@ -103,6 +105,15 @@ export async function ingestErrorIssues(
               organizationId: occurrences.organizationId,
               transition: recorded.transition,
             });
+            // A workspace that paused notifications wakes no agents either.
+            if (!paused.has(occurrences.organizationId)) notices.push({
+              issueId: recorded.issueId,
+              openedAt: dependencies.now(),
+              organizationId: occurrences.organizationId,
+              service: occurrences.service,
+              title: occurrences.title,
+              transition: recorded.transition,
+            });
           }
         } catch (error) {
           if (!rejectedData(error)) throw error;
@@ -118,7 +129,7 @@ export async function ingestErrorIssues(
       }
       await store.saveCursor(kind, nextErrorCandidateCursor(window, rows, candidatesPerPass));
     }
-    return opened;
+    return { notices, opened };
   }).catch((error: unknown) => {
     if (!missingProjection(error)) throw error;
     if (!missingProjectionReported) {
@@ -127,8 +138,10 @@ export async function ingestErrorIssues(
     }
     return null;
   });
-  for (const change of changes ?? []) {
+  for (const change of changes?.opened ?? []) {
     console.log(JSON.stringify({ event: "error_issue_opened", ...change }));
   }
-  return changes ?? [];
+  // Agents watching the workspace hear of each issue once the pass is saved.
+  for (const notice of changes?.notices ?? []) void notifyErrorIssueOpened(notice);
+  return changes?.opened ?? [];
 }

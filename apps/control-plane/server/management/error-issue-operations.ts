@@ -139,6 +139,22 @@ async function claimedIssue(result: ErrorIssueClaimResult | null, hint: string) 
 
 export const errorIssueOperations = [
   defineOperation({
+    name: "watch_error_issues",
+    summary: "Watch for new error issues",
+    description: "Watches the workspace's error issues from this conversation: each new error, and each resolved one that comes back.",
+    mcpOnly: true,
+    method: "POST",
+    path: "/error-issues/watch",
+    tag: "Errors",
+    effect: "read",
+    input: z.object({ once: z.boolean().default(false).describe("Stop watching after the first change.") }),
+    output: z.object({ workspaceId: z.uuid() }),
+    async run(context) {
+      await requireTelemetry(context);
+      return { workspaceId: context.organizationId };
+    },
+  }),
+  defineOperation({
     name: "list_error_issues",
     summary: "List error issues",
     description:

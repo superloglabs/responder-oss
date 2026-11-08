@@ -2,7 +2,9 @@ import browserErrors from "../../../packages/core/src/telemetry/fixtures/browser
 import type { ErrorIssueStore } from "@responder/core/db/error-issues";
 import type { TelemetryClient } from "@responder/core/telemetry/client";
 import type { ErrorCandidate, ErrorCandidateCursor, ErrorIssueKind } from "@responder/core/telemetry/error-issues";
-import { describe, expect, it, vi } from "vitest";
+import { createTestClient } from "@wakeshift/sdk/testing";
+import { defineAgentEvents, setAgentEvents } from "@responder/core/agent-events";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { type ErrorIssueDependencies, ingestErrorIssues } from "./error-issues.js";
 
 const organizationId = "0b9f6b9e-2f4a-4c1e-9d2b-3f8a6c1d7e01";
@@ -229,5 +231,31 @@ describe("ingestErrorIssues when a write fails for another reason", () => {
 
     await expect(ingestErrorIssues(deps)).rejects.toThrow("lock timeout");
     expect(fake.saveCursor).not.toHaveBeenCalled();
+  });
+});
+
+describe("agents watching a workspace's error issues", () => {
+  afterEach(() => setAgentEvents(undefined));
+
+  it("hear of each issue that opened, except in a paused workspace", async () => {
+    const wake = createTestClient();
+    setAgentEvents(defineAgentEvents(wake));
+    const pausedOrganizationId = "0b9f6b9e-2f4a-4c1e-9d2b-3f8a6c1d7e02";
+    const fake = store({
+      organizationIds: vi.fn(async () => [organizationId, pausedOrganizationId]),
+      pausedOrganizationIds: vi.fn(async () => new Set([pausedOrganizationId])),
+    });
+    const deps = dependencies(fake, (kind) => (kind === "span"
+      ? [candidate({ kind }), candidate({ candidate_id: "6a0d1c1e-0000-4000-8000-000000000002", kind, project_id: pausedOrganizationId })]
+      : []));
+
+    await ingestErrorIssues(deps);
+
+    await vi.waitFor(() => expect(wake.emits).toHaveLength(1));
+    expect(wake.emits[0]).toMatchObject({
+      args: { workspace: organizationId },
+      event: "error_issue.opened",
+      payload: { issue: "issue-1", transition: "new" },
+    });
   });
 });

@@ -23,6 +23,7 @@ import { dueScheduleSlot } from "../automations/schedule.js";
 import { matchesSlackPhrase } from "../automations/slack-phrase-match.js";
 import type { AutomationUserMessageEventData } from "../automations/transcript.js";
 import { member } from "./auth-schema.js";
+import { notifyAutomationRunFinished } from "../agent-events.js";
 import { getDatabase } from "./client.js";
 import type { RuntimeRepository } from "./investigations.js";
 import { slackAccountOfApp } from "./integrations.js";
@@ -2026,7 +2027,15 @@ export async function setAutomationRunStatus(input: {
         ...(input.leaseId ? [eq(automationRuns.leaseId, input.leaseId)] : []),
       ),
     )
-    .returning({ id: automationRuns.id });
+    .returning({ completedAt: automationRuns.completedAt, id: automationRuns.id });
+  const row = rows[0];
+  if (row && terminal && row.completedAt) {
+    void notifyAutomationRunFinished({
+      completedAt: row.completedAt,
+      runId: input.runId,
+      status: input.status as "succeeded" | "failed" | "cancelled",
+    });
+  }
   return rows.length > 0;
 }
 

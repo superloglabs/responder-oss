@@ -148,12 +148,14 @@ export function buildOpenApiDocument(
   operations: ManagementOperation[],
   origin: string,
 ) {
+  // MCP-only tools have no REST route.
+  const routed = operations.filter((operation) => !operation.mcpOnly);
   const paths: Record<string, Record<string, unknown>> = {};
-  for (const operation of operations) {
+  for (const operation of routed) {
     paths[operation.path] ??= {};
     paths[operation.path]![operation.method.toLowerCase()] = openApiOperation(operation);
   }
-  const tags = [...new Set(operations.map((operation) => operation.tag))];
+  const tags = [...new Set(routed.map((operation) => operation.tag))];
   return {
     components: {
       schemas: { Error: jsonSchema(errorSchema, "output") },
