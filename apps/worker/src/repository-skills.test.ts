@@ -1,8 +1,12 @@
 import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
+import { dir, file, Manifest, skills } from "@openai/agents/sandbox";
+import { sandboxWorkspaceRoot } from "@responder/core/sandbox-config";
 import { describe, expect, it, vi } from "vitest";
 import {
   discoverRepositoryAgentDocs,
+  clearRepositorySkills,
   loadRepositorySkills,
+  repositorySkillsPath,
   repositoryAgentDocsInstructions,
   type RepositorySkill,
 } from "./repository-skills.js";
@@ -159,5 +163,66 @@ describe("repository skill loading", () => {
     ).rejects.toThrow(
         `Unable to read repository skill file ${repository.path}/.agents/skills/example/SKILL.md: permission denied`,
       );
+  });
+});
+
+describe("repository skills on a resumed thread session", () => {
+  const capability = () =>
+    skills({
+      from: dir({ children: { example: dir({ children: {} }) } }),
+      skillsPath: repositorySkillsPath,
+    });
+
+  function resumedSession(exitCode = 0) {
+    // The first turn's capability lists its folder in the saved manifest.
+    const manifest = capability().processManifest(
+      new Manifest({
+        entries: { ".responder/memory/MEMORY.md": file({ content: "notes" }) },
+      }),
+    );
+    const execCommand = vi.fn().mockResolvedValue(commandResponse("", exitCode));
+    const session = {
+      execCommand,
+      state: { manifest },
+    } as unknown as DaytonaSandboxSession;
+    return { execCommand, manifest, session };
+  }
+
+  it("lets the skills capability add its folder again on the next turn", async () => {
+    const { manifest, session } = resumedSession();
+    expect(() => capability().processManifest(manifest)).toThrow(
+      "skills path overlaps existing manifest entries: .agents",
+    );
+
+    await clearRepositorySkills(session);
+
+    const next = capability().processManifest(session.state.manifest);
+    expect(Object.keys(next.entries).sort()).toEqual([
+      ".agents",
+      ".responder/memory/MEMORY.md",
+    ]);
+  });
+
+  it("removes the earlier turn's skill files from the sandbox", async () => {
+    const { execCommand, session } = resumedSession();
+
+    await clearRepositorySkills(session);
+
+    const command = execCommand.mock.calls[0]?.[0]?.cmd as string;
+    expect(command).toContain(
+      `[ "$(realpath -e -- '${sandboxWorkspaceRoot}')" = '${sandboxWorkspaceRoot}' ]`,
+    );
+    expect(command).toContain(
+      `rm -rf -- '${sandboxWorkspaceRoot}/${repositorySkillsPath}'`,
+    );
+  });
+
+  it("fails the turn when the old skills folder cannot be removed", async () => {
+    const { session } = resumedSession(1);
+
+    await expect(clearRepositorySkills(session)).rejects.toThrow(
+      "Unable to clear the sandbox skills folder",
+    );
+    expect(Object.keys(session.state.manifest.entries)).toContain(".agents");
   });
 });

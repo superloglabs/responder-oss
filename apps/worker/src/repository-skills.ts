@@ -238,6 +238,44 @@ async function readDirectoryEntry(
   return dir({ children });
 }
 
+// The skills capability's folder in the sandbox workspace, the SDK default.
+export const repositorySkillsPath = ".agents";
+
+// The skills capability adds its folder to the session's manifest, and a
+// thread saves that manifest with the session. On the thread's next turn the
+// capability refuses to add a folder that is already listed, so the resumed
+// session drops it first and gets this turn's skills again. The earlier
+// turn's files are removed too, so a skill deleted or renamed since then is
+// gone. Repositories are checked out under `repositories/`, so the folder at
+// the workspace root holds only the capability's copies. The agent controls
+// the sandbox between turns, so the root must resolve to itself first.
+export async function clearRepositorySkills(
+  session: SandboxSession,
+): Promise<void> {
+  const root = sandboxWorkspaceRoot;
+  const output = await session.execCommand({
+    cmd: [
+      "set -eu",
+      `[ "$(realpath -e -- '${root}')" = '${root}' ]`,
+      `rm -rf -- '${root}/${repositorySkillsPath}'`,
+    ].join("\n"),
+    maxOutputTokens: 200,
+    workdir: root,
+  });
+  if (!/(?:^|\n)Process exited with code 0(?:\n|$)/u.test(output)) {
+    throw new Error("Unable to clear the sandbox skills folder");
+  }
+  const entries = session.state.manifest.entries;
+  for (const path of Object.keys(entries)) {
+    if (
+      path === repositorySkillsPath ||
+      path.startsWith(`${repositorySkillsPath}/`)
+    ) {
+      delete entries[path];
+    }
+  }
+}
+
 // Copies the discovered skills for an investigation agent's skills capability.
 export async function loadRepositorySkills(
   session: SandboxSession,
