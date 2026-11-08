@@ -620,6 +620,7 @@ export const sandboxImageSettings = pgTable(
     setupScript: text("setup_script").notNull().default(""),
     startCommand: text("start_command").notNull().default(""),
     vcpus: integer("vcpus").notNull().default(2),
+    installDependencies: boolean("install_dependencies").notNull().default(false),
     // When the packages or setup script last changed, or a rebuild was asked
     // for, so settings can show a build as queued until the worker starts it.
     imageRequestedAt: timestamp("image_requested_at", { withTimezone: true }),

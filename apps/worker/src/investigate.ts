@@ -129,6 +129,11 @@ import {
 import { createWorkspaceTools } from "./workspace-tools.js";
 import { workspaceSandboxNetwork } from "./sandbox-network.js";
 import { runSandboxStartCommand, workspaceSandbox } from "./sandbox-image.js";
+import {
+  installRepositoryDependencies,
+  repositoryDependencyInstructions,
+  type DependencyInstallResult,
+} from "./repository-dependencies.js";
 import { materializeWorkspaceMemories, workspaceMemoryInstructions } from "./workspace-memories.js";
 import { createIssueRemediationUpdateTool } from "./issue-followup.js";
 import {
@@ -413,6 +418,9 @@ export function investigationInstructions(input: {
   clickStackConnected: boolean;
   repositories: CheckedOutRepository[];
   repositoryInstructions?: string[];
+  // The repository dependencies installed after checkout, when the workspace
+  // asks for them.
+  dependencyInstalls?: DependencyInstallResult[];
   workspaceMemories?: RuntimeWorkspaceMemory[];
   runtimeSystemPrompt?: string | null;
   runtimePromptParts?: InvestigationPromptParts;
@@ -600,6 +608,7 @@ export function investigationInstructions(input: {
           ...repositoryInstructions.map((path) => `- ${path}`),
         ].join("\n")
       : null,
+    repositoryDependencyInstructions(input.dependencyInstalls ?? [], input.runtimePromptParts),
     workspaceMemoryInstructions(input.workspaceMemories ?? [], input.runtimePromptParts),
     input.threadMode
       ? prompt(assistant ? "assistantSandbox" : "threadSandbox")
@@ -1094,6 +1103,23 @@ export async function runInvestigationAgent(
         pullRequestReviewCheckoutError = safeInvestigationError(error, environment);
       }
     }
+    // After every checkout above. A resumed thread skips what it already
+    // installed.
+    const dependencyInstalls = sandbox.installDependencies
+      ? await installRepositoryDependencies(session, repositories)
+      : [];
+    if (dependencyInstalls.length > 0) {
+      console.log(JSON.stringify({
+        event: "repository_dependencies_installed",
+        installs: dependencyInstalls.map(({ detail, directory, repository, status }) => ({
+          detail,
+          directory,
+          repository,
+          status,
+        })),
+        investigationId: job.investigationId,
+      }));
+    }
     const agentDocs = await discoverRepositoryAgentDocs(session, repositories);
     const repositorySkills = await loadRepositorySkills(session, agentDocs.skills);
     await clearRepositorySkills(session);
@@ -1245,6 +1271,7 @@ export async function runInvestigationAgent(
         displayName: connection.displayName,
       })),
       repositoryInstructions,
+      dependencyInstalls,
       workspaceMemories,
       slackChannels: slackConnection?.channels,
       upstashConnected: upstashServer !== null,

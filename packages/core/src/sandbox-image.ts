@@ -7,9 +7,12 @@ import { z } from "zod";
 // command runs in every sandbox as it starts or resumes, for processes a
 // snapshot cannot keep, such as the Docker daemon. With a snapshot, the start
 // command is recorded with it and changes when the snapshot does, so a run
-// never runs a start command its snapshot was not built for.
+// never runs a start command its snapshot was not built for. A workspace can
+// also have each checked-out repository's dependencies installed after
+// checkout, which needs no snapshot.
 
 export interface SandboxImageSettings {
+  installDependencies: boolean;
   packages: string[];
   setupScript: string;
   startCommand: string;
@@ -22,6 +25,7 @@ export const sandboxMemoryGiBPerVcpu = 2;
 export const defaultSandboxVcpus = 2;
 
 export const defaultSandboxImageSettings: SandboxImageSettings = {
+  installDependencies: false,
   packages: [],
   setupScript: "",
   startCommand: "",
@@ -43,6 +47,8 @@ export const sandboxPackageSchema = z
   );
 
 export const sandboxImageSettingsSchema = z.object({
+  // Optional, so a settings page loaded before this setting existed still saves.
+  installDependencies: z.boolean().default(false),
   packages: z
     .array(sandboxPackageSchema)
     .transform((packages) => [...new Set(packages)])

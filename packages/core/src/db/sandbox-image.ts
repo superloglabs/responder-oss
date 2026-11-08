@@ -13,6 +13,7 @@ import {
 } from "./schema.js";
 
 const settingsSelection = {
+  installDependencies: sandboxImageSettings.installDependencies,
   packages: sandboxImageSettings.packages,
   setupScript: sandboxImageSettings.setupScript,
   startCommand: sandboxImageSettings.startCommand,

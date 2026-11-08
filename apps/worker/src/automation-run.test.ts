@@ -125,6 +125,7 @@ function dependencies() {
     getMemories: vi.fn<AutomationRunDependencies["getMemories"]>().mockResolvedValue([]),
     grantAllowanceExhausted: vi.fn().mockResolvedValue(false),
     hasNewMessages: vi.fn().mockResolvedValue(false),
+    installDependencies: vi.fn<AutomationRunDependencies["installDependencies"]>().mockResolvedValue([]),
     heartbeatRun: vi.fn().mockResolvedValue(true),
     leaseExpiry: vi.fn<AutomationRunDependencies["leaseExpiry"]>().mockResolvedValue(null),
     loadRepositories: vi.fn().mockResolvedValue([{
@@ -251,6 +252,56 @@ describe("automation run processor", () => {
     expect(deps.discoverAgentDocs).toHaveBeenCalledWith(deps.session, [expect.objectContaining({ repository: "acme/app" })]);
     expect(prompt).toContain(`Read these repository instructions before you start, and follow them:\n- ${root}/AGENTS.md\n- ${root}/CLAUDE.md`);
     expect(prompt).toContain(`- diagnosing-bugs (acme/app): Use when a bug needs a cause. Read ${root}/.claude/skills/diagnosing-bugs/SKILL.md.`);
+  });
+
+  it("installs repository dependencies when the workspace asks for them and tells the agent", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    const root = "/home/daytona/workspace/repositories/acme/app";
+    deps.getWorkspaceSandbox = vi.fn(async (_organizationId: string, config: unknown) => ({
+      config,
+      installDependencies: true,
+      startCommand: "",
+    })) as unknown as AutomationRunDependencies["getWorkspaceSandbox"];
+    deps.installDependencies.mockResolvedValue([{
+      command: "npm ci",
+      detail: "installed",
+      directory: `${root}/frontend`,
+      log: "/home/daytona/workspace/.responder/dependencies/acme--app--frontend--package-lock.json.log",
+      repository: "acme/app",
+      status: "installed",
+    }]);
+
+    await processAutomationRun("job-1", {
+      kind: "automation_run",
+      queuedAt: "2026-09-22T19:00:00.000Z",
+      runId,
+    }, process.env, deps);
+
+    expect(deps.installDependencies).toHaveBeenCalledWith(
+      deps.session,
+      [expect.objectContaining({ repository: "acme/app" })],
+      {},
+    );
+    expect(deps.runCodex.mock.calls[0]![1].prompt).toContain(
+      `- acme/app, ${root}/frontend: npm ci: installed. Log: /home/daytona/workspace/.responder/dependencies/acme--app--frontend--package-lock.json.log`,
+    );
+  });
+
+  it("leaves dependencies alone when the workspace does not ask for them", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+
+    await processAutomationRun("job-1", {
+      kind: "automation_run",
+      queuedAt: "2026-09-22T19:00:00.000Z",
+      runId,
+    }, process.env, deps);
+
+    expect(deps.installDependencies).not.toHaveBeenCalled();
+    expect(deps.runCodex.mock.calls[0]![1].prompt).not.toContain("with CI=1");
   });
 
   it("writes the automation's skills to the sandbox and gives the run their secrets", async () => {

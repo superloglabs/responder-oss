@@ -813,6 +813,13 @@
       "when": 1794087997208,
       "tag": "0115_issue_linear_tickets_account_index",
       "breakpoints": true
+    },
+    {
+      "idx": 116,
+      "version": "7",
+      "when": 1794161303155,
+      "tag": "0116_sandbox_install_dependencies",
+      "breakpoints": true
     }
   ]
 }
