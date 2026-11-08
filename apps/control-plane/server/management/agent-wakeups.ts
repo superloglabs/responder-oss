@@ -1,4 +1,4 @@
-import type { AgentEvents, ToolCall } from "../../../../packages/core/src/agent-events.js";
+import type { AgentEvents, ToolCall, ToolCallSubscribe } from "../../../../packages/core/src/agent-events.js";
 import { automationRunInWorkspace } from "../../../../packages/core/src/db/automations.js";
 import { endLogWatch } from "../../../../packages/core/src/db/log-watches.js";
 import type { ManagementContext } from "./operation.js";
@@ -18,6 +18,13 @@ export function wakingTools(events: AgentEvents) {
 }
 
 type Body = Record<string, unknown>;
+
+// A watch tool does nothing but subscribe, so a subscription Wakeshift
+// didn't make (Wakeshift is off, or this client can't be woken) fails it.
+function watching(subscription: Awaited<ReturnType<ToolCallSubscribe["subscribe"]>>): void {
+  if (subscription.state === "disabled") throw new Error("watch subscription disabled");
+  if (subscription.state === "unavailable") throw new Error(`watch subscription unavailable: ${subscription.reason}`);
+}
 
 function nested(body: Body, key: string): Body {
   const value = body[key];
@@ -60,7 +67,10 @@ export async function subscribeCaller(input: {
   tool: string;
 }): Promise<void> {
   const { body, call, context, events } = input;
-  if (!("subscribe" in call)) return;
+  if (!("subscribe" in call)) {
+    if (input.tool.startsWith("watch_")) throw new Error("watch subscription disabled");
+    return;
+  }
   const once = input.input.once === true;
   switch (input.tool) {
     case "start_automation_run":
@@ -76,10 +86,10 @@ export async function subscribeCaller(input: {
       );
       return;
     case "watch_error_issues":
-      await call.subscribe(events.errorIssueOpened, { workspace: context.organizationId }, { once });
+      watching(await call.subscribe(events.errorIssueOpened, { workspace: context.organizationId }, { once }));
       return;
     case "watch_alert":
-      await call.subscribe(events.alertChanged, { alert: String(nested(body, "alert").id) }, { once });
+      watching(await call.subscribe(events.alertChanged, { alert: String(nested(body, "alert").id) }, { once }));
       return;
     case "watch_logs": {
       // The watch ID is new, so replaying finds only this watch's batches;
@@ -94,14 +104,16 @@ export async function subscribeCaller(input: {
         await endLogWatch(watchId, "unsubscribed", new Date());
         throw error;
       }
-      if (subscription.state === "unavailable") {
+      try {
+        watching(subscription);
+      } catch (error) {
         await endLogWatch(watchId, "unsubscribed", new Date());
-        throw new Error(`log watch subscription unavailable: ${subscription.reason}`);
+        throw error;
       }
       return;
     }
     case "watch_synthetic_check":
-      await call.subscribe(events.syntheticCheckChanged, { check: String(nested(body, "check").id) }, { once });
+      watching(await call.subscribe(events.syntheticCheckChanged, { check: String(nested(body, "check").id) }, { once }));
       return;
   }
 }

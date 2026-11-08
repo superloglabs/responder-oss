@@ -1,3 +1,4 @@
+import { Wakeshift } from "@wakeshift/sdk";
 import { createTestClient, type TestClient } from "@wakeshift/sdk/testing";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -7,6 +8,7 @@ import {
   notifyLogsMatched,
   setAgentEvents,
 } from "../../../../packages/core/src/agent-events.js";
+import { subscribeCaller } from "./agent-wakeups.js";
 import { managementMcpRoutes } from "./mcp.js";
 
 const organizationId = "15151515-1515-4515-8515-151515151515";
@@ -339,5 +341,28 @@ describe("agent wakeups", () => {
     expect(JSON.parse(result.content[0]!.text)).toMatchObject({ code: "watch_unavailable" });
     expect(mocks.endLogWatch).toHaveBeenCalledWith(watchId, "unsubscribed", expect.any(Date));
     warn.mockRestore();
+  });
+
+  it("fails a watch tool when nobody can be woken", async () => {
+    setAgentEvents(defineAgentEvents(new Wakeshift({ key: "" })));
+    mocks.findAlert.mockResolvedValue({ id: alertId, name: "Checkout errors" });
+
+    const off = await callTool("watch_alert", { alertId });
+    expect(off.isError).toBe(true);
+    expect(JSON.parse(off.content[0]!.text)).toMatchObject({ code: "watch_unavailable" });
+  });
+
+  it("treats a subscription Wakeshift can't make as a failed watch", async () => {
+    const events = defineAgentEvents(createTestClient());
+    const call = { subscribe: vi.fn(async () => ({ reason: "client_unsupported", state: "unavailable" })) };
+
+    await expect(subscribeCaller({
+      body: { alert: { id: alertId } },
+      call: call as never,
+      context: { organizationId } as never,
+      events,
+      input: {},
+      tool: "watch_alert",
+    })).rejects.toThrow("client_unsupported");
   });
 });

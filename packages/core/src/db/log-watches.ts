@@ -1,4 +1,4 @@
-import { and, count, eq, gt, inArray, isNull, lt, lte, sql } from "drizzle-orm";
+import { and, count, eq, gt, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { getDatabase } from "./client.js";
 import { logWatches, type LogWatchFilters } from "./schema.js";
 
@@ -113,10 +113,14 @@ export async function endLogWatch(id: string, reason: "expired" | "unsubscribed"
     .where(and(eq(logWatches.id, id), isNull(logWatches.endedAt)));
 }
 
+// Deletes watches that ended, or expired, more than the retention ago. An
+// expired watch counts even if nothing marked it ended, which happens when
+// the worker doesn't check watches (Wakeshift or telemetry is off).
 export async function purgeEndedLogWatches(now: Date): Promise<number> {
+  const cutoff = new Date(now.getTime() - endedLogWatchRetentionMs);
   const rows = await getDatabase()
     .delete(logWatches)
-    .where(lt(logWatches.endedAt, new Date(now.getTime() - endedLogWatchRetentionMs)))
+    .where(or(lt(logWatches.endedAt, cutoff), lt(logWatches.expiresAt, cutoff)))
     .returning({ id: logWatches.id });
   return rows.length;
 }

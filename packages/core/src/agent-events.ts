@@ -1,7 +1,7 @@
 import { Wakeshift } from "@wakeshift/sdk";
 import { z } from "zod";
 
-export type { ToolCall } from "@wakeshift/sdk";
+export type { ToolCall, ToolCallSubscribe } from "@wakeshift/sdk";
 
 // Events that wake the agents using Superlog's MCP server, through Wakeshift.
 // A tool subscribes the conversation calling it, and the API or the worker

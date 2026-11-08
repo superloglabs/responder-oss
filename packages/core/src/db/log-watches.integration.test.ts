@@ -65,6 +65,13 @@ describe.skipIf(!testUrl)("log watches (PostgreSQL)", () => {
     expect(await purgeEndedLogWatches(at(1_000 + 6 * 86_400))).toBe(0);
     expect(await purgeEndedLogWatches(at(1_001 + 7 * 86_400))).toBeGreaterThanOrEqual(1);
     expect(await getDatabase().select().from(logWatches).where(eq(logWatches.id, watch.id))).toEqual([]);
+
+    // A watch nothing ended, because the worker never claimed it, goes a week
+    // after it expired.
+    const unclaimed = await create(at(2_000), 5);
+    expect(await purgeEndedLogWatches(at(2_300 + 6 * 86_400))).toBe(0);
+    await purgeEndedLogWatches(at(2_301 + 7 * 86_400));
+    expect(await getDatabase().select().from(logWatches).where(eq(logWatches.id, unclaimed.id))).toEqual([]);
   });
 
   it("ends expired watches and limits how many a workspace runs at once", async () => {
