@@ -1,6 +1,12 @@
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { sandboxWorkspaceRoot } from "@responder/core/sandbox-config";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  dependencyInstallScript,
   detectDependencyInstalls,
   installRepositoryDependencies,
   repositoryDependencyInstructions,
@@ -17,6 +23,12 @@ const repository = {
   workspaceBaseSha: "a".repeat(40),
 };
 const logs = `${sandboxWorkspaceRoot}/.responder/dependencies`;
+
+// Where an install of acme/app's lockfile keeps its log or marker.
+function installFile(lockfile: string, extension: "log" | "marker"): string {
+  const hash = createHash("sha256").update(`acme/app\0${lockfile}`).digest("hex").slice(0, 12);
+  return `${logs}/acme--app--${lockfile.split("/").join("--")}-${hash}.${extension}`;
+}
 
 function commandResponse(output: string, exitCode = 0): string {
   return `Chunk ID: abc123\nWall time: 0.0100 seconds\nProcess exited with code ${exitCode}\nOutput:\n${output}`;
@@ -57,16 +69,20 @@ describe("dependency install detection", () => {
     expect(commands(["npm-shrinkwrap.json", "package-lock.json"])).toEqual(["npm-shrinkwrap.json"]);
   });
 
-  it("looks three levels deep and skips installed and vendored folders", () => {
+  it("looks three folders deep and skips installed and vendored folders", () => {
     expect(detectDependencyInstalls([
       "./apps/web/package-lock.json",
       "apps/web/deep/package-lock.json",
+      "apps/web/deep/deeper/package-lock.json",
       "node_modules/left-pad/package-lock.json",
       "frontend/node_modules/x/yarn.lock",
       ".git/pnpm-lock.yaml",
       "api/.venv/uv.lock",
       "vendor/lib/package-lock.json",
-    ]).map((install) => install.lockfile)).toEqual(["apps/web/package-lock.json"]);
+    ]).map((install) => install.lockfile)).toEqual([
+      "apps/web/package-lock.json",
+      "apps/web/deep/package-lock.json",
+    ]);
   });
 });
 
@@ -102,7 +118,7 @@ describe("repository dependency installs", () => {
         command: "pnpm install --frozen-lockfile",
         detail: "installed",
         directory: root,
-        log: `${logs}/acme--app--pnpm-lock.yaml.log`,
+        log: installFile("pnpm-lock.yaml", "log"),
         repository: "acme/app",
         status: "installed",
       },
@@ -110,19 +126,19 @@ describe("repository dependency installs", () => {
         command: "npm ci",
         detail: "installed",
         directory: `${root}/frontend`,
-        log: `${logs}/acme--app--frontend--package-lock.json.log`,
+        log: installFile("frontend/package-lock.json", "log"),
         repository: "acme/app",
         status: "installed",
       },
     ]);
     const listing = execCommand.mock.calls[0]![0].cmd;
     expect(listing).toContain(`cd -- '${root}'`);
-    expect(listing).toContain("-maxdepth 3");
+    expect(listing).toContain("-maxdepth 4");
     expect(listing).toMatch(/-name node_modules -o -name \.git -o -name \.venv -o -name vendor/u);
     const [, npm] = installCommands(execCommand);
     expect(npm).toContain(`dir='${root}/frontend'`);
     expect(npm).toContain("lock='package-lock.json'");
-    expect(npm).toContain(`marker='${logs}/acme--app--frontend--package-lock.json.marker'`);
+    expect(npm).toContain(`marker='${installFile("frontend/package-lock.json", "marker")}'`);
     expect(npm).toContain("CI=1 COREPACK_ENABLE_DOWNLOAD_PROMPT=0 timeout -k 10 600 bash -lc 'npm ci'");
     expect(npm).toContain('[ -d "$dir"/\'node_modules\' ]');
     expect(npm).toContain("command -v npm");
@@ -131,7 +147,7 @@ describe("repository dependency installs", () => {
     expect(npm).toContain("sha256sum");
   });
 
-  it("reports what an earlier turn installed, and does not retry what failed", async () => {
+  it("reports installs an earlier turn finished or saw fail", async () => {
     const { session } = fakeSession({
       files: "package-lock.json\nuv.lock\n",
       installs: {
@@ -149,8 +165,8 @@ describe("repository dependency installs", () => {
   });
 
   it("does not fail the run when installs fail, stop, or cannot start", async () => {
-    const { session } = fakeSession({
-      files: "package-lock.json\nuv.lock\napi/pnpm-lock.yaml\nweb/bun.lock\n",
+    const { execCommand, session } = fakeSession({
+      files: "package-lock.json\nuv.lock\napi/pnpm-lock.yaml\nweb/bun.lock\nweb/uv.lock\n",
       installs: {
         "bun.lock": new Error("sandbox connection lost"),
         "package-lock.json": "responder-install: exit 1",
@@ -158,14 +174,32 @@ describe("repository dependency installs", () => {
         "uv.lock": "responder-install: missing-program",
       },
     });
+    execCommand.mockImplementation(async ({ cmd }: { cmd: string }) => {
+      if (cmd.includes("find .")) return commandResponse("package-lock.json\nuv.lock\napi/pnpm-lock.yaml\nweb/bun.lock\nweb/uv.lock\n");
+      if (cmd.includes("dir='/home/daytona/workspace/repositories/acme/app/web'") && cmd.includes("lock='uv.lock'")) {
+        return commandResponse("responder-install: exit 137\n");
+      }
+      const lockfile = /^lock='([^']*)'$/mu.exec(cmd)?.[1] ?? "";
+      const outcome = {
+        "bun.lock": new Error("sandbox connection lost"),
+        "package-lock.json": "responder-install: exit 1",
+        "pnpm-lock.yaml": "responder-install: exit 124",
+        "uv.lock": "responder-install: missing-program",
+      }[lockfile] ?? "responder-install: exit 0";
+      if (outcome instanceof Error) throw outcome;
+      return commandResponse(`${outcome}\n`);
+    });
 
     const results = await installRepositoryDependencies(session, [repository]);
 
     expect(results.map(({ command, detail, log, status }) => ({ command, detail, log, status }))).toEqual([
-      { command: "npm ci", detail: "failed with exit code 1", log: `${logs}/acme--app--package-lock.json.log`, status: "failed" },
+      { command: "npm ci", detail: "failed with exit code 1", log: installFile("package-lock.json", "log"), status: "failed" },
       { command: "uv sync --frozen", detail: "skipped, uv is not on PATH", log: null, status: "skipped" },
-      { command: "pnpm install --frozen-lockfile", detail: "failed, stopped after 10 minutes", log: `${logs}/acme--app--api--pnpm-lock.yaml.log`, status: "failed" },
-      { command: "bun install --frozen-lockfile", detail: "failed, the sandbox command did not finish", log: `${logs}/acme--app--web--bun.lock.log`, status: "failed" },
+      { command: "pnpm install --frozen-lockfile", detail: "failed, stopped after 10 minutes", log: installFile("api/pnpm-lock.yaml", "log"), status: "failed" },
+      // The command never reported back, so it may have written no log.
+      { command: "bun install --frozen-lockfile", detail: "failed, the sandbox command did not finish", log: null, status: "failed" },
+      // A SIGKILL, such as from running out of memory, is not a timeout.
+      { command: "uv sync --frozen", detail: "failed, killed with exit code 137", log: installFile("web/uv.lock", "log"), status: "failed" },
     ]);
   });
 
@@ -208,10 +242,95 @@ describe("repository dependency installs", () => {
       .rejects.toThrow("run stopped");
   });
 
+  it("gives installs whose readable names match their own log and marker", async () => {
+    const { session } = fakeSession({ files: "x--y/package-lock.json\nx/y/package-lock.json\n" });
+    const [first, second] = await installRepositoryDependencies(session, [repository]);
+    expect(first!.log).toBe(installFile("x--y/package-lock.json", "log"));
+    expect(second!.log).toBe(installFile("x/y/package-lock.json", "log"));
+    expect(first!.log).not.toBe(second!.log);
+  });
+
   it("quotes folder names", async () => {
     const { execCommand, session } = fakeSession({ files: "it's/package-lock.json\n" });
     await installRepositoryDependencies(session, [repository]);
     expect(installCommands(execCommand)[0]).toContain(`dir='${root}/it'\\''s'`);
+  });
+});
+
+// Runs the generated script in bash against a temporary repository. A stub
+// timeout stands in for the install, records each run, and exits with the
+// code in its exit-code file.
+const shellTools = ["bash", "sha256sum", "cut", "grep"].every((tool) => {
+  try {
+    execFileSync("sh", ["-c", `command -v ${tool}`], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+});
+describe.skipIf(!shellTools)("dependency install script", () => {
+  let scratch = "";
+  afterEach(() => {
+    if (scratch) rmSync(scratch, { force: true, recursive: true });
+  });
+
+  function setup() {
+    scratch = mkdtempSync(join(tmpdir(), "responder-deps-"));
+    const repositoryPath = join(scratch, "repo");
+    const bin = join(scratch, "bin");
+    mkdirSync(join(repositoryPath, ".git"), { recursive: true });
+    mkdirSync(join(repositoryPath, "frontend"), { recursive: true });
+    mkdirSync(bin);
+    writeFileSync(join(repositoryPath, "frontend", "package-lock.json"), "{}\n");
+    const runs = join(scratch, "runs");
+    const exitCode = join(scratch, "exit-code");
+    writeFileSync(exitCode, "0");
+    writeFileSync(join(bin, "timeout"), `#!/bin/sh\necho run >> '${runs}'\nexit "$(cat '${exitCode}')"\n`);
+    writeFileSync(join(bin, "npm"), "#!/bin/sh\n");
+    chmodSync(join(bin, "timeout"), 0o755);
+    chmodSync(join(bin, "npm"), 0o755);
+    const [install] = detectDependencyInstalls(["frontend/package-lock.json"]);
+    const script = dependencyInstallScript(
+      install!,
+      repositoryPath,
+      { log: join(scratch, "deps", "install.log"), marker: join(scratch, "deps", "install.marker") },
+      600,
+    );
+    const run = () => execFileSync("bash", ["-c", script], {
+      encoding: "utf8",
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ""}` },
+    }).trim();
+    const runCount = () => existsSync(runs) ? readFileSync(runs, "utf8").split("\n").filter(Boolean).length : 0;
+    return { exitCode, repositoryPath, run, runCount };
+  }
+
+  it("does not run an install again after it failed for the same lockfile", () => {
+    const { exitCode, repositoryPath, run, runCount } = setup();
+    writeFileSync(exitCode, "1");
+
+    expect(run()).toBe("responder-install: exit 1");
+    expect(run()).toBe("responder-install: failed-earlier");
+    expect(runCount()).toBe(1);
+
+    writeFileSync(join(repositoryPath, "frontend", "package-lock.json"), "{\"changed\":true}\n");
+    writeFileSync(exitCode, "0");
+    expect(run()).toBe("responder-install: exit 0");
+    expect(runCount()).toBe(2);
+  });
+
+  it("skips an install that succeeded while its output folder is there", () => {
+    const { repositoryPath, run, runCount } = setup();
+
+    expect(run()).toBe("responder-install: exit 0");
+    mkdirSync(join(repositoryPath, "frontend", "node_modules"));
+    expect(run()).toBe("responder-install: current");
+    expect(runCount()).toBe(1);
+
+    rmSync(join(repositoryPath, "frontend", "node_modules"), { recursive: true });
+    expect(run()).toBe("responder-install: exit 0");
+    expect(runCount()).toBe(2);
+    // The output folder is excluded from git once.
+    expect(readFileSync(join(repositoryPath, ".git", "info", "exclude"), "utf8")).toBe("/frontend/node_modules/\n");
   });
 });
 
@@ -222,10 +341,10 @@ describe("repository dependency instructions", () => {
       { command: "uv sync --frozen", detail: "skipped, uv is not on PATH", directory: root, log: null, repository: "acme/app", status: "skipped" },
     ];
     expect(repositoryDependencyInstructions(results)).toBe([
-      "Responder installed the checked-out repositories' dependencies after checkout, with CI=1:",
+      "Responder tried to install the checked-out repositories' dependencies after checkout, with CI=1:",
       `- acme/app, ${root}/frontend: npm ci: installed. Log: ${logs}/a.log`,
       `- acme/app, ${root}: uv sync --frozen: skipped, uv is not on PATH`,
-      "Installed dependencies are ready for tests and builds. Where an install failed or was skipped, read its log and install what your checks need yourself.",
+      "Installed dependencies are ready for tests and builds. Where an install failed or was skipped, read its log if it lists one, and install what your checks need yourself.",
     ].join("\n"));
   });
 

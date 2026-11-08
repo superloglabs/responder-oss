@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { posix } from "node:path";
 import { renderInvestigationPromptPart, type InvestigationPromptParts } from "@responder/core/investigations/prompt-parts";
 import { sandboxWorkspaceRoot } from "@responder/core/sandbox-config";
@@ -22,8 +23,9 @@ export interface DependencyInstall {
   program: string;
 }
 
-// Lockfiles deeper than this are not installed.
-const maxLockfileDepth = 3;
+// Lockfiles more folders deep than this are not installed, so
+// a/b/c/package-lock.json is and a/b/c/d/package-lock.json is not.
+const maxLockfileFolders = 3;
 const skippedFolders = ["node_modules", ".git", ".venv", "vendor"];
 
 // Several JavaScript lockfiles in one folder install once, with the first.
@@ -55,7 +57,7 @@ export function detectDependencyInstalls(files: string[]): DependencyInstall[] {
   for (const file of files) {
     const path = file.trim().replace(/^\.\//u, "");
     const parts = path.split("/");
-    if (!path || parts.length > maxLockfileDepth) continue;
+    if (!path || parts.length - 1 > maxLockfileFolders) continue;
     if (parts.slice(0, -1).some((part) => skippedFolders.includes(part))) continue;
     const directory = posix.dirname(path) === "." ? "" : posix.dirname(path);
     const names = folders.get(directory) ?? new Set<string>();
@@ -113,7 +115,10 @@ const installTimeoutMs = 10 * 60_000;
 const installBudgetMs = 15 * 60_000;
 // Too little time left to start another install.
 const minimumInstallMs = 30_000;
-const timeoutExitCodes = new Set([124, 137]);
+// timeout exits with 124 when the time runs out. A SIGKILL, such as from the
+// out-of-memory killer, exits with 137 and is reported with its code.
+const timeoutExitCode = 124;
+const killedExitCode = 137;
 
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
@@ -133,9 +138,13 @@ function minutes(milliseconds: number): string {
 }
 
 // Names a repository's install in the dependencies folder, for example
-// acme--app--frontend--package-lock.json.
-function installFileName(repository: string, lockfile: string): string {
-  return `${repository}/${lockfile}`.split("/").join("--").replace(/[^A-Za-z0-9._-]/gu, "_");
+// acme--app--frontend--package-lock.json-1a2b3c4d5e6f. The readable part can
+// be the same for two installs, so the hash of the repository and lockfile
+// keeps each name its own.
+export function dependencyInstallFileName(repository: string, lockfile: string): string {
+  const readable = `${repository}/${lockfile}`.split("/").join("--").replace(/[^A-Za-z0-9._-]/gu, "_");
+  const hash = createHash("sha256").update(`${repository}\0${lockfile}`).digest("hex").slice(0, 12);
+  return `${readable}-${hash}`;
 }
 
 async function listLockfiles(
@@ -147,7 +156,7 @@ async function listLockfiles(
   const names = listedFiles.map((name) => `-name ${name}`).join(" -o ");
   // An unreadable folder makes find fail, but the files it found still count.
   const output = await session.execCommand({
-    cmd: `cd -- ${shellQuote(repository.path)} && { find . -maxdepth ${maxLockfileDepth} -type d \\( ${prune} \\) -prune -o -type f \\( ${names} \\) -printf '%P\\n' 2>/dev/null || true; }`,
+    cmd: `cd -- ${shellQuote(repository.path)} && { find . -maxdepth ${maxLockfileFolders + 1} -type d \\( ${prune} \\) -prune -o -type f \\( ${names} \\) -printf '%P\\n' 2>/dev/null || true; }`,
     maxOutputTokens: 2_000,
     workdir: sandboxWorkspaceRoot,
   });
@@ -160,7 +169,7 @@ async function listLockfiles(
 // failed, so a thread's later turns do not wait for it again. The output
 // folder is excluded from git, so a pull request never includes it. It
 // prints one outcome line.
-function installScript(
+export function dependencyInstallScript(
   install: DependencyInstall,
   repositoryPath: string,
   files: { log: string; marker: string },
@@ -175,7 +184,7 @@ function installScript(
     `lock=${shellQuote(posix.basename(install.lockfile))}`,
     `marker=${shellQuote(files.marker)}`,
     `log=${shellQuote(files.log)}`,
-    `mkdir -p -- ${shellQuote(dependencyInstallRoot)}`,
+    `mkdir -p -- ${shellQuote(posix.dirname(files.marker))}`,
     `hash=$(sha256sum -- "$dir/$lock" 2>/dev/null | cut -d ' ' -f 1)`,
     `if [ -z "$hash" ]; then echo 'responder-install: missing-lockfile'; exit 0; fi`,
     `previous=$(cat -- "$marker" 2>/dev/null || true)`,
@@ -210,12 +219,17 @@ function installOutcome(
     case "exit": {
       const code = Number(outcome[2]);
       if (code === 0) return { detail: "installed", logged: true, status: "installed" };
-      return timeoutExitCodes.has(code)
-        ? { detail: `failed, stopped after ${minutes(timeoutMs)}`, logged: true, status: "failed" }
-        : { detail: `failed with exit code ${code}`, logged: true, status: "failed" };
+      if (code === timeoutExitCode) {
+        return { detail: `failed, stopped after ${minutes(timeoutMs)}`, logged: true, status: "failed" };
+      }
+      if (code === killedExitCode) {
+        return { detail: `failed, killed with exit code ${code}`, logged: true, status: "failed" };
+      }
+      return { detail: `failed with exit code ${code}`, logged: true, status: "failed" };
     }
     default:
-      return { detail: "failed, the sandbox command did not finish", logged: true, status: "failed" };
+      // The script ran, so its log may hold what went wrong.
+      return { detail: "failed, the install reported no result", logged: true, status: "failed" };
   }
 }
 
@@ -255,7 +269,7 @@ export async function installRepositoryDependencies(
     for (const install of detectDependencyInstalls(files)) {
       options.signal?.throwIfAborted();
       const directory = install.directory ? `${repository.path}/${install.directory}` : repository.path;
-      const name = installFileName(repository.repository, install.lockfile);
+      const name = dependencyInstallFileName(repository.repository, install.lockfile);
       const log = `${dependencyInstallRoot}/${name}.log`;
       const result = { command: install.command, directory, repository: repository.repository };
       const remainingMs = budgetMs - (now() - startedAt);
@@ -269,10 +283,10 @@ export async function installRepositoryDependencies(
         continue;
       }
       const limitMs = Math.min(timeoutMs, remainingMs);
-      let output = "";
+      let output: string;
       try {
         output = await session.execCommand({
-          cmd: installScript(
+          cmd: dependencyInstallScript(
             install,
             repository.path,
             { log, marker: `${dependencyInstallRoot}/${name}.marker` },
@@ -283,6 +297,14 @@ export async function installRepositoryDependencies(
         });
       } catch {
         options.signal?.throwIfAborted();
+        // The command never reported back, so there may be no log.
+        results.push({
+          ...result,
+          detail: "failed, the sandbox command did not finish",
+          log: null,
+          status: "failed",
+        });
+        continue;
       }
       const { logged, ...outcome } = installOutcome(output, install, limitMs);
       results.push({ ...result, ...outcome, log: logged ? log : null });
