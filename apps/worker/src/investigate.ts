@@ -134,6 +134,7 @@ import {
   repositoryDependencyInstructions,
   type DependencyInstallResult,
 } from "./repository-dependencies.js";
+import { sandboxRuntimeInstructions } from "./sandbox-snapshot.js";
 import { materializeWorkspaceMemories, workspaceMemoryInstructions } from "./workspace-memories.js";
 import { createIssueRemediationUpdateTool } from "./issue-followup.js";
 import {
@@ -598,6 +599,7 @@ export function investigationInstructions(input: {
               prompt("repositoryEntry", { value1: repository.repository, value2: repository.path, value3: repository.branch, value4: repository.sha }),
           ),
           ...(assistant ? [] : [prompt("repositoryEvidence")]),
+          ...sandboxRuntimeInstructions(),
         ].join("\n")
       : assistant
         ? prompt("assistantNoRepositories")

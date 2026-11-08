@@ -57,6 +57,7 @@ import { modelProvider, type ModelProviderId } from "@responder/core/automations
 import { publicApplicationUrl } from "@responder/core/sandbox-network";
 import { workspaceSandboxNetwork } from "./sandbox-network.js";
 import { workspaceSandbox } from "./sandbox-image.js";
+import { sandboxRuntimeInstructions } from "./sandbox-snapshot.js";
 import { subscriptionSecretHosts, parseSubscriptionAuth, subscriptionAuthForSandbox } from "@responder/core/automations/chatgpt-subscription";
 import { getAutomationRuntimeWorkspaceSecrets, type RuntimeWorkspaceSecret } from "@responder/core/db/workspace-secrets";
 import { getAutomationRuntimeSkills, type RuntimeWorkspaceSkill } from "@responder/core/db/workspace-skills";
@@ -457,6 +458,7 @@ function repositoryInstructions(repositories: Array<{ path: string; repository: 
           .map((repository) => `- ${repository.repository}: ${repository.path}`)
           .join("\n")}`]
       : []),
+    ...sandboxRuntimeInstructions(),
   ].join("\n");
 }
 

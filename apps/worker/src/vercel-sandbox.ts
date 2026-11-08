@@ -12,7 +12,7 @@ import { sandboxWorkspaceRoot, type VercelSandboxConfig } from "@responder/core/
 import { sandboxAllowedDomains, type SandboxNetwork } from "@responder/core/sandbox-network";
 import { Sandbox, type Command, type CommandFinished } from "@vercel/sandbox";
 import { reportWorkerException, type WorkerErrorContext } from "./monitoring.js";
-import { sandboxSnapshotResources } from "./sandbox-snapshot.js";
+import { miseVersionsHost, sandboxSnapshotResources, vercelSandboxPath } from "./sandbox-snapshot.js";
 import type { SandboxSecretMount } from "./sandbox-session.js";
 
 type VercelSandboxSessionArguments = ConstructorParameters<typeof VercelSandboxSession>[0];
@@ -169,6 +169,8 @@ async function startVercelSession(
         ...state,
         ...config.vercel,
         authenticationMode: "explicit",
+        // Set on every start, so a resumed session gets the current value.
+        environment: { ...state.environment, PATH: vercelSandboxPath },
         sandboxId: sandbox.name,
         snapshotExpirationMs: pausedSnapshotLifetimeMs,
         snapshotId,
@@ -249,8 +251,8 @@ function secretRules(placeholder: string, value: string): NetworkPolicyRule[] {
 
 // Each sandbox sees only placeholders, and the firewall swaps a placeholder
 // for its value on requests to the secret's allowed hosts. Outbound access is
-// limited to the workspace's list of domains, or open when the workspace has
-// turned the restriction off. Real values
+// limited to the workspace's list of domains and mise's version list, or open
+// when the workspace has turned the restriction off. Real values
 // stay out of the session state, which is saved to the database, so this is
 // applied after every start.
 export function secretNetworkPolicy(
@@ -259,7 +261,7 @@ export function secretNetworkPolicy(
 ): NetworkPolicy {
   const allow: Record<string, NetworkPolicyRule[]> = {};
   if (network) {
-    for (const domain of sandboxAllowedDomains(network, secrets)) {
+    for (const domain of [...sandboxAllowedDomains(network, secrets), miseVersionsHost]) {
       allow[domain] = [];
       // Vercel's `*.example.com` leaves out example.com itself, which
       // Daytona's includes.
