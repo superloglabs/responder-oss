@@ -60,10 +60,10 @@ export const miseVersionsHost = "mise-versions.jdx.dev";
 
 const miseBinaryPath = "/usr/local/bin/mise";
 
-const miseShimTools = ["node", "npm", "npx", "corepack", "python", "python3", "pip", "pip3", "ruby", "gem", "bundle"];
+const miseShimTools = ["node", "npm", "npx", "corepack", "python", "python3", "pip", "pip3"];
 const miseConfig = [
   "[settings]",
-  'idiomatic_version_file_enable_tools = ["node", "python", "ruby"]',
+  'idiomatic_version_file_enable_tools = ["node", "python"]',
   // Repositories are checked out here, so their mise.toml loads without a prompt.
   'trusted_config_paths = ["/vercel/sandbox/repositories"]',
   "auto_install = true",
@@ -180,7 +180,7 @@ export async function sandboxHasMise(session: Pick<SandboxSession, "pathExists">
 // describes the image rather than the agent's task.
 export function sandboxRuntimeInstructions(hasMise: boolean): string[] {
   return hasMise
-    ? ["The sandbox installs language runtimes with mise: in a repository, node, python, and similar commands use the version its .nvmrc, .node-version, .python-version, .tool-versions, or mise.toml asks for, and `mise use <tool>@<version>` switches one by writing it to the current directory's mise config."]
+    ? ["The sandbox installs language runtimes with mise: in a repository, node and python use the version its .nvmrc, .node-version, .python-version, .tool-versions, or mise.toml asks for. To run a command on another version, use `mise exec <tool>@<version> -- <command>`, which changes no files; don't commit mise config the repository didn't have."]
     : [];
 }
 

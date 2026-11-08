@@ -1112,7 +1112,8 @@ export async function runInvestigationAgent(
     const dependencyInstalls = sandbox.installDependencies
       ? await installRepositoryDependencies(session, repositories)
       : [];
-    const runtimeVersions = await sandboxHasMise(session);
+    // Only the repository part of the prompt mentions mise.
+    const runtimeVersions = repositories.length > 0 && await sandboxHasMise(session);
     if (dependencyInstalls.length > 0) {
       console.log(JSON.stringify({
         event: "repository_dependencies_installed",

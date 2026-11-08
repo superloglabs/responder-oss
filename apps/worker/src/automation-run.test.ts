@@ -1984,7 +1984,7 @@ describe("automation run processor", () => {
     }, process.env, deps)).resolves.toEqual({ runId });
 
     expect(deps.runCodex.mock.calls[0]![1].prompt).toContain(
-      "The sandbox installs language runtimes with mise: in a repository, node, python, and similar commands use the version its .nvmrc, .node-version, .python-version, .tool-versions, or mise.toml asks for, and `mise use <tool>@<version>` switches one by writing it to the current directory's mise config.",
+      "The sandbox installs language runtimes with mise: in a repository, node and python use the version its .nvmrc, .node-version, .python-version, .tool-versions, or mise.toml asks for. To run a command on another version, use `mise exec <tool>@<version> -- <command>`, which changes no files; don't commit mise config the repository didn't have.",
     );
   });
 

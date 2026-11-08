@@ -48,7 +48,7 @@ describe("sandbox snapshot", () => {
 });
 
 describe("Vercel sandbox snapshot", () => {
-  it("fails the build when Vercel changes the default PATH", () => {
+  it("guards the Vercel default PATH in the first snapshot command", () => {
     expect(vercelSandboxDefaultPath).toBe(
       "/vercel/runtimes/node24/bin:/home/vercel-sandbox/.global/pnpm/bin:/home/vercel-sandbox/.global/npm/bin:/vercel/runtimes/node24/bin:/vercel/bin:/opt/git/bin:/home/vercel-sandbox/.local/bin:/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
     );
@@ -74,14 +74,14 @@ describe("Vercel sandbox snapshot", () => {
   it("reads version files and installs missing versions without prompts", () => {
     const commands = vercelSandboxSnapshotCommands().join("\n");
     expect(commands).toContain("/home/vercel-sandbox/.config/mise/config.toml");
-    expect(commands).toContain("'idiomatic_version_file_enable_tools = [\"node\", \"python\", \"ruby\"]'");
+    expect(commands).toContain("'idiomatic_version_file_enable_tools = [\"node\", \"python\"]'");
     expect(commands).toContain("'trusted_config_paths = [\"/vercel/sandbox/repositories\"]'");
     expect(commands).toContain("'auto_install = true'");
     expect(commands).toContain("'not_found_auto_install = true'");
   });
 
   it("creates shims that mise keeps before any version is installed", () => {
-    const tools = "node npm npx corepack python python3 pip pip3 ruby gem bundle";
+    const tools = "node npm npx corepack python python3 pip pip3";
     expect(vercelSandboxSnapshotCommands().join("\n")).toContain([
       "sudo ln -s /usr/local/bin/mise /usr/local/bin/mise-shim",
       `mkdir -p ${shims}`,
