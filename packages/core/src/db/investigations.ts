@@ -1671,29 +1671,44 @@ export function contextScopeId(scope: ContextScope): string {
   return typeof scope === "string" ? scope : `workspace:${scope.organizationId}`;
 }
 
+// A workspace's accounts and resources are read once per scope object, so
+// loading every provider for one reader does not repeat the same queries.
+const workspaceConfigs = new WeakMap<object, Promise<ContextConfig>>();
+
 async function contextConfig(scope: ContextScope): Promise<ContextConfig | undefined> {
-  const database = getDatabase();
-  if (typeof scope === "string") {
-    const [config] = await database
-      .select({
-        contextAccountIds: agentConfigVersions.contextAccountIds,
-        contextResourceIds: agentConfigVersions.contextResourceIds,
-        organizationId: agents.organizationId,
-        trigger: agentConfigVersions.trigger,
-        triggerConfig: agentConfigVersions.triggerConfig,
-      })
-      .from(agentConfigVersions)
-      .innerJoin(agents, eq(agents.id, agentConfigVersions.agentId))
-      .where(eq(agentConfigVersions.id, scope))
-      .limit(1);
+  if (typeof scope !== "string") {
+    let config = workspaceConfigs.get(scope);
+    if (!config) {
+      config = workspaceConfig(scope.organizationId);
+      workspaceConfigs.set(scope, config);
+      // A failed read is not kept, so the next load tries again.
+      config.catch(() => workspaceConfigs.delete(scope));
+    }
     return config;
   }
+  const [config] = await getDatabase()
+    .select({
+      contextAccountIds: agentConfigVersions.contextAccountIds,
+      contextResourceIds: agentConfigVersions.contextResourceIds,
+      organizationId: agents.organizationId,
+      trigger: agentConfigVersions.trigger,
+      triggerConfig: agentConfigVersions.triggerConfig,
+    })
+    .from(agentConfigVersions)
+    .innerJoin(agents, eq(agents.id, agentConfigVersions.agentId))
+    .where(eq(agentConfigVersions.id, scope))
+    .limit(1);
+  return config;
+}
+
+async function workspaceConfig(organizationId: string): Promise<ContextConfig> {
+  const database = getDatabase();
   const [accounts, resources] = await Promise.all([
     database
       .select({ id: integrationAccounts.id })
       .from(integrationAccounts)
       .where(and(
-        eq(integrationAccounts.organizationId, scope.organizationId),
+        eq(integrationAccounts.organizationId, organizationId),
         eq(integrationAccounts.status, "connected"),
       )),
     database
@@ -1701,13 +1716,13 @@ async function contextConfig(scope: ContextScope): Promise<ContextConfig | undef
       .from(integrationResources)
       .innerJoin(integrationAccounts, eq(integrationAccounts.id, integrationResources.integrationAccountId))
       .where(and(
-        eq(integrationAccounts.organizationId, scope.organizationId),
+        eq(integrationAccounts.organizationId, organizationId),
         eq(integrationAccounts.status, "connected"),
         eq(integrationResources.available, true),
       )),
   ]);
   return {
-    organizationId: scope.organizationId,
+    organizationId,
     contextAccountIds: accounts.map((account) => account.id),
     contextResourceIds: resources.map((resource) => resource.id),
     trigger: null,

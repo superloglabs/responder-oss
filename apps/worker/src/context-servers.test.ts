@@ -1,6 +1,30 @@
 import type { MCPServer } from "@openai/agents";
 import { describe, expect, it, vi } from "vitest";
-import { datadogObservationUrl, isObservationTool, ObservationMcpServer } from "./context-servers.js";
+
+vi.mock("@responder/core/db/investigations", () => {
+  const none = vi.fn().mockResolvedValue(null);
+  const empty = vi.fn().mockResolvedValue([]);
+  return {
+    getRuntimeAwsConnections: empty,
+    getRuntimeAxiomConnection: none,
+    getRuntimeClickStackConnection: none,
+    getRuntimeCloudflareConnections: empty,
+    getRuntimeDash0Connections: empty,
+    getRuntimeDatadogConnection: vi.fn().mockRejectedValue(new Error("Datadog grant could not be refreshed")),
+    getRuntimeGcpConnections: empty,
+    getRuntimeGrafanaConnections: empty,
+    getRuntimeLangfuseConnections: empty,
+    getRuntimeLinearConnection: none,
+    getRuntimePostHogConnections: empty,
+    getRuntimeRailwayConnections: empty,
+    getRuntimeSentryConnection: none,
+    getRuntimeSupabaseConnections: empty,
+    getRuntimeUpstashConnection: none,
+    getRuntimeVercelConnections: empty,
+  };
+});
+
+const { datadogObservationUrl, isObservationTool, ObservationMcpServer, openWorkspaceContext } = await import("./context-servers.js");
 
 const tool = (name: string, annotations?: Record<string, unknown>) =>
   ({ name, description: name, inputSchema: { type: "object", properties: {} }, ...(annotations ? { annotations } : {}) }) as never;
@@ -14,6 +38,9 @@ describe("observation tools", () => {
     expect(isObservationTool(tool("create_datadog_monitor"))).toBe(false);
     expect(isObservationTool(tool("update_issue"))).toBe(false);
     expect(isObservationTool(tool("delete-notebook"))).toBe(false);
+    expect(isObservationTool(tool("createMonitor"))).toBe(false);
+    expect(isObservationTool(tool("updateIssue"))).toBe(false);
+    expect(isObservationTool(tool("getAlert"))).toBe(true);
     expect(isObservationTool(tool("list_things", { readOnlyHint: false }))).toBe(false);
     expect(isObservationTool(tool("get_things", { destructiveHint: true, readOnlyHint: true }))).toBe(false);
   });
@@ -51,5 +78,12 @@ describe("observation tools", () => {
 
   it("asks Datadog for every toolset", () => {
     expect(datadogObservationUrl("https://mcp.datadoghq.eu/v1/mcp")).toBe("https://mcp.datadoghq.eu/v1/mcp?toolsets=all%2Capm");
+  });
+
+  it("reports a provider whose connection cannot be loaded and opens the rest", async () => {
+    const context = await openWorkspaceContext({ organizationId: "organization-1", label: "test" });
+    expect(context.unavailable).toEqual(["datadog: Datadog grant could not be refreshed"]);
+    expect(context.servers).toEqual([]);
+    await context.close();
   });
 });

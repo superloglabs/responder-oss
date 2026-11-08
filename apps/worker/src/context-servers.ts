@@ -52,7 +52,9 @@ export function isObservationTool(tool: ContextMcpTool): boolean {
   if (annotations?.destructiveHint === true) return false;
   if (annotations?.readOnlyHint === true) return true;
   if (annotations?.readOnlyHint === false) return false;
-  return !writeVerb.test(tool.name);
+  // camelCase names, such as createMonitor, are split into words first.
+  const words = tool.name.replace(/([a-z0-9])([A-Z])/gu, "$1_$2");
+  return !writeVerb.test(words);
 }
 
 async function passesFilter(
@@ -174,26 +176,33 @@ export async function openWorkspaceContext(input: {
   const options: ContextConnectionLoadOptions = {
     onUnavailable: (error) => unavailable.push(error.message),
   };
+  // A provider whose connection cannot be loaded, such as one whose grant
+  // could not be refreshed, is reported and the others still open.
+  const load = <T>(provider: string, loader: Promise<T>, empty: T): Promise<T> =>
+    loader.catch((error: unknown) => {
+      unavailable.push(`${provider}: ${error instanceof Error ? error.message : String(error)}`);
+      return empty;
+    });
   const [
     aws, gcp, axiom, datadog, dash0, postHog, grafana, cloudflare, railway,
     sentry, clickStack, linear, vercel, upstash, langfuse, supabase,
   ] = await Promise.all([
-    getRuntimeAwsConnections(scope),
-    getRuntimeGcpConnections(scope),
-    getRuntimeAxiomConnection(scope, options),
-    getRuntimeDatadogConnection(scope),
-    getRuntimeDash0Connections(scope, options),
-    getRuntimePostHogConnections(scope, options),
-    getRuntimeGrafanaConnections(scope, options),
-    getRuntimeCloudflareConnections(scope, options),
-    getRuntimeRailwayConnections(scope, options),
-    getRuntimeSentryConnection(scope),
-    getRuntimeClickStackConnection(scope),
-    getRuntimeLinearConnection(scope, undefined, options),
-    getRuntimeVercelConnections(scope),
-    getRuntimeUpstashConnection(scope),
-    getRuntimeLangfuseConnections(scope),
-    getRuntimeSupabaseConnections(scope, options),
+    load("aws", getRuntimeAwsConnections(scope), []),
+    load("gcp", getRuntimeGcpConnections(scope), []),
+    load("axiom", getRuntimeAxiomConnection(scope, options), null),
+    load("datadog", getRuntimeDatadogConnection(scope), null),
+    load("dash0", getRuntimeDash0Connections(scope, options), []),
+    load("posthog", getRuntimePostHogConnections(scope, options), []),
+    load("grafana", getRuntimeGrafanaConnections(scope, options), []),
+    load("cloudflare", getRuntimeCloudflareConnections(scope, options), []),
+    load("railway", getRuntimeRailwayConnections(scope, options), []),
+    load("sentry", getRuntimeSentryConnection(scope), null),
+    load("clickstack", getRuntimeClickStackConnection(scope), null),
+    load("linear", getRuntimeLinearConnection(scope, undefined, options), null),
+    load("vercel", getRuntimeVercelConnections(scope), []),
+    load("upstash", getRuntimeUpstashConnection(scope), null),
+    load("langfuse", getRuntimeLangfuseConnections(scope), []),
+    load("supabase", getRuntimeSupabaseConnections(scope, options), []),
   ]);
   const secrets = connectionSecrets([
     ...aws, axiom, datadog, ...dash0, ...postHog, ...grafana, ...cloudflare, ...railway,

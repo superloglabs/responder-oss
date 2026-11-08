@@ -125,30 +125,35 @@ describe("workspace runtime connections", () => {
     resourcesQuery.innerJoin.mockReturnValue(resourcesQuery);
     const accountQuery = {
       from: vi.fn(),
-      where: vi.fn().mockResolvedValue([{
-        displayName: "Orders API",
+      where: vi.fn().mockResolvedValue(["orders", "billing"].map((name) => ({
+        displayName: `${name} API`,
         encryptedCredentials: encryptCredentials({
-          apiToken: "orders-token",
+          apiToken: `${name}-token`,
           authType: "api_token",
-          mcpUrl: "https://mcp.example.com/orders",
+          mcpUrl: `https://mcp.example.com/${name}`,
         }),
-        id: "account-orders",
+        id: `account-${name}`,
         metadata: {},
-      }]),
+      }))),
     };
     accountQuery.from.mockReturnValue(accountQuery);
     const select = vi.fn()
       .mockReturnValueOnce(accountsQuery)
       .mockReturnValueOnce(resourcesQuery)
-      .mockReturnValueOnce(accountQuery);
+      .mockReturnValue(accountQuery);
     vi.mocked(getDatabase).mockReturnValue({ select } as never);
     vi.spyOn(console, "info").mockImplementation(() => {});
 
-    const connections = await getRuntimeCustomMcpConnections({ organizationId: "organization-1" });
-
-    expect(connections.map((connection) => connection.accountId)).toEqual(["account-orders"]);
+    const scope = { organizationId: "organization-1" };
+    const connections = await getRuntimeCustomMcpConnections(scope);
+    expect(connections.map((connection) => connection.accountId)).toEqual(["account-orders", "account-billing"]);
     // No automation config is read for a workspace.
-    expect(select).toHaveBeenCalledTimes(3);
+    expect(accountsQuery.where).toHaveBeenCalledTimes(1);
+
+    // A second loader with the same scope reuses the workspace's accounts.
+    await getRuntimeCustomMcpConnections(scope);
+    expect(accountsQuery.where).toHaveBeenCalledTimes(1);
+    expect(resourcesQuery.where).toHaveBeenCalledTimes(1);
   });
 });
 
