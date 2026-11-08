@@ -257,6 +257,42 @@ describe("sandbox agent configuration", () => {
     expect(instructions).not.toContain("search_observability_suggestions");
   });
 
+  it("tells the agent which repository dependencies installed and where their logs are", () => {
+    const path = "/home/daytona/workspace/repositories/acme/service";
+    const instructions = investigationInstructions({
+      agentPrompt: "Inspect the reported failure.",
+      clickStackConnected: false,
+      datadogConnected: false,
+      dependencyInstalls: [{
+        command: "npm ci",
+        detail: "failed with exit code 1",
+        directory: `${path}/frontend`,
+        log: "/home/daytona/workspace/.responder/dependencies/acme--service--frontend--package-lock.json.log",
+        repository: "acme/service",
+        status: "failed",
+      }],
+      repositories: [{
+        branch: "main",
+        path,
+        repository: "acme/service",
+        sha: "a".repeat(40),
+        workspaceBaseSha: "a".repeat(40),
+      }],
+      sentryConnected: false,
+    });
+
+    expect(instructions).toContain(
+      `with CI=1:\n- acme/service, ${path}/frontend: npm ci: failed with exit code 1. Log: /home/daytona/workspace/.responder/dependencies/acme--service--frontend--package-lock.json.log\n`,
+    );
+    expect(investigationInstructions({
+      agentPrompt: "Inspect the reported failure.",
+      clickStackConnected: false,
+      datadogConnected: false,
+      repositories: [],
+      sentryConnected: false,
+    })).not.toContain("with CI=1");
+  });
+
   it("lists the workspace's memories in tag mode threads, including assistant turns", () => {
     const memories = [{
       body: "Restart the worker after an RDS failover.",

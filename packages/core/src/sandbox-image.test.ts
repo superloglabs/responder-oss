@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   defaultSandboxImageSettings,
   sandboxImageKey,
+  sandboxImageRequired,
   sandboxImageSettingsSchema,
   sandboxImageSnapshotFor,
   sandboxImageStartCommand,
@@ -40,7 +41,24 @@ describe("sandbox image settings", () => {
       setupScript: "  echo hi \n",
       startCommand: "",
       vcpus: 4,
-    })).toEqual({ packages: ["ffmpeg", "valkey"], setupScript: "echo hi", startCommand: "", vcpus: 4 });
+    })).toEqual({
+      installDependencies: false,
+      packages: ["ffmpeg", "valkey"],
+      setupScript: "echo hi",
+      startCommand: "",
+      vcpus: 4,
+    });
+  });
+
+  it("keeps the dependency install choice", () => {
+    expect(sandboxImageSettingsSchema.parse({ ...defaultSandboxImageSettings, installDependencies: true }))
+      .toMatchObject({ installDependencies: true });
+    expect(sandboxImageSettingsSchema.safeParse({ ...defaultSandboxImageSettings, installDependencies: "yes" }).success)
+      .toBe(false);
+  });
+
+  it("needs no image to install dependencies", () => {
+    expect(sandboxImageRequired({ ...defaultSandboxImageSettings, installDependencies: true })).toBe(false);
   });
 
   it("rejects a package with options or a second command", () => {
@@ -65,6 +83,8 @@ describe("sandbox image key", () => {
     expect(sandboxImageKey(settings, { ...base, snapshotId: "snap_next" })).not.toBe(key);
     expect(sandboxImageKey(settings, { ...base, region: "pdx1" })).not.toBe(key);
     expect(sandboxImageKey({ ...settings, setupScript: "true" }, base)).not.toBe(key);
+    const withInstalls = { ...settings, installDependencies: true };
+    expect(sandboxImageKey(withInstalls, base)).toBe(key);
   });
 });
 

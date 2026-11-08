@@ -628,6 +628,7 @@ function PullRequestAuthorSection({ currentUserId }: { currentUserId: string | u
 type SandboxImageBuildState = "building" | "failed" | "none" | "queued" | "ready";
 
 interface SandboxImageSettingsValue {
+  installDependencies: boolean;
   packages: string[];
   setupScript: string;
   startCommand: string;
@@ -693,14 +694,15 @@ async function fetchSandboxImageState(): Promise<SandboxImageState> {
 }
 
 // Adds system packages and a setup script to the workspace's sandboxes, built
-// once into an image, plus a command for every sandbox start and the
-// sandbox size.
+// once into an image, plus a command for every sandbox start, whether to
+// install repository dependencies after checkout, and the sandbox size.
 function SandboxImageSection() {
   const [state, setState] = useState<SandboxImageState | null>(null);
   const [packages, setPackages] = useState("");
   const [setupScript, setSetupScript] = useState("");
   const [startCommand, setStartCommand] = useState("");
   const [vcpus, setVcpus] = useState("2");
+  const [installDependencies, setInstallDependencies] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -710,6 +712,7 @@ function SandboxImageSection() {
     setSetupScript(next.settings.setupScript);
     setStartCommand(next.settings.startCommand);
     setVcpus(String(next.settings.vcpus));
+    setInstallDependencies(next.settings.installDependencies);
   }
 
   useEffect(() => {
@@ -764,6 +767,7 @@ function SandboxImageSection() {
   function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     void send("/api/sandbox-settings", "PUT", {
+      installDependencies,
       packages: packageList(packages),
       setupScript,
       startCommand,
@@ -776,7 +780,8 @@ function SandboxImageSection() {
     packageList(packages).join("\n") !== state.settings.packages.join("\n") ||
     setupScript.trim() !== state.settings.setupScript ||
     startCommand.trim() !== state.settings.startCommand ||
-    Number(vcpus) !== state.settings.vcpus
+    Number(vcpus) !== state.settings.vcpus ||
+    installDependencies !== state.settings.installDependencies
   );
   const status = state ? sandboxImageStatus(state.image) : null;
   const vcpuOptions: Array<SelectOption<string>> = (state?.vcpuOptions ?? [2]).map((count) => ({
@@ -839,6 +844,13 @@ function SandboxImageSection() {
             rows={3}
             spellCheck={false}
             value={startCommand}
+          />
+          <Switch
+            checked={installDependencies}
+            description="After checkout, installs each repository's dependencies from its lockfiles, such as with npm ci or uv sync, so agents can run tests. A failed install does not stop the run."
+            disabled={!canEdit || saving}
+            label="Install repository dependencies"
+            onCheckedChange={setInstallDependencies}
           />
           <SelectField
             disabled={!canEdit || saving}

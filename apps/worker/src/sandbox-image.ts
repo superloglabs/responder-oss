@@ -36,11 +36,13 @@ import { sandboxSnapshotResources } from "./sandbox-snapshot.js";
 import { runVercelCommand } from "./vercel-sandbox.js";
 
 // The sandbox a workspace's run starts with: its snapshot when one has built,
-// its size, and the start command that goes with the snapshot. Workspace sandbox
+// its size, the start command that goes with the snapshot, and whether to
+// install each repository's dependencies after checkout. Workspace sandbox
 // settings apply on Vercel only, so Daytona sandboxes have no size here and
 // are metered as before.
 export interface WorkspaceSandbox<Config extends SandboxConfig = SandboxConfig> {
   config: Config;
+  installDependencies: boolean;
   resources?: { cpu: number; disk: number; memory: number };
   startCommand: string;
 }
@@ -65,7 +67,7 @@ export async function workspaceSandbox<Config extends SandboxConfig>(
   dependencies: WorkspaceSandboxDependencies = defaultWorkspaceDependencies,
 ): Promise<WorkspaceSandbox<Config>> {
   if (!config.vercel) {
-    return { config, startCommand: "" };
+    return { config, installDependencies: false, startCommand: "" };
   }
   const settings = await dependencies.getSettings(organizationId);
   const image = sandboxImageRequired(settings)
@@ -87,6 +89,7 @@ export async function workspaceSandbox<Config extends SandboxConfig>(
       sandboxSnapshotName: snapshotId ?? config.sandboxSnapshotName,
       vcpus: settings.vcpus,
     },
+    installDependencies: settings.installDependencies,
     resources: {
       ...sandboxSnapshotResources,
       cpu: settings.vcpus,

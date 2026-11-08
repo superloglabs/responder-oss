@@ -152,6 +152,11 @@ import {
 } from "./repository-skills.js";
 import { workspaceSecretUsageInstructions } from "./secret-safety.js";
 import { materializeWorkspaceMemories, workspaceMemoryInstructions } from "./workspace-memories.js";
+import {
+  installRepositoryDependencies,
+  repositoryDependencyInstructions,
+  type DependencyInstallResult,
+} from "./repository-dependencies.js";
 
 type ClaimedAutomationRun = NonNullable<Awaited<ReturnType<typeof claimAutomationRun>>>;
 
@@ -183,6 +188,7 @@ export interface AutomationRunDependencies {
   hasCapability: typeof organizationHasCapability;
   hasFinishedTurn: typeof automationRunHasFinishedTurn;
   hasNewMessages: typeof automationRunHasNewMessages;
+  installDependencies: typeof installRepositoryDependencies;
   issueCatalog: typeof createIssueCatalog;
   heartbeatRun: typeof heartbeatAutomationRun;
   leaseExpiry: typeof automationRunLeaseExpiry;
@@ -246,6 +252,7 @@ export const defaultAutomationRunDependencies: AutomationRunDependencies = {
   hasCapability: organizationHasCapability,
   hasFinishedTurn: automationRunHasFinishedTurn,
   hasNewMessages: automationRunHasNewMessages,
+  installDependencies: installRepositoryDependencies,
   issueCatalog: createIssueCatalog,
   heartbeatRun: heartbeatAutomationRun,
   leaseExpiry: automationRunLeaseExpiry,
@@ -603,6 +610,7 @@ function automationPrompt(
   notificationChannels: { inThread: boolean; names: string[] },
   connections: Parameters<typeof contextInstructions>[0],
   extensions: {
+    dependencyInstalls: DependencyInstallResult[];
     memories: RuntimeWorkspaceMemory[];
     secrets: RuntimeWorkspaceSecret[];
     skills: RuntimeWorkspaceSkill[];
@@ -615,6 +623,7 @@ function automationPrompt(
   const continuation = conversationPrompt(conversation, resumed, reviewCheckout);
   const secretInstructions = workspaceSecretUsageInstructions(extensions.secrets);
   const memoryInstructions = workspaceMemoryInstructions(extensions.memories);
+  const dependencyInstructions = repositoryDependencyInstructions(extensions.dependencyInstalls);
   return [
     run.prompt,
     "",
@@ -624,6 +633,7 @@ function automationPrompt(
     ...(telemetry ? [telemetryToolInstructions()] : []),
     repositoryInstructions(repositories),
     ...repositoryAgentDocsInstructions(agentDocs, repositories[0]?.repository),
+    ...(dependencyInstructions ? [dependencyInstructions] : []),
     ...contextInstructions(connections),
     ...automationSkillInstructions(extensions.skills),
     ...(memoryInstructions ? [memoryInstructions] : []),
@@ -1222,6 +1232,27 @@ export async function processAutomationRun(
             ? { error: checkedOut.content.map((part) => part.text).join(" ") }
             : { savedChanges: savedChangesOf(checkedOut.content[0]?.text) };
         }
+        // After the checkouts above. A resumed sandbox skips what it already
+        // installed.
+        const dependencyInstalls = sandbox.installDependencies
+          ? await dependencies.installDependencies(
+            session,
+            repositories,
+            sandboxSignal ? { signal: sandboxSignal } : {},
+          )
+          : [];
+        if (dependencyInstalls.length > 0) {
+          console.log(JSON.stringify({
+            event: "repository_dependencies_installed",
+            installs: dependencyInstalls.map(({ detail, directory, repository, status }) => ({
+              detail,
+              directory,
+              repository,
+              status,
+            })),
+            runId: run.runId,
+          }));
+        }
         const tools = serveAutomationTools({
           handle: handleTool,
           onError: (error) => console.error(JSON.stringify({
@@ -1267,7 +1298,7 @@ export async function processAutomationRun(
                   firstTurn,
                   notificationChannels,
                   connections,
-                  { memories, secrets: workspaceSecrets, skills },
+                  { dependencyInstalls, memories, secrets: workspaceSecrets, skills },
                   workspaceTools.length > 0 ? { integrationsUrl } : undefined,
                   reviewCheckout,
                   issueCatalog !== null,

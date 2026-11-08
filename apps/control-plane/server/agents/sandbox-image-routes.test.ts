@@ -10,6 +10,7 @@ const organizationId = "00000000-0000-4000-8000-000000000001";
 const userId = "00000000-0000-4000-8000-000000000002";
 
 const playwright: SandboxImageSettings = {
+  installDependencies: false,
   packages: ["nss", "atk"],
   setupScript: "npx -y playwright install chromium",
   startCommand: "",
@@ -88,9 +89,27 @@ describe("sandbox settings", () => {
     expect(deps.queueBuild).not.toHaveBeenCalled();
   });
 
+  it("turns on dependency installs without a build", async () => {
+    const { app, deps } = setup({ settings: playwright });
+    const next = { ...playwright, installDependencies: true };
+    const response = await put(app, next);
+    expect(response.status).toBe(200);
+    expect(deps.save).toHaveBeenCalledWith(organizationId, next, userId, false);
+    expect(deps.queueBuild).not.toHaveBeenCalled();
+  });
+
+  it("keeps dependency installs off when an older page leaves the setting out", async () => {
+    const { app, deps } = setup();
+    const older: Partial<SandboxImageSettings> = { ...playwright };
+    delete older.installDependencies;
+    await put(app, older);
+    expect(deps.save).toHaveBeenCalledWith(organizationId, playwright, userId, true);
+  });
+
   it("rejects invalid settings", async () => {
     const { app, deps } = setup();
     expect((await put(app, { ...playwright, vcpus: 3 })).status).toBe(400);
+    expect((await put(app, { ...playwright, installDependencies: "yes" })).status).toBe(400);
     expect(deps.save).not.toHaveBeenCalled();
   });
 

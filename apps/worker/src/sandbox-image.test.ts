@@ -30,6 +30,7 @@ const vercelConfig: VercelSandboxConfig = {
   vercel: { projectId: "prj_1", teamId: "team_1", token: "token" },
 };
 const settings: SandboxImageSettings = {
+  installDependencies: false,
   packages: ["ffmpeg", "valkey"],
   setupScript: "npx -y playwright install chromium",
   startCommand: "sudo dockerd >/tmp/dockerd.log 2>&1 &",
@@ -93,6 +94,24 @@ describe("workspace sandbox", () => {
     expect(sandbox.startCommand).toBe("echo up");
   });
 
+  it("says whether to install repository dependencies, with or without a snapshot", async () => {
+    const withImage = await workspaceSandbox(organizationId, vercelConfig, {
+      getImage: vi.fn(async () => image()),
+      getSettings: vi.fn(async () => ({ ...settings, installDependencies: true })),
+    });
+    expect(withImage.installDependencies).toBe(true);
+    expect(withImage.config.sandboxSnapshotName).toBe("snap_workspace");
+
+    const getImage = vi.fn(async () => null);
+    const installOnly = await workspaceSandbox(organizationId, vercelConfig, {
+      getImage,
+      getSettings: vi.fn(async () => ({ ...defaultSandboxImageSettings, installDependencies: true })),
+    });
+    expect(installOnly.installDependencies).toBe(true);
+    expect(installOnly.config.sandboxSnapshotName).toBe("snap_base");
+    expect(getImage).not.toHaveBeenCalled();
+  });
+
   it("leaves Daytona sandboxes unchanged", async () => {
     const getSettings = vi.fn(async () => settings);
     const config = { daytonaApiKey: "key", sandboxSnapshotName: "responder-sandbox" };
@@ -103,6 +122,7 @@ describe("workspace sandbox", () => {
     expect(sandbox.config).toBe(config);
     expect(sandbox.resources).toBeUndefined();
     expect(sandbox.startCommand).toBe("");
+    expect(sandbox.installDependencies).toBe(false);
     expect(getSettings).not.toHaveBeenCalled();
   });
 });
