@@ -110,6 +110,48 @@ describe("custom MCP runtime connections", () => {
   });
 });
 
+describe("workspace runtime connections", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it("loads every connected account in the workspace", async () => {
+    vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 4).toString("base64"));
+    const accountsQuery = { from: vi.fn(), where: vi.fn().mockResolvedValue([{ id: "account-orders" }, { id: "account-slack" }]) };
+    accountsQuery.from.mockReturnValue(accountsQuery);
+    const resourcesQuery = { from: vi.fn(), innerJoin: vi.fn(), where: vi.fn().mockResolvedValue([{ id: "resource-1" }]) };
+    resourcesQuery.from.mockReturnValue(resourcesQuery);
+    resourcesQuery.innerJoin.mockReturnValue(resourcesQuery);
+    const accountQuery = {
+      from: vi.fn(),
+      where: vi.fn().mockResolvedValue([{
+        displayName: "Orders API",
+        encryptedCredentials: encryptCredentials({
+          apiToken: "orders-token",
+          authType: "api_token",
+          mcpUrl: "https://mcp.example.com/orders",
+        }),
+        id: "account-orders",
+        metadata: {},
+      }]),
+    };
+    accountQuery.from.mockReturnValue(accountQuery);
+    const select = vi.fn()
+      .mockReturnValueOnce(accountsQuery)
+      .mockReturnValueOnce(resourcesQuery)
+      .mockReturnValueOnce(accountQuery);
+    vi.mocked(getDatabase).mockReturnValue({ select } as never);
+    vi.spyOn(console, "info").mockImplementation(() => {});
+
+    const connections = await getRuntimeCustomMcpConnections({ organizationId: "organization-1" });
+
+    expect(connections.map((connection) => connection.accountId)).toEqual(["account-orders"]);
+    // No automation config is read for a workspace.
+    expect(select).toHaveBeenCalledTimes(3);
+  });
+});
+
 describe("initial triage context", () => {
   it("bounds the current alert and recent terminal incident history", async () => {
     const currentQuery = {
