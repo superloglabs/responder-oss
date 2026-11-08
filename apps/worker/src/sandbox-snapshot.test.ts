@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { claudeAgentSdkVersion } from "./claude-automation-harness.js";
 import { codexCliVersion } from "./codex-automation-harness.js";
 import { openCodeVersion } from "./opencode-automation-harness.js";
 import {
+  sandboxHasMise,
   sandboxSnapshotCommands,
   sandboxSnapshotName,
   sandboxSnapshotResources,
@@ -73,14 +74,14 @@ describe("Vercel sandbox snapshot", () => {
   it("reads version files and installs missing versions without prompts", () => {
     const commands = vercelSandboxSnapshotCommands().join("\n");
     expect(commands).toContain("/home/vercel-sandbox/.config/mise/config.toml");
-    expect(commands).toContain("'idiomatic_version_file_enable_tools = [\"go\", \"node\", \"python\", \"ruby\"]'");
+    expect(commands).toContain("'idiomatic_version_file_enable_tools = [\"node\", \"python\", \"ruby\"]'");
     expect(commands).toContain("'trusted_config_paths = [\"/vercel/sandbox/repositories\"]'");
     expect(commands).toContain("'auto_install = true'");
     expect(commands).toContain("'not_found_auto_install = true'");
   });
 
   it("creates shims that mise keeps before any version is installed", () => {
-    const tools = "node npm npx corepack python python3 pip pip3 ruby gem bundle go";
+    const tools = "node npm npx corepack python python3 pip pip3 ruby gem bundle";
     expect(vercelSandboxSnapshotCommands().join("\n")).toContain([
       "sudo ln -s /usr/local/bin/mise /usr/local/bin/mise-shim",
       `mkdir -p ${shims}`,
@@ -96,5 +97,28 @@ describe("Vercel sandbox snapshot", () => {
       `[ "$(env PATH='${vercelSandboxPath}' /bin/sh -lc 'cd /tmp && command -v node')" = "${shims}/node" ]`,
     );
     expect(commands).toContain(`env PATH='${vercelSandboxPath}' /bin/sh -lc 'cd /tmp && node --version'`);
+  });
+});
+
+describe("sandboxHasMise", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("is true only for a Vercel sandbox whose image has mise", async () => {
+    const present = { pathExists: vi.fn().mockResolvedValue(true) };
+    expect(await sandboxHasMise(present)).toBe(false);
+    expect(present.pathExists).not.toHaveBeenCalled();
+
+    vi.stubEnv("SANDBOX_PROVIDER", "vercel");
+    expect(await sandboxHasMise(present)).toBe(true);
+    expect(present.pathExists).toHaveBeenCalledWith("/usr/local/bin/mise");
+    expect(await sandboxHasMise({ pathExists: vi.fn().mockResolvedValue(false) })).toBe(false);
+  });
+
+  it("is false when the check cannot run", async () => {
+    vi.stubEnv("SANDBOX_PROVIDER", "vercel");
+    expect(await sandboxHasMise({ pathExists: vi.fn().mockRejectedValue(new Error("gone")) })).toBe(false);
+    expect(await sandboxHasMise({} as Parameters<typeof sandboxHasMise>[0])).toBe(false);
   });
 });

@@ -134,7 +134,7 @@ import {
   repositoryDependencyInstructions,
   type DependencyInstallResult,
 } from "./repository-dependencies.js";
-import { sandboxRuntimeInstructions } from "./sandbox-snapshot.js";
+import { sandboxHasMise, sandboxRuntimeInstructions } from "./sandbox-snapshot.js";
 import { materializeWorkspaceMemories, workspaceMemoryInstructions } from "./workspace-memories.js";
 import { createIssueRemediationUpdateTool } from "./issue-followup.js";
 import {
@@ -422,6 +422,8 @@ export function investigationInstructions(input: {
   // The repository dependencies installed after checkout, when the workspace
   // asks for them.
   dependencyInstalls?: DependencyInstallResult[];
+  // Whether the sandbox's image has mise to pick runtime versions.
+  runtimeVersions?: boolean;
   workspaceMemories?: RuntimeWorkspaceMemory[];
   runtimeSystemPrompt?: string | null;
   runtimePromptParts?: InvestigationPromptParts;
@@ -599,7 +601,7 @@ export function investigationInstructions(input: {
               prompt("repositoryEntry", { value1: repository.repository, value2: repository.path, value3: repository.branch, value4: repository.sha }),
           ),
           ...(assistant ? [] : [prompt("repositoryEvidence")]),
-          ...sandboxRuntimeInstructions(),
+          ...sandboxRuntimeInstructions(input.runtimeVersions ?? false),
         ].join("\n")
       : assistant
         ? prompt("assistantNoRepositories")
@@ -1110,6 +1112,7 @@ export async function runInvestigationAgent(
     const dependencyInstalls = sandbox.installDependencies
       ? await installRepositoryDependencies(session, repositories)
       : [];
+    const runtimeVersions = await sandboxHasMise(session);
     if (dependencyInstalls.length > 0) {
       console.log(JSON.stringify({
         event: "repository_dependencies_installed",
@@ -1274,6 +1277,7 @@ export async function runInvestigationAgent(
       })),
       repositoryInstructions,
       dependencyInstalls,
+      runtimeVersions,
       workspaceMemories,
       slackChannels: slackConnection?.channels,
       upstashConnected: upstashServer !== null,

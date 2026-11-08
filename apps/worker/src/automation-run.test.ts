@@ -67,6 +67,8 @@ function dependencies() {
   const session = {
     execCommand: vi.fn().mockResolvedValue("Process exited with code 0"),
     materializeEntry: vi.fn().mockResolvedValue(undefined),
+    // The image has mise, as one built from the current base snapshot does.
+    pathExists: vi.fn(async (path: string) => path === "/usr/local/bin/mise"),
     readFile: vi.fn().mockRejectedValue(new Error("not found")),
     state: { environment: {} },
   } as unknown as DaytonaSandboxSession;

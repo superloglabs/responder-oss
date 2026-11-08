@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { sandboxProvider } from "@responder/core/sandbox-config";
 import { prebuiltHarnessRoot } from "./automation-harness.js";
+import type { SandboxSession } from "./sandbox-session.js";
 import { claudeAgentSdkVersion } from "./claude-automation-harness.js";
 import { codexCliVersion } from "./codex-automation-harness.js";
 import { openCodeVersion } from "./opencode-automation-harness.js";
@@ -57,10 +58,12 @@ export const vercelSandboxPath = `${miseShims}:${vercelSandboxDefaultPath}`;
 // list has.
 export const miseVersionsHost = "mise-versions.jdx.dev";
 
-const miseShimTools = ["node", "npm", "npx", "corepack", "python", "python3", "pip", "pip3", "ruby", "gem", "bundle", "go"];
+const miseBinaryPath = "/usr/local/bin/mise";
+
+const miseShimTools = ["node", "npm", "npx", "corepack", "python", "python3", "pip", "pip3", "ruby", "gem", "bundle"];
 const miseConfig = [
   "[settings]",
-  'idiomatic_version_file_enable_tools = ["go", "node", "python", "ruby"]',
+  'idiomatic_version_file_enable_tools = ["node", "python", "ruby"]',
   // Repositories are checked out here, so their mise.toml loads without a prompt.
   'trusted_config_paths = ["/vercel/sandbox/repositories"]',
   "auto_install = true",
@@ -118,7 +121,7 @@ function miseCommands(): string[] {
     [
       `curl -fsSLo /tmp/${miseBinary} https://github.com/jdx/mise/releases/download/v${miseVersion}/${miseBinary}`,
       `echo "${miseBinarySha256}  /tmp/${miseBinary}" | sha256sum -c -`,
-      `sudo install -m 0755 /tmp/${miseBinary} /usr/local/bin/mise`,
+      `sudo install -m 0755 /tmp/${miseBinary} ${miseBinaryPath}`,
       `rm /tmp/${miseBinary}`,
       `[ "$(mise --version | cut -d " " -f 1)" = "${miseVersion}" ]`,
     ].join(" && "),
@@ -164,11 +167,19 @@ export function vercelSandboxSnapshotCommands(): string[] {
   ];
 }
 
-// Tells the agent how runtime versions are chosen. Only the Vercel image has
-// mise. This is not a runtime profile prompt part, whose defaults are stored
-// in the schema, because it describes the image rather than the agent's task.
-export function sandboxRuntimeInstructions(): string[] {
-  return sandboxProvider() === "vercel"
+// Whether the sandbox's image has mise. A cell runs the new code before its
+// base snapshot is rebuilt with mise, and a resumed thread keeps the image it
+// started with, so the agent is told about mise only when it is there.
+export async function sandboxHasMise(session: Pick<SandboxSession, "pathExists">): Promise<boolean> {
+  if (sandboxProvider() !== "vercel" || !session.pathExists) return false;
+  return session.pathExists(miseBinaryPath).catch(() => false);
+}
+
+// Tells the agent how runtime versions are chosen. This is not a runtime
+// profile prompt part, whose defaults are stored in the schema, because it
+// describes the image rather than the agent's task.
+export function sandboxRuntimeInstructions(hasMise: boolean): string[] {
+  return hasMise
     ? ["The sandbox installs language runtimes with mise: in a repository, node, python, and similar commands use the version its .nvmrc, .node-version, .python-version, .tool-versions, or mise.toml asks for, and `mise use <tool>@<version>` switches one by writing it to the current directory's mise config."]
     : [];
 }

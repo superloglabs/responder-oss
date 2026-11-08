@@ -234,15 +234,10 @@ describe("sandbox agent configuration", () => {
       sentryConnected: true,
     };
     expect(investigationInstructions(input)).not.toContain("mise");
-    vi.stubEnv("SANDBOX_PROVIDER", "vercel");
-    try {
-      expect(investigationInstructions(input)).toContain(
-        "The sandbox installs language runtimes with mise: in a repository, node, python, and similar commands use the version its .nvmrc, .node-version, .python-version, .tool-versions, or mise.toml asks for, and `mise use <tool>@<version>` switches one by writing it to the current directory's mise config.",
-      );
-      expect(investigationInstructions({ ...input, repositories: [] })).not.toContain("mise");
-    } finally {
-      vi.unstubAllEnvs();
-    }
+    expect(investigationInstructions({ ...input, runtimeVersions: true })).toContain(
+      "The sandbox installs language runtimes with mise: in a repository, node, python, and similar commands use the version its .nvmrc, .node-version, .python-version, .tool-versions, or mise.toml asks for, and `mise use <tool>@<version>` switches one by writing it to the current directory's mise config.",
+    );
+    expect(investigationInstructions({ ...input, repositories: [], runtimeVersions: true })).not.toContain("mise");
   });
 
   it("keeps proactive scans read-only while retaining issue deduplication", () => {
