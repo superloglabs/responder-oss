@@ -1,3 +1,4 @@
+import { createHash, timingSafeEqual } from "node:crypto";
 import { gunzipSync } from "node:zlib";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
@@ -7,8 +8,12 @@ import {
   recordTelemetryIngestKeyUse,
 } from "../../../../packages/core/src/db/telemetry-ingest-keys.js";
 import { telemetryCollectorUrl } from "../../../../packages/core/src/telemetry/client.js";
+import { findAwsLogSubscriptionWorkspace } from "../../../../packages/core/src/db/aws-log-subscriptions.js";
+import { regionFromAwsLogSubscriptionPolicyName } from "../../../../packages/core/src/integrations/aws-log-subscriptions.js";
 import {
+  cloudWatchLogsMessagesToOtlp,
   cloudWatchLogsToOtlp,
+  decodeCloudWatchLogsRecords,
   firehoseAnswer,
   firehoseRequestSchema,
   firehoseSource,
@@ -29,13 +34,30 @@ import { parseVercelLogs, vercelLogsToOtlp } from "../../../../packages/core/src
 // Cloud providers that deliver in their own formats are converted to OTLP
 // first: Vercel log drains at /api/ingest/vercel/logs, and AWS Firehose
 // streams of CloudWatch metrics and logs at /api/ingest/aws/firehose/*.
+//
+// Superlog's own Firehose stream delivers CloudWatch Logs subscriptions from
+// customer accounts (ADR 0015) at /api/ingest/aws/cloudwatch-logs, with a
+// cell secret instead of an ingest key. Each record's owner and subscription
+// name decide the workspace.
 export type IngestRouteDependencies = {
+  cloudWatchLogsToken?: () => string | null;
   collectorUrl: () => string | null;
   findKey: typeof findTelemetryIngestKey;
   forward: typeof fetch;
+  logSubscriptionWorkspace?: (awsAccountId: string, region: string) => Promise<string | null>;
   now: () => number;
   recordUse: (keyId: string) => Promise<void>;
 };
+
+function cloudWatchLogsIngestToken(): string | null {
+  return process.env.AWS_CLOUDWATCH_LOGS_INGEST_TOKEN?.trim() || null;
+}
+
+// Compares secrets in constant time, whatever their lengths.
+function sameSecret(given: string, expected: string): boolean {
+  const digest = (value: string) => createHash("sha256").update(value).digest();
+  return timingSafeEqual(digest(given), digest(expected));
+}
 
 const defaultDependencies: IngestRouteDependencies = {
   collectorUrl: telemetryCollectorUrl,
@@ -68,6 +90,22 @@ function bearerToken(headers: Headers): string | null {
 
 export function createIngestRoutes(dependencies: IngestRouteDependencies = defaultDependencies) {
   const keys = new Map<string, { expires: number; keyId: string | null; organizationId: string | null }>();
+  const subscriptionWorkspaces = new Map<string, { expires: number; organizationId: string | null }>();
+  const logSubscriptionWorkspace = dependencies.logSubscriptionWorkspace ?? findAwsLogSubscriptionWorkspace;
+  const cloudWatchLogsToken = dependencies.cloudWatchLogsToken ?? cloudWatchLogsIngestToken;
+
+  // The workspace an AWS account's logs from a region belong to, cached like
+  // ingest keys. A removed subscription stops being accepted within the cache
+  // time.
+  async function subscriptionWorkspaceFor(awsAccountId: string, region: string): Promise<string | null> {
+    const key = `${awsAccountId}:${region}`;
+    const cached = subscriptionWorkspaces.get(key);
+    if (cached && cached.expires > dependencies.now()) return cached.organizationId;
+    const organizationId = await logSubscriptionWorkspace(awsAccountId, region);
+    if (subscriptionWorkspaces.size >= keyCacheLimit) subscriptionWorkspaces.clear();
+    subscriptionWorkspaces.set(key, { expires: dependencies.now() + keyCacheMs, organizationId });
+    return organizationId;
+  }
 
   async function workspaceFor(token: string): Promise<{ keyId: string; organizationId: string } | null> {
     const hash = hashTelemetryIngestToken(token);
@@ -207,6 +245,62 @@ export function createIngestRoutes(dependencies: IngestRouteDependencies = defau
           : reply(400, `Telemetry ingest rejected the records with HTTP ${response.status}`, requestId);
       }
       void dependencies.recordUse(key.keyId).catch(() => undefined);
+      return reply(200, undefined, requestId);
+    })
+    // Superlog's own Firehose stream of customers' CloudWatch Logs
+    // subscriptions. Records from accounts or regions without a subscription
+    // are dropped. Every workspace's logs are forwarded before answering; if
+    // the collector was busy for any of them, Firehose resends the whole
+    // batch, so the others can arrive twice.
+    .post("/aws/cloudwatch-logs", async (context) => {
+      const collector = dependencies.collectorUrl();
+      const expected = cloudWatchLogsToken();
+      if (!collector || !expected) return context.json({ error: "Not found" }, 404);
+      const headerRequestId = context.req.header("x-amz-firehose-request-id") ?? "";
+      const reply = (status: 200 | 400 | 401 | 503, errorMessage?: string, requestId = headerRequestId) =>
+        context.json(firehoseAnswer(requestId, errorMessage, dependencies.now()), status);
+      const token = context.req.header("x-amz-firehose-access-key")?.trim();
+      if (!token || !sameSecret(token, expected)) return reply(401, "Invalid access key");
+      let request: ReturnType<typeof firehoseRequestSchema.parse>;
+      try {
+        request = firehoseRequestSchema.parse(JSON.parse((await requestBody(context.req.raw)).toString("utf8")));
+      } catch {
+        return reply(400, "Invalid Firehose request body");
+      }
+      const requestId = headerRequestId || request.requestId;
+      const { messages } = decodeCloudWatchLogsRecords(request);
+      const groups = new Map<string, { awsAccountId: string; messages: typeof messages; region: string }>();
+      for (const message of messages) {
+        const region = message.subscriptionFilters
+          .map(regionFromAwsLogSubscriptionPolicyName)
+          .find((value): value is string => value !== null);
+        if (!region || !/^\d{12}$/u.test(message.owner)) continue;
+        const key = `${message.owner}:${region}`;
+        const group = groups.get(key) ?? { awsAccountId: message.owner, messages: [], region };
+        group.messages.push(message);
+        groups.set(key, group);
+      }
+      let dropped = 0;
+      let busy: string | null = null;
+      for (const group of groups.values()) {
+        const organizationId = await subscriptionWorkspaceFor(group.awsAccountId, group.region);
+        if (!organizationId) {
+          dropped += group.messages.length;
+          continue;
+        }
+        const logs = cloudWatchLogsMessagesToOtlp(group.messages, { accountId: group.awsAccountId, region: group.region }, dependencies.now());
+        if (logs.records === 0) continue;
+        const response = await forward({ body: JSON.stringify(logs.payload), collector, contentType: "application/json", organizationId, signal: "logs" });
+        if (!response || response.status >= 500 || response.status === 429) {
+          busy = response ? `Telemetry ingest answered HTTP ${response.status}` : "Telemetry ingest is unavailable";
+          continue;
+        }
+        if (!response.ok) {
+          console.warn(JSON.stringify({ event: "aws_cloudwatch_logs_rejected", organizationId, status: response.status }));
+        }
+      }
+      if (dropped > 0) console.info(JSON.stringify({ dropped, event: "aws_cloudwatch_logs_dropped" }));
+      if (busy) return reply(503, busy, requestId);
       return reply(200, undefined, requestId);
     });
 }

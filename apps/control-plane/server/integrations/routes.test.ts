@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { removeAwsLogSubscriptionsBeforeDisconnect, restoreAwsLogSubscriptions } from "./aws-log-subscriptions.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   decryptCredentials,
@@ -221,6 +222,11 @@ vi.mock("./railway.js", async (importOriginal) => ({
   railwayConnectionProfile: vi.fn(),
 }));
 
+vi.mock("./aws-log-subscriptions.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./aws-log-subscriptions.js")>()),
+  removeAwsLogSubscriptionsBeforeDisconnect: vi.fn(async () => ({ left: [], ok: true, removed: [] as string[] })),
+  restoreAwsLogSubscriptions: vi.fn(async () => undefined),
+}));
 vi.mock("../investigations/queue.js", () => ({
   queueGcpProjectSetup: vi.fn(),
 }));
@@ -2169,6 +2175,46 @@ describe("integration callback routing", () => {
       error:
         'This project is used by the automation "Triage Cloud Run errors". Remove it from that automation first.',
     });
+  });
+
+  it("deletes an AWS connection's log subscriptions only once nothing else blocks the removal", async () => {
+    const id = "30000000-0000-4000-8000-000000000000";
+    const remove = () => app.request(`/api/integrations/aws/accounts/${id}`, { method: "DELETE" });
+    const target = { integrationAccountId: id, organizationId: tenant.organizationId, provider: "aws" };
+
+    vi.mocked(deleteIntegrationAccount).mockResolvedValueOnce({ automationNames: ["Nightly triage"], status: "in_use" });
+    expect((await remove()).status).toBe(409);
+    expect(deleteIntegrationAccount).toHaveBeenCalledWith({ ...target, dryRun: true });
+    expect(removeAwsLogSubscriptionsBeforeDisconnect).not.toHaveBeenCalled();
+
+    vi.mocked(removeAwsLogSubscriptionsBeforeDisconnect).mockResolvedValueOnce({ error: "Superlog could not remove the log subscriptions in us-east-1", ok: false });
+    vi.mocked(deleteIntegrationAccount).mockResolvedValueOnce({ status: "removable" });
+    const blocked = await remove();
+    expect(blocked.status).toBe(409);
+    await expect(blocked.json()).resolves.toEqual({ error: "Superlog could not remove the log subscriptions in us-east-1" });
+    expect(deleteIntegrationAccount).toHaveBeenCalledTimes(2);
+
+    vi.mocked(deleteIntegrationAccount).mockResolvedValueOnce({ status: "removable" }).mockResolvedValueOnce({ status: "removed" });
+    const removed = await remove();
+    expect(removed.status).toBe(200);
+    expect(removeAwsLogSubscriptionsBeforeDisconnect).toHaveBeenCalledWith({ integrationAccountId: id, organizationId: tenant.organizationId });
+    expect(deleteIntegrationAccount).toHaveBeenLastCalledWith(target);
+    // The subscriptions go before the connection does.
+    const cleanupOrder = vi.mocked(removeAwsLogSubscriptionsBeforeDisconnect).mock.invocationCallOrder.at(-1)!;
+    const deleteOrder = vi.mocked(deleteIntegrationAccount).mock.invocationCallOrder.at(-1)!;
+    expect(cleanupOrder).toBeLessThan(deleteOrder);
+    expect(restoreAwsLogSubscriptions).not.toHaveBeenCalled();
+  });
+
+  it("puts an AWS connection's subscriptions back when it becomes used during the removal", async () => {
+    const id = "30000000-0000-4000-8000-000000000000";
+    vi.mocked(removeAwsLogSubscriptionsBeforeDisconnect).mockResolvedValueOnce({ left: [], ok: true, removed: ["eu-west-1"] });
+    vi.mocked(deleteIntegrationAccount)
+      .mockResolvedValueOnce({ status: "removable" })
+      .mockResolvedValueOnce({ automationNames: ["Nightly triage"], status: "in_use" });
+    const response = await app.request(`/api/integrations/aws/accounts/${id}`, { method: "DELETE" });
+    expect(response.status).toBe(409);
+    expect(restoreAwsLogSubscriptions).toHaveBeenCalledWith({ integrationAccountId: id, organizationId: tenant.organizationId, regions: ["eu-west-1"] });
   });
 
   it("removes a Signal source's connection for its own provider only", async () => {

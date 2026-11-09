@@ -1,6 +1,8 @@
 import { integrationAccountDetails } from "./account-details.js";
 import { chatConnectionRoutes } from "./chat-connection.js";
 import { customMcpToolRoutes } from "./custom-mcp-tools.js";
+import { awsLogSubscriptionRoutes, removeAwsLogSubscriptionsBeforeDisconnect, restoreAwsLogSubscriptions } from "./aws-log-subscriptions.js";
+import { awsLogSubscriptionPrincipalArnForStacks } from "../../../../packages/core/src/integrations/aws-log-subscriptions.js";
 import {
   AWS_REGISTRATION_UNAVAILABLE_ERROR,
   awsRegistrationRoutes,
@@ -1238,31 +1240,61 @@ async function removeIntegrationAccount(input: {
   if (!accountId.success) {
     return Response.json({ error: input.invalid }, { status: 400 });
   }
-  const removal = await deleteIntegrationAccount({
+  const target = {
     integrationAccountId: accountId.data,
     organizationId: tenant.organizationId,
     provider: input.provider,
-  });
-  if (removal.status === "not_found") {
-    return Response.json({ error: input.notFound }, { status: 404 });
+  };
+  const blocked = (removal: Awaited<ReturnType<typeof deleteIntegrationAccount>>) => {
+    if (removal.status === "not_found") {
+      return Response.json({ error: input.notFound }, { status: 404 });
+    }
+    if (removal.status === "has_linear_tickets") {
+      return Response.json(
+        {
+          error: `Linear ticket records use this ${input.noun}, so it can't be removed. Reconnect it instead.`,
+        },
+        { status: 409 },
+      );
+    }
+    if (removal.status === "in_use") {
+      const one = removal.automationNames.length === 1;
+      const names = removal.automationNames.map((name) => `"${name}"`).join(", ");
+      return Response.json(
+        {
+          error: `This ${input.noun} is used by ${one ? "the automation" : "the automations"} ${names}. Remove it from ${one ? "that automation" : "those automations"} first.`,
+        },
+        { status: 409 },
+      );
+    }
+    return null;
+  };
+  // An AWS connection's log subscriptions are deleted before it is removed,
+  // once nothing else blocks the removal. If some cannot be deleted, the
+  // connection stays, so Superlog keeps the credentials to retry.
+  let restoreRegions: string[] = [];
+  if (input.provider === "aws") {
+    const check = blocked(await deleteIntegrationAccount({ ...target, dryRun: true }));
+    if (check) return check;
+    let cleanup: Awaited<ReturnType<typeof removeAwsLogSubscriptionsBeforeDisconnect>>;
+    try {
+      cleanup = await removeAwsLogSubscriptionsBeforeDisconnect({
+        integrationAccountId: accountId.data,
+        organizationId: tenant.organizationId,
+      });
+    } catch (error) {
+      logCallbackError("AWS", error, { accountId: accountId.data, organizationId: tenant.organizationId, stage: "log_subscription_cleanup" });
+      return Response.json({ error: "Superlog could not remove this account's log subscriptions. Try again." }, { status: 502 });
+    }
+    if (!cleanup.ok) return Response.json({ error: cleanup.error }, { status: 409 });
+    restoreRegions = cleanup.removed;
   }
-  if (removal.status === "has_linear_tickets") {
-    return Response.json(
-      {
-        error: `Linear ticket records use this ${input.noun}, so it can't be removed. Reconnect it instead.`,
-      },
-      { status: 409 },
-    );
-  }
-  if (removal.status === "in_use") {
-    const one = removal.automationNames.length === 1;
-    const names = removal.automationNames.map((name) => `"${name}"`).join(", ");
-    return Response.json(
-      {
-        error: `This ${input.noun} is used by ${one ? "the automation" : "the automations"} ${names}. Remove it from ${one ? "that automation" : "those automations"} first.`,
-      },
-      { status: 409 },
-    );
+  const removal = blocked(await deleteIntegrationAccount(target));
+  if (removal) {
+    // Something started using the connection after the check, so it stays:
+    // give it back the subscriptions removed above.
+    await restoreAwsLogSubscriptions({ integrationAccountId: accountId.data, organizationId: tenant.organizationId, regions: restoreRegions });
+    return removal;
   }
   return Response.json({ removed: true });
 }
@@ -1272,6 +1304,7 @@ export const integrationRoutes = new Hono()
   .route("/custom-mcp", customMcpToolRoutes)
   .route("/github/pull-request-author", githubPullRequestAuthorRoutes)
   .route("/aws", awsRegistrationRoutes)
+  .route("/aws/log-subscriptions", awsLogSubscriptionRoutes)
   .get("/", async (context) => {
     const tenant = await getActiveTenant(context.req.raw.headers);
     if (tenant.ok === false) {
@@ -1560,17 +1593,20 @@ export const integrationRoutes = new Hono()
               status: "pending",
             });
       const templateUrl = await createAwsCloudFormationTemplateUrl();
+      const logSubscriptionPrincipalArn = awsLogSubscriptionPrincipalArnForStacks();
       return context.json({
         accountId,
         cloudFormationUrl: templateUrl
           ? awsCloudFormationQuickCreateUrl({
               externalId,
+              logSubscriptionPrincipalArn,
               principalArn,
               templateUrl,
             })
           : null,
         template: awsParameterizedCloudFormationTemplate({
           externalId,
+          logSubscriptionPrincipalArn,
           principalArn,
         }),
       });

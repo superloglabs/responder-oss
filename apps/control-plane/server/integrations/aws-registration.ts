@@ -44,6 +44,7 @@ import {
   snsMessageSchema,
   verifySnsMessageSignature,
 } from "../../../../packages/core/src/integrations/aws-registration.js";
+import { awsLogSubscriptionPrincipalArnForStacks } from "../../../../packages/core/src/integrations/aws-log-subscriptions.js";
 import { getActiveTenant } from "../tenant.js";
 
 export const AWS_REGISTRATION_UNAVAILABLE_ERROR =
@@ -92,6 +93,7 @@ export async function startAwsRegistration(
   const registrationTopicArn = awsRegistrationTopicArn();
   if (!registrationTopicArn) return { available: false };
   const principalArn = awsIntegrationPrincipalArn();
+  const logSubscriptionPrincipalArn = awsLogSubscriptionPrincipalArnForStacks();
 
   const pending = await getPendingIntegrationRegistration({
     externalAccountIdPrefix: AWS_REGISTRATION_EXTERNAL_ACCOUNT_PREFIX,
@@ -141,6 +143,7 @@ export async function startAwsRegistration(
     cloudFormationUrl: templateUrl
       ? awsCloudFormationQuickCreateUrl({
           externalId,
+          logSubscriptionPrincipalArn,
           principalArn,
           registrationTopicArn,
           templateUrl,
@@ -150,6 +153,7 @@ export async function startAwsRegistration(
     // and a downloaded template can be deployed anywhere.
     template: awsParameterizedCloudFormationTemplate({
       externalId,
+      logSubscriptionPrincipalArn,
       principalArn,
     }),
   };
@@ -396,6 +400,9 @@ export const awsRegistrationRoutes = new Hono()
     }
     const known = {
       awsAccountId: credentials.accountId,
+      // The connection the setup became, which differs from the setup's ID
+      // when the account was already connected.
+      integrationAccountId: account.id,
       roleArn: credentials.roleArn,
     };
     if (account.status === "connected") {

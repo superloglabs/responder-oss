@@ -22,6 +22,10 @@ const { startAutomationScheduler, stopAutomationScheduler } = await import(
   "./automations/scheduler.js"
 );
 startAutomationScheduler();
+const { startAwsLogSubscriptionScheduler, stopAwsLogSubscriptionScheduler } = await import(
+  "./integrations/aws-log-subscriptions.js"
+);
+startAwsLogSubscriptionScheduler();
 const { startQueueHealthMetrics } = await import("./queue-health-metrics.js");
 startQueueHealthMetrics();
 
@@ -63,6 +67,7 @@ async function shutdown(signal: NodeJS.Signals) {
 
   await stopScanScheduler();
   await stopAutomationScheduler();
+  await stopAwsLogSubscriptionScheduler();
   server.close(async (error) => {
     clearTimeout(timeout);
     if (error) {

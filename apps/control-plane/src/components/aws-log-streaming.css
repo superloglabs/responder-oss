@@ -1,0 +1,16 @@
+.awsLogStreaming { display: flex; flex-direction: column; gap: 10px; padding: 16px 20px; border-radius: 12px; background: var(--ds-surface-base); outline: .5px solid var(--ds-border-default); }
+.awsLogStreaming h3 { margin: 0; font-size: 13px; font-weight: 600; }
+.awsLogStreaming > p { margin: 0; color: var(--ds-text-secondary); font-size: 12px; line-height: 18px; }
+.awsLogStreaming .awsLogStreaming__filter { color: var(--ds-text-muted); }
+.awsLogStreaming__regions { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.awsLogStreaming__regions > li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; }
+.awsLogStreaming__regions > li > .dsButton { margin-left: auto; }
+.awsLogStreaming__empty { color: var(--ds-text-muted); }
+.awsLogStreaming__error { color: var(--ds-danger); font-size: 12px; }
+.awsLogStreaming__actions { display: flex; justify-content: flex-end; gap: 8px; }
+.awsLogStreaming .dsAlert ol { margin: 6px 0; padding-left: 18px; font-size: 12px; line-height: 18px; }
+.awsLogStreaming .dsAlert p { margin: 4px 0; font-size: 12px; line-height: 18px; }
+/* In the settings account list, the streaming settings take a full row. */
+.appShell--settings .integrationCard__accounts li.integrationCard__account--stacked { flex-wrap: wrap; }
+.integrationCard__account--stacked > .awsLogStreaming { flex: 1 1 100%; }
+.appShell--settings .integrationCard__accounts .awsLogStreaming__regions li { padding: 0; border: 0; background: none; justify-content: flex-start; }

@@ -8,6 +8,7 @@ import {
 import { ClickStackConnectionDialog } from "../components/clickstack-connection-dialog";
 import { GrafanaConnectionDialog } from "../components/grafana-connection-dialog";
 import { AwsConnectionDialog } from "../components/aws-connection-dialog";
+import { AwsLogStreamingSettings } from "../components/aws-log-streaming";
 import { GcpConnectionDialog } from "../components/gcp-connection-dialog";
 import { GcpSetupStepper } from "../components/gcp-setup-progress";
 import { gcpSetupProgressLabel, type GcpSetupStatus } from "../gcp-setup-status";
@@ -390,6 +391,9 @@ function IntegrationCard({
   if (integration.id === "custom_mcp" && integration.accountCount > 0) {
     return <CustomMcpIntegrationCard integration={integration} />;
   }
+  if (integration.id === "aws" && integration.accountCount > 0) {
+    return <AwsIntegrationCard integration={integration} />;
+  }
   return <DefaultIntegrationCard integration={integration} sentryHealth={sentryHealth} />;
 }
 
@@ -754,6 +758,84 @@ function CustomMcpIntegrationCard({
           }}
         />
       ) : null}
+    </article>
+  );
+}
+
+// Connected AWS accounts, each with the CloudWatch Logs regions that send
+// new errors to Superlog.
+function AwsIntegrationCard({
+  integration,
+}: {
+  integration: IntegrationSummary;
+}) {
+  const [showAccounts, setShowAccounts] = useState(
+    new URLSearchParams(window.location.search).get("integration") === "aws",
+  );
+  const [adding, setAdding] = useState(false);
+  const canConnect = Boolean(integration.connectUrl);
+  const accounts = integration.accounts;
+
+  return (
+    <article
+      className="integrationCard integrationCard--managed"
+      id={`integration-${integration.id}`}
+    >
+      <ProviderGlyph className="integrationLogo" decorative provider="aws" />
+      <div className="integrationCard__body">
+        <strong>{integration.name}</strong>
+        <small>
+          {integration.accountCount} account{integration.accountCount === 1 ? "" : "s"}
+        </small>
+      </div>
+      {accounts.some((account) => account.status === "error") ? (
+        <span className="connectedBadge connectedBadge--warning">Action needed</span>
+      ) : (
+        <span className="connectedBadge">Connected</span>
+      )}
+      <div className="integrationCard__actions">
+        <button
+          aria-expanded={showAccounts}
+          className="button button--secondary button--small"
+          onClick={() => setShowAccounts((value) => !value)}
+          type="button"
+        >
+          Manage
+        </button>
+      </div>
+      {showAccounts ? (
+        <ul className="integrationCard__accounts" aria-label="Connected AWS accounts">
+          {accounts.map((account) => (
+            <li key={account.id} className="integrationCard__account--stacked">
+              <span>
+                <strong>{account.displayName}</strong>
+                <small>Read-only investigation role</small>
+              </span>
+              <span
+                className={`integrationCard__accountStatus${
+                  account.status === "error" ? " integrationCard__accountStatus--error" : ""
+                }`}
+              >
+                {account.status === "connected" ? "Connected" : account.status === "pending" ? "Pending" : "Error"}
+              </span>
+              {account.status === "connected" ? <AwsLogStreamingSettings integrationAccountId={account.id} /> : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {showAccounts && canConnect ? (
+        <div className="integrationCard__actions integrationCard__manageActions">
+          <button className="button button--primary button--small" onClick={() => setAdding(true)} type="button">
+            Add account
+          </button>
+        </div>
+      ) : null}
+      <AwsConnectionDialog
+        connectUrl={integration.connectUrl ?? ""}
+        onCancel={() => setAdding(false)}
+        open={adding && canConnect}
+        returnTo="/settings"
+      />
     </article>
   );
 }

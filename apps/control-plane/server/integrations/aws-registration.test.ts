@@ -485,11 +485,13 @@ describe("one-click AWS registration", () => {
 
       await expect(first.json()).resolves.toEqual({
         awsAccountId,
+        integrationAccountId: registrationAccountId,
         roleArn,
         status: "verifying",
       });
       await expect(second.json()).resolves.toEqual({
         awsAccountId,
+        integrationAccountId: registrationAccountId,
         roleArn,
         status: "verifying",
       });
@@ -511,6 +513,7 @@ describe("one-click AWS registration", () => {
 
       await expect(response.json()).resolves.toEqual({
         awsAccountId,
+        integrationAccountId: registrationAccountId,
         roleArn,
         status: "connected",
       });
@@ -547,6 +550,7 @@ describe("one-click AWS registration", () => {
 
       await expect(response.json()).resolves.toEqual({
         awsAccountId,
+        integrationAccountId: registrationAccountId,
         roleArn,
         status: "connected",
       });
@@ -566,7 +570,8 @@ describe("one-click AWS registration", () => {
       const response = await poll();
 
       expect(response.status).toBe(200);
-      await expect(response.json()).resolves.toMatchObject({ status: "connected" });
+      // The page manages the connection the setup merged into.
+      await expect(response.json()).resolves.toMatchObject({ integrationAccountId: existingAccountId, status: "connected" });
       expect(getIntegrationAccountMergedFromRegistration).toHaveBeenCalledWith({
         organizationId,
         provider: "aws",

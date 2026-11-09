@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { IconCheck, IconExclamationMark } from "@tabler/icons-react";
 import { removeIntegrationAccount, type IntegrationAccount, type IntegrationSummary } from "../agents-api";
+import { AwsLogStreamingSettings } from "../components/aws-log-streaming";
 import { Button } from "../design-system";
 import { CloudSourceSetup } from "../pages/telemetry-source";
 import { fetchServices } from "../telemetry-api";
@@ -46,7 +47,12 @@ export function SignalManage(props: ManageProps) {
         // With several accounts, each Disconnect names its own.
         several={accounts.length > 1}
         // Sending telemetry covers the workspace, so it is shown once.
-        stream={(page === "aws" || page === "gcp") && account === accounts.at(-1) ? <CloudStream provider={page} /> : null}
+        stream={page === "aws"
+          // Each AWS account chooses its regions; without log streaming
+          // here, the CloudWatch stream setup is shown once.
+          ? <AwsLogStreamingSettings integrationAccountId={account.id}
+            fallback={account === accounts.at(-1) ? <CloudStream provider="aws" /> : null} />
+          : page === "gcp" && account === accounts.at(-1) ? <CloudStream provider={page} /> : null}
         onReconnect={props.onReconnect}
         onRemoved={props.onRemoved} />)}
     <Actions onBack={onBack}><Button variant="primary" onClick={onBack}>Done</Button></Actions>

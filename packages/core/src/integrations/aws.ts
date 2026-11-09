@@ -90,22 +90,32 @@ function requireSnsTopicArn(topicArn: string): SnsTopic {
   return topic;
 }
 
+const roleArnSchema = z.string().regex(
+  /^arn:aws:iam::\d{12}:role\/[A-Za-z0-9+=,.@_/-]+$/,
+);
+
 export function awsParameterizedCloudFormationTemplate(input: {
   externalId: string;
+  logSubscriptionPrincipalArn?: string | null;
   principalArn: string;
   registrationTopicArn?: string;
 }): string {
   const externalId = z.string().min(32).max(256).parse(input.externalId);
-  const principalArn = z.string().regex(
-    /^arn:aws:iam::\d{12}:role\/[A-Za-z0-9+=,.@_/-]+$/,
-  ).parse(input.principalArn);
+  const principalArn = roleArnSchema.parse(input.principalArn);
   if (input.registrationTopicArn) requireSnsTopicArn(input.registrationTopicArn);
-  const template = input.registrationTopicArn
+  let template = input.registrationTopicArn
     ? cloudFormationTemplate.replace(
         "    Default: \"\"\n    Description: SNS topic that tells Responder which account ran this stack",
         `    Default: '${input.registrationTopicArn}'\n    Description: SNS topic that tells Responder which account ran this stack`,
       )
     : cloudFormationTemplate;
+  if (input.logSubscriptionPrincipalArn) {
+    const logSubscriptionPrincipalArn = roleArnSchema.parse(input.logSubscriptionPrincipalArn);
+    template = template.replace(
+      "    Default: \"\"\n    Description: Superlog's log subscription broker role ARN",
+      `    Default: '${logSubscriptionPrincipalArn}'\n    Description: Superlog's log subscription broker role ARN`,
+    );
+  }
   return template
     .replace(
       "    Description: Responder's AWS integration broker role ARN",
@@ -145,6 +155,7 @@ function isSupportedCloudFormationTemplateUrl(templateUrl: URL): boolean {
 
 export function awsCloudFormationQuickCreateUrl(input: {
   externalId: string;
+  logSubscriptionPrincipalArn?: string | null;
   principalArn: string;
   registrationTopicArn?: string;
   templateUrl: string;
@@ -161,6 +172,9 @@ export function awsCloudFormationQuickCreateUrl(input: {
     param_ResponderPrincipalArn: input.principalArn,
     param_ExternalId: input.externalId,
   });
+  if (input.logSubscriptionPrincipalArn) {
+    parameters.set("param_LogSubscriptionPrincipalArn", roleArnSchema.parse(input.logSubscriptionPrincipalArn));
+  }
   if (!input.registrationTopicArn) {
     return `https://console.aws.amazon.com/cloudformation/home#/stacks/create/review?${parameters}`;
   }

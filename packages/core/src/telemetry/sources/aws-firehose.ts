@@ -150,19 +150,17 @@ export function logGroupService(logGroup: string, logStream = ""): string {
   return withoutGeneratedSuffix(named || segments.at(-1) || logGroup) || "aws";
 }
 
+export type CloudWatchLogsMessage = z.infer<typeof cloudWatchLogsSchema>;
+
 // CloudWatch Logs subscriptions write each record as gzip-compressed JSON
-// with the events of one log stream. Control messages carry no events.
+// with the events of one log stream. Control messages carry no events and are
+// left out, with records that cannot be read counted as skipped.
 // https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/SubscriptionFilters.html
-export function cloudWatchLogsToOtlp(
-  request: FirehoseRequest,
-  source: { accountId: string; region: string } | null,
-  now: number = Date.now(),
-): { payload: OtlpLogsRequest; records: number; skipped: number } {
-  const payload: OtlpLogsRequest = { resourceLogs: [] };
-  let records = 0;
+export function decodeCloudWatchLogsRecords(request: FirehoseRequest): { messages: CloudWatchLogsMessage[]; skipped: number } {
+  const messages: CloudWatchLogsMessage[] = [];
   let skipped = 0;
   for (const record of request.records) {
-    let parsed: z.infer<typeof cloudWatchLogsSchema>;
+    let parsed: CloudWatchLogsMessage;
     try {
       const bytes = Buffer.from(record.data, "base64");
       const text = (bytes[0] === 0x1f && bytes[1] === 0x8b ? gunzipSync(bytes) : bytes).toString("utf8");
@@ -172,6 +170,21 @@ export function cloudWatchLogsToOtlp(
       continue;
     }
     if (parsed.messageType !== "DATA_MESSAGE" || parsed.logEvents.length === 0) continue;
+    messages.push(parsed);
+  }
+  return { messages, skipped };
+}
+
+// OTLP logs for decoded messages. The account is each message's owner, or
+// the source's; the region is the source's.
+export function cloudWatchLogsMessagesToOtlp(
+  messages: CloudWatchLogsMessage[],
+  source: { accountId: string; region: string } | null,
+  now: number = Date.now(),
+): { payload: OtlpLogsRequest; records: number } {
+  const payload: OtlpLogsRequest = { resourceLogs: [] };
+  let records = 0;
+  for (const parsed of messages) {
     const logRecords: OtlpLogRecord[] = parsed.logEvents.map((event) => {
       const line = logLine(event.message);
       records += 1;
@@ -199,5 +212,14 @@ export function cloudWatchLogsToOtlp(
       scopeLogs: [{ logRecords, scope: { name: "aws.cloudwatch_logs" } }],
     });
   }
-  return { payload, records, skipped };
+  return { payload, records };
+}
+
+export function cloudWatchLogsToOtlp(
+  request: FirehoseRequest,
+  source: { accountId: string; region: string } | null,
+  now: number = Date.now(),
+): { payload: OtlpLogsRequest; records: number; skipped: number } {
+  const { messages, skipped } = decodeCloudWatchLogsRecords(request);
+  return { ...cloudWatchLogsMessagesToOtlp(messages, source, now), skipped };
 }

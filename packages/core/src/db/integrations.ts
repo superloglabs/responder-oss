@@ -327,12 +327,17 @@ export async function listRunningIntegrationAccountSetups(input: {
 
 export type IntegrationAccountRemoval =
   | { status: "removed" }
+  // A dry run found nothing that blocks the removal.
+  | { status: "removable" }
   | { status: "not_found" }
   | { status: "in_use"; automationNames: string[] }
   // Linear ticket records reference the account, whatever their status.
   | { status: "has_linear_tickets" };
 
+// Removes a connection unless an automation or Linear ticket records use it.
+// With `dryRun`, only checks, so a caller can do its own cleanup first.
 export async function deleteIntegrationAccount(input: {
+  dryRun?: boolean;
   integrationAccountId: string;
   organizationId: string;
   provider: IntegrationProvider;
@@ -376,6 +381,7 @@ export async function deleteIntegrationAccount(input: {
       .from(issueLinearTickets)
       .where(eq(issueLinearTickets.integrationAccountId, account.id));
     if ((linear?.tickets ?? 0) > 0) return { status: "has_linear_tickets" };
+    if (input.dryRun) return { status: "removable" };
 
     // Only superseded automation versions still point at the account. They
     // no longer run, so their references go with it.

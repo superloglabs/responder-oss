@@ -769,6 +769,104 @@ test("sends a connected AWS account's CloudWatch to Signal", async ({ page }) =>
   await page.screenshot({ path: "test-results/signal-aws-stream.png", fullPage: true });
 });
 
+test("streams a connected AWS account's errors from the regions an admin picks", async ({ page }) => {
+  await workspace(page, { signal: fakeSignal(30, { setUp: false }) });
+  const now = new Date().toISOString();
+  const accountId = "44444444-4444-4444-8444-444444444444";
+  await page.route("**/api/integrations", (route) => route.fulfill({ json: { integrations: [
+    { id: "aws", name: "AWS", description: "", state: "connected", accountCount: 1, resourceCount: 0, connectUrl: "/api/integrations/aws/connect", configurationUrl: null, accounts: [{ id: accountId, displayName: "123456789012", status: "connected", resourceCount: 0, updatedAt: now, details: { awsAccountId: "123456789012", roleName: "ResponderInvestigationRole" } }] },
+  ] } }));
+  await page.route("**/api/cells", (route) => route.fulfill({ json: { cells: [{ id: "eu", label: "Europe", url: "https://superlog.sh" }], current: "eu" } }));
+  const streaming = {
+    available: true,
+    canManage: true,
+    filter: "Error lines only: ERROR, FATAL, and CRITICAL lines, exceptions, tracebacks, and panics.",
+    regions: ["us-east-1", "eu-west-1", "eu-west-3"],
+    stackUpdate: null,
+    subscriptions: [] as Array<Record<string, unknown>>,
+  };
+  let saved: unknown = null;
+  await page.route(`**/api/integrations/aws/log-subscriptions/${accountId}`, (route) => {
+    if (route.request().method() === "PUT") {
+      saved = route.request().postDataJSON();
+      streaming.subscriptions = [{ appliedAt: now, lastError: null, region: "eu-west-1", status: "active" }];
+    }
+    return route.fulfill({ json: streaming });
+  });
+
+  await page.goto("/signal/setup/telemetry/aws");
+  await expect(page.getByRole("heading", { name: "Send new errors to Superlog" })).toBeVisible();
+  // The region nearest the workspace's cell is suggested, not yet saved.
+  await expect(page.getByText("eu-west-1", { exact: true })).toBeVisible();
+  await expect(page.getByText("Not saved")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Send CloudWatch to Signal" })).toHaveCount(0);
+  // The admin adds us-east-1 and eu-west-3, then drops eu-west-3 again.
+  await page.getByRole("button", { name: /Add a region/u }).click();
+  await page.getByRole("option", { name: "us-east-1", exact: true }).click();
+  await page.getByRole("button", { name: /Add a region/u }).click();
+  await page.getByRole("option", { name: "eu-west-3", exact: true }).click();
+  await page.getByRole("listitem").filter({ hasText: "eu-west-3" }).getByRole("button", { name: "Remove" }).click();
+  await page.getByRole("button", { name: "Start streaming" }).click();
+  await expect.poll(() => saved).toEqual({ regions: ["eu-west-1", "us-east-1"] });
+  await expect(page.getByText("Streaming", { exact: true })).toBeVisible();
+  await page.screenshot({ path: "test-results/signal-aws-log-streaming.png", fullPage: true });
+});
+
+test("shows a member the AWS regions without letting them change them", async ({ page }) => {
+  await workspace(page, { signal: fakeSignal(30, { setUp: false }) });
+  const now = new Date().toISOString();
+  const accountId = "44444444-4444-4444-8444-444444444444";
+  await page.route("**/api/integrations", (route) => route.fulfill({ json: { integrations: [
+    { id: "aws", name: "AWS", description: "", state: "connected", accountCount: 1, resourceCount: 0, connectUrl: "/api/integrations/aws/connect", configurationUrl: null, accounts: [{ id: accountId, displayName: "123456789012", status: "connected", resourceCount: 0, updatedAt: now, details: { awsAccountId: "123456789012", roleName: "ResponderInvestigationRole" } }] },
+  ] } }));
+  await page.route(`**/api/integrations/aws/log-subscriptions/${accountId}`, (route) => route.fulfill({ json: {
+    available: true,
+    canManage: false,
+    regions: ["eu-west-1", "us-east-1"],
+    stackUpdate: null,
+    subscriptions: [
+      { appliedAt: now, lastError: null, region: "eu-west-1", status: "active" },
+      { appliedAt: now, lastError: "AWS returned an error in us-east-1: throttled", region: "us-east-1", status: "removing" },
+    ],
+  } }));
+
+  await page.goto("/signal/setup/telemetry/aws");
+  await expect(page.getByText("Streaming", { exact: true })).toBeVisible();
+  // A region being removed stays listed with its error.
+  await expect(page.getByText("Stopping", { exact: true })).toBeVisible();
+  await expect(page.getByText("AWS returned an error in us-east-1: throttled")).toBeVisible();
+  await expect(page.getByText("Workspace owners and admins choose the regions.")).toBeVisible();
+  await expect(page.getByRole("button", { name: /Add a region/u })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Remove" })).toHaveCount(0);
+});
+
+test("asks an admin to update an AWS stack that predates log streaming", async ({ page }) => {
+  await workspace(page, { signal: fakeSignal(30, { setUp: false }) });
+  const now = new Date().toISOString();
+  const accountId = "44444444-4444-4444-8444-444444444444";
+  await page.route("**/api/integrations", (route) => route.fulfill({ json: { integrations: [
+    { id: "aws", name: "AWS", description: "", state: "connected", accountCount: 1, resourceCount: 0, connectUrl: "/api/integrations/aws/connect", configurationUrl: null, accounts: [{ id: accountId, displayName: "123456789012", status: "connected", resourceCount: 0, updatedAt: now, details: { awsAccountId: "123456789012", roleName: "ResponderInvestigationRole" } }] },
+  ] } }));
+  await page.route(`**/api/integrations/aws/log-subscriptions/${accountId}`, (route) => route.fulfill({ json: {
+    available: true,
+    canManage: true,
+    regions: ["eu-west-1"],
+    stackUpdate: {
+      command: "aws cloudformation update-stack --region eu-west-3 --stack-name ResponderInvestigationAccess",
+      logSubscriptionPrincipalArn: "arn:aws:iam::121638211609:role/ResponderLogSubscriptionBroker",
+      stackName: "ResponderInvestigationAccess",
+      templateUrl: null,
+    },
+    subscriptions: [{ appliedAt: null, lastError: "Superlog could not assume ResponderLogSubscriptionRole in this AWS account. Update the Superlog stack to the latest template.", region: "eu-west-1", status: "failed" }],
+  } }));
+
+  await page.goto("/signal/setup/telemetry/aws");
+  await expect(page.getByText("Update your Superlog stack first")).toBeVisible();
+  await expect(page.getByText("aws cloudformation update-stack --region eu-west-3 --stack-name ResponderInvestigationAccess")).toBeVisible();
+  await expect(page.getByText("Error", { exact: true })).toBeVisible();
+  await page.screenshot({ path: "test-results/signal-aws-stack-update.png", fullPage: true });
+});
+
 test("connects AWS with one launch and finishes when the stack reports back", async ({ page, context }) => {
   await workspace(page, { signal: fakeSignal(30, { setUp: false }) });
   await page.route("**/api/integrations", (route) => route.fulfill({ json: { integrations: [
