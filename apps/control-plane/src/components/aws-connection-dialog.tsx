@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { defaultAwsRegion } from "../../../../packages/core/src/integrations/aws-regions";
+import { useCellDirectory } from "../cells";
 import { awsRegions } from "../telemetry-sources-api";
 
 interface AwsSetup {
@@ -20,7 +22,10 @@ export function AwsConnectionDialog({
   returnTo: string;
 }) {
   const [awsAccountId, setAwsAccountId] = useState("");
-  const [region, setRegion] = useState<string>("us-east-1");
+  // Starts on the region nearest this workspace's cell until one is chosen.
+  const cells = useCellDirectory(open);
+  const [chosenRegion, setRegion] = useState<string | null>(null);
+  const region = chosenRegion ?? defaultAwsRegion(cells?.current);
   const [setup, setSetup] = useState<AwsSetup | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -174,7 +179,8 @@ export function AwsConnectionDialog({
               opens in this region. If the workspace receives telemetry, the
               stack also streams this region's CloudWatch logs to Superlog;
               Firehose and CloudWatch Logs delivery are billed to your AWS
-              account.
+              account. AWS allows one account-wide log subscription per
+              region, so the stack fails if this region already has one.
             </p>
             {error ? <p className="siteDialog__error" role="alert">{error}</p> : null}
             <footer className="siteDialog__footer">

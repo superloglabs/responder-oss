@@ -45,7 +45,12 @@ import {
   verifySnsMessageSignature,
 } from "../../../../packages/core/src/integrations/aws-registration.js";
 import { getActiveTenant } from "../tenant.js";
-import { type AwsLogStream, prepareAwsLogStream, readAwsLogStream } from "./aws-log-stream.js";
+import {
+  type AwsLogStream,
+  commitAwsLogStream,
+  prepareAwsLogStream,
+  readAwsLogStream,
+} from "./aws-log-stream.js";
 
 export const AWS_REGISTRATION_UNAVAILABLE_ERROR =
   "One-click AWS setup is not available in this region";
@@ -146,27 +151,37 @@ export async function startAwsRegistration(
       })
     : null;
   // A new placeholder, or a new ingest key for an open one, is saved before
-  // the link goes out, so the next launch finds the same key.
-  if (!accountId || (prepared && !previousStream)) {
-    accountId = await upsertIntegrationAccount({
-      organizationId,
-      provider: "aws",
-      externalAccountId: awsRegistrationExternalAccountId(externalId),
-      displayName: REGISTRATION_DISPLAY_NAME,
-      encryptedCredentials: encryptCredentials({
-        externalId,
-        registration: true,
-        ...(prepared ? { logStream: prepared.stream } : {}),
-      }),
-      credentialKeyVersion: 1,
-      metadata: {
-        permissionPolicy: "AIOpsAssistantPolicy",
-        registrationHash: awsRegistrationHash(externalId),
-        roleName: "ResponderInvestigationRole",
-      },
-      status: "pending",
-    });
-  }
+  // the link goes out, so the next launch finds the same key. Without a new
+  // key, an open placeholder keeps the one it has.
+  const openAccountId = accountId;
+  accountId = await commitAwsLogStream({
+    organizationId,
+    prepared,
+    region: options.region,
+    saveConnection: async () => {
+      if (openAccountId && !prepared?.created) return openAccountId;
+      const logStream = prepared?.stream ?? previousStream;
+      return upsertIntegrationAccount({
+        organizationId,
+        provider: "aws",
+        externalAccountId: awsRegistrationExternalAccountId(externalId),
+        displayName: REGISTRATION_DISPLAY_NAME,
+        encryptedCredentials: encryptCredentials({
+          externalId,
+          registration: true,
+          ...(logStream ? { logStream } : {}),
+        }),
+        credentialKeyVersion: 1,
+        metadata: {
+          permissionPolicy: "AIOpsAssistantPolicy",
+          registrationHash: awsRegistrationHash(externalId),
+          roleName: "ResponderInvestigationRole",
+        },
+        status: "pending",
+      });
+    },
+    userId: options.userId ?? "",
+  });
 
   return {
     accountId,

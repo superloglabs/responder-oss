@@ -365,7 +365,8 @@ function AwsSetup({ list, onCreated }: { list: ReactNode; onCreated: () => Promi
       <p className="telemetrySetup__intro">
         A CloudFormation stack in your account streams one region's CloudWatch metrics and CloudWatch Logs to
         Superlog through Amazon Data Firehose. Metric Streams, Firehose and log delivery are billed to your AWS
-        account. Deploy one stack per region.
+        account. Deploy one stack per region. AWS allows one account-wide log subscription per region, so a
+        region that already has one needs EnableLogs set to false.
       </p>
       <section aria-labelledby="aws-stack-title" className="telemetrySetup__section">
         <h2 id="aws-stack-title">Deploy the stack</h2>

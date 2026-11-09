@@ -74,7 +74,7 @@ import { exchangeSlackCode, listSlackChannels } from "./slack.js";
 import { startDefaultSlackThreadMode } from "../../../../packages/core/src/db/agents.js";
 import { getActiveTenant } from "../tenant.js";
 import { organizationHasCapability } from "../../../../packages/core/src/db/organization-capabilities.js";
-import { prepareAwsLogStream } from "./aws-log-stream.js";
+import { commitAwsLogStream, prepareAwsLogStream } from "./aws-log-stream.js";
 import {
   customMcpConnectionMetricEvent,
   integrationRoutes,
@@ -243,6 +243,8 @@ vi.mock("../../../../packages/core/src/db/organization-capabilities.js", () => (
 
 vi.mock("./aws-log-stream.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./aws-log-stream.js")>()),
+  // Saves the connection only; aws-log-stream.test.ts covers the rest.
+  commitAwsLogStream: vi.fn(async (input: { saveConnection: () => Promise<unknown> }) => input.saveConnection()),
   prepareAwsLogStream: vi.fn(async () => null),
 }));
 
@@ -1822,6 +1824,7 @@ describe("integration callback routing", () => {
     );
     const stream = { ingestKey: "sl_ingest_token", ingestKeyId: "key-1", resourcePrefix: "superlog-0a1b2c3d" };
     vi.mocked(prepareAwsLogStream).mockResolvedValue({
+      created: true,
       parameters: { ingestKey: "sl_ingest_token", ingestUrl: "https://superlog.sh", resourcePrefix: "superlog-0a1b2c3d" },
       stream,
     });
@@ -1860,6 +1863,9 @@ describe("integration callback routing", () => {
       registration: true,
     });
     expect(upsertIntegrationAccount).toHaveBeenCalledTimes(1);
+    expect(commitAwsLogStream).toHaveBeenCalledWith(
+      expect.objectContaining({ organizationId: tenant.organizationId, region: "eu-west-1", userId: tenant.user.id }),
+    );
   });
 
   it("reuses the open setup's ingest key when the stack is launched again", async () => {
@@ -1885,6 +1891,7 @@ describe("integration callback routing", () => {
       "https://responder-templates.s3.eu-west-3.amazonaws.com/responder-aws-access.yaml?X-Amz-Signature=test",
     );
     vi.mocked(prepareAwsLogStream).mockResolvedValue({
+      created: false,
       parameters: { ingestKey: "sl_ingest_old", ingestUrl: "https://superlog.sh", resourcePrefix: "superlog-99999999" },
       stream,
     });
@@ -1917,6 +1924,7 @@ describe("integration callback routing", () => {
     );
     const stream = { ingestKey: "sl_ingest_token", ingestKeyId: "key-1", resourcePrefix: "superlog-0a1b2c3d" };
     vi.mocked(prepareAwsLogStream).mockResolvedValue({
+      created: true,
       parameters: { ingestKey: "sl_ingest_token", ingestUrl: "https://superlog.sh", resourcePrefix: "superlog-0a1b2c3d" },
       stream,
     });
@@ -1945,6 +1953,106 @@ describe("integration callback routing", () => {
       logStream: stream,
       roleArn: "arn:aws:iam::123456789012:role/ResponderInvestigationRole",
     });
+  });
+
+  it("keeps a stored ingest key when a launch does not stream", async () => {
+    vi.stubEnv(
+      "AWS_INTEGRATION_PRINCIPAL_ARN",
+      "arn:aws:iam::111122223333:role/ResponderAwsIntegrationBroker",
+    );
+    const stream = { ingestKey: "sl_ingest_old", ingestKeyId: "key-0", resourcePrefix: "superlog-99999999" };
+    vi.mocked(getOrganizationIntegrationAccountByExternalId).mockResolvedValue({
+      encryptedCredentials: "pending-credentials",
+      id: "30000000-0000-4000-8000-000000000000",
+      metadata: {},
+      status: "pending",
+    });
+    vi.mocked(decryptCredentials).mockReturnValue({
+      accountId: "123456789012",
+      externalId: "responder_existing_external_id_1234567890",
+      logStream: stream,
+      roleArn: "arn:aws:iam::123456789012:role/ResponderInvestigationRole",
+    });
+    vi.mocked(createAwsCloudFormationTemplateUrl).mockResolvedValue(null);
+    vi.mocked(encryptCredentials).mockReturnValue("encrypted-aws-credentials");
+    vi.mocked(upsertIntegrationAccount).mockResolvedValue(
+      "30000000-0000-4000-8000-000000000000",
+    );
+
+    const response = await app.request("/api/integrations/aws/connect", {
+      body: JSON.stringify({ accountId: "123456789012" }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ streamsLogs: false });
+    expect(prepareAwsLogStream).not.toHaveBeenCalled();
+    expect(encryptCredentials).toHaveBeenCalledWith({
+      accountId: "123456789012",
+      externalId: "responder_existing_external_id_1234567890",
+      logStream: stream,
+      roleArn: "arn:aws:iam::123456789012:role/ResponderInvestigationRole",
+    });
+  });
+
+  it("replaces a revoked key in the open one-click setup", async () => {
+    vi.stubEnv(
+      "AWS_INTEGRATION_REGISTRATION_TOPIC_ARN",
+      "arn:aws:sns:eu-west-3:111122223333:ResponderAwsRegistration",
+    );
+    vi.stubEnv(
+      "AWS_INTEGRATION_PRINCIPAL_ARN",
+      "arn:aws:iam::111122223333:role/ResponderAwsIntegrationBroker",
+    );
+    const revoked = { ingestKey: "sl_ingest_old", ingestKeyId: "key-0", resourcePrefix: "superlog-99999999" };
+    const fresh = { ingestKey: "sl_ingest_new", ingestKeyId: "key-1", resourcePrefix: "superlog-0a1b2c3d" };
+    vi.mocked(getPendingIntegrationRegistration).mockResolvedValue({
+      encryptedCredentials: "encrypted-registration",
+      id: "30000000-0000-4000-8000-000000000000",
+    });
+    vi.mocked(decryptCredentials).mockReturnValue({
+      externalId: "responder_existing_external_id_1234567890",
+      logStream: revoked,
+      registration: true,
+    });
+    vi.mocked(createAwsCloudFormationTemplateUrl).mockResolvedValue(
+      "https://responder-templates.s3.eu-west-3.amazonaws.com/responder-aws-access.yaml?X-Amz-Signature=test",
+    );
+    vi.mocked(prepareAwsLogStream).mockResolvedValue({
+      created: true,
+      parameters: { ingestKey: "sl_ingest_new", ingestUrl: "https://superlog.sh", resourcePrefix: "superlog-0a1b2c3d" },
+      stream: fresh,
+    });
+    vi.mocked(encryptCredentials).mockReturnValue("encrypted-registration");
+    vi.mocked(upsertIntegrationAccount).mockResolvedValue(
+      "30000000-0000-4000-8000-000000000000",
+    );
+
+    const response = await app.request("/api/integrations/aws/connect", {
+      body: JSON.stringify({ region: "eu-west-1" }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    expect(prepareAwsLogStream).toHaveBeenCalledWith(expect.objectContaining({ previous: revoked }));
+    expect(encryptCredentials).toHaveBeenCalledWith({
+      externalId: "responder_existing_external_id_1234567890",
+      logStream: fresh,
+      registration: true,
+    });
+  });
+
+  it("rejects a region AWS does not have", async () => {
+    const response = await app.request("/api/integrations/aws/connect", {
+      body: JSON.stringify({ region: "us-foobar-1" }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: "Choose a commercial AWS region" });
   });
 
   it("rejects a region outside the commercial partition", async () => {

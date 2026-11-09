@@ -777,7 +777,7 @@ test("connects AWS with one launch and finishes when the stack reports back", as
   let launchBody: unknown = null;
   await page.route("**/api/integrations/aws/connect", (route) => {
     launchBody = route.request().postDataJSON();
-    return route.fulfill({ json: { accountId: "setup-1", cloudFormationUrl: "https://eu-west-3.console.aws.amazon.com/cloudformation/home", template: "" } });
+    return route.fulfill({ json: { accountId: "setup-1", cloudFormationUrl: "https://eu-west-3.console.aws.amazon.com/cloudformation/home", streamsLogs: true, template: "" } });
   });
   let setup: Record<string, string> = { status: "waiting" };
   await page.route("**/api/integrations/aws/setup/setup-1", (route) => route.fulfill({ json: setup }));
@@ -794,10 +794,12 @@ test("connects AWS with one launch and finishes when the stack reports back", as
   await expect((await popup)).toHaveURL(/eu-west-3\.console\.aws\.amazon\.com/u);
   expect(launchBody).toEqual({ region: "eu-west-1", returnTo: "/signal/setup/telemetry" });
   await expect(page.getByRole("heading", { name: "Waiting for the stack" })).toBeVisible();
+  await expect(page.getByText("ResponderInvestigationAccess in eu-west-1, with its log stream")).toBeVisible();
   await expect(page.getByRole("button", { name: "Continue", exact: true })).toBeDisabled();
 
   setup = { status: "connected", awsAccountId: "123456789012", roleArn: "arn:aws:iam::123456789012:role/ResponderInvestigationRole" };
   await expect(page.getByRole("heading", { name: "AWS account 123456789012 connected" })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText("investigates new errors in eu-west-1 logs")).toBeVisible();
   await page.screenshot({ path: "test-results/signal-aws-connected.png" });
   await page.getByRole("button", { name: "Continue", exact: true }).click();
   await expect(page).toHaveURL(/\/signal\/setup\/telemetry$/u);

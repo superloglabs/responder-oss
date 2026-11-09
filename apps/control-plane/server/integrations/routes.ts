@@ -6,7 +6,12 @@ import {
   awsRegistrationRoutes,
   startAwsRegistration,
 } from "./aws-registration.js";
-import { awsRegionSchema, prepareAwsLogStream, readAwsLogStream } from "./aws-log-stream.js";
+import {
+  awsRegionSchema,
+  commitAwsLogStream,
+  prepareAwsLogStream,
+  readAwsLogStream,
+} from "./aws-log-stream.js";
 import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -1563,37 +1568,47 @@ export const integrationRoutes = new Hono()
         roleArn: awsInvestigationRoleArn(awsAccountId),
       };
       const connected = existing?.status === "connected" && existingCredentials?.success;
+      const previousStream = existing?.encryptedCredentials
+        ? readAwsLogStream(recoverStoredCredentials(existing.encryptedCredentials))
+        : null;
       // A connected account already has its stack; more regions are added
       // from the telemetry sources page.
       const templateUrl = await createAwsCloudFormationTemplateUrl();
       const prepared = templateUrl && !connected && parsed.data.region
         ? await prepareAwsLogStream({
             organizationId: tenant.organizationId,
-            previous: existing?.encryptedCredentials
-              ? readAwsLogStream(recoverStoredCredentials(existing.encryptedCredentials))
-              : null,
+            previous: previousStream,
             region: parsed.data.region,
             userId: tenant.user.id,
           })
         : null;
-      const accountId = connected && existing
-        ? existing.id
-        : await upsertIntegrationAccount({
-            organizationId: tenant.organizationId,
-            provider: "aws",
-            externalAccountId: awsAccountId,
-            displayName: `AWS · ${awsAccountId}`,
-            encryptedCredentials: encryptCredentials({
-              ...credentials,
-              ...(prepared ? { logStream: prepared.stream } : {}),
-            }),
-            credentialKeyVersion: 1,
-            metadata: {
-              permissionPolicy: "AIOpsAssistantPolicy",
-              roleName: "ResponderInvestigationRole",
-            },
-            status: "pending",
-          });
+      // A launch without a stream keeps the key an earlier launch stored.
+      const logStream = prepared?.stream ?? previousStream;
+      const accountId = await commitAwsLogStream({
+        organizationId: tenant.organizationId,
+        prepared,
+        region: parsed.data.region,
+        saveConnection: async () =>
+          connected && existing
+            ? existing.id
+            : upsertIntegrationAccount({
+                organizationId: tenant.organizationId,
+                provider: "aws",
+                externalAccountId: awsAccountId,
+                displayName: `AWS · ${awsAccountId}`,
+                encryptedCredentials: encryptCredentials({
+                  ...credentials,
+                  ...(logStream ? { logStream } : {}),
+                }),
+                credentialKeyVersion: 1,
+                metadata: {
+                  permissionPolicy: "AIOpsAssistantPolicy",
+                  roleName: "ResponderInvestigationRole",
+                },
+                status: "pending",
+              }),
+        userId: tenant.user.id,
+      });
       return context.json({
         accountId,
         cloudFormationUrl: templateUrl

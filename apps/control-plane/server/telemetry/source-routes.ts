@@ -13,7 +13,7 @@ import {
   revokeTelemetrySourceIngestKey,
   saveTelemetrySource,
 } from "../../../../packages/core/src/db/telemetry-sources.js";
-import { isAwsCommercialRegion } from "../../../../packages/core/src/integrations/aws.js";
+import { isOfferedAwsRegion } from "../../../../packages/core/src/integrations/aws-regions.js";
 import { gcpConnectionCredentialsSchema } from "../../../../packages/core/src/integrations/gcp.js";
 import { vercelCredentialsSchema } from "../../../../packages/core/src/integrations/vercel.js";
 import { telemetryCollectorUrl } from "../../../../packages/core/src/telemetry/client.js";
@@ -91,7 +91,7 @@ const defaultDependencies: SourceRouteDependencies = {
 };
 
 const accountSchema = z.object({ integrationAccountId: z.uuid() });
-const awsSchema = z.object({ region: z.string().refine(isAwsCommercialRegion) });
+const awsSchema = z.object({ region: z.string().refine(isOfferedAwsRegion) });
 // Stale drains are earlier drains that Vercel did not delete; removing the
 // source or reconnecting tries them again.
 const vercelStateSchema = z.object({

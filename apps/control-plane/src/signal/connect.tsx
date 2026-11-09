@@ -18,6 +18,8 @@ import { createIngestKey, existingOpenTelemetryPrompt, openTelemetryPrompt } fro
 import { currentProjectSelectionState } from "../project-selection";
 import { fetchServices } from "../telemetry-api";
 import { awsRegions } from "../telemetry-sources-api";
+import { defaultAwsRegion } from "../../../../packages/core/src/integrations/aws-regions";
+import { useCellDirectory } from "../cells";
 import type { ConnectPage } from "./connect-pages";
 import { connectionStartUrl } from "./model";
 import { SignalLogo } from "./shared";
@@ -392,13 +394,25 @@ function awsEndpoint(connectUrl: string, path: string) {
 
 function AwsConnect({ integration, organizationId, listPath, onBack, onDone }: PageProps) {
   const storageKey = `signal-aws-setup:${organizationId ?? ""}`;
+  const forgetSetup = () => {
+    sessionStorage.removeItem(storageKey);
+    sessionStorage.removeItem(`${storageKey}:stream`);
+  };
   const [setupId, setSetupId] = useState<string | null>(() => sessionStorage.getItem(storageKey));
   const [launchUrl, setLaunchUrl] = useState<string | null>(null);
   const [state, setState] = useState<AwsSetupState>({ status: "waiting" });
   const [error, setError] = useState("");
   const [launching, setLaunching] = useState(false);
   const [pollFailed, setPollFailed] = useState(false);
-  const [region, setRegion] = useState<string>("us-east-1");
+  // Starts on the region nearest this workspace's cell until one is chosen.
+  const cells = useCellDirectory();
+  const [chosenRegion, setRegion] = useState<string | null>(null);
+  const region = chosenRegion ?? defaultAwsRegion(cells?.current);
+  // What the prepared stack does, from the connect response.
+  const [launched, setLaunched] = useState<{ region: string; streamsLogs: boolean } | null>(() => {
+    const saved = sessionStorage.getItem(`${storageKey}:stream`);
+    return saved ? (JSON.parse(saved) as { region: string; streamsLogs: boolean }) : null;
+  });
   const connectUrl = integration?.connectUrl;
 
   useEffect(() => {
@@ -410,6 +424,7 @@ function AwsConnect({ integration, organizationId, listPath, onBack, onDone }: P
         if (cancelled) return;
         if (response.status === 404) {
           sessionStorage.removeItem(storageKey);
+          sessionStorage.removeItem(`${storageKey}:stream`);
           setSetupId(null);
           setPollFailed(false);
           return;
@@ -439,7 +454,10 @@ function AwsConnect({ integration, organizationId, listPath, onBack, onDone }: P
       if (typeof body.accountId !== "string" || typeof body.cloudFormationUrl !== "string") {
         throw new Error("One-click AWS setup is not available here yet.");
       }
+      const stream = { region, streamsLogs: body.streamsLogs === true };
       sessionStorage.setItem(storageKey, body.accountId);
+      sessionStorage.setItem(`${storageKey}:stream`, JSON.stringify(stream));
+      setLaunched(stream);
       setSetupId(body.accountId);
       setLaunchUrl(body.cloudFormationUrl);
       setState({ status: "waiting" });
@@ -456,7 +474,7 @@ function AwsConnect({ integration, organizationId, listPath, onBack, onDone }: P
   const connected = state.status === "connected";
   if (!setupId) {
     return <>
-      <Intro provider="aws" title="Connect AWS CloudWatch">Launch one CloudFormation stack. It creates a read-only role and streams one region's CloudWatch logs to Superlog. Signal connects when it finishes.</Intro>
+      <Intro provider="aws" title="Connect AWS CloudWatch">Launch one CloudFormation stack. It creates a read-only role and, where this workspace can receive telemetry, streams one region's CloudWatch logs to Superlog. Signal connects when it finishes.</Intro>
       {error && <p className="signalError" role="alert">{error}</p>}
       <SelectField
         className="dsField--compact"
@@ -474,6 +492,7 @@ function AwsConnect({ integration, organizationId, listPath, onBack, onDone }: P
           <li>Check the boxes to allow IAM resources and the transform, then click <strong>Create stack</strong>.</li>
           <li>Come back here. Signal connects on its own when the stack finishes.</li>
         </ol>
+        <p>AWS allows one account-wide log subscription per region. If {region} already has one, for example from another Superlog stack, the stack fails at <code>LogsSubscription</code>. Remove that subscription or choose another region.</p>
         <p>Want to review it first? <a href={awsEndpoint(connectUrl ?? "/api/integrations/aws/connect", "/cloudformation-template")} target="_blank" rel="noreferrer">Download the template</a></p>
       </section>
       <AccessList title="The stack creates a read-only role and a log stream"
@@ -487,8 +506,11 @@ function AwsConnect({ integration, organizationId, listPath, onBack, onDone }: P
 
   return <>
     <Intro provider="aws" title="Connect AWS CloudWatch">{connected
-      ? "Signal can now read CloudWatch logs, metrics, and alarms in this account, and investigates new errors in the logs it streams."
+      ? launched?.streamsLogs
+        ? `Signal can now read CloudWatch logs, metrics, and alarms in this account, and investigates new errors in ${launched.region} logs.`
+        : "Signal can now read CloudWatch logs, metrics, and alarms in this account."
       : "Finish creating the stack in AWS. This page updates on its own."}</Intro>
+    {launched && !launched.streamsLogs && <p className="signalNote">This stack creates only the role. It does not stream logs to Superlog, so Signal reads CloudWatch during investigations only.</p>}
     {pollFailed && !connected && <p className="signalError" role="alert">Could not check the stack. Retrying…</p>}
     {connected
       ? <section className="signalCard">
@@ -504,7 +526,7 @@ function AwsConnect({ integration, organizationId, listPath, onBack, onDone }: P
       : <ol className="signalCard signalStepCard">
         <li>
           <StepMarker state="done" number={1} />
-          <div><h3>Stack opened in AWS</h3><p>ResponderInvestigationAccess</p></div>
+          <div><h3>Stack opened in AWS</h3><p>{launched?.streamsLogs ? `ResponderInvestigationAccess in ${launched.region}, with its log stream` : "ResponderInvestigationAccess"}</p></div>
           {launchUrl && <a className="dsButton dsButton--secondary dsButton--medium" href={launchUrl} target="_blank" rel="noreferrer"><External>Open again</External></a>}
         </li>
         <li>
@@ -518,10 +540,10 @@ function AwsConnect({ integration, organizationId, listPath, onBack, onDone }: P
         </li>
       </ol>}
     <Actions onBack={() => {
-      if (!connected) { sessionStorage.removeItem(storageKey); setSetupId(null); setPollFailed(false); return; }
+      if (!connected) { forgetSetup(); setSetupId(null); setPollFailed(false); return; }
       onBack();
     }}>
-      <Button variant="primary" disabled={!connected} onClick={() => { sessionStorage.removeItem(storageKey); onDone(); }}>Continue</Button>
+      <Button variant="primary" disabled={!connected} onClick={() => { forgetSetup(); onDone(); }}>Continue</Button>
     </Actions>
   </>;
 }
