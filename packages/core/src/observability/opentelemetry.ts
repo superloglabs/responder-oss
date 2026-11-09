@@ -223,18 +223,23 @@ export class BetterAuthClientErrorProcessor implements SpanProcessor {
     if (span.instrumentationScope.name !== "better-auth") return;
     const recordException = span.recordException.bind(span);
     const setStatus = span.setStatus.bind(span);
-    let clientError = false;
+    // Better Auth sets the ERROR status right after recording the
+    // exception. Only that one status is dropped.
+    let skipErrorStatus = false;
     span.recordException = (exception, time) => {
       const status = betterAuthClientErrorStatus(exception);
+      skipErrorStatus = status !== null;
       if (status === null) {
         recordException(exception, time);
         return;
       }
-      clientError = true;
       span.setAttribute("http.response.status_code", status);
     };
     span.setStatus = (status: SpanStatus) => {
-      if (clientError && status.code === SpanStatusCode.ERROR) return span;
+      if (skipErrorStatus && status.code === SpanStatusCode.ERROR) {
+        skipErrorStatus = false;
+        return span;
+      }
       return setStatus(status);
     };
   }

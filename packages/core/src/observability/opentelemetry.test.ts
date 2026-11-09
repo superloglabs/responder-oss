@@ -170,6 +170,22 @@ describe("BetterAuthClientErrorProcessor", () => {
     expect(span.status.code).toBe(SpanStatusCode.ERROR);
   });
 
+  it("records a later error on the same span", () => {
+    const exporter = new InMemorySpanExporter();
+    const provider = new BasicTracerProvider({
+      spanProcessors: [new BetterAuthClientErrorProcessor(), new SimpleSpanProcessor(exporter)],
+    });
+    const span = provider.getTracer("better-auth").startSpan("handler /verify-email");
+    span.recordException(apiError("Invalid token", 401));
+    span.setStatus({ code: SpanStatusCode.ERROR, message: "Invalid token" });
+    span.recordException(new TypeError("connection reset"));
+    span.setStatus({ code: SpanStatusCode.ERROR, message: "connection reset" });
+    span.end();
+    const finished = exporter.getFinishedSpans()[0]!;
+    expect(finished.events.map((event) => event.name)).toEqual(["exception"]);
+    expect(finished.status).toEqual({ code: SpanStatusCode.ERROR, message: "connection reset" });
+  });
+
   it("leaves spans from other libraries alone", () => {
     const span = endWithError("hono", apiError("Unauthorized", 401));
     expect(span.events.map((event) => event.name)).toEqual(["exception"]);
