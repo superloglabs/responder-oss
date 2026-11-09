@@ -73,6 +73,7 @@ function dependencies(overrides: Partial<AwsLogSubscriptionDependencies> = {}) {
       return ids;
     }),
     list: vi.fn(async () => [] as AwsLogSubscription[]),
+    locateStack: vi.fn(async () => null),
     markActive: vi.fn(async () => undefined),
     markFailed: vi.fn(async () => undefined),
     markRemovalFailed: vi.fn(async () => undefined),
@@ -322,16 +323,59 @@ describe("log subscription routes", () => {
     expect(deps.putSubscription).toHaveBeenCalledTimes(1);
   });
 
-  it("shows the stack update when the role is missing", async () => {
-    const failed = [row({ lastError: new AwsLogSubscriptionRoleUnavailableError(null).message, status: "failed" })];
-    const { deps } = dependencies({ list: vi.fn(async () => failed), templateUrl: vi.fn(async () => "https://bucket.s3.eu-west-3.amazonaws.com/t.yaml?X-Amz-Signature=x") });
-    const body = await (await app(deps).request(`/api/integrations/aws/log-subscriptions/${integrationAccountId}`)).json() as {
-      stackUpdate: { command: string; stackName: string };
+  it("shows a missing role as waiting for the stack update, with a link to update the stack where it is", async () => {
+    const waiting = [row({ lastError: new AwsLogSubscriptionRoleUnavailableError(null).message, status: "failed" })];
+    const stackId = "arn:aws:cloudformation:us-west-2:123456789012:stack/ResponderInvestigationAccess/abc";
+    const { deps } = dependencies({
+      list: vi.fn(async () => waiting),
+      locateStack: vi.fn(async () => ({ parameterKeys: ["ResponderPrincipalArn", "ExternalId"], region: "us-west-2", stackId })),
+      templateUrl: vi.fn(async () => "https://bucket.s3.eu-west-3.amazonaws.com/t.yaml?X-Amz-Signature=x"),
+    });
+    const target = app(deps);
+    const body = await (await target.request(`/api/integrations/aws/log-subscriptions/${integrationAccountId}`)).json() as {
+      stackUpdate: { command: string; consoleUrl: string; region: string; stackName: string };
+      subscriptions: Array<{ lastError: string | null; status: string }>;
     };
+    expect(body.subscriptions).toMatchObject([{ lastError: null, status: "waiting" }]);
+    expect(deps.locateStack).toHaveBeenCalledWith(connectionCredentials, "eu-west-3");
     expect(body.stackUpdate.stackName).toBe("ResponderInvestigationAccess");
-    expect(body.stackUpdate.command).toContain("--region eu-west-3");
+    expect(body.stackUpdate.region).toBe("us-west-2");
+    expect(body.stackUpdate.command).toContain("--region us-west-2");
     expect(body.stackUpdate.command).toContain("ParameterKey=ExternalId,UsePreviousValue=true");
+    // This stack predates one-click setup, so it has no RegistrationTopicArn.
+    expect(body.stackUpdate.command).not.toContain("RegistrationTopicArn");
     expect(body.stackUpdate.command).toContain(`ParameterKey=LogSubscriptionPrincipalArn,ParameterValue=${config.principalArn}`);
+    const consoleUrl = new URL(body.stackUpdate.consoleUrl);
+    expect(consoleUrl.host).toBe("us-west-2.console.aws.amazon.com");
+    const route = new URLSearchParams(consoleUrl.hash.replace(/^#\/stacks\/update\/template\?/u, ""));
+    expect(route.get("stackId")).toBe(stackId);
+    expect(route.get("templateURL")).toBe("https://bucket.s3.eu-west-3.amazonaws.com/t.yaml?X-Amz-Signature=x");
+    // The stack's location is kept, so the next page load does not look again.
+    await target.request(`/api/integrations/aws/log-subscriptions/${integrationAccountId}`);
+    expect(deps.locateStack).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to the stacks list in the registration region when the stack cannot be found", async () => {
+    const waiting = [row({ lastError: new AwsLogSubscriptionRoleUnavailableError(null).message, status: "failed" })];
+    const { deps } = dependencies({ list: vi.fn(async () => waiting) });
+    const body = await (await app(deps).request(`/api/integrations/aws/log-subscriptions/${integrationAccountId}`)).json() as {
+      stackUpdate: { command: string; consoleUrl: string };
+    };
+    expect(body.stackUpdate.consoleUrl).toBe("https://eu-west-3.console.aws.amazon.com/cloudformation/home?region=eu-west-3#/stacks");
+    expect(body.stackUpdate.command).toContain("--region eu-west-3");
+  });
+
+  it("tries waiting regions again while the page is open, at most every 20 seconds", async () => {
+    const waiting = [row({ lastError: new AwsLogSubscriptionRoleUnavailableError(null).message, status: "failed" })];
+    const { advance, deps } = dependencies({ list: vi.fn(async () => waiting) });
+    const target = app(deps);
+    await target.request(`/api/integrations/aws/log-subscriptions/${integrationAccountId}`);
+    await target.request(`/api/integrations/aws/log-subscriptions/${integrationAccountId}`);
+    expect(deps.claim).toHaveBeenCalledTimes(1);
+    expect(deps.putSubscription).toHaveBeenCalledTimes(1);
+    advance(20_000);
+    await target.request(`/api/integrations/aws/log-subscriptions/${integrationAccountId}`);
+    expect(deps.claim).toHaveBeenCalledTimes(2);
   });
 
   it("refuses members, unknown regions, unfinished or foreign connections, and accounts streaming elsewhere", async () => {
@@ -353,9 +397,20 @@ describe("log subscription routes", () => {
 });
 
 describe("stack update command", () => {
-  it("keeps every other parameter and works without a template URL", () => {
-    expect(awsStackUpdateCommand({ logSubscriptionPrincipalArn: config.principalArn, region: null, templateUrl: null })).toBe(
+  it("keeps the parameters the stack has and works without a template URL", () => {
+    expect(awsStackUpdateCommand({
+      logSubscriptionPrincipalArn: config.principalArn,
+      parameterKeys: ["ResponderPrincipalArn", "ExternalId", "RegistrationTopicArn", "LogSubscriptionPrincipalArn"],
+      region: null,
+      templateUrl: null,
+    })).toBe(
       "aws cloudformation update-stack --stack-name ResponderInvestigationAccess --template-body file://responder-aws-access.yaml --capabilities CAPABILITY_NAMED_IAM --parameters ParameterKey=ResponderPrincipalArn,UsePreviousValue=true ParameterKey=ExternalId,UsePreviousValue=true ParameterKey=RegistrationTopicArn,UsePreviousValue=true ParameterKey=LogSubscriptionPrincipalArn,ParameterValue=arn:aws:iam::121638211609:role/ResponderLogSubscriptionBroker",
+    );
+  });
+
+  it("keeps the one-click setup parameters when the stack was not found, so none is reset", () => {
+    expect(awsStackUpdateCommand({ logSubscriptionPrincipalArn: config.principalArn, region: "eu-west-3", templateUrl: null })).toContain(
+      "--parameters ParameterKey=ResponderPrincipalArn,UsePreviousValue=true ParameterKey=ExternalId,UsePreviousValue=true ParameterKey=RegistrationTopicArn,UsePreviousValue=true ParameterKey=LogSubscriptionPrincipalArn,",
     );
   });
 });

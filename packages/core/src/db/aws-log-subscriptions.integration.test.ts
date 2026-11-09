@@ -111,6 +111,14 @@ describe.skipIf(!testUrl)("AWS log subscriptions (PostgreSQL)", () => {
     await markAwsLogSubscriptionFailed(us!.id, "boom again");
     expect(mine(await claimAwsLogSubscriptions([us!.id], 60_000))).toEqual(["us-east-1"]);
     await markAwsLogSubscriptionFailed(us!.id, "boom again");
+    // A region waiting for the stack update is retried sooner than other
+    // failures.
+    const soon = new Date(Date.now() + 60_000);
+    expect(mine(await claimDueAwsLogSubscriptions({ filterPattern: "?ERROR", leaseMs: 60_000, limit: 100, retryFailedBefore: new Date(0), retryWaitingBefore: soon }))).toEqual([]);
+    await markAwsLogSubscriptionFailed(us!.id, "Superlog could not assume ResponderLogSubscriptionRole in this AWS account.");
+    const waiting = await claimDueAwsLogSubscriptions({ filterPattern: "?ERROR", leaseMs: 60_000, limit: 100, retryFailedBefore: new Date(0), retryWaitingBefore: soon });
+    expect(mine(waiting)).toEqual(["us-east-1"]);
+    await markAwsLogSubscriptionFailed(us!.id, "boom again");
     // A new filter pattern makes active subscriptions due again.
     // Without the ingest token, only removals are handed out.
     expect(mine(await claimDueAwsLogSubscriptions({ filterPattern: "?ERROR ?FATAL", leaseMs: 60_000, limit: 100, removalsOnly: true, retryFailedBefore: new Date(0) }))).toEqual([]);

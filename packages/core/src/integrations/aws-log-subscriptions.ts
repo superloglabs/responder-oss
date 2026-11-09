@@ -113,10 +113,12 @@ function temporaryCredentials(credentials: Credentials | undefined, stage: strin
 // AWS refused to let the broker assume the customer's role: the stack
 // predates the role, it was removed, or its trust does not match. Other
 // failures, such as throttling, are passed through and retried.
+export const awsLogSubscriptionRoleName = AWS_LOG_SUBSCRIPTION_ROLE_NAME;
+
 export class AwsLogSubscriptionRoleUnavailableError extends Error {
   constructor(cause: unknown) {
     super(
-      "Superlog could not assume ResponderLogSubscriptionRole in this AWS account. Update the Superlog stack to the latest template.",
+      `Superlog could not assume ${awsLogSubscriptionRoleName} in this AWS account. Update the Superlog stack to the latest template.`,
       { cause },
     );
   }

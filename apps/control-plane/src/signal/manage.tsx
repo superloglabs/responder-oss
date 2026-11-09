@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { IconCheck, IconExclamationMark } from "@tabler/icons-react";
 import { removeIntegrationAccount, type IntegrationAccount, type IntegrationSummary } from "../agents-api";
-import { AwsLogStreamingSettings } from "../components/aws-log-streaming";
+import { AwsLogStreaming } from "../components/aws-log-streaming";
 import { Button } from "../design-system";
 import { CloudSourceSetup } from "../pages/telemetry-source";
 import { fetchServices } from "../telemetry-api";
@@ -46,13 +46,11 @@ export function SignalManage(props: ManageProps) {
         account={account}
         // With several accounts, each Disconnect names its own.
         several={accounts.length > 1}
+        // Each AWS account chooses its regions in its details; without log
+        // streaming here, the CloudWatch stream setup is shown once.
+        awsStreaming={page === "aws" ? { fallback: account === accounts.at(-1) ? <CloudStream provider="aws" /> : null } : undefined}
         // Sending telemetry covers the workspace, so it is shown once.
-        stream={page === "aws"
-          // Each AWS account chooses its regions; without log streaming
-          // here, the CloudWatch stream setup is shown once.
-          ? <AwsLogStreamingSettings integrationAccountId={account.id}
-            fallback={account === accounts.at(-1) ? <CloudStream provider="aws" /> : null} />
-          : page === "gcp" && account === accounts.at(-1) ? <CloudStream provider={page} /> : null}
+        stream={page === "gcp" && account === accounts.at(-1) ? <CloudStream provider={page} /> : null}
         onReconnect={props.onReconnect}
         onRemoved={props.onRemoved} />)}
     <Actions onBack={onBack}><Button variant="primary" onClick={onBack}>Done</Button></Actions>
@@ -67,8 +65,8 @@ function Status({ failed = false, title, children, action }: { failed?: boolean;
   </div>;
 }
 
-function Rows({ rows }: { rows: Array<ManageRow & { onAction?: () => void }> }) {
-  if (rows.length === 0) return null;
+function Rows({ rows, extra }: { rows: Array<ManageRow & { onAction?: () => void }>; extra?: ReactNode }) {
+  if (rows.length === 0 && !extra) return null;
   return <div className="signalCard signalManageRows">
     {rows.map((row) => <div key={row.label}>
       <span className="signalManageRows__label">{row.label}</span>
@@ -78,6 +76,7 @@ function Rows({ rows }: { rows: Array<ManageRow & { onAction?: () => void }> }) 
       </span>
       {row.action && row.onAction && <Button onClick={row.onAction}>{row.action}</Button>}
     </div>)}
+    {extra}
   </div>;
 }
 
@@ -86,8 +85,9 @@ function updatedLabel(updatedAt: string) {
   return `Last updated ${label === "Just now" || label === "Yesterday" ? label.toLowerCase() : label}.`;
 }
 
-function ManagedAccount({ provider, name, account, several, stream, onReconnect, onRemoved }: {
-  provider: ConnectPage; name: string; account: IntegrationAccount; several: boolean; stream: ReactNode;
+function ManagedAccount({ provider, name, account, several, awsStreaming, stream, onReconnect, onRemoved }: {
+  provider: ConnectPage; name: string; account: IntegrationAccount; several: boolean;
+  awsStreaming?: { fallback: ReactNode }; stream: ReactNode;
   onReconnect: () => void; onRemoved: () => void;
 }) {
   const view = manageView(provider, name, account);
@@ -116,7 +116,22 @@ function ManagedAccount({ provider, name, account, several, stream, onReconnect,
         {`Signal can't read ${view.connectedTo.replace(/^the /u, "")} until you reconnect.`}
       </Status>
       : <Status title={`Connected to ${view.connectedTo}`}>{updatedLabel(account.updatedAt)}</Status>}
-    <Rows rows={view.rows.map((row) => ({ ...row, onAction: onReconnect }))} />
+    {/* An account that lost access cannot change regions; it keeps the
+        CloudWatch stream fallback. */}
+    {awsStreaming && account.status !== "connected"
+      ? <><Rows rows={view.rows.map((row) => ({ ...row, onAction: onReconnect }))} />{awsStreaming.fallback}</>
+      : awsStreaming
+      ? <AwsLogStreaming integrationAccountId={account.id} fallback={awsStreaming.fallback}>
+        {({ notice, row }) => <>
+          <Rows rows={view.rows.map((row) => ({ ...row, onAction: onReconnect }))}
+            extra={row && <div className="signalManageRows__regions">
+              <span className="signalManageRows__label">Telemetry from</span>
+              {row}
+            </div>} />
+          {notice}
+        </>}
+      </AwsLogStreaming>
+      : <Rows rows={view.rows.map((row) => ({ ...row, onAction: onReconnect }))} />}
     {stream}
     <div className={`signalDisconnect${confirming ? " signalDisconnect--confirm" : ""}`}>
       <div>

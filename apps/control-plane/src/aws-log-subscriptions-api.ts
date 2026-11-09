@@ -1,6 +1,7 @@
 // CloudWatch Logs streaming for one AWS connection (ADR 0015).
 
-export type AwsLogSubscriptionStatus = "active" | "failed" | "pending" | "removing";
+// "waiting" means the region waits for the customer to update their stack.
+export type AwsLogSubscriptionStatus = "active" | "failed" | "pending" | "removing" | "waiting";
 
 export interface AwsLogStreaming {
   available: boolean;
@@ -13,7 +14,12 @@ export interface AwsLogStreaming {
   // Shown when the stack predates ResponderLogSubscriptionRole.
   stackUpdate: {
     command: string;
+    // Opens the stack's update page in AWS, or the region's stacks list when
+    // Superlog could not find the stack. Its template link lasts 15 minutes,
+    // so the page refreshes it while it waits.
+    consoleUrl: string | null;
     logSubscriptionPrincipalArn: string;
+    region: string | null;
     stackName: string;
     templateUrl: string | null;
   } | null;
@@ -61,9 +67,12 @@ export async function saveAwsLogStreaming(integrationAccountId: string, regions:
   }), "Could not save log streaming.");
 }
 
-export const awsLogSubscriptionStatusLabels: Record<AwsLogSubscriptionStatus, { label: string; tone: "danger" | "info" | "live" | "neutral" }> = {
+export type AwsLogSubscriptionTone = "danger" | "info" | "live" | "neutral" | "warning";
+
+export const awsLogSubscriptionStatusLabels: Record<AwsLogSubscriptionStatus, { label: string; tone: AwsLogSubscriptionTone }> = {
   active: { label: "Streaming", tone: "live" },
   failed: { label: "Error", tone: "danger" },
-  pending: { label: "Starting", tone: "info" },
-  removing: { label: "Stopping", tone: "neutral" },
+  pending: { label: "Setting up", tone: "info" },
+  removing: { label: "Removing", tone: "neutral" },
+  waiting: { label: "Waiting for the stack update", tone: "warning" },
 };

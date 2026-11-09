@@ -24,7 +24,8 @@ those requests fail and the pages show their errors.
 - **Setup** shows the workspace's real connections. Providers with their own
   connection dialog open it here; OAuth providers return to the same step.
   Google Cloud and OpenTelemetry link to their settings pages. The manage
-  page of a connected AWS account chooses the regions whose CloudWatch error
+  page of a connected AWS account chooses, in its "Telemetry from" row, the
+  regions whose CloudWatch error
   lines Superlog receives through log subscriptions (the CloudWatch stream
   stack where a deployment has no log destinations); the Google Cloud page
   reads the project into Superlog. Signal finds new errors in telemetry

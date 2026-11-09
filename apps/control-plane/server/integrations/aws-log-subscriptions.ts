@@ -19,13 +19,17 @@ import {
 } from "../../../../packages/core/src/db/aws-log-subscriptions.js";
 import { getOrganizationIntegrationAccount } from "../../../../packages/core/src/db/integrations.js";
 import {
+  assumeAwsInvestigationRole,
   awsConnectionCredentialsSchema,
   createAwsCloudFormationTemplateUrl,
   parseSnsTopicArn,
   type AwsConnectionCredentials,
 } from "../../../../packages/core/src/integrations/aws.js";
+import { awsRegions } from "../../../../packages/core/src/integrations/aws-regions.js";
+import { awsStackUpdateConsoleUrl, findAwsStack, type AwsStackLocation } from "../../../../packages/core/src/integrations/aws-stack.js";
 import {
   assumeAwsLogSubscriptionRole,
+  awsLogSubscriptionRoleName,
   AwsLogSubscriptionRoleUnavailableError,
   awsLogDestinationArn,
   awsLogSubscriptionConfig,
@@ -66,6 +70,9 @@ export interface AwsLogSubscriptionDependencies {
   release: typeof releaseAwsLogSubscriptions;
   removeAll: typeof removeAllAwsLogSubscriptions;
   setRegions: typeof setAwsLogSubscriptionRegions;
+  // Finds the connection's ResponderInvestigationAccess stack with its
+  // read-only role, looking in `preferredRegion` first.
+  locateStack: (connection: AwsConnectionCredentials, preferredRegion: string | null) => Promise<AwsStackLocation | null>;
   templateUrl: () => Promise<string | null>;
   topicArn: () => string | null;
 }
@@ -106,11 +113,19 @@ export const defaultAwsLogSubscriptionDependencies: AwsLogSubscriptionDependenci
   release: releaseAwsLogSubscriptions,
   removeAll: removeAllAwsLogSubscriptions,
   setRegions: setAwsLogSubscriptionRegions,
+  locateStack: async (connection, preferredRegion) => findAwsStack({
+    credentials: await assumeAwsInvestigationRole(connection, { sessionName: "superlog-stack-lookup" }),
+    regions: [...new Set([...(preferredRegion ? [preferredRegion] : []), ...awsRegions])],
+    stackName: AWS_STACK_NAME,
+  }),
   templateUrl: () => createAwsCloudFormationTemplateUrl(),
   topicArn: () => awsRegistrationTopicArn(),
 };
 
 const retryFailedAfterMs = 10 * 60_000;
+// A region waiting for the stack update is retried sooner, so it starts
+// streaming soon after the update.
+const retryWaitingAfterMs = 60_000;
 // How long one process holds rows it works on.
 const leaseMs = 5 * 60_000;
 // Destination policies are rewritten when their account list changes, and
@@ -231,6 +246,7 @@ export function createAwsLogSubscriptionManager(deps: AwsLogSubscriptionDependen
       limit: 100,
       removalsOnly: !config.acceptsLogs,
       retryFailedBefore: new Date(deps.now() - retryFailedAfterMs),
+      retryWaitingBefore: new Date(deps.now() - retryWaitingAfterMs),
     });
     await process(config, rows);
   }
@@ -387,12 +403,18 @@ function isWorkspaceAdmin(role: string): boolean {
 export const AWS_STACK_NAME = "ResponderInvestigationAccess";
 
 // How an admin adds ResponderLogSubscriptionRole to a stack created before
-// it existed: one update that keeps every other parameter.
+// it existed: one update that keeps every parameter the stack already has.
+// Stacks made before one-click setup have no RegistrationTopicArn. When the
+// stack was not found, the command keeps it too: an older stack then rejects
+// the command, where leaving it out would quietly reset it on newer ones.
 export function awsStackUpdateCommand(input: {
   logSubscriptionPrincipalArn: string;
+  parameterKeys?: string[] | null;
   region: string | null;
   templateUrl: string | null;
 }): string {
+  const kept = (input.parameterKeys ?? ["ResponderPrincipalArn", "ExternalId", "RegistrationTopicArn"])
+    .filter((key) => key !== "LogSubscriptionPrincipalArn");
   return [
     "aws cloudformation update-stack",
     ...(input.region ? [`--region ${input.region}`] : []),
@@ -400,15 +422,48 @@ export function awsStackUpdateCommand(input: {
     input.templateUrl ? `--template-url '${input.templateUrl}'` : "--template-body file://responder-aws-access.yaml",
     "--capabilities CAPABILITY_NAMED_IAM",
     "--parameters",
-    "ParameterKey=ResponderPrincipalArn,UsePreviousValue=true",
-    "ParameterKey=ExternalId,UsePreviousValue=true",
-    "ParameterKey=RegistrationTopicArn,UsePreviousValue=true",
+    ...kept.map((key) => `ParameterKey=${key},UsePreviousValue=true`),
     `ParameterKey=LogSubscriptionPrincipalArn,ParameterValue=${input.logSubscriptionPrincipalArn}`,
   ].join(" ");
 }
 
+// A region that failed only because the stack predates the subscription role
+// is waiting for the customer, not broken.
+export function isWaitingForStackUpdate(row: Pick<AwsLogSubscription, "lastError" | "status">): boolean {
+  return row.status === "failed" && (row.lastError?.includes(awsLogSubscriptionRoleName) ?? false);
+}
+
 export function createAwsLogSubscriptionRoutes(deps: AwsLogSubscriptionDependencies = defaultAwsLogSubscriptionDependencies) {
   const manager = createAwsLogSubscriptionManager(deps);
+  // Where each connection's stack is, found once and kept for a while.
+  const stacks = new Map<string, { at: number; location: AwsStackLocation | null }>();
+  // When each connection's waiting regions were last tried from a page load.
+  const checked = new Map<string, number>();
+  const stackCacheMs = 30 * 60_000;
+  const missingStackCacheMs = 5 * 60_000;
+  const recheckMs = 20_000;
+
+  async function stackOf(integrationAccountId: string, organizationId: string, preferredRegion: string | null) {
+    const cached = stacks.get(integrationAccountId);
+    if (cached && deps.now() - cached.at < (cached.location ? stackCacheMs : missingStackCacheMs)) return cached.location;
+    const connection = await deps.connection({ integrationAccountId, organizationId });
+    const location = connection?.credentials
+      ? await deps.locateStack(connection.credentials, preferredRegion).catch(() => null)
+      : null;
+    stacks.set(integrationAccountId, { at: deps.now(), location });
+    return location;
+  }
+
+  // While the page is open, regions waiting for the stack update are tried
+  // again every few seconds, so they start soon after the update.
+  async function recheckWaiting(config: AwsLogSubscriptionConfig, input: { integrationAccountId: string; organizationId: string }) {
+    const last = checked.get(input.integrationAccountId);
+    if (last !== undefined && deps.now() - last < recheckMs) return;
+    const waiting = (await deps.list(input)).filter(isWaitingForStackUpdate);
+    if (waiting.length === 0) return;
+    checked.set(input.integrationAccountId, deps.now());
+    await manager.applyNow(config, waiting);
+  }
 
   async function present(input: {
     canManage: boolean;
@@ -417,9 +472,12 @@ export function createAwsLogSubscriptionRoutes(deps: AwsLogSubscriptionDependenc
     organizationId: string;
   }) {
     const subscriptions = await deps.list(input);
-    const roleMissing = subscriptions.some((row) => row.status === "failed" && row.lastError?.includes("ResponderLogSubscriptionRole"));
+    const roleMissing = subscriptions.some(isWaitingForStackUpdate);
     const topicArn = deps.topicArn();
+    const topicRegion = topicArn ? parseSnsTopicArn(topicArn)?.region ?? null : null;
     const templateUrl = roleMissing ? await deps.templateUrl().catch(() => null) : null;
+    const stack = roleMissing ? await stackOf(input.integrationAccountId, input.organizationId, topicRegion) : null;
+    const stackRegion = stack?.region ?? topicRegion;
     return {
       available: true,
       canManage: input.canManage,
@@ -429,19 +487,24 @@ export function createAwsLogSubscriptionRoutes(deps: AwsLogSubscriptionDependenc
         ? {
             command: awsStackUpdateCommand({
               logSubscriptionPrincipalArn: input.config.principalArn,
-              region: topicArn ? parseSnsTopicArn(topicArn)?.region ?? null : null,
+              parameterKeys: stack?.parameterKeys ?? null,
+              region: stackRegion,
               templateUrl,
             }),
+            consoleUrl: stackRegion
+              ? awsStackUpdateConsoleUrl({ region: stackRegion, stackId: stack?.stackId ?? null, templateUrl })
+              : null,
             logSubscriptionPrincipalArn: input.config.principalArn,
+            region: stackRegion,
             stackName: AWS_STACK_NAME,
             templateUrl,
           }
         : null,
       subscriptions: subscriptions.map((row) => ({
         appliedAt: row.appliedAt?.toISOString() ?? null,
-        lastError: row.lastError,
+        lastError: isWaitingForStackUpdate(row) ? null : row.lastError,
         region: row.region,
-        status: row.status,
+        status: isWaitingForStackUpdate(row) ? "waiting" as const : row.status,
       })),
     };
   }
@@ -456,6 +519,9 @@ export function createAwsLogSubscriptionRoutes(deps: AwsLogSubscriptionDependenc
       if (!z.uuid().safeParse(input.integrationAccountId).success || !(await deps.connection(input))) {
         return context.json({ error: "AWS connection not found" }, 404);
       }
+      await recheckWaiting(config, input).catch((error: unknown) => {
+        log({ error: errorText(error), organizationId: input.organizationId, outcome: "failed", stage: "recheck" });
+      });
       return context.json(await present({ ...input, canManage: isWorkspaceAdmin(tenant.role), config }));
     })
     .put("/:integrationAccountId", async (context) => {
