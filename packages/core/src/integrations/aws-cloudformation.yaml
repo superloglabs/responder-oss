@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: Read-only AWS investigation access for Responder
+Description: Read-only AWS investigation access for Responder, and an optional role that lets Superlog manage CloudWatch Logs subscriptions to its log destinations
 Parameters:
   ResponderPrincipalArn:
     Type: String
@@ -15,8 +15,14 @@ Parameters:
     Default: ""
     Description: SNS topic that tells Responder which account ran this stack. Leave empty to connect by account ID instead.
     AllowedPattern: '^$|^arn:aws:sns:[a-z0-9-]+:[0-9]{12}:[A-Za-z0-9_-]+$'
+  LogSubscriptionPrincipalArn:
+    Type: String
+    Default: ""
+    Description: Superlog's log subscription broker role ARN. Leave empty to create only the read-only role.
+    AllowedPattern: '^$|^arn:aws:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+$'
 Conditions:
   RegisterWithResponder: !Not [!Equals [!Ref RegistrationTopicArn, ""]]
+  ManageLogSubscriptions: !Not [!Equals [!Ref LogSubscriptionPrincipalArn, ""]]
 Resources:
   InvestigationRole:
     Type: AWS::IAM::Role
@@ -52,6 +58,43 @@ Resources:
             Condition:
               StringEquals:
                 sts:ExternalId: !Ref ExternalId
+  # Lets Superlog create, change, and delete CloudWatch Logs subscription
+  # policies, so it can stream chosen regions' error lines to its log
+  # destinations. CloudWatch Logs also requires a type-specific permission
+  # for every other account policy type (data protection, transformers, field
+  # indexes, retention), so this role cannot change those, and it reads no
+  # log data.
+  LogSubscriptionRole:
+    Type: AWS::IAM::Role
+    Condition: ManageLogSubscriptions
+    Properties:
+      RoleName: ResponderLogSubscriptionRole
+      Description: Lets Superlog manage CloudWatch Logs subscription policies to its log destinations
+      MaxSessionDuration: 3600
+      Policies:
+        - PolicyName: ManageLogSubscriptions
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ManageLogSubscriptions
+                Effect: Allow
+                Action:
+                  - logs:PutAccountPolicy
+                  - logs:PutSubscriptionFilter
+                  - logs:DeleteAccountPolicy
+                  - logs:DeleteSubscriptionFilter
+                  - logs:DescribeAccountPolicies
+                Resource: '*'
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: !Ref LogSubscriptionPrincipalArn
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                sts:ExternalId: !Ref ExternalId
   ResponderRegistration:
     Type: Custom::ResponderRegistration
     Condition: RegisterWithResponder
@@ -67,3 +110,7 @@ Outputs:
   PermissionPolicy:
     Description: AWS-managed read-only investigation policy
     Value: AIOpsAssistantPolicy
+  LogSubscriptionRoleArn:
+    Condition: ManageLogSubscriptions
+    Description: Role Superlog assumes to manage CloudWatch Logs subscriptions
+    Value: !GetAtt LogSubscriptionRole.Arn

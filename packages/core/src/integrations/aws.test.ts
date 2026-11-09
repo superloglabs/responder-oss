@@ -152,9 +152,14 @@ describe("AWS integration", () => {
     expect(resource).toContain("ServiceToken: !Ref RegistrationTopicArn");
     expect(resource).toContain("ExternalId: !Ref ExternalId");
     expect(resource).toContain("RoleArn: !GetAtt InvestigationRole.Arn");
-    // Every other resource is unconditional, so an empty topic leaves the
-    // stack as it was before registration existed.
-    expect(template.match(/^ {4}Condition: /gm)).toEqual(["    Condition: "]);
+    // Only registration and the log subscription role (with its output)
+    // are conditional, so empty parameters leave the stack as it was before
+    // either existed.
+    expect(template.match(/^ {4}Condition: \S+/gm)).toEqual([
+      "    Condition: ManageLogSubscriptions",
+      "    Condition: RegisterWithResponder",
+      "    Condition: ManageLogSubscriptions",
+    ]);
   });
 
   it("leaves the registration topic empty unless one is given", () => {
@@ -168,7 +173,7 @@ describe("AWS integration", () => {
       registrationTopicArn,
     });
     expect(template).toContain(`Default: '${registrationTopicArn}'`);
-    expect(template).not.toContain('    Default: ""\n');
+    expect(template).not.toContain('    Default: ""\n    Description: SNS topic');
     expect(() =>
       awsParameterizedCloudFormationTemplate({
         ...input,
@@ -205,5 +210,58 @@ describe("AWS integration", () => {
     });
     expect(parseSnsTopicArn("arn:aws:sns:us-gov-west-1:111122223333:x")).toBeNull();
     expect(parseSnsTopicArn("arn:aws:sqs:eu-west-3:111122223333:x")).toBeNull();
+  });
+
+  it("adds a log subscription role that can only manage subscription policies", () => {
+    const template = awsCloudFormationTemplate();
+    const block = template.slice(template.indexOf("  LogSubscriptionRole:"), template.indexOf("  ResponderRegistration:"));
+    expect(block).toContain("Condition: ManageLogSubscriptions");
+    expect(block).toContain("RoleName: ResponderLogSubscriptionRole");
+    expect(block).toContain("AWS: !Ref LogSubscriptionPrincipalArn");
+    expect(block).toContain("sts:ExternalId: !Ref ExternalId");
+    const actions = [...block.matchAll(/^ {18}- (\S+)$/gmu)].map((match) => match[1]);
+    expect(actions).toEqual([
+      "logs:PutAccountPolicy",
+      "logs:PutSubscriptionFilter",
+      "logs:DeleteAccountPolicy",
+      "logs:DeleteSubscriptionFilter",
+      "logs:DescribeAccountPolicies",
+    ]);
+    expect(block).not.toContain("ManagedPolicyArns");
+    expect(template).toContain('ManageLogSubscriptions: !Not [!Equals [!Ref LogSubscriptionPrincipalArn, ""]]');
+  });
+
+  it("leaves the log subscription role out unless a broker is given", () => {
+    const withoutBroker = awsParameterizedCloudFormationTemplate({
+      externalId: "responder_abcdefghijklmnopqrstuvwxyz1234567890",
+      principalArn: "arn:aws:iam::111122223333:role/ResponderAwsIntegrationBroker",
+    });
+    expect(withoutBroker).toContain("    Default: \"\"\n    Description: Superlog's log subscription broker role ARN");
+    const withBroker = awsParameterizedCloudFormationTemplate({
+      externalId: "responder_abcdefghijklmnopqrstuvwxyz1234567890",
+      logSubscriptionPrincipalArn: "arn:aws:iam::111122223333:role/ResponderLogSubscriptionBroker",
+      principalArn: "arn:aws:iam::111122223333:role/ResponderAwsIntegrationBroker",
+    });
+    expect(withBroker).toContain("    Default: 'arn:aws:iam::111122223333:role/ResponderLogSubscriptionBroker'\n    Description: Superlog's log subscription broker role ARN");
+    expect(() => awsParameterizedCloudFormationTemplate({
+      externalId: "responder_abcdefghijklmnopqrstuvwxyz1234567890",
+      logSubscriptionPrincipalArn: "not-an-arn",
+      principalArn: "arn:aws:iam::111122223333:role/ResponderAwsIntegrationBroker",
+    })).toThrow();
+  });
+
+  it("passes the log subscription broker to quick create when there is one", () => {
+    const base = {
+      externalId: "responder_abcdefghijklmnopqrstuvwxyz1234567890",
+      principalArn: "arn:aws:iam::111122223333:role/ResponderAwsIntegrationBroker",
+      registrationTopicArn,
+      templateUrl: "https://responder-templates.s3.eu-west-3.amazonaws.com/responder-aws-access.yaml",
+    };
+    const parameters = (url: string) => new URLSearchParams(new URL(url).hash.split("?")[1]);
+    expect(parameters(awsCloudFormationQuickCreateUrl(base)).has("param_LogSubscriptionPrincipalArn")).toBe(false);
+    expect(parameters(awsCloudFormationQuickCreateUrl({
+      ...base,
+      logSubscriptionPrincipalArn: "arn:aws:iam::111122223333:role/ResponderLogSubscriptionBroker",
+    })).get("param_LogSubscriptionPrincipalArn")).toBe("arn:aws:iam::111122223333:role/ResponderLogSubscriptionBroker");
   });
 });

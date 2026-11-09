@@ -14,6 +14,8 @@ const { startScanScheduler } = await import("./scans/scheduler.js");
 startScanScheduler();
 const { startAutomationScheduler } = await import("./automations/scheduler.js");
 startAutomationScheduler();
+const { startAwsLogSubscriptionScheduler } = await import("./integrations/aws-log-subscriptions.js");
+startAwsLogSubscriptionScheduler();
 
 serve(
   {

@@ -37,10 +37,12 @@ credentials remain server configuration, not tool arguments.
 
 Each connected Signal source has a manage page in setup. It shows what the
 connection is, from the non-secret metadata saved when it connected, and opens
-the connect form again to replace keys or sign in again. The AWS and Google
-Cloud pages also add the provider's telemetry source (see Telemetry sources),
-so Signal reads its logs and metrics as they arrive rather than only during an
-investigation.
+the connect form again to replace keys or sign in again. The AWS page chooses
+the regions whose CloudWatch error lines Superlog receives (see CloudWatch Logs
+subscriptions), or, where the deployment has no log destinations, adds the
+CloudWatch telemetry source. The Google Cloud page adds the project's
+telemetry source (see Telemetry sources). Either way Signal reads new errors as
+they arrive rather than only during an investigation.
 
 **Disconnect** calls `DELETE /api/integrations/<provider>/accounts/<id>`, where
 `<provider>` is `aws`, `datadog`, `gcp`, `grafana`, `linear`, `posthog`, or
@@ -961,6 +963,39 @@ annotated read-only, plus AWS's sandboxed script runner and task polling tools.
 The role's read-only policy and explicit secret-value denies remain the
 authorization boundary for script-runner API calls. This integration currently
 supports the commercial AWS partition (`arn:aws`) only.
+
+### CloudWatch Logs subscriptions
+
+Where the deployment sets `AWS_LOG_SUBSCRIPTION_PRINCIPAL_ARN`,
+`AWS_LOG_DESTINATION_NAME`, `AWS_LOG_DESTINATION_REGIONS`, and
+`AWS_CLOUDWATCH_LOGS_INGEST_TOKEN`, the stack also creates
+`ResponderLogSubscriptionRole`. Its trust requires the log subscription broker
+and the same external ID, and its only actions are `logs:PutAccountPolicy`,
+`logs:PutSubscriptionFilter`, `logs:DeleteAccountPolicy`,
+`logs:DeleteSubscriptionFilter`, and `logs:DescribeAccountPolicies`.
+CloudWatch Logs requires a type-specific permission for every other account
+policy type, so the role cannot change data protection, transformers, field
+indexes, or retention, and it reads no log data.
+
+Workspace owners and admins choose regions on the connection's manage page or
+in settings (`GET` and `PUT /api/integrations/aws/log-subscriptions/<id>`). For
+each region, the API assumes the role and creates one account-level
+subscription policy named `superlog-<region>` that sends error lines to the
+deployment's log destination in that region. Superlog owns the filter pattern
+(`awsLogSubscriptionFilterPattern`); changing it re-applies every active
+subscription. The API also keeps each destination's access policy limited to
+the AWS accounts that subscribe there, retries failed subscriptions every ten
+minutes, and deletes the policies when regions or the connection are removed.
+Only the API assumes this role; agents, the worker, and Signal never receive
+its credentials. An AWS account streams to one workspace. A stack created
+before the role existed gets it with one stack update, which the page shows
+when the role cannot be assumed.
+
+The destination's Firehose stream delivers to
+`POST /api/ingest/aws/cloudwatch-logs` with the cell secret as its access key.
+The API finds the workspace from each record's owner and the region from its
+policy name, drops records without an active subscription, and forwards the
+rest to the collector, where error lines become error issues.
 
 AWS context does not receive native EventBridge or SNS webhooks. CloudWatch
 alarms can trigger an Agent when Amazon Q Developer in chat applications

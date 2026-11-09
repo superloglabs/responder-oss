@@ -196,3 +196,104 @@ describe("AWS Firehose ingest", () => {
     expect(dependencies.forward).not.toHaveBeenCalled();
   });
 });
+
+describe("CloudWatch Logs subscriptions through Superlog's Firehose stream", () => {
+  const secret = "cell-secret-token";
+  const otherOrganizationId = "c925b1df-5b78-43c8-a816-6f00afb174af";
+
+  function message(overrides: Record<string, unknown> = {}) {
+    // The shape CloudWatch Logs delivered in a live cross-region test.
+    return gzipSync(JSON.stringify({
+      logEvents: [{ id: "40013018097123303965823654137420776125263956161457815552", message: "ERROR dest test 1", timestamp: 1794245786000 }],
+      logGroup: "/x",
+      logStream: "s1",
+      messageType: "DATA_MESSAGE",
+      owner: "121638211609",
+      policyLevel: "ACCOUNT_LEVEL_POLICY",
+      subscriptionFilters: ["superlog-eu-west-1"],
+      ...overrides,
+    })).toString("base64");
+  }
+
+  function subscriptionRoutes(overrides: Partial<IngestRouteDependencies> = {}) {
+    return routes({
+      cloudWatchLogsToken: () => secret,
+      logSubscriptionWorkspace: vi.fn(async (account: string, region: string) =>
+        account === "121638211609" && region === "eu-west-1" ? organizationId
+          : account === "222233334444" && region === "us-east-1" ? otherOrganizationId
+            : null),
+      ...overrides,
+    });
+  }
+
+  function deliver(app: ReturnType<typeof routes>["app"], records: Array<{ data: string }>, accessKey = secret) {
+    return app.request("/aws/cloudwatch-logs", {
+      body: gzipSync(JSON.stringify({ records, requestId: "body-id", timestamp: 1 })),
+      headers: {
+        "content-encoding": "gzip",
+        "content-type": "application/json",
+        "x-amz-firehose-access-key": accessKey,
+        "x-amz-firehose-request-id": "req-2",
+        "x-amz-firehose-source-arn": "arn:aws:firehose:eu-west-3:121638211609:deliverystream/superlog-cloudwatch-logs-eu",
+      },
+      method: "POST",
+    });
+  }
+
+  it("sends each account's logs to its workspace with the account and the log region", async () => {
+    const { app, dependencies } = subscriptionRoutes();
+    const control = Buffer.from(gzipSync(JSON.stringify({ logEvents: [{ id: "", message: "CWL CONTROL MESSAGE", timestamp: 1 }], logGroup: "", logStream: "", messageType: "CONTROL_MESSAGE", owner: "CloudwatchLogs", subscriptionFilters: [] }))).toString("base64");
+    const response = await deliver(app, [
+      { data: control },
+      { data: message() },
+      { data: message({ owner: "222233334444", subscriptionFilters: ["superlog-us-east-1"] }) },
+    ]);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ requestId: "req-2", timestamp: 0 });
+    const calls = vi.mocked(dependencies.forward).mock.calls;
+    expect(calls.map(([, init]) => (init!.headers as Headers).get("x-superlog-project-id"))).toEqual([organizationId, otherOrganizationId]);
+    const first = JSON.parse(calls[0]![1]!.body as string);
+    expect(first.resourceLogs[0].resource.attributes).toEqual(expect.arrayContaining([
+      { key: "cloud.account.id", value: { stringValue: "121638211609" } },
+      { key: "cloud.region", value: { stringValue: "eu-west-1" } },
+    ]));
+    expect(first.resourceLogs[0].scopeLogs[0].logRecords[0].severityText).toBe("ERROR");
+    const second = JSON.parse(calls[1]![1]!.body as string);
+    expect(second.resourceLogs[0].resource.attributes).toContainEqual({ key: "cloud.region", value: { stringValue: "us-east-1" } });
+  });
+
+  it("drops accounts and regions without a subscription, and policies that are not Superlog's", async () => {
+    const { app, dependencies } = subscriptionRoutes();
+    const response = await deliver(app, [
+      { data: message({ owner: "999988887777" }) },
+      { data: message({ subscriptionFilters: ["superlog-us-east-1"] }) },
+      { data: message({ subscriptionFilters: ["datadog-forwarder"] }) },
+    ]);
+    expect(response.status).toBe(200);
+    expect(dependencies.forward).not.toHaveBeenCalled();
+  });
+
+  it("caches the workspace lookup", async () => {
+    const { advance, app, dependencies } = subscriptionRoutes();
+    await deliver(app, [{ data: message() }]);
+    await deliver(app, [{ data: message() }]);
+    expect(dependencies.logSubscriptionWorkspace).toHaveBeenCalledTimes(1);
+    advance(61_000);
+    await deliver(app, [{ data: message() }]);
+    expect(dependencies.logSubscriptionWorkspace).toHaveBeenCalledTimes(2);
+  });
+
+  it("refuses a wrong access key, asks for a retry when the collector is busy, and is off without a secret", async () => {
+    const { app, dependencies } = subscriptionRoutes();
+    const denied = await deliver(app, [{ data: message() }], "wrong");
+    expect(denied.status).toBe(401);
+    expect(await denied.json()).toMatchObject({ requestId: "req-2" });
+    expect(dependencies.forward).not.toHaveBeenCalled();
+
+    const busy = subscriptionRoutes({ forward: vi.fn(async () => new Response("", { status: 503 })) });
+    expect((await deliver(busy.app, [{ data: message() }])).status).toBe(503);
+
+    const off = routes({ cloudWatchLogsToken: () => null });
+    expect((await deliver(off.app, [{ data: message() }])).status).toBe(404);
+  });
+});

@@ -155,7 +155,10 @@ export function AwsConnectionDialog({
             </label>
             <p className="siteDialog__oauthNote">
               The role uses AWS-managed AIOpsAssistantPolicy and can inspect all
-              regions in this account. It cannot change resources.
+              regions in this account. It cannot change resources. Where Superlog
+              can receive logs, the stack also adds a role that only creates and
+              removes CloudWatch Logs subscriptions, so you can choose regions whose
+              error lines Superlog receives.
             </p>
             {error ? <p className="siteDialog__error" role="alert">{error}</p> : null}
             <footer className="siteDialog__footer">
@@ -174,7 +177,7 @@ export function AwsConnectionDialog({
         ) : (
           <div className="siteDialog__form">
             <ol className="siteDialog__instructions">
-              <li>Open AWS CloudFormation and review the role and policy.</li>
+              <li>Open AWS CloudFormation and review the roles and policies.</li>
               <li>Create the stack and wait until its status is CREATE_COMPLETE.</li>
               <li>Return here and verify the connection.</li>
             </ol>

@@ -12,6 +12,7 @@ import {
 } from "@tabler/icons-react";
 import type { IntegrationSummary } from "../agents-api";
 import { DATADOG_SITES, type DatadogSiteId } from "../components/datadog-sites";
+import { AwsLogStreamingSettings } from "../components/aws-log-streaming";
 import { Button } from "../design-system";
 import { GCP_SETUP_STEPS, useGcpSetupStatus, type GcpSetupStatus } from "../gcp-setup-status";
 import { createIngestKey, existingOpenTelemetryPrompt, openTelemetryPrompt } from "../ingest-keys-api";
@@ -383,7 +384,7 @@ function OAuthApproval({ page, integration, listPath, onBack }: PageProps & { pa
 
 // --- AWS -------------------------------------------------------------------
 
-interface AwsSetupState { status: "waiting" | "verifying" | "connected"; awsAccountId?: string; roleArn?: string }
+interface AwsSetupState { status: "waiting" | "verifying" | "connected"; awsAccountId?: string; integrationAccountId?: string; roleArn?: string }
 
 function awsEndpoint(connectUrl: string, path: string) {
   return connectUrl.replace(/\/connect(?:\?.*)?$/u, path);
@@ -454,20 +455,23 @@ function AwsConnect({ integration, organizationId, listPath, onBack, onDone }: P
   const connected = state.status === "connected";
   if (!setupId) {
     return <>
-      <Intro provider="aws" title="Connect AWS CloudWatch">Launch one CloudFormation stack. It creates a read-only role, and Signal connects when it finishes.</Intro>
+      <Intro provider="aws" title="Connect AWS CloudWatch">Launch one CloudFormation stack, once. It creates a read-only role and a role that only manages CloudWatch Logs subscriptions. Signal connects when it finishes.</Intro>
       {error && <p className="signalError" role="alert">{error}</p>}
       <section className="signalAccess">
         <h3>How it works</h3>
         <ol className="signalSteps">
           <li>Sign in to the AWS account you want to connect. The stack opens with everything filled in.</li>
           <li>Check the box to allow IAM resources, then click <strong>Create stack</strong>.</li>
-          <li>Come back here. Signal connects on its own when the stack finishes.</li>
+          <li>Come back here. Signal connects on its own when the stack finishes, and you choose the regions whose errors it watches.</li>
         </ol>
         <p>Want to review it first? <a href={awsEndpoint(connectUrl ?? "/api/integrations/aws/connect", "/cloudformation-template")} target="_blank" rel="noreferrer">Download the template</a></p>
       </section>
-      <AccessList title="The stack creates one read-only role"
-        allowed={["Uses the AWS-managed AIOpsAssistantPolicy", "Reads CloudWatch logs, metrics, alarms, and resources in all regions"]}
-        denied="Cannot change resources" />
+      <AccessList title="The stack creates two roles and nothing else"
+        allowed={[
+          "Read-only role: the AWS-managed AIOpsAssistantPolicy, to read CloudWatch logs, metrics, alarms, and resources",
+          "Subscription role: creates and removes CloudWatch Logs subscriptions that send error lines to Superlog",
+        ]}
+        denied="Cannot change resources, data protection, or retention, and costs nothing beyond CloudWatch ingestion" />
       <Actions onBack={onBack}>
         <Button variant="primary" loading={launching} disabled={!connectUrl} onClick={() => void launch()}><External>Launch stack in AWS</External></Button>
       </Actions>
@@ -506,6 +510,7 @@ function AwsConnect({ integration, organizationId, listPath, onBack, onDone }: P
           <div><h3>Verify the role</h3><p>Signal assumes the role once to check it works.</p></div>
         </li>
       </ol>}
+    {connected && <AwsLogStreamingSettings integrationAccountId={state.integrationAccountId ?? setupId} />}
     <Actions onBack={() => {
       if (!connected) { sessionStorage.removeItem(storageKey); setSetupId(null); setPollFailed(false); return; }
       onBack();

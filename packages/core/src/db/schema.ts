@@ -382,6 +382,38 @@ export const integrationAccounts = pgTable(
   ],
 );
 
+// One CloudWatch Logs account-level subscription that Superlog keeps in a
+// customer's AWS account, per region (ADR 0015). The policy named
+// superlog-<region> sends that region's matching log lines to Superlog's log
+// destination there. An AWS account streams to one workspace.
+export const awsLogSubscriptions = pgTable(
+  "aws_log_subscriptions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    integrationAccountId: uuid("integration_account_id")
+      .notNull()
+      .references(() => integrationAccounts.id, { onDelete: "cascade" }),
+    awsAccountId: text("aws_account_id").notNull(),
+    region: text("region").notNull(),
+    filterPattern: text("filter_pattern").notNull(),
+    // pending: not applied yet; active: the policy is in place; failed: the
+    // last attempt failed; removing: the policy is being deleted.
+    status: text("status").$type<"active" | "failed" | "pending" | "removing">().notNull().default("pending"),
+    lastError: text("last_error"),
+    appliedAt: timestamp("applied_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("aws_log_subscriptions_account_region_idx").on(table.awsAccountId, table.region),
+    index("aws_log_subscriptions_integration_account_idx").on(table.integrationAccountId),
+    index("aws_log_subscriptions_status_idx").on(table.status).where(sql`${table.status} <> 'active'`),
+  ],
+);
+
 export const integrationConnectionStates = pgTable(
   "integration_connection_states",
   {

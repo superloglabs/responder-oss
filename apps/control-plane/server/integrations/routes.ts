@@ -1,6 +1,8 @@
 import { integrationAccountDetails } from "./account-details.js";
 import { chatConnectionRoutes } from "./chat-connection.js";
 import { customMcpToolRoutes } from "./custom-mcp-tools.js";
+import { awsLogSubscriptionCleanup, awsLogSubscriptionRoutes } from "./aws-log-subscriptions.js";
+import { awsLogSubscriptionConfig } from "../../../../packages/core/src/integrations/aws-log-subscriptions.js";
 import {
   AWS_REGISTRATION_UNAVAILABLE_ERROR,
   awsRegistrationRoutes,
@@ -1238,6 +1240,12 @@ async function removeIntegrationAccount(input: {
   if (!accountId.success) {
     return Response.json({ error: input.invalid }, { status: 400 });
   }
+  // An AWS connection's log subscriptions are deleted after it is removed,
+  // with the credentials read before.
+  const logCleanup = input.provider === "aws"
+    ? await awsLogSubscriptionCleanup({ integrationAccountId: accountId.data, organizationId: tenant.organizationId })
+      .catch(() => null)
+    : null;
   const removal = await deleteIntegrationAccount({
     integrationAccountId: accountId.data,
     organizationId: tenant.organizationId,
@@ -1264,6 +1272,7 @@ async function removeIntegrationAccount(input: {
       { status: 409 },
     );
   }
+  if (logCleanup) await logCleanup();
   return Response.json({ removed: true });
 }
 
@@ -1272,6 +1281,7 @@ export const integrationRoutes = new Hono()
   .route("/custom-mcp", customMcpToolRoutes)
   .route("/github/pull-request-author", githubPullRequestAuthorRoutes)
   .route("/aws", awsRegistrationRoutes)
+  .route("/aws/log-subscriptions", awsLogSubscriptionRoutes)
   .get("/", async (context) => {
     const tenant = await getActiveTenant(context.req.raw.headers);
     if (tenant.ok === false) {
@@ -1560,17 +1570,20 @@ export const integrationRoutes = new Hono()
               status: "pending",
             });
       const templateUrl = await createAwsCloudFormationTemplateUrl();
+      const logSubscriptionPrincipalArn = awsLogSubscriptionConfig()?.principalArn ?? null;
       return context.json({
         accountId,
         cloudFormationUrl: templateUrl
           ? awsCloudFormationQuickCreateUrl({
               externalId,
+              logSubscriptionPrincipalArn,
               principalArn,
               templateUrl,
             })
           : null,
         template: awsParameterizedCloudFormationTemplate({
           externalId,
+          logSubscriptionPrincipalArn,
           principalArn,
         }),
       });

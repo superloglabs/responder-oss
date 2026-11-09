@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { IconCheck, IconExclamationMark } from "@tabler/icons-react";
 import { removeIntegrationAccount, type IntegrationAccount, type IntegrationSummary } from "../agents-api";
+import { AwsLogStreamingSettings } from "../components/aws-log-streaming";
 import { Button } from "../design-system";
 import { CloudSourceSetup } from "../pages/telemetry-source";
 import { fetchServices } from "../telemetry-api";
@@ -26,7 +27,7 @@ const descriptions: Record<ConnectPage, string> = {
   datadog: "Signal reads your monitors, logs, traces, and metrics. It never changes anything in Datadog.",
   grafana: "Signal reads your dashboards, alerts, and datasources. It never changes anything in Grafana.",
   sentry: "Signal reads your errors and issues to find what broke and who it affects.",
-  aws: "Signal reads CloudWatch logs, metrics, and alarms through a read-only role.",
+  aws: "Signal reads CloudWatch logs, metrics, and alarms through a read-only role, and receives new error lines from the regions you choose.",
   gcp: "Signal reads logs and metrics in your project through a read-only service account.",
   linear: "Signal checks Linear before posting, so it skips problems your team already tracks.",
   posthog: "Signal uses product usage to tell how many customers a problem affects.",
@@ -46,7 +47,12 @@ export function SignalManage(props: ManageProps) {
         // With several accounts, each Disconnect names its own.
         several={accounts.length > 1}
         // Sending telemetry covers the workspace, so it is shown once.
-        stream={(page === "aws" || page === "gcp") && account === accounts.at(-1) ? <CloudStream provider={page} /> : null}
+        stream={page === "aws"
+          // Each AWS account chooses its regions; without log streaming
+          // here, the CloudWatch stream setup is shown once.
+          ? <AwsLogStreamingSettings integrationAccountId={account.id}
+            fallback={account === accounts.at(-1) ? <CloudStream provider="aws" /> : null} />
+          : page === "gcp" && account === accounts.at(-1) ? <CloudStream provider={page} /> : null}
         onReconnect={props.onReconnect}
         onRemoved={props.onRemoved} />)}
     <Actions onBack={onBack}><Button variant="primary" onClick={onBack}>Done</Button></Actions>

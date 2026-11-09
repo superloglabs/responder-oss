@@ -24,9 +24,10 @@ those requests fail and the pages show their errors.
 - **Setup** shows the workspace's real connections. Providers with their own
   connection dialog open it here; OAuth providers return to the same step.
   Google Cloud and OpenTelemetry link to their settings pages. The manage
-  page of a connected AWS account or Google Cloud project also sends that
-  provider's logs and metrics to Superlog: the AWS CloudWatch stream stack, or
-  reading the Google Cloud project. Signal finds new errors in telemetry
+  page of a connected AWS account chooses the regions whose CloudWatch error
+  lines Superlog receives through log subscriptions (the CloudWatch stream
+  stack where a deployment has no log destinations); the Google Cloud page
+  reads the project into Superlog. Signal finds new errors in telemetry
   Superlog receives, and reads Datadog and Grafana on a schedule only for a
   workspace whose telemetry does not reach Superlog. Repositories and
   the findings channel come from the workspace's GitHub and Slack connections

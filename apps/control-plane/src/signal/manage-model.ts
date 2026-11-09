@@ -83,7 +83,7 @@ export function manageView(provider: string, name: string, account: IntegrationA
             ? [{ label: "Role", value: `arn:aws:iam::${details.awsAccountId}:role/${details.roleName}`, code: true }]
             : []),
         ],
-        disconnect: `Signal stops using the role. To remove the role too, delete the ResponderInvestigationAccess stack in CloudFormation. ${pastFindings}`,
+        disconnect: `Signal stops using the role, and Superlog removes the log subscriptions it created. To remove the roles too, delete the ResponderInvestigationAccess stack in CloudFormation. ${pastFindings}`,
       };
     case "gcp": {
       const projectId = account.projectId ?? account.displayName.replace(/^GCP · /u, "");
