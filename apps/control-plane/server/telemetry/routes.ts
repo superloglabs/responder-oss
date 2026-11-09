@@ -70,7 +70,8 @@ import { getActiveTenant } from "../tenant.js";
 
 // Read-only access to a workspace's OpenTelemetry data. A workspace sees
 // telemetry only with the telemetry capability and a configured store, and
-// only the data tagged with its organization ID.
+// only the data tagged with its organization ID. The services list also
+// answers Signal workspaces, for Signal setup.
 export type TelemetryRouteDependencies = {
   // Model calls in the window whose spans report no token counts.
   aiCallsWithoutUsage: (client: ClickHouseClient, organizationId: string, range: TimeRange) => Promise<number>;

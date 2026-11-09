@@ -66,21 +66,30 @@ type Database = ReturnType<typeof getDatabase>;
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 
 // Every workspace that receives telemetry, such as for grouping errors into
-// issues, or only those with the given capabilities.
-export async function listTelemetryOrganizationIds(
+// issues, and which of them have Signal without the telemetry product.
+export async function listTelemetryOrganizations(
   executor: Database | Transaction = getDatabase(),
-  capabilities: readonly OrganizationCapability[] = telemetryDataCapabilities,
-): Promise<string[]> {
+): Promise<{ organizationIds: string[]; signalOnly: Set<string> }> {
   const rows = await executor
-    .selectDistinct({ organizationId: organizationCapabilities.organizationId })
+    .select({
+      capability: organizationCapabilities.capability,
+      organizationId: organizationCapabilities.organizationId,
+    })
     .from(organizationCapabilities)
     .where(
       and(
-        inArray(organizationCapabilities.capability, [...capabilities]),
+        inArray(organizationCapabilities.capability, [...telemetryDataCapabilities]),
         eq(organizationCapabilities.enabled, true),
       ),
     );
-  return rows.map((row) => row.organizationId);
+  const product = new Set(
+    rows.filter((row) => row.capability === "telemetry").map((row) => row.organizationId),
+  );
+  const organizationIds = [...new Set(rows.map((row) => row.organizationId))];
+  return {
+    organizationIds,
+    signalOnly: new Set(organizationIds.filter((id) => !product.has(id))),
+  };
 }
 
 export async function setOrganizationCapability(input: {

@@ -16,7 +16,7 @@ import {
 } from "../telemetry/error-issues.js";
 import { enqueueErrorNotificationFollowups, enqueueErrorNotifications } from "./error-notifications.js";
 import { getDatabase } from "./client.js";
-import { listTelemetryOrganizationIds } from "./organization-capabilities.js";
+import { listTelemetryOrganizations } from "./organization-capabilities.js";
 import { pausedTelemetryNotificationOrganizations } from "./telemetry-notification-pauses.js";
 import { errorIssueActivities, errorIssueCursors, errorIssueDailyCounts, errorIssueHourlyCounts, errorIssues } from "./schema.js";
 
@@ -51,28 +51,27 @@ export async function withErrorIssueStore<T>(pass: (store: ErrorIssueStore) => P
       sql`select pg_try_advisory_xact_lock(hashtextextended('error-issue-ingest', 0)) as locked`,
     );
     if (!lock.rows[0]?.locked) return null;
+    // Signal reads the issues of workspaces without the telemetry product.
+    // Their new issues notify no one, wake no agents, and start no
+    // automations.
+    let organizations: ReturnType<typeof listTelemetryOrganizations> | undefined;
+    const telemetry = () => (organizations ??= listTelemetryOrganizations(tx));
     return pass({
       cursor: (kind) => errorIssueCursor(tx, kind),
-      // Signal reads the issues of workspaces without the telemetry product.
-      organizationIds: () => listTelemetryOrganizationIds(tx),
-      pausedOrganizationIds: () => quietOrganizationIds(tx),
+      organizationIds: async () => (await telemetry()).organizationIds,
+      pausedOrganizationIds: async () => {
+        const paused = await pausedTelemetryNotificationOrganizations(tx);
+        for (const organizationId of (await telemetry()).signalOnly) paused.add(organizationId);
+        return paused;
+      },
       // A savepoint per issue, so one failed write does not undo the others.
-      record: (occurrences) => tx.transaction((savepoint) => recordErrorOccurrences(savepoint, occurrences)),
+      record: async (occurrences) => {
+        const notify = !(await telemetry()).signalOnly.has(occurrences.organizationId);
+        return tx.transaction((savepoint) => recordErrorOccurrences(savepoint, occurrences, { notify }));
+      },
       saveCursor: (kind, cursor) => saveErrorIssueCursor(tx, kind, cursor),
     });
   });
-}
-
-// Workspaces whose new issues wake no agents and start no automations: those
-// that paused notifications, and Signal workspaces without the telemetry
-// product.
-async function quietOrganizationIds(executor: Executor): Promise<Set<string>> {
-  const quiet = await pausedTelemetryNotificationOrganizations(executor);
-  const product = new Set(await listTelemetryOrganizationIds(executor, ["telemetry"]));
-  for (const organizationId of await listTelemetryOrganizationIds(executor)) {
-    if (!product.has(organizationId)) quiet.add(organizationId);
-  }
-  return quiet;
 }
 
 async function errorIssueCursor(executor: Executor, kind: ErrorIssueKind): Promise<ErrorCandidateCursor | null> {
@@ -99,6 +98,8 @@ async function saveErrorIssueCursor(executor: Executor, kind: ErrorIssueKind, cu
 export async function recordErrorOccurrences(
   executor: Executor,
   occurrences: ErrorOccurrences,
+  // False for a workspace whose issues queue no notifications.
+  { notify = true }: { notify?: boolean } = {},
 ): Promise<RecordedErrorOccurrences> {
   const issueColumns = { id: errorIssues.id, status: errorIssues.status, statusChangedAt: errorIssues.statusChangedAt };
   let [existing] = await executor
@@ -192,7 +193,7 @@ export async function recordErrorOccurrences(
   await executor
     .delete(errorIssueHourlyCounts)
     .where(and(eq(errorIssueHourlyCounts.issueId, issueId), lt(errorIssueHourlyCounts.hour, oldest)));
-  if (transition === "new" || transition === "regressed") {
+  if (notify && (transition === "new" || transition === "regressed")) {
     await enqueueErrorNotifications(executor, {
       organizationId: occurrences.organizationId,
       issueId,

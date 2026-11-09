@@ -8,9 +8,11 @@ in its navigation. Direct Signal URLs also require the capability.
 A Signal workspace receives OpenTelemetry data without the `telemetry`
 capability: it creates ingest keys, lists the services sending data, reads its
 logs, traces, and metrics through the API and MCP, and has its errors grouped
-into issues, which Signal reads. Those issues wake no agents and start no
-automations. The telemetry pages and their API, telemetry sources, error issue
-pages, dashboards, alerts, and error notifications still need `telemetry`.
+into issues, which Signal reads. Those issues send no notifications, wake no
+agents, and start no automations. Signal setup reads `GET
+/api/telemetry/services`; the other `/api/telemetry/*` routes, the AWS, Google
+Cloud, and Vercel telemetry sources, error issue pages, dashboards, alerts,
+and error notifications still need `telemetry`.
 
 For a newly created local workspace, set
 `RESPONDER_NEW_ORGANIZATION_CAPABILITIES=signal` before creating it.
