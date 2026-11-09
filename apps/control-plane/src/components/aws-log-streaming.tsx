@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { IconExternalLink, IconPlus, IconX } from "@tabler/icons-react";
 import {
   awsLogSubscriptionStatusLabels,
@@ -134,8 +134,8 @@ function RegionChips({ canManage, error, offered, onAdd, onRemove, saving, subsc
           </button>}
         </li>;
       })}
-      {subscriptions.length === 0 && !canManage && <li className="awsLogStreaming__none">None</li>}
-      {canManage && addable.length > 0 && <li><AddRegion disabled={saving} regions={addable} onAdd={onAdd} /></li>}
+      {subscriptions.length === 0 && !canManage && <li className="awsLogStreaming__item awsLogStreaming__none">None</li>}
+      {canManage && addable.length > 0 && <li className="awsLogStreaming__item"><AddRegion disabled={saving} regions={addable} onAdd={onAdd} /></li>}
     </ul>
     {failures.map((row) => <p key={row.region} className="awsLogStreaming__error">{row.region}: {row.lastError}</p>)}
     {error && <p className="awsLogStreaming__error" role="alert">{error}</p>}
@@ -145,6 +145,14 @@ function RegionChips({ canManage, error, offered, onAdd, onRemove, saving, subsc
 function AddRegion({ disabled, regions, onAdd }: { disabled: boolean; regions: string[]; onAdd: (region: string) => void }) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  // Choosing a region closes the menu; focus goes back to the button so
+  // keyboard users keep their place.
+  const choose = (region: string) => {
+    setOpen(false);
+    onAdd(region);
+    requestAnimationFrame(() => trigger.current?.focus());
+  };
   useEffect(() => {
     if (!open) return;
     const close = (event: MouseEvent) => { if (event.target instanceof Node && !root.current?.contains(event.target)) setOpen(false); };
@@ -157,13 +165,13 @@ function AddRegion({ disabled, regions, onAdd }: { disabled: boolean; regions: s
     };
   }, [open]);
   return <div className="awsAddRegion" ref={root}>
-    <button aria-expanded={open} aria-haspopup="listbox" className="awsAddRegion__button" disabled={disabled} onClick={() => setOpen(!open)} type="button">
+    <button aria-expanded={open} aria-haspopup="listbox" className="awsAddRegion__button" disabled={disabled} onClick={() => setOpen(!open)} ref={trigger} type="button">
       <IconPlus aria-hidden="true" size={13} stroke={2} />Add region
     </button>
     {open && <ul aria-label="Regions" className="awsAddRegion__menu" role="listbox">
       {regions.map((region) => <li key={region} aria-selected={false} role="option" tabIndex={0}
-        onClick={() => { setOpen(false); onAdd(region); }}
-        onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setOpen(false); onAdd(region); } }}>
+        onClick={() => choose(region)}
+        onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); choose(region); } }}>
         {region}
       </li>)}
     </ul>}
@@ -172,9 +180,11 @@ function AddRegion({ disabled, regions, onAdd }: { disabled: boolean; regions: s
 
 function StackUpdate({ update }: { update: NonNullable<AwsLogStreamingState["stackUpdate"]> }) {
   const [showCommand, setShowCommand] = useState(false);
-  return <section className="awsStackUpdate" aria-labelledby="aws-stack-update-title">
+  // Settings can show one of these per AWS account.
+  const titleId = useId();
+  return <section className="awsStackUpdate" aria-labelledby={titleId}>
     <div className="awsStackUpdate__text">
-      <h3 id="aws-stack-update-title">A new version of the Superlog AWS stack is available</h3>
+      <h3 id={titleId}>A new version of the Superlog AWS stack is available</h3>
       <p>It lets Superlog send new errors from the regions you choose. Updating takes about a minute in AWS and changes nothing else in your account.</p>
       <button className="awsStackUpdate__cli" onClick={() => setShowCommand(!showCommand)} type="button" aria-expanded={showCommand}>
         {showCommand ? "Hide the CLI command" : "Use the CLI instead"}

@@ -1003,9 +1003,13 @@ be assumed, its regions show "Waiting for the stack update" and the page offers
 **Update in AWS**. That link opens CloudFormation's update page for the stack,
 with the current template chosen, in the region where the API found the stack
 with the read-only role (`awsStackUpdateConsoleUrl`; AWS does not document
-this console route). The deployment's template sets
-`LogSubscriptionPrincipalArn` by default, so the update needs no typing. The
-page also offers the equivalent CLI command. Removing the AWS connection first deletes its
+this console route). When the API cannot find the stack, the link opens the
+stacks list in the registration region instead, and the customer selects the
+stack and replaces its template there. The shipped template leaves
+`LogSubscriptionPrincipalArn` empty: a deployment that fills it in the template
+it serves, as the hosted one does, spares customers from typing it, and other
+operators enter the broker ARN during the update. The page also offers the
+equivalent CLI command. Removing the AWS connection first deletes its
 policies; if a deletion fails, the connection stays and the API retries.
 
 AWS allows one account-level subscription policy per account and region. In a

@@ -22,7 +22,8 @@
 .awsAddRegion__button:hover:not(:disabled) { border-style: solid; background: var(--ds-surface-hover); color: var(--ds-text-primary); }
 .awsAddRegion__menu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 20; width: 180px; max-height: 240px; overflow-y: auto; margin: 0; padding: 4px; list-style: none; border-radius: var(--ds-radius-medium, 6px); background: var(--ds-surface-overlay, #fff); box-shadow: 0 8px 24px #0000001f, 0 0 0 .5px #00000024; }
 .awsAddRegion__menu li { padding: 5px 8px; border-radius: 4px; font: 400 12px/18px ui-monospace, "SFMono-Regular", Consolas, monospace; cursor: pointer; }
-.awsAddRegion__menu li:hover, .awsAddRegion__menu li:focus-visible { outline: none; background: var(--ds-surface-hover); }
+.awsAddRegion__menu li:hover, .awsAddRegion__menu li:focus-visible { background: var(--ds-surface-hover); }
+.awsAddRegion__menu li:focus-visible, .awsAddRegion__button:focus-visible, .awsRegionChip__remove:focus-visible, .awsStackUpdate__cli:focus-visible { outline: 2px solid var(--ds-text-primary); outline-offset: 2px; }
 
 /* Asks for the one stack update that adds the subscription role. */
 .awsStackUpdate { display: flex; align-items: center; gap: 16px; padding: 14px 20px; border: .5px solid #00000014; border-radius: 6px; background: #fafafa; }
@@ -39,7 +40,16 @@
 .awsLogStreaming__label { width: 120px; flex-shrink: 0; padding-top: 4px; color: #666; line-height: 20px; }
 .appShell--settings .integrationCard__accounts li.integrationCard__account--stacked { flex-wrap: wrap; }
 .integrationCard__account--stacked > .awsLogStreaming__row, .integrationCard__account--stacked > .awsStackUpdate { flex: 1 1 100%; }
-.appShell--settings .integrationCard__accounts .awsRegionChip { padding-block: 0; border: 0; }
+/* The settings account list styles every li as a row; the region chips and
+   the Add region item are not rows. */
+.appShell--workspace.appShell--settings .integrationCard__accounts li.awsRegionChip,
+.appShell--settings .integrationCard__accounts li.awsRegionChip { padding: 0 6px 0 10px; border: 0; border-radius: var(--ds-radius-small, 4px); background: var(--ds-surface-raised, #fff); }
+.appShell--workspace.appShell--settings .integrationCard__accounts li.awsLogStreaming__item,
+.appShell--settings .integrationCard__accounts li.awsLogStreaming__item,
+.appShell--workspace.appShell--settings .integrationCard__accounts .awsAddRegion__menu li,
+.appShell--settings .integrationCard__accounts .awsAddRegion__menu li { display: block; padding: 0; border: 0; background: none; }
+.appShell--workspace.appShell--settings .integrationCard__accounts .awsAddRegion__menu li,
+.appShell--settings .integrationCard__accounts .awsAddRegion__menu li { padding: 5px 8px; }
 
 /* Inside Signal's account details, the regions are one more row. */
 .signalManageRows > .signalManageRows__regions { align-items: flex-start; }

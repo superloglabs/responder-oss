@@ -404,14 +404,16 @@ export const AWS_STACK_NAME = "ResponderInvestigationAccess";
 
 // How an admin adds ResponderLogSubscriptionRole to a stack created before
 // it existed: one update that keeps every parameter the stack already has.
-// Stacks made before one-click setup have no RegistrationTopicArn.
+// Stacks made before one-click setup have no RegistrationTopicArn. When the
+// stack was not found, the command keeps it too: an older stack then rejects
+// the command, where leaving it out would quietly reset it on newer ones.
 export function awsStackUpdateCommand(input: {
   logSubscriptionPrincipalArn: string;
   parameterKeys?: string[] | null;
   region: string | null;
   templateUrl: string | null;
 }): string {
-  const kept = (input.parameterKeys ?? ["ResponderPrincipalArn", "ExternalId"])
+  const kept = (input.parameterKeys ?? ["ResponderPrincipalArn", "ExternalId", "RegistrationTopicArn"])
     .filter((key) => key !== "LogSubscriptionPrincipalArn");
   return [
     "aws cloudformation update-stack",

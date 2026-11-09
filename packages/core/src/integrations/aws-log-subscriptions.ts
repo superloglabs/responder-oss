@@ -113,7 +113,7 @@ function temporaryCredentials(credentials: Credentials | undefined, stage: strin
 // AWS refused to let the broker assume the customer's role: the stack
 // predates the role, it was removed, or its trust does not match. Other
 // failures, such as throttling, are passed through and retried.
-export const awsLogSubscriptionRoleName = "ResponderLogSubscriptionRole";
+export const awsLogSubscriptionRoleName = AWS_LOG_SUBSCRIPTION_ROLE_NAME;
 
 export class AwsLogSubscriptionRoleUnavailableError extends Error {
   constructor(cause: unknown) {

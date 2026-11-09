@@ -116,7 +116,11 @@ function ManagedAccount({ provider, name, account, several, awsStreaming, stream
         {`Signal can't read ${view.connectedTo.replace(/^the /u, "")} until you reconnect.`}
       </Status>
       : <Status title={`Connected to ${view.connectedTo}`}>{updatedLabel(account.updatedAt)}</Status>}
-    {awsStreaming
+    {/* An account that lost access cannot change regions; it keeps the
+        CloudWatch stream fallback. */}
+    {awsStreaming && account.status !== "connected"
+      ? <><Rows rows={view.rows.map((row) => ({ ...row, onAction: onReconnect }))} />{awsStreaming.fallback}</>
+      : awsStreaming
       ? <AwsLogStreaming integrationAccountId={account.id} fallback={awsStreaming.fallback}>
         {({ notice, row }) => <>
           <Rows rows={view.rows.map((row) => ({ ...row, onAction: onReconnect }))}

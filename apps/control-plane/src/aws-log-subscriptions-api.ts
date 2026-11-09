@@ -14,8 +14,9 @@ export interface AwsLogStreaming {
   // Shown when the stack predates ResponderLogSubscriptionRole.
   stackUpdate: {
     command: string;
-    // Opens the stack's update page in AWS. Its template link lasts 15
-    // minutes, so the page refreshes it while it waits.
+    // Opens the stack's update page in AWS, or the region's stacks list when
+    // Superlog could not find the stack. Its template link lasts 15 minutes,
+    // so the page refreshes it while it waits.
     consoleUrl: string | null;
     logSubscriptionPrincipalArn: string;
     region: string | null;

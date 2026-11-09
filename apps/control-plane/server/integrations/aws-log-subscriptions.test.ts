@@ -408,9 +408,9 @@ describe("stack update command", () => {
     );
   });
 
-  it("keeps only the parameters every stack has when the stack was not found", () => {
+  it("keeps the one-click setup parameters when the stack was not found, so none is reset", () => {
     expect(awsStackUpdateCommand({ logSubscriptionPrincipalArn: config.principalArn, region: "eu-west-3", templateUrl: null })).toContain(
-      "--parameters ParameterKey=ResponderPrincipalArn,UsePreviousValue=true ParameterKey=ExternalId,UsePreviousValue=true ParameterKey=LogSubscriptionPrincipalArn,",
+      "--parameters ParameterKey=ResponderPrincipalArn,UsePreviousValue=true ParameterKey=ExternalId,UsePreviousValue=true ParameterKey=RegistrationTopicArn,UsePreviousValue=true ParameterKey=LogSubscriptionPrincipalArn,",
     );
   });
 });
