@@ -315,7 +315,8 @@ an empty token refuses every request.
   Slack actions and Discord interactions go to one owner cell, because the
   provider uses one cell's response. A Slack button whose block ID is
   `cell:<cell id>` goes to that cell instead, for messages a cell posts to a
-  Slack team that another cell holds. OAuth callbacks return to the cell named
+  Slack team that another cell holds: the named cell handles it even when it
+  does not hold the team, and an unknown cell ID is routed by team as usual. OAuth callbacks return to the cell named
   in their state.
 - The user support page lists the users of every cell.
 - A person signed in to a cell where they belong to no workspace is told which

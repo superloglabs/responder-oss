@@ -189,7 +189,7 @@ export function cellWebhookRouter(
             provider: tenant.provider,
           }),
         );
-        return context.json({ error: "The tenant's cell is unavailable" }, 502);
+        return context.json({ error: "The button's cell is unavailable" }, 502);
       }
       return relayed(forwarded);
     }
