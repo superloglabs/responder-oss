@@ -15,6 +15,7 @@ import {
   type SignalFindingSummary,
   type SignalPeriod,
 } from "./model";
+import { SignalComputerIllustration } from "./computer-illustration";
 import { PeriodSelect, Severity } from "./shared";
 
 function useDebounced<T>(value: T, delayMs: number) {
@@ -98,11 +99,15 @@ export function SignalFindings() {
         </tr>)}</tbody>
       </table></div>
     </section>)}
-    {!loading && !error && findings.length === 0 && <div className="signalEmpty">
-      {filtered
-        ? <><h2>No matching findings</h2><p>Try another search or date range.</p><Button onClick={() => { setSearch(""); setDays(14); }}>Clear filters</Button></>
-        : <><h2>No findings yet</h2><p>Signal posts problems that need someone to act here and in Slack.</p></>}
-    </div>}
+    {!loading && !error && findings.length === 0 && (filtered
+      ? <div className="signalEmpty">
+        <h2>No matching findings</h2><p>Try another search or date range.</p><Button onClick={() => { setSearch(""); setDays(14); }}>Clear filters</Button>
+      </div>
+      : <div className="signalEmpty signalEmpty--waiting">
+        <SignalComputerIllustration />
+        <h2>No findings yet</h2>
+        <p>We’re now looking through billions of logs. As soon as we see an issue, we’ll report it.</p>
+      </div>)}
     <footer className="signalListFooter">
       <span role="status">{loading ? "Loading…" : `Showing ${findings.length} of ${total} findings`}</span>
       {!loading && error
