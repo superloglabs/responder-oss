@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { organizationHasCapability } from "../../../../packages/core/src/db/organization-capabilities.js";
+import { organizationReceivesTelemetry } from "../../../../packages/core/src/db/organization-capabilities.js";
 import {
   createTelemetryIngestKey,
   listTelemetryIngestKeys,
@@ -20,7 +20,7 @@ const keySchema = z.object({
 });
 
 async function requireIngest(context: ManagementContext): Promise<void> {
-  if (!telemetryCollectorUrl() || !(await organizationHasCapability(context.organizationId, "telemetry"))) {
+  if (!telemetryCollectorUrl() || !(await organizationReceivesTelemetry(context.organizationId))) {
     throw new ManagementError(404, "Sending telemetry is not available in this workspace.", "telemetry_unavailable");
   }
 }

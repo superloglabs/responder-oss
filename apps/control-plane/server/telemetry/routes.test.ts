@@ -49,6 +49,7 @@ function routes(overrides: Partial<TelemetryRouteDependencies> = {}) {
     hasDashboards: vi.fn(async () => true),
     hasTelemetry: vi.fn(async () => true),
     listServices: vi.fn(async () => ["checkout", "api"]),
+    receivesTelemetry: vi.fn(async () => true),
     metricCatalog: vi.fn(async () => [
       {
         attributes: ["http.route"],
@@ -257,6 +258,27 @@ describe("telemetry routes", () => {
       expect.anything(),
       "metrics",
     );
+  });
+
+  it("lists services, and nothing else, for a Signal workspace without the telemetry product", async () => {
+    const { app, dependencies } = routes({ hasTelemetry: vi.fn(async () => false) });
+
+    const response = await app.request("/services?signal=all");
+
+    await expect(response.json()).resolves.toEqual({ services: ["checkout", "api"] });
+    expect(dependencies.receivesTelemetry).toHaveBeenCalledWith(organizationId);
+    expect((await app.request("/logs")).status).toBe(404);
+    expect((await app.request("/status")).status).toBe(404);
+    const priced = await app.request("/ai-price-overrides", {
+      body: JSON.stringify({ inputMtok: 2, model: "ft:gpt-4o:acme", outputMtok: 8 }),
+      headers: { "content-type": "application/json" },
+      method: "PUT",
+    });
+    expect(priced.status).toBe(404);
+    expect(dependencies.saveAiPriceOverride).not.toHaveBeenCalled();
+
+    const neither = routes({ hasTelemetry: vi.fn(async () => false), receivesTelemetry: vi.fn(async () => false) });
+    expect((await neither.app.request("/services")).status).toBe(404);
   });
 
   it("queries traces with the chosen filters and window", async () => {

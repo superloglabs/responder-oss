@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { organizationHasCapability } from "../../../../packages/core/src/db/organization-capabilities.js";
+import { organizationReceivesTelemetry } from "../../../../packages/core/src/db/organization-capabilities.js";
 import {
   createTelemetryIngestKey,
   listTelemetryIngestKeys,
@@ -9,8 +9,8 @@ import {
 import { telemetryCollectorUrl } from "../../../../packages/core/src/telemetry/client.js";
 import { getActiveTenant } from "../tenant.js";
 
-// Keys applications send telemetry with. Available with the telemetry
-// capability in a cell that accepts telemetry.
+// Keys applications send telemetry with. Available with the telemetry or
+// Signal capability in a cell that accepts telemetry.
 export type IngestKeyRouteDependencies = {
   collectorUrl: () => string | null;
   createKey: typeof createTelemetryIngestKey;
@@ -28,7 +28,7 @@ export type IngestKeyRouteDependencies = {
 const defaultDependencies: IngestKeyRouteDependencies = {
   collectorUrl: telemetryCollectorUrl,
   createKey: createTelemetryIngestKey,
-  hasTelemetry: (organizationId) => organizationHasCapability(organizationId, "telemetry"),
+  hasTelemetry: organizationReceivesTelemetry,
   listKeys: listTelemetryIngestKeys,
   revokeKey: revokeTelemetryIngestKey,
   tenant: getActiveTenant,

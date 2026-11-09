@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { organizationHasCapability } from "../../../../packages/core/src/db/organization-capabilities.js";
+import { organizationHasCapability, organizationReceivesTelemetry } from "../../../../packages/core/src/db/organization-capabilities.js";
 import {
   AiPriceOverrideConflictError,
   deleteAiPriceOverride,
@@ -70,7 +70,8 @@ import { getActiveTenant } from "../tenant.js";
 
 // Read-only access to a workspace's OpenTelemetry data. A workspace sees
 // telemetry only with the telemetry capability and a configured store, and
-// only the data tagged with its organization ID.
+// only the data tagged with its organization ID. The services list also
+// answers Signal workspaces, for Signal setup.
 export type TelemetryRouteDependencies = {
   // Model calls in the window whose spans report no token counts.
   aiCallsWithoutUsage: (client: ClickHouseClient, organizationId: string, range: TimeRange) => Promise<number>;
@@ -145,6 +146,9 @@ export type TelemetryRouteDependencies = {
   ) => Promise<Array<{ bucket: string; count: number; group: string }>>;
   hasDashboards: (organizationId: string) => Promise<boolean>;
   hasTelemetry: (organizationId: string) => Promise<boolean>;
+  // Also true for Signal workspaces, which receive telemetry without the
+  // telemetry product. Only the services list accepts them.
+  receivesTelemetry: (organizationId: string) => Promise<boolean>;
   // Every metric in the window, with its description, services and attributes.
   metricCatalog: (client: ClickHouseClient, organizationId: string, range: TimeRange) => Promise<unknown>;
   // The attributes one metric carries and their most frequent values.
@@ -289,6 +293,7 @@ const defaultDependencies: TelemetryRouteDependencies = {
     return { logs: trace.logs as unknown[], spans: trace.spans as unknown[] };
   },
   queryTraces: queryTracesAggregated,
+  receivesTelemetry: organizationReceivesTelemetry,
   tenant: getActiveTenant,
   traceOverview,
 };
@@ -578,14 +583,14 @@ export function createTelemetryRoutes(
   }
 
   // The workspace's ID and store, or why the request is refused.
-  async function access(headers: Headers): Promise<
+  async function access(headers: Headers, allowed = dependencies.hasTelemetry): Promise<
     | { client: ClickHouseClient; ok: true; organizationId: string }
     | { error: string; ok: false; status: 401 | 403 | 404 | 409 }
   > {
     const tenant = await dependencies.tenant(headers);
     if (tenant.ok === false) return { error: tenant.error, ok: false, status: tenant.status };
     const client = dependencies.client();
-    if (!client || !(await dependencies.hasTelemetry(tenant.organizationId))) {
+    if (!client || !(await allowed(tenant.organizationId))) {
       return { error: "Telemetry is not available", ok: false, status: 404 };
     }
     return { client, ok: true, organizationId: tenant.organizationId };
@@ -733,8 +738,9 @@ export function createTelemetryRoutes(
       if (!result.ok) return context.json({ error: result.error }, result.status);
       return context.json({ values: result.values });
     })
+    // Signal setup checks here whether services send data.
     .get("/services", async (context) => {
-      const granted = await access(context.req.raw.headers);
+      const granted = await access(context.req.raw.headers, dependencies.receivesTelemetry);
       if (!granted.ok) return context.json({ error: granted.error }, granted.status);
       const query = servicesSchema.safeParse(context.req.query());
       if (!query.success) return context.json({ error: "Invalid service query" }, 400);

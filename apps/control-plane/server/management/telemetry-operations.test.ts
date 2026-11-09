@@ -31,6 +31,9 @@ vi.mock("../../../../packages/core/src/db/oauth-access-tokens.js", () => ({
 vi.mock("../../../../packages/core/src/db/organization-capabilities.js", () => ({
   listEnabledOrganizationCapabilities: vi.fn().mockResolvedValue([]),
   organizationHasCapability: mocks.capability,
+  // The telemetry product or Signal, like the real check.
+  organizationReceivesTelemetry: async (organizationId: string) =>
+    (await mocks.capability(organizationId, "telemetry")) || (await mocks.capability(organizationId, "signal")),
 }));
 vi.mock("../../../../packages/core/src/telemetry/client.js", () => ({
   getTelemetryClient: mocks.client,
@@ -296,6 +299,13 @@ describe("telemetry operations", () => {
       since: "2026-10-15T10:00:00.000Z",
       until: "2026-10-16T10:00:00.000Z",
     });
+  });
+
+  it("reads telemetry in a Signal workspace without the telemetry product", async () => {
+    mocks.capability.mockImplementation(async (_organization: string, capability: string) => capability === "signal");
+    mocks.listServices.mockResolvedValue(["api"]);
+
+    expect((await callTool("list_services")).body).toMatchObject({ services: ["api"] });
   });
 
   it("is unavailable without the telemetry feature or a telemetry store", async () => {
