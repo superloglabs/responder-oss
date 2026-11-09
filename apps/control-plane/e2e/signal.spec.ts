@@ -370,6 +370,7 @@ test("searches, pages, and acts on findings", async ({ page, context }) => {
   await expect(page.getByText("Showing 19 of 19 findings")).toBeVisible();
   await page.getByLabel("Search findings").fill("nonsense");
   await expect(page.getByRole("heading", { name: "No matching findings" })).toBeVisible();
+  await expect(page.getByText(/Showing \d+ of \d+ findings/u)).toHaveCount(0);
   await page.getByRole("button", { name: "Clear filters" }).click();
   await page.getByRole("link", { name: "Checkout requests time out after the payment client retry change", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Evidence", exact: true })).toBeVisible();
