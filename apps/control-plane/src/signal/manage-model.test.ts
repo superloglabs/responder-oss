@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { IntegrationAccount } from "../agents-api";
-import { manageableAccounts, manageView } from "./manage-model";
+import { accountSummary, manageableAccounts, manageView } from "./manage-model";
 
 function account(input: Partial<IntegrationAccount>): IntegrationAccount {
   return { id: "account-1", displayName: "Acme", status: "connected", resourceCount: 0, updatedAt: "2026-11-07T10:00:00Z", ...input };
@@ -69,5 +69,14 @@ describe("Signal manage pages", () => {
       account({ id: "b", status: "pending" }),
       account({ id: "c", status: "error" }),
     ]).map((candidate) => candidate.id)).toEqual(["a", "c"]);
+  });
+
+  it("sums up each connected account in one line", () => {
+    expect(accountSummary("datadog", account({ displayName: "acme-prod", details: { site: "datadoghq.com" } }))).toBe("acme-prod · US1");
+    expect(accountSummary("sentry", account({ resourceCount: 9, details: { organizationSlug: "acme" } }))).toBe("acme · 9 projects");
+    expect(accountSummary("grafana", account({ details: { url: "https://acme.grafana.net" } }))).toBe("acme.grafana.net");
+    expect(accountSummary("aws", account({ details: { awsAccountId: "123456789012" } }))).toBe("Account 123456789012");
+    expect(accountSummary("gcp", account({ displayName: "GCP · acme-prod" }))).toBe("acme-prod");
+    expect(accountSummary("linear", account({}))).toBe("Acme");
   });
 });

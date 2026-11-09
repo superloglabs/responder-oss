@@ -35,12 +35,23 @@ export interface SignalUsageDay {
   accepted: number;
 }
 
+export type SignalCooldownHours = 6 | 24 | 72 | 168;
+
 export interface SignalSettings {
   enabled: boolean;
   // True once Signal has been turned on, even if it is off now.
   setupComplete?: boolean;
   slack: { integrationAccountId: string; channelId: string } | null;
   repositoryIds: string[];
+  // Findings below it stay on the Findings page: not posted, not billed.
+  minimumSeverity: SignalSeverity;
+  // Null allows the most the workspace may set, `limits.dailyInvestigationCap`.
+  dailyInvestigationCap: number | null;
+  dismissalCooldownHours: SignalCooldownHours;
+  // Exact service names, or a prefix ending in "*".
+  skippedServices: string[];
+  notes: string;
+  limits: { dailyInvestigationCap: number };
 }
 
 export interface SignalPlan {
@@ -103,12 +114,40 @@ export function fetchUsage(days: SignalPeriod) {
   return signalJson<{ daily: SignalUsageDay[] }>(`/usage?days=${days}`);
 }
 
-export function fetchSignalSettings() {
-  return signalJson<SignalSettings>("/settings");
+// Older servers return only `enabled`, `slack`, and `repositoryIds`; the
+// other fields take the server's defaults.
+export function withSettingsDefaults(settings: Partial<SignalSettings> & Pick<SignalSettings, "enabled" | "slack" | "repositoryIds">): SignalSettings {
+  return {
+    ...settings,
+    minimumSeverity: settings.minimumSeverity ?? "SEV-3",
+    dailyInvestigationCap: settings.dailyInvestigationCap ?? null,
+    dismissalCooldownHours: settings.dismissalCooldownHours ?? 24,
+    skippedServices: settings.skippedServices ?? [],
+    notes: settings.notes ?? "",
+    limits: settings.limits ?? { dailyInvestigationCap: 50 },
+  };
 }
 
-export function saveSignalSettings(settings: SignalSettings) {
-  return signalJson<SignalSettings>("/settings", jsonBody("PUT", settings));
+// What a save sends: everything but the read-only fields.
+export function settingsBody(settings: SignalSettings) {
+  return {
+    enabled: settings.enabled,
+    slack: settings.slack,
+    repositoryIds: settings.repositoryIds,
+    minimumSeverity: settings.minimumSeverity,
+    dailyInvestigationCap: settings.dailyInvestigationCap,
+    dismissalCooldownHours: settings.dismissalCooldownHours,
+    skippedServices: settings.skippedServices,
+    notes: settings.notes,
+  };
+}
+
+export async function fetchSignalSettings() {
+  return withSettingsDefaults(await signalJson<SignalSettings>("/settings"));
+}
+
+export async function saveSignalSettings(settings: SignalSettings) {
+  return withSettingsDefaults(await signalJson<SignalSettings>("/settings", jsonBody("PUT", settingsBody(settings))));
 }
 
 export function fetchSignalBilling() {
