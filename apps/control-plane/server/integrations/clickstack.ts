@@ -59,7 +59,7 @@ export async function registerClickStackCloudClient(
       "content-type": "application/json",
     },
     body: JSON.stringify({
-      client_name: "Responder",
+      client_name: "Superlog",
       grant_types: ["authorization_code", "refresh_token"],
       redirect_uris: [redirectUri],
       response_types: ["code"],

@@ -3792,7 +3792,7 @@ describe("integration callback routing", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({
       client_id: "https://responder.example/api/integrations/railway/client-metadata.json",
-      client_name: "Responder",
+      client_name: "Superlog",
       grant_types: ["authorization_code", "refresh_token"],
       redirect_uris: ["https://responder.example/api/integrations/railway/callback"],
       token_endpoint_auth_method: "none",

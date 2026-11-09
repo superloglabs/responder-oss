@@ -57,7 +57,7 @@ describe("custom MCP security", () => {
     expect(provider.state()).toBe("state");
     expect(provider.codeVerifier()).toBe("verifier");
     expect(provider.clientMetadata).toMatchObject({
-      client_name: "Responder",
+      client_name: "Superlog",
       client_uri: "https://responder.example/",
       logo_uri:
         "https://responder.example/superlog-wordmark.svg",
