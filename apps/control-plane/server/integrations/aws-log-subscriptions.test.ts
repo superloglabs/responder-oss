@@ -386,7 +386,20 @@ describe("log subscription routes", () => {
     expect((await app(missing.deps).request(`${base}/stack-update`)).status).toBe(404);
   });
 
-  it("tries waiting regions again while the page is open, at most every 20 seconds, without holding up the page", async () => {
+  it("answers the page while the retry of waiting regions is still running", async () => {
+    let finish: (rows: AwsLogSubscription[]) => void = () => {};
+    const { deps } = dependencies({
+      claim: vi.fn(() => new Promise<AwsLogSubscription[]>((resolve) => { finish = resolve; })),
+      list: vi.fn(async () => waitingRows()),
+    });
+    const response = await app(deps).request(base);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ subscriptions: [{ status: "waiting" }] });
+    expect(deps.claim).toHaveBeenCalledTimes(1);
+    finish([]);
+  });
+
+  it("tries waiting regions again while the page is open, at most every 20 seconds", async () => {
     const { advance, deps } = dependencies({ list: vi.fn(async () => waitingRows()) });
     const target = app(deps);
     // Lets the background passes the requests started finish.
