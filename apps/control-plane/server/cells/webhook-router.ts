@@ -4,7 +4,7 @@ import {
   hasWebhookTenant,
   type WebhookTenant,
 } from "../../../../packages/core/src/db/webhook-tenants.js";
-import { webhookRoutingKey } from "./routing-keys.js";
+import { pinnedSlackActionCell, webhookRoutingKey } from "./routing-keys.js";
 
 // Providers send each app's webhooks to one URL. In a multi-cell deployment
 // the cell receiving them handles tenants it holds and forwards the request,
@@ -170,6 +170,29 @@ export function cellWebhookRouter(
     const body = new Uint8Array(await context.req.raw.clone().arrayBuffer());
     const tenant = webhookRoutingKey(context.req.path, context.req.header("content-type"), body);
     if (!tenant) return next();
+
+    // A press on a button that names its cell goes to that cell alone. An
+    // unknown cell is ignored and the press is routed by its tenant.
+    const pinned = pinnedSlackActionCell(context.req.path, context.req.header("content-type"), body);
+    if (pinned === directory.current) return next();
+    const pinnedCell = directory.cells.find((cell) => cell.id === pinned);
+    if (pinnedCell) {
+      let forwarded: Response;
+      try {
+        forwarded = await forwardTo(context, pinnedCell, body, directory.current, tenant, dependencies);
+      } catch (error) {
+        console.error(
+          JSON.stringify({
+            cell: pinnedCell.id,
+            errorMessage: errorMessage(error),
+            event: "cell_webhook_forward_failed",
+            provider: tenant.provider,
+          }),
+        );
+        return context.json({ error: "The tenant's cell is unavailable" }, 502);
+      }
+      return relayed(forwarded);
+    }
     const interactive = interactivePaths.test(context.req.path);
 
     // Copies to other holders never delay or change this cell's response.
@@ -238,11 +261,15 @@ export function cellWebhookRouter(
       );
       return context.json({ error: "The tenant's cell is unavailable" }, 502);
     }
-    return new Response(await forwarded.arrayBuffer(), {
-      headers: forwarded.headers.get("content-type")
-        ? { "content-type": forwarded.headers.get("content-type")! }
-        : {},
-      status: forwarded.status,
-    });
+    return relayed(forwarded);
   };
+}
+
+async function relayed(forwarded: Response): Promise<Response> {
+  return new Response(await forwarded.arrayBuffer(), {
+    headers: forwarded.headers.get("content-type")
+      ? { "content-type": forwarded.headers.get("content-type")! }
+      : {},
+    status: forwarded.status,
+  });
 }
