@@ -133,6 +133,19 @@
 .signalPrompt pre { margin: 8px 0 0; padding: 12px 14px; border: 1px solid #e5e5e5; border-radius: 6px; background: #fafafa; white-space: pre-wrap; overflow-wrap: anywhere; font: 400 12px/20px ui-monospace, "SFMono-Regular", Consolas, monospace; }
 .signalListFooter { display: flex; justify-content: space-between; align-items: center; color: #666; font-size: 12px; }
 .signalEmpty { padding: 40px 16px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.signalEmpty--waiting { padding-top: 16px; gap: 4px; }
+.signalEmpty--waiting h2 { color: #666; }
+.signal .signalEmpty--waiting p { max-width: 360px; color: #777; }
+.signalComputer { display: block; max-width: 100%; height: auto; }
+.signalComputer__logs { animation: signal-computer-logs 12s linear infinite; }
+.signalComputer__scan { animation: signal-computer-scan 3.6s cubic-bezier(.45, 0, .55, 1) infinite alternate; }
+.signalComputer__light { animation: signal-computer-light 1.8s ease-in-out infinite; }
+@keyframes signal-computer-logs { to { transform: translateY(-60px); } }
+@keyframes signal-computer-scan { to { transform: translateY(34px); } }
+@keyframes signal-computer-light { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) {
+  .signalComputer__logs, .signalComputer__scan, .signalComputer__light { animation: none; }
+}
 .signalDetail { display: flex; flex-direction: column; gap: 32px; }
 .signalDetailHeader { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; margin-top: 12px; }
 .signalDetailHeader > div:first-child { max-width: 619px; flex: 1; }
