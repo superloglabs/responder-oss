@@ -4,6 +4,7 @@ import {
   context,
   metrics,
   propagation,
+  SpanStatusCode,
   trace,
   type Attributes,
   type AttributeValue,
@@ -11,6 +12,7 @@ import {
   type ContextManager,
   type Link,
   type SpanKind,
+  type SpanStatus,
 } from "@opentelemetry/api";
 import { logs, SeverityNumber, type Logger } from "@opentelemetry/api-logs";
 import { OTLPLogExporter } from "@opentelemetry/exporter-logs-otlp-proto";
@@ -26,6 +28,8 @@ import {
   SamplingDecision,
   type Sampler,
   type SamplingResult,
+  type Span,
+  type SpanProcessor,
 } from "@opentelemetry/sdk-trace-base";
 import {
   ATTR_SERVICE_NAME,
@@ -200,6 +204,57 @@ export class DetachedSpanSampler implements Sampler {
   }
 }
 
+// The HTTP status of a Better Auth APIError, such as 401 for a wrong
+// password. Better Auth throws these to answer a request.
+function betterAuthClientErrorStatus(error: unknown): number | null {
+  if (error === null || typeof error !== "object") return null;
+  const { name, statusCode } = error as { name?: unknown; statusCode?: unknown };
+  if (name !== "APIError" || typeof statusCode !== "number") return null;
+  return statusCode >= 400 && statusCode < 500 ? statusCode : null;
+}
+
+// Better Auth's own spans record every APIError it throws as an exception,
+// including 4xx answers such as "Invalid email or password". Those are the
+// client's mistakes, so each one would open an error issue. This processor
+// records the status code on the span instead and leaves its status unset,
+// as Better Auth already does for redirects. Server errors are kept.
+export class BetterAuthClientErrorProcessor implements SpanProcessor {
+  onStart(span: Span): void {
+    if (span.instrumentationScope.name !== "better-auth") return;
+    const recordException = span.recordException.bind(span);
+    const setStatus = span.setStatus.bind(span);
+    // Better Auth sets the ERROR status right after recording the
+    // exception. Only that one status is dropped.
+    let skipErrorStatus = false;
+    span.recordException = (exception, time) => {
+      const status = betterAuthClientErrorStatus(exception);
+      skipErrorStatus = status !== null;
+      if (status === null) {
+        recordException(exception, time);
+        return;
+      }
+      span.setAttribute("http.response.status_code", status);
+    };
+    span.setStatus = (status: SpanStatus) => {
+      if (skipErrorStatus && status.code === SpanStatusCode.ERROR) {
+        skipErrorStatus = false;
+        return span;
+      }
+      return setStatus(status);
+    };
+  }
+
+  onEnd(): void {}
+
+  forceFlush(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  shutdown(): Promise<void> {
+    return Promise.resolve();
+  }
+}
+
 const maxLogBodyLength = 16_000;
 const maxLogAttributeLength = 4_000;
 const consoleSeverities = {
@@ -305,6 +360,7 @@ export function startNodeTelemetry(options: NodeTelemetryOptions): NodeTelemetry
     resource,
     sampler: new DetachedSpanSampler(new SentrySampler(options.sentryClient)),
     spanProcessors: [
+      new BetterAuthClientErrorProcessor(),
       new SentrySpanProcessor({ client: options.sentryClient }),
       new BatchSpanProcessor(new OTLPTraceExporter()),
     ],
