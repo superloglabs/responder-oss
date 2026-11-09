@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { IconCheck, IconSearch } from "@tabler/icons-react";
+import { Combobox } from "@base-ui/react/combobox";
+import { IconCheck, IconChevronDown, IconSearch } from "@tabler/icons-react";
 import { fetchAgentOptions, fetchIntegrations, type AgentOptions, type IntegrationSummary } from "../agents-api";
 import { providerDisplayName } from "../components/provider-glyphs";
 import { ScrollArea } from "../components/ui/scroll-area";
@@ -56,6 +57,8 @@ const descriptions: Record<Step, string> = {
   plan: "Start a monthly subscription to receive investigated findings in Slack.",
 };
 const stepNumber: Record<Step, number> = { telemetry: 1, code: 2, repositories: 2, slack: 3, context: 4, plan: 5 };
+
+const channelName = (displayName: string) => displayName.replace(/^#/u, "");
 
 export function SignalSetup() {
   const { step: stepParam = "telemetry", page: pageParam, mode } = useParams();
@@ -256,15 +259,37 @@ export function SignalSetup() {
         connected={connected("slack")} onConnect={() => connect("slack")} onManage={() => navigate("/settings")} />
       <div className="signalSlackFields"><div className="signalField">
         <label htmlFor="signal-findings-channel"><strong>Findings channel</strong><span>Issues that need your attention.</span></label>
-        <select id="signal-findings-channel" aria-label="Findings channel" disabled={channels.length === 0}
-          value={draft.slack?.channelId ?? ""}
-          onChange={(e) => {
-            const channel = channels.find((candidate) => candidate.externalId === e.target.value);
-            setDraft({ ...draft, slack: channel ? { integrationAccountId: channel.integrationAccountId, channelId: channel.externalId } : null });
-          }}>
-          <option value="">Choose a channel</option>
-          {channels.map((channel) => <option key={channel.id} value={channel.externalId}># {channel.displayName.replace(/^#/u, "")}</option>)}
-        </select>
+        <Combobox.Root
+          items={channels}
+          value={channels.find((channel) => channel.integrationAccountId === draft.slack?.integrationAccountId && channel.externalId === draft.slack?.channelId) ?? null}
+          disabled={channels.length === 0}
+          modal={false}
+          itemToStringLabel={(channel) => channelName(channel.displayName)}
+          isItemEqualToValue={(channel, value) => channel.id === value.id}
+          filter={(channel, query) => channelName(channel.displayName).toLocaleLowerCase().includes(query.trim().replace(/^#/u, "").toLocaleLowerCase())}
+          onValueChange={(channel) => setDraft({ ...draft, slack: channel ? { integrationAccountId: channel.integrationAccountId, channelId: channel.externalId } : null })}
+        >
+          <Combobox.InputGroup className="signalChannelPicker">
+            <span aria-hidden="true">#</span>
+            <Combobox.Input id="signal-findings-channel" aria-label="Findings channel" placeholder="Choose a channel" />
+            <Combobox.Trigger className="signalChannelPicker__trigger" aria-label="Show Slack channels">
+              <IconChevronDown aria-hidden="true" size={14} />
+            </Combobox.Trigger>
+          </Combobox.InputGroup>
+          <Combobox.Portal>
+            <Combobox.Positioner className="signalChannelPicker__positioner" sideOffset={4} align="start">
+              <Combobox.Popup className="signalChannelPicker__popup">
+                <Combobox.Empty className="signalChannelPicker__empty">No channels match.</Combobox.Empty>
+                <Combobox.List className="signalChannelPicker__list" aria-label="Slack channels">
+                  {(channel: (typeof channels)[number]) => <Combobox.Item key={channel.id} value={channel} className="signalChannelPicker__option">
+                    <span># {channelName(channel.displayName)}</span>
+                    <Combobox.ItemIndicator><IconCheck aria-hidden="true" size={14} /></Combobox.ItemIndicator>
+                  </Combobox.Item>}
+                </Combobox.List>
+              </Combobox.Popup>
+            </Combobox.Positioner>
+          </Combobox.Portal>
+        </Combobox.Root>
       </div></div>
     </div>}
 

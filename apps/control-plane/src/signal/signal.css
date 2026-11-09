@@ -79,6 +79,23 @@
 .signalField strong { font-weight: 600; }
 .signalField label > span { color: #666; font-size: 12px; }
 .signal .signalField select { width: 240px; flex-shrink: 0; border-radius: 6px; }
+.signalChannelPicker { display: flex; align-items: center; gap: 4px; width: 240px; height: 28px; flex-shrink: 0; padding: 0 2px 0 8px; background: #fff; border: .5px solid #ddd; border-radius: 6px; box-shadow: 0 1px 1px #0000000d; color: #777; }
+.signalChannelPicker:focus-within { outline: 2px solid var(--signal-accent); outline-offset: 2px; }
+.signalChannelPicker:has(input:disabled) { opacity: .45; }
+.signal .signalChannelPicker input { flex: 1; width: 100%; min-width: 0; height: 24px; padding: 0; border: 0; border-radius: 0; background: transparent; color: #161616; font: 500 13px/20px var(--ds-font-sans); }
+.signal .signalChannelPicker input:focus-visible { outline: none; }
+.signal .signalChannelPicker__trigger { display: flex; align-items: center; justify-content: center; flex-shrink: 0; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: #666; cursor: pointer; }
+.signalChannelPicker__trigger:hover:not(:disabled) { background: #ededed; }
+.signalChannelPicker__trigger:disabled { cursor: not-allowed; }
+.signalChannelPicker__positioner { z-index: 10; width: var(--anchor-width); max-width: var(--available-width); }
+.signalChannelPicker__popup { overflow: hidden; border: .5px solid #ddd; border-radius: 6px; background: #fff; box-shadow: 0 8px 24px #0000001f, 0 1px 2px #0000000d; color: #161616; font: 500 13px/20px var(--ds-font-sans); }
+.signalChannelPicker__list { max-height: min(240px, var(--available-height)); overflow-y: auto; overscroll-behavior-y: contain; padding: 4px; }
+.signalChannelPicker__option { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 28px; padding: 4px 8px; border-radius: 4px; cursor: pointer; }
+.signalChannelPicker__option > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.signalChannelPicker__option[data-highlighted] { background: #f0f0f0; }
+.signalChannelPicker__option svg { flex-shrink: 0; color: var(--signal-accent); }
+.signalChannelPicker__empty:empty { display: none; }
+.signalChannelPicker__empty { padding: 12px; color: #777; font-weight: 400; text-align: center; }
 .signal select { appearance: auto; border: .5px solid #ddd; border-radius: 4px; height: 28px; background: #fff; padding: 3px 8px; color: #161616; font: 500 13px/20px var(--ds-font-sans); box-shadow: 0 1px 1px #0000000d; }
 .signal select:disabled { opacity: .45; }
 .signalPlans { display: flex; gap: 16px; }
@@ -215,6 +232,7 @@
   .signalSetup, .signalFindings { margin-top: 8px; }
   .signalField { align-items: stretch; flex-direction: column; gap: 12px; }
   .signal .signalField select { width: 100%; }
+  .signalChannelPicker { width: 100%; }
   .signalConnection { padding: 16px 12px; gap: 12px; flex-wrap: wrap; }
   .signalConnection__actions { margin-left: auto; }
   .signalConnected { font-size: 12px; }

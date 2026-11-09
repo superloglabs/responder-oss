@@ -194,7 +194,10 @@ test("sets up Signal with the workspace's real connections and turns it on after
   await next.click();
   await expect(page).toHaveURL(/\/signal\/setup\/slack$/);
   await expect(next).toBeDisabled();
-  await page.getByLabel("Findings channel").selectOption("C02");
+  await page.getByLabel("Findings channel").fill("eng");
+  await expect(page.getByRole("option", { name: "# incidents" })).toHaveCount(0);
+  await page.getByRole("option", { name: "# engineering" }).click();
+  await expect(page.getByLabel("Findings channel")).toHaveValue("engineering");
   await next.click();
   await page.getByRole("button", { name: "Skip for now" }).click();
   await expect(page).toHaveURL(/\/signal\/setup\/plan$/);
