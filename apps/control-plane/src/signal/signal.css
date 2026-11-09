@@ -96,6 +96,8 @@
 .signalChannelPicker__option svg { flex-shrink: 0; color: var(--signal-accent); }
 .signalChannelPicker__empty:empty { display: none; }
 .signalChannelPicker__empty { padding: 12px; color: #777; font-weight: 400; text-align: center; }
+.signalChannelField { display: flex; flex-direction: column; gap: 6px; width: 240px; flex-shrink: 0; }
+.signal .signalChannelHint { color: #666; font-size: 12px; line-height: 16px; }
 .signal select { appearance: auto; border: .5px solid #ddd; border-radius: 4px; height: 28px; background: #fff; padding: 3px 8px; color: #161616; font: 500 13px/20px var(--ds-font-sans); box-shadow: 0 1px 1px #0000000d; }
 .signal select:disabled { opacity: .45; }
 .signalPlans { display: flex; gap: 16px; }
@@ -232,7 +234,7 @@
   .signalSetup, .signalFindings { margin-top: 8px; }
   .signalField { align-items: stretch; flex-direction: column; gap: 12px; }
   .signal .signalField select { width: 100%; }
-  .signalChannelPicker { width: 100%; }
+  .signalChannelField, .signalChannelPicker { width: 100%; }
   .signalConnection { padding: 16px 12px; gap: 12px; flex-wrap: wrap; }
   .signalConnection__actions { margin-left: auto; }
   .signalConnected { font-size: 12px; }
@@ -422,17 +424,17 @@
 .signalSourceRow__more { padding: 0 20px 20px 68px; }
 .signalSourceRow__more .signalRepositories { padding: 0 0 12px; }
 .signalChips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.signalChip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 4px; background: #fff; box-shadow: inset 0 0 0 .5px #00000020; color: #444; font: 400 12px/18px ui-monospace, "SFMono-Regular", Consolas, monospace; }
+.signalChip { display: inline-flex; max-width: 100%; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 4px; background: #fff; box-shadow: inset 0 0 0 .5px #00000020; color: #444; font: 400 12px/18px ui-monospace, "SFMono-Regular", Consolas, monospace; }
 .signalChip:has(button) { padding-right: 6px; }
-.signalChip code { font: inherit; }
+.signalChip code { min-width: 0; font: inherit; overflow-wrap: anywhere; }
 .signalChip button { display: flex; padding: 0; border: 0; background: none; color: #777; cursor: pointer; }
 .signalChip button:hover { color: #202020; }
-.signalSkipped { display: flex; width: 360px; flex-shrink: 0; flex-direction: column; align-items: flex-end; gap: 6px; }
+.signalSkipped { display: flex; flex: 0 1 360px; min-width: 0; flex-direction: column; align-items: flex-end; gap: 6px; }
 .signalSkipped .signalChips { justify-content: flex-end; }
 .signalChipAdd { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 6px; border: 0; border-radius: 4px; background: none; color: #666; font: 500 12px/18px var(--ds-font-sans); cursor: pointer; }
 .signalChipAdd:hover { background: #ededed; color: #202020; }
-.signalChipForm { display: inline-flex; align-items: center; gap: 6px; }
-.signalChipForm input { width: 160px; height: 24px; padding: 0 8px; border: 0; border-radius: 4px; background: #fff; box-shadow: 0 0 0 .5px #00000024, inset 0 1px 1px #0000000d; color: #202020; font: 400 12px/18px ui-monospace, "SFMono-Regular", Consolas, monospace; }
+.signalChipForm { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; max-width: 100%; }
+.signalChipForm input { width: 160px; max-width: 100%; min-width: 0; height: 24px; padding: 0 8px; border: 0; border-radius: 4px; background: #fff; box-shadow: 0 0 0 .5px #00000024, inset 0 1px 1px #0000000d; color: #202020; font: 400 12px/18px ui-monospace, "SFMono-Regular", Consolas, monospace; }
 .signalChipForm input[aria-invalid="true"] { box-shadow: 0 0 0 1px #b33d43; }
 .signal .signalChipForm .dsButton { height: 24px; min-height: 24px; padding: 2px 8px; font-size: 12px; }
 .signalNotes { min-height: 76px; padding: 8px 10px; border: 0; border-radius: 6px; background: #fff; box-shadow: 0 1px 1.5px #0000001a, 0 0 0 .5px #00000024; color: #202020; font: 400 13px/20px var(--ds-font-sans); resize: vertical; }

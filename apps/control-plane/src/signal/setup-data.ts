@@ -107,12 +107,15 @@ export function useOtelServices(key: string | null) {
 export function sourceActions(input: {
   integrations: IntegrationSummary[];
   otelServices: number | null;
+  // With a failed services lookup, OpenTelemetry counts as connected, so its
+  // manage page can show the failure.
+  otelFailed?: boolean;
   listPath: string;
   navigate: (path: string) => void;
 }) {
-  const { integrations, otelServices, listPath, navigate } = input;
+  const { integrations, otelServices, otelFailed = false, listPath, navigate } = input;
   const summary = (provider: string) => integrations.find((integration) => integration.id === provider);
-  const connected = (provider: string) => provider === "otel" ? Boolean(otelServices) : summary(provider)?.state === "connected";
+  const connected = (provider: string) => provider === "otel" ? Boolean(otelServices) || otelFailed : summary(provider)?.state === "connected";
   return {
     listPath,
     summary,

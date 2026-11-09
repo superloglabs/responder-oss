@@ -16,13 +16,13 @@ export function SettingsNotifications({ data, save, status }: SettingsPageProps)
       <div className="signalSettingsCard">
         <SourceRow provider="slack" name="Slack"
           description={connected ? workspace || "Connected" : "Connect your workspace to post findings."}
-          action={<Button disabled={!actions.summary("slack")?.connectUrl} onClick={() => actions.connect("slack")}>
-            {connected ? "Change workspace" : "Connect Slack"}
-          </Button>} />
+          action={connected
+            ? <Button aria-label="Manage Slack" onClick={() => actions.manage("slack")}>Manage</Button>
+            : <Button disabled={!actions.summary("slack")?.connectUrl} onClick={() => actions.connect("slack")}>Connect Slack</Button>} />
         <div className="signalSettingsCard--rows">
           <SettingsRow label="Findings channel" description="Every finding is posted here.">
             <ChannelSelect options={options} value={settings.slack}
-              onChange={(slack) => { if (slack) save({ slack }); }} />
+              onChange={(slack) => save({ slack })} />
           </SettingsRow>
         </div>
       </div>

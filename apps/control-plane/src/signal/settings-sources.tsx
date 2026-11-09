@@ -23,8 +23,9 @@ export function SettingsSources({ data, organizationId, reload, save, status, pr
   mode: string | undefined;
 }) {
   const navigate = useNavigate();
-  const otel = useOtelServices(`${provider ?? ""}/${mode ?? ""}`);
-  const actions = sourceActions({ integrations: data.integrations, otelServices: otel.count, listPath, navigate });
+  // Only the list, the telemetry to add, and OpenTelemetry's page need them.
+  const otel = useOtelServices(!provider || provider === "telemetry" || provider === "otel" ? `${provider ?? ""}/${mode ?? ""}` : null);
+  const actions = sourceActions({ integrations: data.integrations, otelServices: otel.count, otelFailed: otel.failed, listPath, navigate });
 
   if (isConnectPage(provider) && (!mode || mode === "connect")) {
     return <section className="signalSettingsSource">
@@ -43,7 +44,7 @@ export function SettingsSources({ data, organizationId, reload, save, status, pr
   if (provider) return <Navigate replace to={listPath} />;
 
   const summary = (source: Source) => source.provider === "otel"
-    ? `${otel.count} ${otel.count === 1 ? "service" : "services"} sending data`
+    ? otel.failed ? "Could not check for data" : `${otel.count} ${otel.count === 1 ? "service" : "services"} sending data`
     : actions.accounts(source.provider).map((account) => accountSummary(source.provider, account)).join(", ") || "Connected";
   const rows = (sources: Source[], empty: string) => {
     const connected = sources.filter((source) => actions.connected(source.provider));

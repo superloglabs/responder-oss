@@ -32,39 +32,36 @@ export interface SettingsPageProps extends SetupViewProps {
   status: SaveStatus;
 }
 
-// Saves each change as it is made, in order. A change shows at once and is
-// undone if its save fails. The outcome keeps the page it was made on.
+// Saves each change as it is made, one at a time and in order. A change
+// shows at once. The settings shown are the last saved ones plus the changes
+// still waiting, so a failed save undoes only its own change.
 function useSettingsSaver(settings: SignalSettings, setSettings: SetupViewProps["setSettings"]) {
   const [status, setStatus] = useState<{ path: string; status: SaveStatus } | null>(null);
-  const latest = useRef(settings);
+  const confirmed = useRef(settings);
+  const pending = useRef<Array<Partial<SignalSettings>>>([]);
   const queue = useRef<Promise<void>>(Promise.resolve());
-  const pending = useRef(0);
   const failed = useRef(false);
-  useEffect(() => { latest.current = settings; }, [settings]);
+  // Settings loaded again while nothing is saving are the saved ones.
+  useEffect(() => { if (pending.current.length === 0) confirmed.current = settings; }, [settings]);
+  const shown = () => pending.current.reduce<SignalSettings>((next, patch) => ({ ...next, ...patch }), confirmed.current);
 
   function save(patch: Partial<SignalSettings>, path: string) {
-    const before = latest.current;
-    latest.current = { ...before, ...patch };
-    setSettings(latest.current);
-    if (pending.current === 0) failed.current = false;
-    pending.current += 1;
+    if (pending.current.length === 0) failed.current = false;
+    pending.current.push(patch);
+    setSettings(shown());
     setStatus({ path, status: { state: "saving" } });
     queue.current = queue.current.then(async () => {
       try {
-        const saved = await saveSignalSettings(latest.current);
-        pending.current -= 1;
-        if (pending.current > 0) return;
-        latest.current = saved;
-        setSettings(saved, true);
-        if (!failed.current) setStatus({ path, status: { state: "saved" } });
+        confirmed.current = await saveSignalSettings({ ...confirmed.current, ...patch });
       } catch (failure) {
-        pending.current -= 1;
         failed.current = true;
-        const restored = Object.fromEntries(Object.keys(patch).map((key) => [key, before[key as keyof SignalSettings]]));
-        latest.current = { ...latest.current, ...restored };
-        setSettings(latest.current);
         setStatus({ path, status: { state: "error", message: failure instanceof Error ? failure.message : "Could not save." } });
       }
+      // Saves run in order, so this one is first.
+      pending.current.shift();
+      const done = pending.current.length === 0;
+      setSettings(shown(), done);
+      if (done && !failed.current) setStatus({ path, status: { state: "saved" } });
     });
   }
   return {
@@ -86,8 +83,8 @@ export function SignalSettingsView(props: SetupViewProps) {
     const page = provider && ["telemetry", "context"].includes(section!) ? `/${provider}${mode ? `/${mode}` : ""}` : "";
     return <Navigate replace to={`/signal/setup/${mapped}${page}${search}`} />;
   }
-  if (!sections.some((candidate) => candidate.id === section)) return <Navigate replace to="/signal/setup/general" />;
-  if (section !== "sources" && provider) return <Navigate replace to={`/signal/setup/${section}`} />;
+  if (!sections.some((candidate) => candidate.id === section)) return <Navigate replace to={`/signal/setup/general${search}`} />;
+  if (section !== "sources" && provider) return <Navigate replace to={`/signal/setup/${section}${search}`} />;
 
   const pageProps: SettingsPageProps = {
     ...props,

@@ -111,35 +111,41 @@ export function ChannelSelect({ options, value, onChange, disabled = false, clas
   disabled?: boolean;
 }) {
   const channels = slackChannels(options);
-  return <Combobox.Root
-    items={channels}
-    value={channels.find((channel) => channel.integrationAccountId === value?.integrationAccountId && channel.externalId === value?.channelId) ?? null}
-    disabled={disabled || channels.length === 0}
-    modal={false}
-    itemToStringLabel={(channel) => channelName(channel.displayName)}
-    isItemEqualToValue={(channel, selected) => channel.id === selected.id}
-    filter={(channel, query) => channelName(channel.displayName).toLocaleLowerCase().includes(query.trim().replace(/^#/u, "").toLocaleLowerCase())}
-    onValueChange={(channel) => onChange(channel ? { integrationAccountId: channel.integrationAccountId, channelId: channel.externalId } : null)}
-  >
-    <Combobox.InputGroup className={["signalChannelPicker", className].filter(Boolean).join(" ")}>
-      <span aria-hidden="true">#</span>
-      <Combobox.Input id="signal-findings-channel" aria-label="Findings channel" placeholder="Choose a channel" />
-      <Combobox.Trigger className="signalChannelPicker__trigger" aria-label="Show Slack channels">
-        <IconChevronDown aria-hidden="true" size={14} />
-      </Combobox.Trigger>
-    </Combobox.InputGroup>
-    <Combobox.Portal>
-      <Combobox.Positioner className="signalChannelPicker__positioner" sideOffset={4} align="start">
-        <Combobox.Popup className="signalChannelPicker__popup">
-          <Combobox.Empty className="signalChannelPicker__empty">No channels match.</Combobox.Empty>
-          <Combobox.List className="signalChannelPicker__list" aria-label="Slack channels">
-            {(channel: (typeof channels)[number]) => <Combobox.Item key={channel.id} value={channel} className="signalChannelPicker__option">
-              <span># {channelName(channel.displayName)}</span>
-              <Combobox.ItemIndicator><IconCheck aria-hidden="true" size={14} /></Combobox.ItemIndicator>
-            </Combobox.Item>}
-          </Combobox.List>
-        </Combobox.Popup>
-      </Combobox.Positioner>
-    </Combobox.Portal>
-  </Combobox.Root>;
+  const slack = options.accounts.some((account) => account.provider === "slack");
+  return <div className="signalChannelField">
+    <Combobox.Root
+      items={channels}
+      value={channels.find((channel) => channel.integrationAccountId === value?.integrationAccountId && channel.externalId === value?.channelId) ?? null}
+      disabled={disabled || channels.length === 0}
+      modal={false}
+      itemToStringLabel={(channel) => channelName(channel.displayName)}
+      isItemEqualToValue={(channel, selected) => channel.id === selected.id}
+      filter={(channel, query) => channelName(channel.displayName).toLocaleLowerCase().includes(query.trim().replace(/^#/u, "").toLocaleLowerCase())}
+      onValueChange={(channel) => onChange(channel ? { integrationAccountId: channel.integrationAccountId, channelId: channel.externalId } : null)}
+    >
+      <Combobox.InputGroup className={["signalChannelPicker", className].filter(Boolean).join(" ")}>
+        <span aria-hidden="true">#</span>
+        <Combobox.Input id="signal-findings-channel" aria-label="Findings channel" placeholder={channels.length ? "Choose a channel" : "No channels found"} />
+        <Combobox.Trigger className="signalChannelPicker__trigger" aria-label="Show Slack channels">
+          <IconChevronDown aria-hidden="true" size={14} />
+        </Combobox.Trigger>
+      </Combobox.InputGroup>
+      <Combobox.Portal>
+        <Combobox.Positioner className="signalChannelPicker__positioner" sideOffset={4} align="start">
+          <Combobox.Popup className="signalChannelPicker__popup">
+            <Combobox.Empty className="signalChannelPicker__empty">No channels match.</Combobox.Empty>
+            <Combobox.List className="signalChannelPicker__list" aria-label="Slack channels">
+              {(channel: (typeof channels)[number]) => <Combobox.Item key={channel.id} value={channel} className="signalChannelPicker__option">
+                <span># {channelName(channel.displayName)}</span>
+                <Combobox.ItemIndicator><IconCheck aria-hidden="true" size={14} /></Combobox.ItemIndicator>
+              </Combobox.Item>}
+            </Combobox.List>
+          </Combobox.Popup>
+        </Combobox.Positioner>
+      </Combobox.Portal>
+    </Combobox.Root>
+    {channels.length === 0 && <p className="signalChannelHint">
+      {slack ? "Invite Responder to a channel, then reload this page." : "Connect Slack to choose a channel."}
+    </p>}
+  </div>;
 }
