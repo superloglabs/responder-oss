@@ -6,6 +6,7 @@ import {
   awsRegistrationRoutes,
   startAwsRegistration,
 } from "./aws-registration.js";
+import { awsRegionSchema, prepareAwsLogStream, readAwsLogStream } from "./aws-log-stream.js";
 import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -282,6 +283,8 @@ const providerSchema = z.enum(productIntegrationIds);
 // reports its account.
 const awsConnectionSchema = z.object({
   accountId: awsAccountIdSchema.optional(),
+  // The region whose CloudWatch Logs the stack streams, and where it opens.
+  region: awsRegionSchema.optional(),
   returnTo: z.string().max(2_048).optional(),
 });
 const awsVerificationSchema = z.object({
@@ -321,6 +324,14 @@ function publicGcpSetupState(
 const pendingConnectionCredentialsSchema = z.object({
   encryptedCredentials: z.string().min(1),
 });
+
+function recoverStoredCredentials(encryptedCredentials: string): unknown {
+  try {
+    return decryptCredentials<Record<string, unknown>>(encryptedCredentials);
+  } catch {
+    return null;
+  }
+}
 
 function recoverAwsConnectionCredentials(encryptedCredentials: string) {
   try {
@@ -1499,18 +1510,26 @@ export const integrationRoutes = new Hono()
       await context.req.json().catch(() => null),
     );
     if (!parsed.success) {
-      return context.json({ error: "Enter a 12-digit AWS account ID" }, 400);
+      const region = parsed.error.issues.some((issue) => issue.path[0] === "region");
+      return context.json(
+        { error: region ? "Choose a commercial AWS region" : "Enter a 12-digit AWS account ID" },
+        400,
+      );
     }
     const awsAccountId = parsed.data.accountId;
     if (awsAccountId === undefined) {
       try {
-        const registration = await startAwsRegistration(tenant.organizationId);
+        const registration = await startAwsRegistration(tenant.organizationId, {
+          region: parsed.data.region,
+          userId: tenant.user.id,
+        });
         if (!registration.available) {
           return context.json({ error: AWS_REGISTRATION_UNAVAILABLE_ERROR }, 503);
         }
         return context.json({
           accountId: registration.accountId,
           cloudFormationUrl: registration.cloudFormationUrl,
+          streamsLogs: registration.streamsLogs,
           template: registration.template,
         });
       } catch (error) {
@@ -1543,32 +1562,50 @@ export const integrationRoutes = new Hono()
         externalId,
         roleArn: awsInvestigationRoleArn(awsAccountId),
       };
-      const accountId =
-        existing?.status === "connected" && existingCredentials?.success
-          ? existing.id
-          : await upsertIntegrationAccount({
-              organizationId: tenant.organizationId,
-              provider: "aws",
-              externalAccountId: awsAccountId,
-              displayName: `AWS · ${awsAccountId}`,
-              encryptedCredentials: encryptCredentials(credentials),
-              credentialKeyVersion: 1,
-              metadata: {
-                permissionPolicy: "AIOpsAssistantPolicy",
-                roleName: "ResponderInvestigationRole",
-              },
-              status: "pending",
-            });
+      const connected = existing?.status === "connected" && existingCredentials?.success;
+      // A connected account already has its stack; more regions are added
+      // from the telemetry sources page.
       const templateUrl = await createAwsCloudFormationTemplateUrl();
+      const prepared = templateUrl && !connected && parsed.data.region
+        ? await prepareAwsLogStream({
+            organizationId: tenant.organizationId,
+            previous: existing?.encryptedCredentials
+              ? readAwsLogStream(recoverStoredCredentials(existing.encryptedCredentials))
+              : null,
+            region: parsed.data.region,
+            userId: tenant.user.id,
+          })
+        : null;
+      const accountId = connected && existing
+        ? existing.id
+        : await upsertIntegrationAccount({
+            organizationId: tenant.organizationId,
+            provider: "aws",
+            externalAccountId: awsAccountId,
+            displayName: `AWS · ${awsAccountId}`,
+            encryptedCredentials: encryptCredentials({
+              ...credentials,
+              ...(prepared ? { logStream: prepared.stream } : {}),
+            }),
+            credentialKeyVersion: 1,
+            metadata: {
+              permissionPolicy: "AIOpsAssistantPolicy",
+              roleName: "ResponderInvestigationRole",
+            },
+            status: "pending",
+          });
       return context.json({
         accountId,
         cloudFormationUrl: templateUrl
           ? awsCloudFormationQuickCreateUrl({
               externalId,
               principalArn,
+              region: parsed.data.region,
+              stream: prepared?.parameters,
               templateUrl,
             })
           : null,
+        streamsLogs: prepared !== null,
         template: awsParameterizedCloudFormationTemplate({
           externalId,
           principalArn,

@@ -67,6 +67,7 @@ vi.mock("../tenant.js", () => ({
 
 vi.mock("../../../../packages/core/src/db/organization-capabilities.js", () => ({
   organizationHasCapability: vi.fn(),
+  organizationReceivesTelemetry: vi.fn(),
 }));
 
 vi.mock("./github.js", async (importOriginal) => ({

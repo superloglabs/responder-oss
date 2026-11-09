@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { awsRegions } from "../telemetry-sources-api";
 
 interface AwsSetup {
   accountId: string;
   cloudFormationUrl: string | null;
+  streamsLogs?: boolean;
   template: string;
 }
 
@@ -18,6 +20,7 @@ export function AwsConnectionDialog({
   returnTo: string;
 }) {
   const [awsAccountId, setAwsAccountId] = useState("");
+  const [region, setRegion] = useState<string>("us-east-1");
   const [setup, setSetup] = useState<AwsSetup | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -47,7 +50,7 @@ export function AwsConnectionDialog({
       const response = await fetch(connectUrl, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ accountId: awsAccountId, returnTo }),
+        body: JSON.stringify({ accountId: awsAccountId, region, returnTo }),
       });
       const body = (await response.json().catch(() => null)) as
         | (Partial<AwsSetup> & { error?: string })
@@ -153,9 +156,25 @@ export function AwsConnectionDialog({
                 value={awsAccountId}
               />
             </label>
+            <label className="siteDialog__field">
+              <span>Region</span>
+              <select
+                disabled={isSubmitting}
+                onChange={(event) => setRegion(event.target.value)}
+                value={region}
+              >
+                {awsRegions.map((value) => (
+                  <option key={value} value={value}>{value}</option>
+                ))}
+              </select>
+            </label>
             <p className="siteDialog__oauthNote">
               The role uses AWS-managed AIOpsAssistantPolicy and can inspect all
-              regions in this account. It cannot change resources.
+              regions in this account. It cannot change resources. The stack
+              opens in this region. If the workspace receives telemetry, the
+              stack also streams this region's CloudWatch logs to Superlog;
+              Firehose and CloudWatch Logs delivery are billed to your AWS
+              account.
             </p>
             {error ? <p className="siteDialog__error" role="alert">{error}</p> : null}
             <footer className="siteDialog__footer">
@@ -174,7 +193,10 @@ export function AwsConnectionDialog({
         ) : (
           <div className="siteDialog__form">
             <ol className="siteDialog__instructions">
-              <li>Open AWS CloudFormation and review the role and policy.</li>
+              <li>
+                Open AWS CloudFormation and review the role and policy
+                {setup.streamsLogs ? `, and the stream of ${region} CloudWatch logs to Superlog` : ""}.
+              </li>
               <li>Create the stack and wait until its status is CREATE_COMPLETE.</li>
               <li>Return here and verify the connection.</li>
             </ol>

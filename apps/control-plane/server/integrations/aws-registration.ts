@@ -45,6 +45,7 @@ import {
   verifySnsMessageSignature,
 } from "../../../../packages/core/src/integrations/aws-registration.js";
 import { getActiveTenant } from "../tenant.js";
+import { type AwsLogStream, prepareAwsLogStream, readAwsLogStream } from "./aws-log-stream.js";
 
 export const AWS_REGISTRATION_UNAVAILABLE_ERROR =
   "One-click AWS setup is not available in this region";
@@ -58,6 +59,15 @@ const VERIFY_INTERVAL_MS = 5_000;
 function logRegistration(fields: Record<string, unknown>): void {
   const log = fields.outcome === "error" ? console.error : console.info;
   log(JSON.stringify({ event: "aws_registration", ...fields }));
+}
+
+function readStoredCredentials(encryptedCredentials: string | null | undefined): unknown {
+  if (!encryptedCredentials) return null;
+  try {
+    return decryptCredentials<Record<string, unknown>>(encryptedCredentials);
+  } catch {
+    return null;
+  }
 }
 
 function readCredentials<T extends z.ZodType>(
@@ -81,13 +91,17 @@ export type AwsRegistrationStart =
       accountId: string;
       available: true;
       cloudFormationUrl: string | null;
+      streamsLogs: boolean;
       template: string;
     };
 
 // Prepares a setup link that does not need the customer's account ID. The
-// stack reports the account back through the registration topic.
+// stack reports the account back through the registration topic. With a
+// region, the stack opens there and also streams that region's CloudWatch
+// Logs to the workspace.
 export async function startAwsRegistration(
   organizationId: string,
+  options: { region?: string; userId?: string } = {},
 ): Promise<AwsRegistrationStart> {
   const registrationTopicArn = awsRegistrationTopicArn();
   if (!registrationTopicArn) return { available: false };
@@ -98,15 +112,15 @@ export async function startAwsRegistration(
     organizationId,
     provider: "aws",
   });
-  const pendingCredentials = readCredentials(
-    awsRegistrationCredentialsSchema,
-    pending?.encryptedCredentials,
-  );
-  let accountId: string;
+  const pendingStored = readStoredCredentials(pending?.encryptedCredentials);
+  const pendingCredentials = awsRegistrationCredentialsSchema.safeParse(pendingStored);
+  let accountId: string | null = null;
   let externalId: string;
-  if (pending && pendingCredentials) {
+  let previousStream: AwsLogStream | null = null;
+  if (pending && pendingCredentials.success) {
     accountId = pending.id;
-    externalId = pendingCredentials.externalId;
+    externalId = pendingCredentials.data.externalId;
+    previousStream = readAwsLogStream(pendingStored);
   } else {
     // An unreadable placeholder can never be claimed; replace it so it does
     // not shadow the new one.
@@ -118,12 +132,32 @@ export async function startAwsRegistration(
       });
     }
     externalId = createAwsExternalId();
+  }
+
+  // Only a quick-create link carries the ingest key, so without one there is
+  // nothing to stream.
+  const templateUrl = await createAwsCloudFormationTemplateUrl();
+  const prepared = templateUrl && options.region && options.userId
+    ? await prepareAwsLogStream({
+        organizationId,
+        previous: previousStream,
+        region: options.region,
+        userId: options.userId,
+      })
+    : null;
+  // A new placeholder, or a new ingest key for an open one, is saved before
+  // the link goes out, so the next launch finds the same key.
+  if (!accountId || (prepared && !previousStream)) {
     accountId = await upsertIntegrationAccount({
       organizationId,
       provider: "aws",
       externalAccountId: awsRegistrationExternalAccountId(externalId),
       displayName: REGISTRATION_DISPLAY_NAME,
-      encryptedCredentials: encryptCredentials({ externalId, registration: true }),
+      encryptedCredentials: encryptCredentials({
+        externalId,
+        registration: true,
+        ...(prepared ? { logStream: prepared.stream } : {}),
+      }),
       credentialKeyVersion: 1,
       metadata: {
         permissionPolicy: "AIOpsAssistantPolicy",
@@ -134,7 +168,6 @@ export async function startAwsRegistration(
     });
   }
 
-  const templateUrl = await createAwsCloudFormationTemplateUrl();
   return {
     accountId,
     available: true,
@@ -142,15 +175,19 @@ export async function startAwsRegistration(
       ? awsCloudFormationQuickCreateUrl({
           externalId,
           principalArn,
+          region: options.region,
           registrationTopicArn,
+          stream: prepared?.parameters,
           templateUrl,
         })
       : null,
-    // The download has no topic: the topic only works from its own region,
-    // and a downloaded template can be deployed anywhere.
+    streamsLogs: prepared !== null,
+    // The download registers from any region, but it carries no ingest key:
+    // a key in a file outlives the setup.
     template: awsParameterizedCloudFormationTemplate({
       externalId,
       principalArn,
+      registrationTopicArn,
     }),
   };
 }

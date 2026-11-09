@@ -31,6 +31,7 @@ vi.mock("../../../../packages/core/src/db/oauth-access-tokens.js", () => ({
 }));
 vi.mock("../../../../packages/core/src/db/organization-capabilities.js", () => ({
   listEnabledOrganizationCapabilities: vi.fn().mockResolvedValue([]),
+  organizationReceivesTelemetry: vi.fn(),
   organizationHasCapability: vi.fn(async (_organization: string, capability: string) => mocks.capabilities.has(capability)),
 }));
 vi.mock("../../../../packages/core/src/db/synthetic-checks.js", () => ({

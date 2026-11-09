@@ -27,6 +27,7 @@ vi.mock("../../../../packages/core/src/db/organizations.js", async (importOrigin
 }));
 vi.mock("../../../../packages/core/src/db/organization-capabilities.js", () => ({
   listEnabledOrganizationCapabilities: mocks.listCapabilities,
+  organizationReceivesTelemetry: vi.fn(),
   organizationHasCapability: vi.fn().mockResolvedValue(true),
 }));
 

@@ -785,10 +785,14 @@ test("connects AWS with one launch and finishes when the stack reports back", as
 
   await page.goto("/signal/setup/telemetry/aws");
   await expect(page.getByRole("heading", { name: "Connect AWS CloudWatch" })).toBeVisible();
+  await page.getByRole("button", { name: /Region with your logs/u }).click();
+  await page.getByRole("option", { name: "eu-west-1", exact: true }).click();
+  await expect(page.getByText("The stack opens in eu-west-1")).toBeVisible();
+  await page.screenshot({ path: "test-results/signal-aws-launch.png", fullPage: true });
   const popup = context.waitForEvent("page");
   await page.getByRole("button", { name: "Launch stack in AWS" }).click();
   await expect((await popup)).toHaveURL(/eu-west-3\.console\.aws\.amazon\.com/u);
-  expect(launchBody).toEqual({ returnTo: "/signal/setup/telemetry" });
+  expect(launchBody).toEqual({ region: "eu-west-1", returnTo: "/signal/setup/telemetry" });
   await expect(page.getByRole("heading", { name: "Waiting for the stack" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Continue", exact: true })).toBeDisabled();
 

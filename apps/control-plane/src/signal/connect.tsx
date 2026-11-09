@@ -12,11 +12,12 @@ import {
 } from "@tabler/icons-react";
 import type { IntegrationSummary } from "../agents-api";
 import { DATADOG_SITES, type DatadogSiteId } from "../components/datadog-sites";
-import { Button } from "../design-system";
+import { Button, SelectField } from "../design-system";
 import { GCP_SETUP_STEPS, useGcpSetupStatus, type GcpSetupStatus } from "../gcp-setup-status";
 import { createIngestKey, existingOpenTelemetryPrompt, openTelemetryPrompt } from "../ingest-keys-api";
 import { currentProjectSelectionState } from "../project-selection";
 import { fetchServices } from "../telemetry-api";
+import { awsRegions } from "../telemetry-sources-api";
 import type { ConnectPage } from "./connect-pages";
 import { connectionStartUrl } from "./model";
 import { SignalLogo } from "./shared";
@@ -397,6 +398,7 @@ function AwsConnect({ integration, organizationId, listPath, onBack, onDone }: P
   const [error, setError] = useState("");
   const [launching, setLaunching] = useState(false);
   const [pollFailed, setPollFailed] = useState(false);
+  const [region, setRegion] = useState<string>("us-east-1");
   const connectUrl = integration?.connectUrl;
 
   useEffect(() => {
@@ -433,7 +435,7 @@ function AwsConnect({ integration, organizationId, listPath, onBack, onDone }: P
     // Opened before the request so the browser does not block it as a pop-up.
     const tab = window.open("about:blank", "_blank");
     try {
-      const body = await postJson(connectUrl, { returnTo: listPath }, "Unable to prepare the AWS connection");
+      const body = await postJson(connectUrl, { region, returnTo: listPath }, "Unable to prepare the AWS connection");
       if (typeof body.accountId !== "string" || typeof body.cloudFormationUrl !== "string") {
         throw new Error("One-click AWS setup is not available here yet.");
       }
@@ -454,19 +456,28 @@ function AwsConnect({ integration, organizationId, listPath, onBack, onDone }: P
   const connected = state.status === "connected";
   if (!setupId) {
     return <>
-      <Intro provider="aws" title="Connect AWS CloudWatch">Launch one CloudFormation stack. It creates a read-only role, and Signal connects when it finishes.</Intro>
+      <Intro provider="aws" title="Connect AWS CloudWatch">Launch one CloudFormation stack. It creates a read-only role and streams one region's CloudWatch logs to Superlog. Signal connects when it finishes.</Intro>
       {error && <p className="signalError" role="alert">{error}</p>}
+      <SelectField
+        className="dsField--compact"
+        hint="Signal investigates new errors in this region's logs. Firehose and CloudWatch Logs delivery are billed to your AWS account."
+        label="Region with your logs"
+        onChange={setRegion}
+        options={awsRegions.map((value) => ({ label: value, value }))}
+        searchable
+        value={region}
+      />
       <section className="signalAccess">
         <h3>How it works</h3>
         <ol className="signalSteps">
-          <li>Sign in to the AWS account you want to connect. The stack opens with everything filled in.</li>
-          <li>Check the box to allow IAM resources, then click <strong>Create stack</strong>.</li>
+          <li>Sign in to the AWS account you want to connect. The stack opens in {region} with everything filled in.</li>
+          <li>Check the boxes to allow IAM resources and the transform, then click <strong>Create stack</strong>.</li>
           <li>Come back here. Signal connects on its own when the stack finishes.</li>
         </ol>
         <p>Want to review it first? <a href={awsEndpoint(connectUrl ?? "/api/integrations/aws/connect", "/cloudformation-template")} target="_blank" rel="noreferrer">Download the template</a></p>
       </section>
-      <AccessList title="The stack creates one read-only role"
-        allowed={["Uses the AWS-managed AIOpsAssistantPolicy", "Reads CloudWatch logs, metrics, alarms, and resources in all regions"]}
+      <AccessList title="The stack creates a read-only role and a log stream"
+        allowed={["Uses the AWS-managed AIOpsAssistantPolicy", "Reads CloudWatch logs, metrics, alarms, and resources in all regions", `Streams ${region} CloudWatch logs to Superlog through Amazon Data Firehose`]}
         denied="Cannot change resources" />
       <Actions onBack={onBack}>
         <Button variant="primary" loading={launching} disabled={!connectUrl} onClick={() => void launch()}><External>Launch stack in AWS</External></Button>
@@ -476,7 +487,7 @@ function AwsConnect({ integration, organizationId, listPath, onBack, onDone }: P
 
   return <>
     <Intro provider="aws" title="Connect AWS CloudWatch">{connected
-      ? "Signal can now read CloudWatch logs, metrics, and alarms in this account."
+      ? "Signal can now read CloudWatch logs, metrics, and alarms in this account, and investigates new errors in the logs it streams."
       : "Finish creating the stack in AWS. This page updates on its own."}</Intro>
     {pollFailed && !connected && <p className="signalError" role="alert">Could not check the stack. Retrying…</p>}
     {connected

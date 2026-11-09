@@ -74,6 +74,7 @@ import { exchangeSlackCode, listSlackChannels } from "./slack.js";
 import { startDefaultSlackThreadMode } from "../../../../packages/core/src/db/agents.js";
 import { getActiveTenant } from "../tenant.js";
 import { organizationHasCapability } from "../../../../packages/core/src/db/organization-capabilities.js";
+import { prepareAwsLogStream } from "./aws-log-stream.js";
 import {
   customMcpConnectionMetricEvent,
   integrationRoutes,
@@ -237,6 +238,12 @@ vi.mock("./slack.js", async (importOriginal) => ({
 
 vi.mock("../../../../packages/core/src/db/organization-capabilities.js", () => ({
   organizationHasCapability: vi.fn(),
+  organizationReceivesTelemetry: vi.fn(),
+}));
+
+vi.mock("./aws-log-stream.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./aws-log-stream.js")>()),
+  prepareAwsLogStream: vi.fn(async () => null),
 }));
 
 const app = new Hono().route("/api/integrations", integrationRoutes);
@@ -1575,7 +1582,9 @@ describe("integration callback routing", () => {
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body.accountId).toBe("30000000-0000-4000-8000-000000000000");
-    expect(body.cloudFormationUrl).toContain("#/stacks/create/review?");
+    expect(body.cloudFormationUrl).toContain("#/stacks/quickcreate?");
+    expect(body.streamsLogs).toBe(false);
+    expect(prepareAwsLogStream).not.toHaveBeenCalled();
     expect(body.cloudFormationUrl).toContain(
       encodeURIComponent(
         "https://responder-templates.s3.eu-west-3.amazonaws.com/responder-aws-access.yaml?X-Amz-Signature=test",
@@ -1735,8 +1744,9 @@ describe("integration callback routing", () => {
         "param_RegistrationTopicArn",
       ),
     ).toBe(topicArn);
-    // The download can be deployed in any region, so it leaves the topic out.
-    expect(body.template).not.toContain(topicArn);
+    // The stack forwards registration to the topic from any region.
+    expect(body.template).toContain(`Default: '${topicArn}'`);
+    expect(body.streamsLogs).toBe(false);
     expect(encryptCredentials).toHaveBeenCalledWith({
       externalId: "responder_abcdefghijklmnopqrstuvwxyz1234567890",
       registration: true,
@@ -1794,6 +1804,159 @@ describe("integration callback routing", () => {
     });
     expect(createAwsExternalId).not.toHaveBeenCalled();
     expect(upsertIntegrationAccount).not.toHaveBeenCalled();
+  });
+
+  it("streams the chosen region's logs from the one-click stack", async () => {
+    const topicArn = "arn:aws:sns:eu-west-3:111122223333:ResponderAwsRegistration";
+    vi.stubEnv("AWS_INTEGRATION_REGISTRATION_TOPIC_ARN", topicArn);
+    vi.stubEnv(
+      "AWS_INTEGRATION_PRINCIPAL_ARN",
+      "arn:aws:iam::111122223333:role/ResponderAwsIntegrationBroker",
+    );
+    vi.mocked(getPendingIntegrationRegistration).mockResolvedValue(null);
+    vi.mocked(createAwsExternalId).mockReturnValue(
+      "responder_abcdefghijklmnopqrstuvwxyz1234567890",
+    );
+    vi.mocked(createAwsCloudFormationTemplateUrl).mockResolvedValue(
+      "https://responder-templates.s3.eu-west-3.amazonaws.com/responder-aws-access.yaml?X-Amz-Signature=test",
+    );
+    const stream = { ingestKey: "sl_ingest_token", ingestKeyId: "key-1", resourcePrefix: "superlog-0a1b2c3d" };
+    vi.mocked(prepareAwsLogStream).mockResolvedValue({
+      parameters: { ingestKey: "sl_ingest_token", ingestUrl: "https://superlog.sh", resourcePrefix: "superlog-0a1b2c3d" },
+      stream,
+    });
+    vi.mocked(encryptCredentials).mockReturnValue("encrypted-registration");
+    vi.mocked(upsertIntegrationAccount).mockResolvedValue(
+      "30000000-0000-4000-8000-000000000000",
+    );
+
+    const response = await app.request("/api/integrations/aws/connect", {
+      body: JSON.stringify({ region: "eu-west-1", returnTo: "/signal/setup/telemetry/aws" }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.streamsLogs).toBe(true);
+    const cloudFormationUrl = new URL(body.cloudFormationUrl);
+    expect(cloudFormationUrl.origin).toBe("https://eu-west-1.console.aws.amazon.com");
+    const parameters = new URLSearchParams(cloudFormationUrl.hash.split("?")[1]);
+    expect(parameters.get("param_RegistrationTopicArn")).toBe(topicArn);
+    expect(parameters.get("param_IngestKey")).toBe("sl_ingest_token");
+    expect(parameters.get("param_IngestUrl")).toBe("https://superlog.sh");
+    expect(parameters.get("param_ResourcePrefix")).toBe("superlog-0a1b2c3d");
+    // The key is not in the download.
+    expect(body.template).not.toContain("sl_ingest_token");
+    expect(prepareAwsLogStream).toHaveBeenCalledWith({
+      organizationId: tenant.organizationId,
+      previous: null,
+      region: "eu-west-1",
+      userId: tenant.user.id,
+    });
+    expect(encryptCredentials).toHaveBeenCalledWith({
+      externalId: "responder_abcdefghijklmnopqrstuvwxyz1234567890",
+      logStream: stream,
+      registration: true,
+    });
+    expect(upsertIntegrationAccount).toHaveBeenCalledTimes(1);
+  });
+
+  it("reuses the open setup's ingest key when the stack is launched again", async () => {
+    vi.stubEnv(
+      "AWS_INTEGRATION_REGISTRATION_TOPIC_ARN",
+      "arn:aws:sns:eu-west-3:111122223333:ResponderAwsRegistration",
+    );
+    vi.stubEnv(
+      "AWS_INTEGRATION_PRINCIPAL_ARN",
+      "arn:aws:iam::111122223333:role/ResponderAwsIntegrationBroker",
+    );
+    const stream = { ingestKey: "sl_ingest_old", ingestKeyId: "key-0", resourcePrefix: "superlog-99999999" };
+    vi.mocked(getPendingIntegrationRegistration).mockResolvedValue({
+      encryptedCredentials: "encrypted-registration",
+      id: "30000000-0000-4000-8000-000000000000",
+    });
+    vi.mocked(decryptCredentials).mockReturnValue({
+      externalId: "responder_existing_external_id_1234567890",
+      logStream: stream,
+      registration: true,
+    });
+    vi.mocked(createAwsCloudFormationTemplateUrl).mockResolvedValue(
+      "https://responder-templates.s3.eu-west-3.amazonaws.com/responder-aws-access.yaml?X-Amz-Signature=test",
+    );
+    vi.mocked(prepareAwsLogStream).mockResolvedValue({
+      parameters: { ingestKey: "sl_ingest_old", ingestUrl: "https://superlog.sh", resourcePrefix: "superlog-99999999" },
+      stream,
+    });
+
+    const response = await app.request("/api/integrations/aws/connect", {
+      body: JSON.stringify({ region: "us-east-2" }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    expect(prepareAwsLogStream).toHaveBeenCalledWith(
+      expect.objectContaining({ previous: stream, region: "us-east-2" }),
+    );
+    expect(createAwsExternalId).not.toHaveBeenCalled();
+    expect(upsertIntegrationAccount).not.toHaveBeenCalled();
+  });
+
+  it("streams logs from a stack connected by account ID", async () => {
+    vi.stubEnv(
+      "AWS_INTEGRATION_PRINCIPAL_ARN",
+      "arn:aws:iam::111122223333:role/ResponderAwsIntegrationBroker",
+    );
+    vi.mocked(getOrganizationIntegrationAccountByExternalId).mockReset();
+    vi.mocked(createAwsExternalId).mockReturnValue(
+      "responder_abcdefghijklmnopqrstuvwxyz1234567890",
+    );
+    vi.mocked(createAwsCloudFormationTemplateUrl).mockResolvedValue(
+      "https://responder-templates.s3.eu-west-3.amazonaws.com/responder-aws-access.yaml?X-Amz-Signature=test",
+    );
+    const stream = { ingestKey: "sl_ingest_token", ingestKeyId: "key-1", resourcePrefix: "superlog-0a1b2c3d" };
+    vi.mocked(prepareAwsLogStream).mockResolvedValue({
+      parameters: { ingestKey: "sl_ingest_token", ingestUrl: "https://superlog.sh", resourcePrefix: "superlog-0a1b2c3d" },
+      stream,
+    });
+    vi.mocked(encryptCredentials).mockReturnValue("encrypted-aws-credentials");
+    vi.mocked(upsertIntegrationAccount).mockResolvedValue(
+      "30000000-0000-4000-8000-000000000000",
+    );
+
+    const response = await app.request("/api/integrations/aws/connect", {
+      body: JSON.stringify({ accountId: "123456789012", region: "ap-southeast-2" }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.streamsLogs).toBe(true);
+    const cloudFormationUrl = new URL(body.cloudFormationUrl);
+    expect(cloudFormationUrl.searchParams.get("region")).toBe("ap-southeast-2");
+    expect(new URLSearchParams(cloudFormationUrl.hash.split("?")[1]).get("param_IngestKey")).toBe(
+      "sl_ingest_token",
+    );
+    expect(encryptCredentials).toHaveBeenCalledWith({
+      accountId: "123456789012",
+      externalId: "responder_abcdefghijklmnopqrstuvwxyz1234567890",
+      logStream: stream,
+      roleArn: "arn:aws:iam::123456789012:role/ResponderInvestigationRole",
+    });
+  });
+
+  it("rejects a region outside the commercial partition", async () => {
+    const response = await app.request("/api/integrations/aws/connect", {
+      body: JSON.stringify({ region: "us-gov-west-1" }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: "Choose a commercial AWS region" });
+    expect(prepareAwsLogStream).not.toHaveBeenCalled();
   });
 
   it("reports one-click AWS setup as unavailable without a registration topic", async () => {

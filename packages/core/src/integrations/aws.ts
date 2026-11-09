@@ -143,10 +143,21 @@ function isSupportedCloudFormationTemplateUrl(templateUrl: URL): boolean {
   return region !== undefined && isAwsCommercialRegion(region);
 }
 
+// What the stack needs to stream one region's CloudWatch Logs to Superlog.
+export interface AwsLogStreamParameters {
+  ingestKey: string;
+  ingestUrl: string;
+  resourcePrefix: string;
+}
+
+export const AWS_INVESTIGATION_STACK_NAME = "ResponderInvestigationAccess";
+
 export function awsCloudFormationQuickCreateUrl(input: {
   externalId: string;
   principalArn: string;
+  region?: string;
   registrationTopicArn?: string;
+  stream?: AwsLogStreamParameters;
   templateUrl: string;
 }): string {
   const templateUrl = new URL(input.templateUrl);
@@ -155,20 +166,32 @@ export function awsCloudFormationQuickCreateUrl(input: {
       "AWS CloudFormation quick-create templates must use an Amazon S3 URL",
     );
   }
+  if (input.region !== undefined && !isAwsCommercialRegion(input.region)) {
+    throw new AwsIntegrationConfigurationError("Choose a commercial AWS region");
+  }
   const parameters = new URLSearchParams({
     templateURL: templateUrl.toString(),
-    stackName: "ResponderInvestigationAccess",
+    stackName: AWS_INVESTIGATION_STACK_NAME,
     param_ResponderPrincipalArn: input.principalArn,
     param_ExternalId: input.externalId,
   });
-  if (!input.registrationTopicArn) {
-    return `https://console.aws.amazon.com/cloudformation/home#/stacks/create/review?${parameters}`;
+  if (input.registrationTopicArn) {
+    requireSnsTopicArn(input.registrationTopicArn);
+    parameters.set("param_RegistrationTopicArn", input.registrationTopicArn);
   }
-  // A custom resource's SNS ServiceToken must be in the stack's own region,
-  // so the console opens in the topic's region.
-  const { region } = requireSnsTopicArn(input.registrationTopicArn);
-  parameters.set("param_RegistrationTopicArn", input.registrationTopicArn);
-  return `https://${region}.console.aws.amazon.com/cloudformation/home?region=${region}#/stacks/create/review?${parameters}`;
+  if (input.stream) {
+    parameters.set("param_IngestUrl", input.stream.ingestUrl.replace(/\/+$/u, ""));
+    parameters.set("param_IngestKey", input.stream.ingestKey);
+    parameters.set("param_ResourcePrefix", input.stream.resourcePrefix);
+  }
+  // The stack streams the region it runs in, so it opens in the chosen one.
+  // Registration works from any region: the stack forwards it to the topic.
+  const region = input.region ??
+    (input.registrationTopicArn ? requireSnsTopicArn(input.registrationTopicArn).region : undefined);
+  if (!region) {
+    return `https://console.aws.amazon.com/cloudformation/home#/stacks/quickcreate?${parameters}`;
+  }
+  return `https://${region}.console.aws.amazon.com/cloudformation/home?region=${region}#/stacks/quickcreate?${parameters}`;
 }
 
 interface StsTemporaryCredentials {
