@@ -13,6 +13,7 @@ import {
   tryLegacyEmailSignIn,
 } from "../legacy-account-handoff";
 import { workspaceSlug } from "./workspace";
+import { useSessionScreen } from "./session-screen";
 import { automationSetupReturnPath } from "../pages/shared-automation-template-presentation";
 import { ActiveWorkspaceCheck } from "./active-workspace-check";
 import { ImpersonationBanner } from "./impersonation-banner";
@@ -202,7 +203,7 @@ export function SignIn({
         setError(result.error.message ?? "Authentication failed");
         return;
       }
-      setIsSubmitting(false);
+      // The form stays busy until the new session replaces it.
       console.info(
         JSON.stringify({
           event: isCreatingAccount
@@ -1032,6 +1033,7 @@ export function AuthGate({ children }: AuthGateProps) {
   const signedInUserId = session.data?.user.id;
   const activeOrganizationId = session.data?.session.activeOrganizationId;
   const [isCreatingWorkspace, setIsCreatingWorkspace] = useState(false);
+  const screen = useSessionScreen(session);
   // A signed-in visitor's next /app visit on any cell's host comes back here.
   useEffect(() => {
     if (signedInUserId && cells?.current) {
@@ -1095,9 +1097,9 @@ export function AuthGate({ children }: AuthGateProps) {
     <AppFrameSkeleton />
   );
 
-  if (session.isPending) return loading;
+  if (screen === "loading") return loading;
 
-  if (session.error) {
+  if (screen === "unavailable") {
     return (
       <AuthFrame>
         <div className="authIntro">
