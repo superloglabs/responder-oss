@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { webhookAppId, webhookRoutingKey } from "./routing-keys.js";
+import { pinnedSlackActionCell, webhookAppId, webhookRoutingKey } from "./routing-keys.js";
 
 const json = (value: unknown) => new TextEncoder().encode(JSON.stringify(value));
 
@@ -101,5 +101,21 @@ describe("webhook routing keys", () => {
       "x-github-hook-installation-target-id": "42",
       "x-github-hook-installation-target-type": "repository",
     }))).toBeNull();
+  });
+
+  it("reads the cell a Slack button names in its block ID", () => {
+    const form = (actions: unknown[]) => new TextEncoder().encode(
+      new URLSearchParams({ payload: JSON.stringify({ team: { id: "T1" }, actions }) }).toString(),
+    );
+    const formType = "application/x-www-form-urlencoded";
+    const path = "/api/webhooks/slack/actions";
+    expect(pinnedSlackActionCell(path, formType, form([{ action_id: "a", block_id: "cell:us" }]))).toBe("us");
+    expect(pinnedSlackActionCell(`${path}/`, formType, form([{ action_id: "a", block_id: "cell:eu-2" }]))).toBe("eu-2");
+    for (const blockId of ["actions", "cell:", "cell:US", "cell:us/x", "xcell:us", undefined]) {
+      expect(pinnedSlackActionCell(path, formType, form([{ action_id: "a", block_id: blockId }])), String(blockId)).toBeNull();
+    }
+    expect(pinnedSlackActionCell(path, formType, form([]))).toBeNull();
+    expect(pinnedSlackActionCell("/api/webhooks/slack", formType, form([{ block_id: "cell:us" }]))).toBeNull();
+    expect(pinnedSlackActionCell(path, "application/json", form([{ block_id: "cell:us" }]))).toBeNull();
   });
 });

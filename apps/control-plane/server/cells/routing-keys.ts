@@ -84,6 +84,23 @@ export function webhookRoutingKey(
   }
 }
 
+// A Slack button can name the cell that handles its presses with the block
+// ID `cell:<cell id>`, for messages a cell posts to a Slack team that another
+// cell holds. Returns that cell ID, or null.
+export function pinnedSlackActionCell(
+  path: string,
+  contentType: string | undefined,
+  body: Uint8Array,
+): string | null {
+  if (path.replace(/\/$/u, "") !== "/api/webhooks/slack/actions") return null;
+  if (!contentType?.toLowerCase().includes("application/x-www-form-urlencoded")) return null;
+  const payload = new URLSearchParams(new TextDecoder().decode(body)).get("payload");
+  if (!payload) return null;
+  const actions = parseJson(new TextEncoder().encode(payload))?.actions;
+  const blockId = text(object(Array.isArray(actions) ? actions[0] : null)?.block_id);
+  return /^cell:([a-z][a-z0-9-]{0,31})$/u.exec(blockId ?? "")?.[1] ?? null;
+}
+
 // The provider app a webhook was sent to, where the provider names it: Slack
 // puts `api_app_id` in events and interactions, GitHub sends the app's ID in a
 // header, and Linear puts the OAuth app's `oauthClientId` in agent session

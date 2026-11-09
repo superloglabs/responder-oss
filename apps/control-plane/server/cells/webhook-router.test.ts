@@ -37,6 +37,10 @@ function harness(
       handled(await context.req.text());
       return context.json({ ok: true, from: "eu" });
     })
+    .post("/api/webhooks/slack/actions", async (context) => {
+      handled(await context.req.text());
+      return context.json({ ok: true, from: "eu" });
+    })
     .post("/api/webhooks/discord", async (context) => {
       handled(await context.req.text());
       return context.json({ type: 4 });
@@ -200,5 +204,69 @@ describe("cell webhook router", () => {
 
     expect(response.status).toBe(502);
     expect(handled).not.toHaveBeenCalled();
+  });
+
+  describe("Slack buttons that name their cell", () => {
+    const press = (blockId: string) => ({
+      body: new URLSearchParams({
+        payload: JSON.stringify({
+          type: "block_actions",
+          team: { id: "T123" },
+          actions: [{ action_id: "example:go", block_id: blockId, value: "1" }],
+        }),
+      }).toString(),
+      headers: { "content-type": "application/x-www-form-urlencoded", "x-slack-signature": "v0=abc" },
+      method: "POST",
+    });
+
+    it("sends the press to the named cell alone and returns its answer", async () => {
+      const { app, dependencies, handled } = harness({ hasTenant: vi.fn(async () => true) });
+
+      const response = await app.request("/api/webhooks/slack/actions", press("cell:us"));
+
+      expect(response.status).toBe(202);
+      await expect(response.json()).resolves.toEqual({ ok: true, from: "us" });
+      expect(handled).not.toHaveBeenCalled();
+      expect(dependencies.hasTenant).not.toHaveBeenCalled();
+      expect(dependencies.askCell).not.toHaveBeenCalled();
+      expect(dependencies.forward).toHaveBeenCalledTimes(1);
+      expect(dependencies.forward).toHaveBeenCalledWith(
+        "https://us.superlog.sh/api/webhooks/slack/actions",
+        expect.objectContaining({
+          headers: expect.any(Headers),
+          method: "POST",
+        }),
+      );
+      const [, init] = vi.mocked(dependencies.forward).mock.calls[0]!;
+      expect((init.headers as Headers).get("x-slack-signature")).toBe("v0=abc");
+    });
+
+    it("handles a press that names this cell here, even for a tenant it does not hold", async () => {
+      const { app, dependencies, handled } = harness({ hasTenant: vi.fn(async () => false) });
+
+      const response = await app.request("/api/webhooks/slack/actions", press("cell:eu"));
+
+      await expect(response.json()).resolves.toEqual({ ok: true, from: "eu" });
+      expect(handled).toHaveBeenCalled();
+      expect(dependencies.forward).not.toHaveBeenCalled();
+    });
+
+    it("routes by tenant when the named cell is unknown", async () => {
+      const { app, dependencies, handled } = harness({ hasTenant: vi.fn(async () => true) });
+
+      await app.request("/api/webhooks/slack/actions", press("cell:mars"));
+
+      expect(dependencies.hasTenant).toHaveBeenCalled();
+      expect(handled).toHaveBeenCalled();
+      expect(dependencies.forward).not.toHaveBeenCalled();
+    });
+
+    it("answers 502 when the named cell cannot be reached, so Slack shows the failure", async () => {
+      const { app } = harness({ forward: vi.fn(async () => { throw new Error("timeout"); }) });
+
+      const response = await app.request("/api/webhooks/slack/actions", press("cell:us"));
+
+      expect(response.status).toBe(502);
+    });
   });
 });
