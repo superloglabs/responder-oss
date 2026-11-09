@@ -192,6 +192,46 @@ describe("AWS log stream", () => {
     expect(deps.revokeKey).not.toHaveBeenCalled();
   });
 
+  it("logs a key it could not revoke and still reports the save error", async () => {
+    const deps = dependencies({ revokeKey: vi.fn(async () => { throw new Error("revoke failed"); }) });
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const prepared = await prepareAwsLogStream({ organizationId, previous: null, region: "eu-west-1", userId }, deps);
+
+    await expect(
+      commitAwsLogStream(
+        {
+          organizationId,
+          prepared,
+          region: "eu-west-1",
+          saveConnection: async () => {
+            throw new Error("database unavailable");
+          },
+          userId,
+        },
+        deps,
+      ),
+    ).rejects.toThrow("database unavailable");
+    expect(JSON.parse(String(logged.mock.calls[0]?.[0]))).toEqual({
+      error: "revoke failed",
+      event: "aws_log_stream_key_revoke_failed",
+      keyId: "key-1",
+      organizationId,
+    });
+    logged.mockRestore();
+  });
+
+  it("keeps the key with the saved connection when the source cannot be saved", async () => {
+    const deps = dependencies({ saveSource: vi.fn(async () => { throw new Error("source failed"); }) });
+    const prepared = await prepareAwsLogStream({ organizationId, previous: null, region: "eu-west-1", userId }, deps);
+    const saveConnection = vi.fn(async () => "account-1");
+
+    await expect(
+      commitAwsLogStream({ organizationId, prepared, region: "eu-west-1", saveConnection, userId }, deps),
+    ).rejects.toThrow("source failed");
+    expect(saveConnection).toHaveBeenCalledTimes(1);
+    expect(deps.revokeKey).not.toHaveBeenCalled();
+  });
+
   it("saves only the connection without a stream", async () => {
     const deps = dependencies();
     await expect(

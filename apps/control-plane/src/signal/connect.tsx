@@ -492,7 +492,7 @@ function AwsConnect({ integration, organizationId, listPath, onBack, onDone }: P
           <li>Check the boxes to allow IAM resources and the transform, then click <strong>Create stack</strong>.</li>
           <li>Come back here. Signal connects on its own when the stack finishes.</li>
         </ol>
-        <p>AWS allows one account-wide log subscription per region. If {region} already has one, for example from another Superlog stack, the stack fails at <code>LogsSubscription</code>. Remove that subscription or choose another region.</p>
+        <p>AWS allows one account-wide log subscription per region. If {region} already has one, for example from another Superlog stack, the stack fails at <code>LogsSubscription</code>. Choose another region, or set <code>EnableLogs</code> to false in the stack to create only the role.</p>
         <p>Want to review it first? <a href={awsEndpoint(connectUrl ?? "/api/integrations/aws/connect", "/cloudformation-template")} target="_blank" rel="noreferrer">Download the template</a></p>
       </section>
       <AccessList title="The stack creates a read-only role and a log stream"

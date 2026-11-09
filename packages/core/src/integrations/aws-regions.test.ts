@@ -14,5 +14,6 @@ describe("AWS regions", () => {
     expect(defaultAwsRegion("eu")).toBe("eu-west-1");
     expect(defaultAwsRegion("us")).toBe("us-east-1");
     expect(defaultAwsRegion(null)).toBe("us-east-1");
+    expect(defaultAwsRegion("ap")).toBe("us-east-1");
   });
 });

@@ -138,7 +138,15 @@ export async function commitAwsLogStream<T>(
     if (prepared?.created) {
       await dependencies
         .revokeKey({ keyId: prepared.stream.ingestKeyId, organizationId: input.organizationId, userId: input.userId })
-        .catch(() => undefined);
+        .catch((revokeError: unknown) => {
+          // The key is active with nothing recording it; revoke it by hand.
+          console.error(JSON.stringify({
+            error: revokeError instanceof Error ? revokeError.message : String(revokeError),
+            event: "aws_log_stream_key_revoke_failed",
+            keyId: prepared.stream.ingestKeyId,
+            organizationId: input.organizationId,
+          }));
+        });
     }
     throw error;
   }

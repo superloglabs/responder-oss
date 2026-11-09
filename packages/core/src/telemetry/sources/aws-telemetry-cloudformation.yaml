@@ -262,7 +262,8 @@ Resources:
   # current and future, except the Firehose delivery errors. AWS allows one
   # account-level subscription filter policy per account and region, so this
   # resource fails if the region already has one, such as from another
-  # Superlog stack. Remove that policy, or deploy with EnableLogs=false.
+  # Superlog stack. Deploy with EnableLogs=false instead. Remove the existing
+  # policy only after checking that no other stack forwards logs with it.
   LogsSubscription:
     Type: AWS::Logs::AccountPolicy
     Condition: CreateLogs

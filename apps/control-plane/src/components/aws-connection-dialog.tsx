@@ -6,6 +6,8 @@ import { awsRegions } from "../telemetry-sources-api";
 interface AwsSetup {
   accountId: string;
   cloudFormationUrl: string | null;
+  // The region the stack was prepared for.
+  region: string;
   streamsLogs?: boolean;
   template: string;
 }
@@ -67,7 +69,7 @@ export function AwsConnectionDialog({
       ) {
         throw new Error(body?.error ?? "Unable to prepare AWS access");
       }
-      setSetup(body as AwsSetup);
+      setSetup({ ...(body as Omit<AwsSetup, "region">), region });
     } catch (caught) {
       setError(
         caught instanceof Error ? caught.message : "Unable to prepare AWS access",
@@ -201,7 +203,7 @@ export function AwsConnectionDialog({
             <ol className="siteDialog__instructions">
               <li>
                 Open AWS CloudFormation and review the role and policy
-                {setup.streamsLogs ? `, and the stream of ${region} CloudWatch logs to Superlog` : ""}.
+                {setup.streamsLogs ? `, and the stream of ${setup.region} CloudWatch logs to Superlog` : ""}.
               </li>
               <li>Create the stack and wait until its status is CREATE_COMPLETE.</li>
               <li>Return here and verify the connection.</li>
