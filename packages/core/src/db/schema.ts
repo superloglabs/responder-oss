@@ -403,11 +403,16 @@ export const awsLogSubscriptions = pgTable(
     // last attempt failed; removing: the policy is being deleted.
     status: text("status").$type<"active" | "failed" | "pending" | "removing">().notNull().default("pending"),
     lastError: text("last_error"),
+    // When AWS first confirmed the policy. Logs are routed only after that.
     appliedAt: timestamp("applied_at", { withTimezone: true }),
+    // An API process working on the row holds it until then, so several
+    // processes do not apply or remove the same subscription at once.
+    claimedUntil: timestamp("claimed_until", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
+    check("aws_log_subscriptions_status_check", sql`${table.status} IN ('pending', 'active', 'failed', 'removing')`),
     uniqueIndex("aws_log_subscriptions_account_region_idx").on(table.awsAccountId, table.region),
     index("aws_log_subscriptions_integration_account_idx").on(table.integrationAccountId),
     index("aws_log_subscriptions_status_idx").on(table.status).where(sql`${table.status} <> 'active'`),

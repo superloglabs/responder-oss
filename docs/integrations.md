@@ -968,14 +968,19 @@ supports the commercial AWS partition (`arn:aws`) only.
 
 Where the deployment sets `AWS_LOG_SUBSCRIPTION_PRINCIPAL_ARN`,
 `AWS_LOG_DESTINATION_NAME`, `AWS_LOG_DESTINATION_REGIONS`, and
-`AWS_CLOUDWATCH_LOGS_INGEST_TOKEN`, the stack also creates
+`AWS_CLOUDWATCH_LOGS_INGEST_TOKEN` (all four; without the token the API
+offers no log streaming), the stack also creates
 `ResponderLogSubscriptionRole`. Its trust requires the log subscription broker
-and the same external ID, and its only actions are `logs:PutAccountPolicy`,
-`logs:PutSubscriptionFilter`, `logs:DeleteAccountPolicy`,
-`logs:DeleteSubscriptionFilter`, and `logs:DescribeAccountPolicies`.
-CloudWatch Logs requires a type-specific permission for every other account
-policy type, so the role cannot change data protection, transformers, field
-indexes, or retention, and it reads no log data.
+and the same external ID. It allows `logs:PutAccountPolicy`,
+`logs:PutSubscriptionFilter`, `logs:DeleteAccountPolicy`, and
+`logs:DeleteSubscriptionFilter`, and denies the two subscription-filter
+actions on `log-group` resources. CloudWatch Logs checks an account policy's
+subscription-filter permission against the account, not a log group, so the
+role manages account-level subscription policies only and cannot add or
+remove a log group's own filters. CloudWatch Logs requires a type-specific
+permission for every other account policy type, so the role cannot change data
+protection, transformers, field indexes, or retention, and it reads no log
+data.
 
 Workspace owners and admins choose regions on the connection's manage page or
 in settings (`GET` and `PUT /api/integrations/aws/log-subscriptions/<id>`). For
@@ -989,7 +994,14 @@ minutes, and deletes the policies when regions or the connection are removed.
 Only the API assumes this role; agents, the worker, and Signal never receive
 its credentials. An AWS account streams to one workspace. A stack created
 before the role existed gets it with one stack update, which the page shows
-when the role cannot be assumed.
+when the role cannot be assumed. Removing the AWS connection first deletes its
+policies; if a deletion fails, the connection stays and the API retries.
+
+AWS allows one account-level subscription policy per account and region. In a
+region that already has one, for example from another log forwarder, creating
+Superlog's fails and the page says so. Find out what sends logs through the
+existing policy before changing it: choose another region, or remove that
+policy only if nothing depends on it.
 
 The destination's Firehose stream delivers to
 `POST /api/ingest/aws/cloudwatch-logs` with the cell secret as its access key.

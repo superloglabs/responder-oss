@@ -1,6 +1,6 @@
-import { and, asc, eq, inArray, lt, ne, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm";
 import { getDatabase } from "./client.js";
-import { awsLogSubscriptions } from "./schema.js";
+import { awsLogSubscriptions, integrationAccounts } from "./schema.js";
 
 export type AwsLogSubscriptionStatus = "active" | "failed" | "pending" | "removing";
 
@@ -29,6 +29,13 @@ const columns = {
   status: awsLogSubscriptions.status,
   updatedAt: awsLogSubscriptions.updatedAt,
 };
+
+// The connection is not this workspace's AWS connection.
+export class AwsLogSubscriptionConnectionError extends Error {
+  constructor() {
+    super("AWS connection not found");
+  }
+}
 
 // Another workspace already streams this AWS account's logs.
 export class AwsAccountStreamsElsewhereError extends Error {
@@ -65,6 +72,17 @@ export async function setAwsLogSubscriptionRegions(input: {
   const regions = [...new Set(input.regions)];
   return getDatabase().transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`aws_log_subscriptions:${input.awsAccountId}`}))`);
+    // A row always pairs a workspace with its own AWS connection.
+    const [connection] = await tx
+      .select({ id: integrationAccounts.id })
+      .from(integrationAccounts)
+      .where(and(
+        eq(integrationAccounts.id, input.integrationAccountId),
+        eq(integrationAccounts.organizationId, input.organizationId),
+        eq(integrationAccounts.provider, "aws"),
+      ))
+      .limit(1);
+    if (!connection) throw new AwsLogSubscriptionConnectionError();
     const existing = await tx
       .select(columns)
       .from(awsLogSubscriptions)
@@ -121,38 +139,64 @@ export async function removeAllAwsLogSubscriptions(input: {
     .returning(columns);
 }
 
-// Subscriptions that need work: pending, being removed, failed a while ago,
-// or applied with a filter pattern other than the current one.
-export async function findDueAwsLogSubscriptions(input: {
+// Claims up to `limit` subscriptions that need work, for `leaseMs`: pending,
+// being removed, failed a while ago, or applied with a filter pattern other
+// than the current one. Rows another process holds are skipped.
+export async function claimDueAwsLogSubscriptions(input: {
   filterPattern: string;
+  leaseMs: number;
   limit: number;
   retryFailedBefore: Date;
 }): Promise<AwsLogSubscription[]> {
-  return getDatabase()
-    .select(columns)
+  const db = getDatabase();
+  const due = db
+    .select({ id: awsLogSubscriptions.id })
     .from(awsLogSubscriptions)
-    .where(or(
-      eq(awsLogSubscriptions.status, "pending"),
-      eq(awsLogSubscriptions.status, "removing"),
-      and(eq(awsLogSubscriptions.status, "failed"), lt(awsLogSubscriptions.updatedAt, input.retryFailedBefore)),
-      and(eq(awsLogSubscriptions.status, "active"), ne(awsLogSubscriptions.filterPattern, input.filterPattern)),
+    .where(and(
+      or(isNull(awsLogSubscriptions.claimedUntil), lt(awsLogSubscriptions.claimedUntil, sql`now()`)),
+      or(
+        eq(awsLogSubscriptions.status, "pending"),
+        eq(awsLogSubscriptions.status, "removing"),
+        and(eq(awsLogSubscriptions.status, "failed"), lt(awsLogSubscriptions.updatedAt, input.retryFailedBefore)),
+        and(eq(awsLogSubscriptions.status, "active"), ne(awsLogSubscriptions.filterPattern, input.filterPattern)),
+      ),
     ))
     .orderBy(asc(awsLogSubscriptions.updatedAt))
-    .limit(input.limit);
+    .limit(input.limit)
+    .for("update", { skipLocked: true });
+  return db
+    .update(awsLogSubscriptions)
+    .set({ claimedUntil: sql`now() + make_interval(secs => ${input.leaseMs / 1000})` })
+    .where(inArray(awsLogSubscriptions.id, due))
+    .returning(columns);
+}
+
+// Claims the given subscriptions, as when an admin saves regions. Rows
+// another process holds are left out.
+export async function claimAwsLogSubscriptions(ids: string[], leaseMs: number): Promise<AwsLogSubscription[]> {
+  if (ids.length === 0) return [];
+  return getDatabase()
+    .update(awsLogSubscriptions)
+    .set({ claimedUntil: sql`now() + make_interval(secs => ${leaseMs / 1000})` })
+    .where(and(
+      inArray(awsLogSubscriptions.id, ids),
+      or(isNull(awsLogSubscriptions.claimedUntil), lt(awsLogSubscriptions.claimedUntil, sql`now()`)),
+    ))
+    .returning(columns);
 }
 
 export async function markAwsLogSubscriptionActive(id: string, filterPattern: string): Promise<void> {
   const now = new Date();
   await getDatabase()
     .update(awsLogSubscriptions)
-    .set({ appliedAt: now, filterPattern, lastError: null, status: "active", updatedAt: now })
+    .set({ appliedAt: now, claimedUntil: null, filterPattern, lastError: null, status: "active", updatedAt: now })
     .where(and(eq(awsLogSubscriptions.id, id), ne(awsLogSubscriptions.status, "removing")));
 }
 
 export async function markAwsLogSubscriptionFailed(id: string, error: string): Promise<void> {
   await getDatabase()
     .update(awsLogSubscriptions)
-    .set({ lastError: error.slice(0, 1000), status: "failed", updatedAt: new Date() })
+    .set({ claimedUntil: null, lastError: error.slice(0, 1000), status: "failed", updatedAt: new Date() })
     .where(and(eq(awsLogSubscriptions.id, id), ne(awsLogSubscriptions.status, "removing")));
 }
 
@@ -160,7 +204,7 @@ export async function markAwsLogSubscriptionFailed(id: string, error: string): P
 export async function markAwsLogSubscriptionRemovalFailed(id: string, error: string): Promise<void> {
   await getDatabase()
     .update(awsLogSubscriptions)
-    .set({ lastError: error.slice(0, 1000), updatedAt: new Date() })
+    .set({ claimedUntil: null, lastError: error.slice(0, 1000), updatedAt: new Date() })
     .where(and(eq(awsLogSubscriptions.id, id), eq(awsLogSubscriptions.status, "removing")));
 }
 
@@ -184,6 +228,26 @@ export async function awsLogSubscriptionAccountsByRegion(): Promise<Map<string, 
   return byRegion;
 }
 
+// Runs `write` with the region's current account list while holding a lock
+// for that region, so two processes cannot overwrite each other's destination
+// policy with lists read at different times.
+export async function withAwsLogDestinationAccounts(
+  region: string,
+  write: (accountIds: string[]) => Promise<void>,
+): Promise<string[]> {
+  return getDatabase().transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`aws_log_destination:${region}`}))`);
+    const rows = await tx
+      .selectDistinct({ awsAccountId: awsLogSubscriptions.awsAccountId })
+      .from(awsLogSubscriptions)
+      .where(eq(awsLogSubscriptions.region, region))
+      .orderBy(asc(awsLogSubscriptions.awsAccountId));
+    const accountIds = rows.map((row) => row.awsAccountId);
+    await write(accountIds);
+    return accountIds;
+  });
+}
+
 // The workspace that receives an AWS account's logs from a region.
 export async function findAwsLogSubscriptionWorkspace(awsAccountId: string, region: string): Promise<string | null> {
   const [row] = await getDatabase()
@@ -192,6 +256,9 @@ export async function findAwsLogSubscriptionWorkspace(awsAccountId: string, regi
     .where(and(
       eq(awsLogSubscriptions.awsAccountId, awsAccountId),
       eq(awsLogSubscriptions.region, region),
+      // Routed once AWS has confirmed the policy, and until its removal
+      // starts; a later failure, such as a filter update, keeps the policy.
+      isNotNull(awsLogSubscriptions.appliedAt),
       ne(awsLogSubscriptions.status, "removing"),
     ))
     .limit(1);

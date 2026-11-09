@@ -809,7 +809,7 @@ function AwsIntegrationCard({
             <li key={account.id} className="integrationCard__account--stacked">
               <span>
                 <strong>{account.displayName}</strong>
-                <small>Read-only access</small>
+                <small>Read-only investigation role</small>
               </span>
               <span
                 className={`integrationCard__accountStatus${

@@ -219,14 +219,20 @@ describe("AWS integration", () => {
     expect(block).toContain("RoleName: ResponderLogSubscriptionRole");
     expect(block).toContain("AWS: !Ref LogSubscriptionPrincipalArn");
     expect(block).toContain("sts:ExternalId: !Ref ExternalId");
-    const actions = [...block.matchAll(/^ {18}- (\S+)$/gmu)].map((match) => match[1]);
-    expect(actions).toEqual([
+    const statements = block.split("              - Sid: ").slice(1);
+    const actions = (statement: string) => [...statement.matchAll(/^ {18}- (\S+)$/gmu)].map((match) => match[1]);
+    expect(statements.map((statement) => statement.split("\n")[0])).toEqual(["ManageLogSubscriptions", "DenyLogGroupSubscriptionFilters"]);
+    expect(statements[0]).toContain("Effect: Allow");
+    expect(actions(statements[0]!)).toEqual([
       "logs:PutAccountPolicy",
       "logs:PutSubscriptionFilter",
       "logs:DeleteAccountPolicy",
       "logs:DeleteSubscriptionFilter",
-      "logs:DescribeAccountPolicies",
     ]);
+    // Account policies only: no log group's own subscription filters.
+    expect(statements[1]).toContain("Effect: Deny");
+    expect(statements[1]).toContain("Resource: arn:aws:logs:*:*:log-group:*");
+    expect(actions(statements[1]!)).toEqual(["logs:PutSubscriptionFilter", "logs:DeleteSubscriptionFilter"]);
     expect(block).not.toContain("ManagedPolicyArns");
     expect(template).toContain('ManageLogSubscriptions: !Not [!Equals [!Ref LogSubscriptionPrincipalArn, ""]]');
   });

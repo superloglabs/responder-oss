@@ -455,21 +455,21 @@ function AwsConnect({ integration, organizationId, listPath, onBack, onDone }: P
   const connected = state.status === "connected";
   if (!setupId) {
     return <>
-      <Intro provider="aws" title="Connect AWS CloudWatch">Launch one CloudFormation stack, once. It creates a read-only role and a role that only manages CloudWatch Logs subscriptions. Signal connects when it finishes.</Intro>
+      <Intro provider="aws" title="Connect AWS CloudWatch">Launch one CloudFormation stack, once. It creates a read-only role and, where Superlog can receive CloudWatch logs, a role that only manages log subscriptions. Signal connects when it finishes.</Intro>
       {error && <p className="signalError" role="alert">{error}</p>}
       <section className="signalAccess">
         <h3>How it works</h3>
         <ol className="signalSteps">
           <li>Sign in to the AWS account you want to connect. The stack opens with everything filled in.</li>
           <li>Check the box to allow IAM resources, then click <strong>Create stack</strong>.</li>
-          <li>Come back here. Signal connects on its own when the stack finishes, and you choose the regions whose errors it watches.</li>
+          <li>Come back here. Signal connects on its own when the stack finishes.</li>
         </ol>
         <p>Want to review it first? <a href={awsEndpoint(connectUrl ?? "/api/integrations/aws/connect", "/cloudformation-template")} target="_blank" rel="noreferrer">Download the template</a></p>
       </section>
-      <AccessList title="The stack creates two roles and nothing else"
+      <AccessList title="The stack creates IAM roles and nothing else"
         allowed={[
           "Read-only role: the AWS-managed AIOpsAssistantPolicy, to read CloudWatch logs, metrics, alarms, and resources",
-          "Subscription role: creates and removes CloudWatch Logs subscriptions that send error lines to Superlog",
+          "Subscription role, where Superlog can receive logs: creates and removes account-level CloudWatch Logs subscriptions that send error lines to Superlog",
         ]}
         denied="Cannot change resources, data protection, or retention, and costs nothing beyond CloudWatch ingestion" />
       <Actions onBack={onBack}>

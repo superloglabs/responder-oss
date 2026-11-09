@@ -6,7 +6,7 @@
 .awsLogStreaming__regions > li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; }
 .awsLogStreaming__regions > li > .dsButton { margin-left: auto; }
 .awsLogStreaming__empty { color: var(--ds-text-muted); }
-.awsLogStreaming__error { color: var(--ds-text-danger, #b42318); font-size: 12px; }
+.awsLogStreaming__error { color: var(--ds-danger); font-size: 12px; }
 .awsLogStreaming__actions { display: flex; justify-content: flex-end; gap: 8px; }
 .awsLogStreaming .dsAlert ol { margin: 6px 0; padding-left: 18px; font-size: 12px; line-height: 18px; }
 .awsLogStreaming .dsAlert p { margin: 4px 0; font-size: 12px; line-height: 18px; }

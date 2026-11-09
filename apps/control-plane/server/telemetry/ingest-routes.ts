@@ -249,7 +249,9 @@ export function createIngestRoutes(dependencies: IngestRouteDependencies = defau
     })
     // Superlog's own Firehose stream of customers' CloudWatch Logs
     // subscriptions. Records from accounts or regions without a subscription
-    // are dropped; Firehose retries only a busy collector.
+    // are dropped. Every workspace's logs are forwarded before answering; if
+    // the collector was busy for any of them, Firehose resends the whole
+    // batch, so the others can arrive twice.
     .post("/aws/cloudwatch-logs", async (context) => {
       const collector = dependencies.collectorUrl();
       const expected = cloudWatchLogsToken();
@@ -279,6 +281,7 @@ export function createIngestRoutes(dependencies: IngestRouteDependencies = defau
         groups.set(key, group);
       }
       let dropped = 0;
+      let busy: string | null = null;
       for (const group of groups.values()) {
         const organizationId = await subscriptionWorkspaceFor(group.awsAccountId, group.region);
         if (!organizationId) {
@@ -289,13 +292,15 @@ export function createIngestRoutes(dependencies: IngestRouteDependencies = defau
         if (logs.records === 0) continue;
         const response = await forward({ body: JSON.stringify(logs.payload), collector, contentType: "application/json", organizationId, signal: "logs" });
         if (!response || response.status >= 500 || response.status === 429) {
-          return reply(503, response ? `Telemetry ingest answered HTTP ${response.status}` : "Telemetry ingest is unavailable", requestId);
+          busy = response ? `Telemetry ingest answered HTTP ${response.status}` : "Telemetry ingest is unavailable";
+          continue;
         }
         if (!response.ok) {
           console.warn(JSON.stringify({ event: "aws_cloudwatch_logs_rejected", organizationId, status: response.status }));
         }
       }
       if (dropped > 0) console.info(JSON.stringify({ dropped, event: "aws_cloudwatch_logs_dropped" }));
+      if (busy) return reply(503, busy, requestId);
       return reply(200, undefined, requestId);
     });
 }

@@ -27,7 +27,7 @@ const descriptions: Record<ConnectPage, string> = {
   datadog: "Signal reads your monitors, logs, traces, and metrics. It never changes anything in Datadog.",
   grafana: "Signal reads your dashboards, alerts, and datasources. It never changes anything in Grafana.",
   sentry: "Signal reads your errors and issues to find what broke and who it affects.",
-  aws: "Signal reads CloudWatch logs, metrics, and alarms through a read-only role, and receives new error lines from the regions you choose.",
+  aws: "Signal reads CloudWatch logs, metrics, and alarms through a read-only role.",
   gcp: "Signal reads logs and metrics in your project through a read-only service account.",
   linear: "Signal checks Linear before posting, so it skips problems your team already tracks.",
   posthog: "Signal uses product usage to tell how many customers a problem affects.",

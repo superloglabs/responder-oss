@@ -290,8 +290,16 @@ describe("CloudWatch Logs subscriptions through Superlog's Firehose stream", () 
     expect(await denied.json()).toMatchObject({ requestId: "req-2" });
     expect(dependencies.forward).not.toHaveBeenCalled();
 
-    const busy = subscriptionRoutes({ forward: vi.fn(async () => new Response("", { status: 503 })) });
-    expect((await deliver(busy.app, [{ data: message() }])).status).toBe(503);
+    // Every workspace's logs are sent before the batch is answered as busy.
+    const busy = subscriptionRoutes({
+      forward: vi.fn(async (_url: string | URL | Request, init?: RequestInit) =>
+        new Response("", { status: (init!.headers as Headers).get("x-superlog-project-id") === organizationId ? 503 : 200 })),
+    });
+    expect((await deliver(busy.app, [
+      { data: message() },
+      { data: message({ owner: "222233334444", subscriptionFilters: ["superlog-us-east-1"] }) },
+    ])).status).toBe(503);
+    expect(busy.dependencies.forward).toHaveBeenCalledTimes(2);
 
     const off = routes({ cloudWatchLogsToken: () => null });
     expect((await deliver(off.app, [{ data: message() }])).status).toBe(404);

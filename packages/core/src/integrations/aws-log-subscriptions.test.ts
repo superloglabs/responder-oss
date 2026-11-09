@@ -22,6 +22,7 @@ import {
 } from "./aws-log-subscriptions.js";
 
 const environment = {
+  AWS_CLOUDWATCH_LOGS_INGEST_TOKEN: "cell-secret",
   AWS_LOG_DESTINATION_NAME: "superlog-logs-eu",
   AWS_LOG_DESTINATION_REGIONS: "eu-west-1, us-east-1,eu-west-3,not-a-region",
   AWS_LOG_SUBSCRIPTION_PRINCIPAL_ARN: "arn:aws:iam::121638211609:role/ResponderLogSubscriptionBroker",
@@ -67,6 +68,8 @@ describe("AWS log subscription settings", () => {
     expect(awsLogSubscriptionConfig({ ...environment, AWS_LOG_DESTINATION_REGIONS: "" })).toBeNull();
     expect(awsLogSubscriptionConfig({ ...environment, AWS_LOG_SUBSCRIPTION_PRINCIPAL_ARN: "role" })).toBeNull();
     expect(awsLogSubscriptionConfig({ ...environment, AWS_LOG_DESTINATION_NAME: "bad name" })).toBeNull();
+    // Without the ingest token, subscriptions would send logs nobody accepts.
+    expect(awsLogSubscriptionConfig({ ...environment, AWS_CLOUDWATCH_LOGS_INGEST_TOKEN: " " })).toBeNull();
   });
 
   it("names the customer's role, the destination, and the policy", () => {
@@ -113,6 +116,20 @@ describe("assuming the customer's log subscription role", () => {
     const failure = assumeAwsLogSubscriptionRole({ accountId: "123456789012", externalId: "responder_external" }, { config, sts });
     await expect(failure).rejects.toBeInstanceOf(AwsLogSubscriptionRoleUnavailableError);
     expect(describeAwsLogSubscriptionError(await failure.catch((error: unknown) => error), "eu-west-1").problem).toBe("role_missing");
+  });
+
+  it("passes other failures through, so they are retried rather than treated as a missing role", async () => {
+    let call = 0;
+    const sts = () => ({
+      send: async () => {
+        call += 1;
+        if (call === 2) throw Object.assign(new Error("Rate exceeded"), { name: "ThrottlingException" });
+        return { Credentials: stsCredentials };
+      },
+    }) as never;
+    const failure = assumeAwsLogSubscriptionRole({ accountId: "123456789012", externalId: "responder_external" }, { config, sts });
+    await expect(failure).rejects.toThrow("Rate exceeded");
+    await expect(failure).rejects.not.toBeInstanceOf(AwsLogSubscriptionRoleUnavailableError);
   });
 });
 
@@ -163,7 +180,10 @@ describe("CloudWatch Logs calls", () => {
     await putAwsLogDestinationPolicy({ accountIds: ["111122223333"], config, logs: logs.factory, region: "eu-west-1" });
     expect(logs.sent[0]!.credentials).toBeUndefined();
     expect(logs.sent[0]!.command).toBeInstanceOf(PutDestinationPolicyCommand);
-    expect((logs.sent[0]!.command as PutDestinationPolicyCommand).input.destinationName).toBe("superlog-logs-eu");
+    expect((logs.sent[0]!.command as PutDestinationPolicyCommand).input).toEqual({
+      accessPolicy: awsLogDestinationPolicy(config, "eu-west-1", ["111122223333"]),
+      destinationName: "superlog-logs-eu",
+    });
   });
 });
 
@@ -175,7 +195,13 @@ describe("describing failures", () => {
     expect(describeAwsLogSubscriptionError(Object.assign(new Error("User is not authorized"), { name: "AccessDeniedException" }), "eu-west-1")).toMatchObject({
       problem: "access_denied",
     });
-    expect(describeAwsLogSubscriptionError(new Error("The destination policy does not allow this account"), "eu-west-1").problem).toBe("destination_unavailable");
+    const destination = "arn:aws:logs:eu-west-1:121638211609:destination:superlog-logs-eu";
+    const refusedByDestination = Object.assign(new Error(`User is not authorized to perform: logs:PutSubscriptionFilter on resource: ${destination}`), { name: "AccessDeniedException" });
+    expect(describeAwsLogSubscriptionError(refusedByDestination, "eu-west-1", destination).problem).toBe("destination_unavailable");
+    // A denial in the customer's account that mentions some destination is
+    // still the customer's to fix.
+    const refusedByCustomer = Object.assign(new Error("not authorized on resource arn:aws:logs:eu-west-1:999988887777:destination:other"), { name: "AccessDeniedException" });
+    expect(describeAwsLogSubscriptionError(refusedByCustomer, "eu-west-1", destination).problem).toBe("access_denied");
     expect(describeAwsLogSubscriptionError(new Error("boom"), "eu-west-1")).toEqual({
       message: "AWS returned an error in eu-west-1: boom",
       problem: "unknown",

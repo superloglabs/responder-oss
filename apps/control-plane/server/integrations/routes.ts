@@ -1,7 +1,7 @@
 import { integrationAccountDetails } from "./account-details.js";
 import { chatConnectionRoutes } from "./chat-connection.js";
 import { customMcpToolRoutes } from "./custom-mcp-tools.js";
-import { awsLogSubscriptionCleanup, awsLogSubscriptionRoutes } from "./aws-log-subscriptions.js";
+import { awsLogSubscriptionRoutes, removeAwsLogSubscriptionsBeforeDisconnect } from "./aws-log-subscriptions.js";
 import { awsLogSubscriptionConfig } from "../../../../packages/core/src/integrations/aws-log-subscriptions.js";
 import {
   AWS_REGISTRATION_UNAVAILABLE_ERROR,
@@ -1240,12 +1240,21 @@ async function removeIntegrationAccount(input: {
   if (!accountId.success) {
     return Response.json({ error: input.invalid }, { status: 400 });
   }
-  // An AWS connection's log subscriptions are deleted after it is removed,
-  // with the credentials read before.
-  const logCleanup = input.provider === "aws"
-    ? await awsLogSubscriptionCleanup({ integrationAccountId: accountId.data, organizationId: tenant.organizationId })
-      .catch(() => null)
-    : null;
+  // An AWS connection's log subscriptions are deleted first. If some cannot
+  // be, the connection stays, so Superlog keeps the credentials to retry.
+  if (input.provider === "aws") {
+    let cleanup: Awaited<ReturnType<typeof removeAwsLogSubscriptionsBeforeDisconnect>>;
+    try {
+      cleanup = await removeAwsLogSubscriptionsBeforeDisconnect({
+        integrationAccountId: accountId.data,
+        organizationId: tenant.organizationId,
+      });
+    } catch (error) {
+      logCallbackError("AWS", error, { accountId: accountId.data, organizationId: tenant.organizationId, stage: "log_subscription_cleanup" });
+      return Response.json({ error: "Superlog could not remove this account's log subscriptions. Try again." }, { status: 502 });
+    }
+    if (!cleanup.ok) return Response.json({ error: cleanup.error }, { status: 409 });
+  }
   const removal = await deleteIntegrationAccount({
     integrationAccountId: accountId.data,
     organizationId: tenant.organizationId,
@@ -1272,7 +1281,6 @@ async function removeIntegrationAccount(input: {
       { status: 409 },
     );
   }
-  if (logCleanup) await logCleanup();
   return Response.json({ removed: true });
 }
 

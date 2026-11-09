@@ -4,18 +4,21 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { organization } from "./auth-schema.js";
 import {
   AwsAccountStreamsElsewhereError,
+  AwsLogSubscriptionConnectionError,
   awsLogSubscriptionAccountsByRegion,
+  claimAwsLogSubscriptions,
+  claimDueAwsLogSubscriptions,
   deleteAwsLogSubscription,
   findAwsLogSubscriptionWorkspace,
-  findDueAwsLogSubscriptions,
   listAwsLogSubscriptions,
   markAwsLogSubscriptionActive,
   markAwsLogSubscriptionFailed,
   removeAllAwsLogSubscriptions,
   setAwsLogSubscriptionRegions,
+  withAwsLogDestinationAccounts,
 } from "./aws-log-subscriptions.js";
 import { closeDatabase, getDatabase } from "./client.js";
-import { integrationAccounts } from "./schema.js";
+import { awsLogSubscriptions, integrationAccounts } from "./schema.js";
 
 // Run against a disposable, migrated PostgreSQL database only.
 const testUrl = process.env.TEST_AWS_LOG_SUBSCRIPTIONS_DATABASE_URL;
@@ -56,27 +59,58 @@ describe.skipIf(!testUrl)("AWS log subscriptions (PostgreSQL)", () => {
       regions: ["eu-central-1"],
     })).rejects.toBeInstanceOf(AwsAccountStreamsElsewhereError);
 
+    // A workspace cannot use another workspace's connection.
+    await expect(setAwsLogSubscriptionRegions({
+      awsAccountId: "999988887777",
+      filterPattern: "?ERROR",
+      integrationAccountId: connections[1]!,
+      organizationId: organizations[0]!,
+      regions: ["eu-west-1"],
+    })).rejects.toBeInstanceOf(AwsLogSubscriptionConnectionError);
+
+    // The status is constrained in the database.
+    await expect(getDatabase().update(awsLogSubscriptions).set({ status: "bogus" as never }).where(eq(awsLogSubscriptions.awsAccountId, awsAccountId)))
+      .rejects.toThrow();
+
     const fewer = await setAwsLogSubscriptionRegions({ ...workspace, awsAccountId, filterPattern: "?ERROR", regions: ["eu-west-1"] });
     expect(fewer.map((row) => [row.region, row.status])).toEqual([["eu-west-1", "pending"], ["us-east-1", "removing"]]);
     const restored = await setAwsLogSubscriptionRegions({ ...workspace, awsAccountId, filterPattern: "?ERROR", regions: ["eu-west-1", "us-east-1"] });
     expect(restored.map((row) => row.status)).toEqual(["pending", "pending"]);
   });
 
-  it("tracks applying, failures, due work, and the workspace logs go to", async () => {
+  it("tracks applying, failures, claimed work, and the workspace logs go to", async () => {
     const [eu, us] = await listAwsLogSubscriptions(workspace);
+    // Nothing is routed before AWS confirms the policy.
+    expect(await findAwsLogSubscriptionWorkspace(awsAccountId, "eu-west-1")).toBeNull();
     await markAwsLogSubscriptionActive(eu!.id, "?ERROR");
     await markAwsLogSubscriptionFailed(us!.id, "boom");
     expect(await findAwsLogSubscriptionWorkspace(awsAccountId, "eu-west-1")).toBe(organizations[0]);
-    expect(await findAwsLogSubscriptionWorkspace(awsAccountId, "ap-south-1")).toBeNull();
+    expect(await findAwsLogSubscriptionWorkspace(awsAccountId, "us-east-1")).toBeNull();
+    // A policy that was applied keeps routing when a later update fails.
+    await markAwsLogSubscriptionFailed(eu!.id, "throttled");
+    expect(await findAwsLogSubscriptionWorkspace(awsAccountId, "eu-west-1")).toBe(organizations[0]);
+    await markAwsLogSubscriptionActive(eu!.id, "?ERROR");
 
     const later = new Date(Date.now() + 60_000);
-    const due = await findDueAwsLogSubscriptions({ filterPattern: "?ERROR", limit: 100, retryFailedBefore: later });
-    expect(due.filter((row) => row.awsAccountId === awsAccountId).map((row) => row.region)).toEqual(["us-east-1"]);
+    const mine = (rows: Array<{ awsAccountId: string; region: string }>) => rows.filter((row) => row.awsAccountId === awsAccountId).map((row) => row.region);
+    const due = await claimDueAwsLogSubscriptions({ filterPattern: "?ERROR", leaseMs: 60_000, limit: 100, retryFailedBefore: later });
+    expect(mine(due)).toEqual(["us-east-1"]);
+    // A claimed row is not handed out again until its lease ends.
+    expect(mine(await claimDueAwsLogSubscriptions({ filterPattern: "?ERROR", leaseMs: 60_000, limit: 100, retryFailedBefore: later }))).toEqual([]);
+    expect(await claimAwsLogSubscriptions([us!.id], 60_000)).toEqual([]);
+    // Recording the outcome releases it.
+    await markAwsLogSubscriptionFailed(us!.id, "boom again");
+    expect(mine(await claimAwsLogSubscriptions([us!.id], 60_000))).toEqual(["us-east-1"]);
+    await markAwsLogSubscriptionFailed(us!.id, "boom again");
     // A new filter pattern makes active subscriptions due again.
-    const changed = await findDueAwsLogSubscriptions({ filterPattern: "?ERROR ?FATAL", limit: 100, retryFailedBefore: new Date(0) });
-    expect(changed.filter((row) => row.awsAccountId === awsAccountId).map((row) => row.region)).toEqual(["eu-west-1"]);
+    const changed = await claimDueAwsLogSubscriptions({ filterPattern: "?ERROR ?FATAL", leaseMs: 60_000, limit: 100, retryFailedBefore: new Date(0) });
+    expect(mine(changed)).toEqual(["eu-west-1"]);
+    await markAwsLogSubscriptionActive(eu!.id, "?ERROR");
 
     expect((await awsLogSubscriptionAccountsByRegion()).get("eu-west-1")).toContain(awsAccountId);
+    let written: string[] = [];
+    expect(await withAwsLogDestinationAccounts("eu-west-1", async (ids) => { written = ids; })).toContain(awsAccountId);
+    expect(written).toContain(awsAccountId);
   });
 
   it("removes every region of a connection and deletes only rows marked for removal", async () => {

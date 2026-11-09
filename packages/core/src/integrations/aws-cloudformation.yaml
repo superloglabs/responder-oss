@@ -58,12 +58,15 @@ Resources:
             Condition:
               StringEquals:
                 sts:ExternalId: !Ref ExternalId
-  # Lets Superlog create, change, and delete CloudWatch Logs subscription
-  # policies, so it can stream chosen regions' error lines to its log
-  # destinations. CloudWatch Logs also requires a type-specific permission
-  # for every other account policy type (data protection, transformers, field
-  # indexes, retention), so this role cannot change those, and it reads no
-  # log data.
+  # Lets Superlog create, change, and delete account-level CloudWatch Logs
+  # subscription policies, so it can stream chosen regions' error lines to
+  # its log destinations. CloudWatch Logs also requires a type-specific
+  # permission for every other account policy type (data protection,
+  # transformers, field indexes, retention), so this role cannot change those,
+  # and it reads no log data. CloudWatch Logs checks the subscription-filter
+  # permission of an account policy against the account, not a log group, so
+  # the deny leaves the role unable to add or remove any log group's own
+  # subscription filters.
   LogSubscriptionRole:
     Type: AWS::IAM::Role
     Condition: ManageLogSubscriptions
@@ -83,8 +86,13 @@ Resources:
                   - logs:PutSubscriptionFilter
                   - logs:DeleteAccountPolicy
                   - logs:DeleteSubscriptionFilter
-                  - logs:DescribeAccountPolicies
                 Resource: '*'
+              - Sid: DenyLogGroupSubscriptionFilters
+                Effect: Deny
+                Action:
+                  - logs:PutSubscriptionFilter
+                  - logs:DeleteSubscriptionFilter
+                Resource: arn:aws:logs:*:*:log-group:*
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:

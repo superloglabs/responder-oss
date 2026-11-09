@@ -33,12 +33,15 @@ export function AwsLogStreamingSettings({ integrationAccountId, fallback = null 
     return () => { current = false; };
   }, [integrationAccountId]);
 
-  // Refreshes while a region is starting or stopping.
+  // Refreshes while a region is starting or stopping. A failed refresh keeps
+  // the state but replaces the object, so the next one is scheduled.
   const settling = streaming?.subscriptions.some((row) => row.status === "pending" || row.status === "removing") ?? false;
   useEffect(() => {
     if (!settling) return;
     const timer = window.setTimeout(() => {
-      void fetchAwsLogStreaming(integrationAccountId).then(setStreaming).catch(() => undefined);
+      void fetchAwsLogStreaming(integrationAccountId)
+        .then(setStreaming)
+        .catch(() => setStreaming((current) => (current ? { ...current } : current)));
     }, 5_000);
     return () => window.clearTimeout(timer);
   }, [integrationAccountId, settling, streaming]);
@@ -47,14 +50,17 @@ export function AwsLogStreamingSettings({ integrationAccountId, fallback = null 
   if (!streaming) return null;
   if (!streaming.available) return <>{fallback}</>;
 
+  const canManage = streaming.canManage;
   const saved = streaming.subscriptions.filter((row) => row.status !== "removing").map((row) => row.region);
-  // With nothing saved yet, the region nearest the workspace's cell is
-  // suggested, and saved only when the admin starts streaming.
+  // With nothing saved yet, an admin is offered the region nearest the
+  // workspace's cell, saved only when they start streaming.
   const suggested = defaultAwsRegion(cells?.current);
-  const regions = chosen ?? (saved.length > 0 ? saved : streaming.regions.includes(suggested) ? [suggested] : []);
+  const regions = chosen ?? (saved.length > 0 || !canManage ? saved : streaming.regions.includes(suggested) ? [suggested] : []);
   const dirty = regions.join(",") !== saved.join(",");
   const addable = streaming.regions.filter((region) => !regions.includes(region));
   const statusOf = (region: string) => streaming.subscriptions.find((row) => row.region === region);
+  // Regions being removed stay listed, with any error, until they are gone.
+  const stopping = streaming.subscriptions.filter((row) => row.status === "removing" && !regions.includes(row.region));
 
   async function save() {
     setSaving(true);
@@ -86,12 +92,18 @@ export function AwsLogStreamingSettings({ integrationAccountId, fallback = null 
           <code>{region}</code>
           {status ? <Badge tone={status.tone}>{status.label}</Badge> : <Badge>Not saved</Badge>}
           {row?.lastError && !dirty && <span className="awsLogStreaming__error">{row.lastError}</span>}
-          <Button size="small" variant="ghost" disabled={saving} onClick={() => setChosen(regions.filter((value) => value !== region))}>Remove</Button>
+          {canManage && <Button size="small" variant="ghost" disabled={saving} onClick={() => setChosen(regions.filter((value) => value !== region))}>Remove</Button>}
         </li>;
       })}
-      {regions.length === 0 && <li className="awsLogStreaming__empty">No regions. Superlog reads CloudWatch only while it investigates.</li>}
+      {stopping.map((row) => <li key={row.region}>
+        <code>{row.region}</code>
+        <Badge tone={awsLogSubscriptionStatusLabels.removing.tone}>{awsLogSubscriptionStatusLabels.removing.label}</Badge>
+        {row.lastError && <span className="awsLogStreaming__error">{row.lastError}</span>}
+      </li>)}
+      {regions.length === 0 && stopping.length === 0 && <li className="awsLogStreaming__empty">No regions. Superlog reads CloudWatch only while it investigates.</li>}
     </ul>
-    {addable.length > 0 && <SelectField
+    {!canManage && <p className="awsLogStreaming__filter">Workspace owners and admins choose the regions.</p>}
+    {canManage && addable.length > 0 && <SelectField
       className="dsField--compact"
       label="Add a region"
       onChange={(region) => { if (region) setChosen([...regions, region]); }}
@@ -100,7 +112,7 @@ export function AwsLogStreamingSettings({ integrationAccountId, fallback = null 
       value=""
     />}
     {error && <p className="awsLogStreaming__error" role="alert">{error}</p>}
-    {dirty && <div className="awsLogStreaming__actions">
+    {canManage && dirty && <div className="awsLogStreaming__actions">
       {chosen && <Button disabled={saving} onClick={() => setChosen(null)}>Cancel</Button>}
       <Button variant="primary" loading={saving} onClick={() => void save()}>
         {saved.length === 0 ? "Start streaming" : "Save regions"}

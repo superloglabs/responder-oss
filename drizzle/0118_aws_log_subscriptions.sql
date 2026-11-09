@@ -8,8 +8,10 @@ CREATE TABLE "aws_log_subscriptions" (
 	"status" text DEFAULT 'pending' NOT NULL,
 	"last_error" text,
 	"applied_at" timestamp with time zone,
+	"claimed_until" timestamp with time zone,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "aws_log_subscriptions_status_check" CHECK ("aws_log_subscriptions"."status" IN ('pending', 'active', 'failed', 'removing'))
 );
 --> statement-breakpoint
 ALTER TABLE "aws_log_subscriptions" ADD CONSTRAINT "aws_log_subscriptions_organization_id_organization_id_fk" FOREIGN KEY ("organization_id") REFERENCES "public"."organization"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint

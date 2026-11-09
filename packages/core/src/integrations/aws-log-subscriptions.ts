@@ -38,10 +38,12 @@ const roleArnPattern = /^arn:aws:iam::(\d{12}):role\/[A-Za-z0-9+=,.@_/-]+$/u;
 const destinationNamePattern = /^[A-Za-z0-9_.-]{1,512}$/u;
 
 // The log streaming settings the infrastructure gives the API, or null when
-// this installation offers no log streaming.
+// this installation offers no log streaming. All four must be set: without
+// the ingest token, subscriptions would send logs the ingest route refuses.
 export function awsLogSubscriptionConfig(
   environment: NodeJS.ProcessEnv = process.env,
 ): AwsLogSubscriptionConfig | null {
+  if (!environment.AWS_CLOUDWATCH_LOGS_INGEST_TOKEN?.trim()) return null;
   const principalArn = environment.AWS_LOG_SUBSCRIPTION_PRINCIPAL_ARN?.trim();
   const destinationName = environment.AWS_LOG_DESTINATION_NAME?.trim();
   const listed = (environment.AWS_LOG_DESTINATION_REGIONS ?? "")
@@ -95,8 +97,9 @@ function temporaryCredentials(credentials: Credentials | undefined, stage: strin
   };
 }
 
-// The customer's role could not be assumed: the stack predates the role, it
-// was removed, or its trust does not match.
+// AWS refused to let the broker assume the customer's role: the stack
+// predates the role, it was removed, or its trust does not match. Other
+// failures, such as throttling, are passed through and retried.
 export class AwsLogSubscriptionRoleUnavailableError extends Error {
   constructor(cause: unknown) {
     super(
@@ -131,8 +134,14 @@ export async function assumeAwsLogSubscriptionRole(
     }));
     return temporaryCredentials(customer.Credentials, "log subscription");
   } catch (error) {
-    throw new AwsLogSubscriptionRoleUnavailableError(error);
+    if (isAccessDenied(error)) throw new AwsLogSubscriptionRoleUnavailableError(error);
+    throw error;
   }
+}
+
+function isAccessDenied(error: unknown): boolean {
+  const name = errorName(error);
+  return name === "AccessDenied" || name === "AccessDeniedException" || /not authorized/iu.test(errorMessage(error));
 }
 
 export type LogsClientFactory = (region: string, credentials?: AwsTemporaryCredentials) => Pick<CloudWatchLogsClient, "send">;
@@ -226,8 +235,13 @@ export type AwsLogSubscriptionProblem =
   | "unknown";
 
 // A message a workspace admin can act on, for an error while applying or
-// removing a subscription.
-export function describeAwsLogSubscriptionError(error: unknown, region: string): { message: string; problem: AwsLogSubscriptionProblem } {
+// removing a subscription. `destinationArn` is Superlog's destination in the
+// region: a refusal that names it is Superlog's to fix, not the customer's.
+export function describeAwsLogSubscriptionError(
+  error: unknown,
+  region: string,
+  destinationArn?: string,
+): { message: string; problem: AwsLogSubscriptionProblem } {
   if (error instanceof AwsLogSubscriptionRoleUnavailableError) {
     return { message: error.message, problem: "role_missing" };
   }
@@ -235,14 +249,14 @@ export function describeAwsLogSubscriptionError(error: unknown, region: string):
   const text = errorMessage(error);
   if (name === "LimitExceededException" || /already (?:has|exists)|maximum number|only one/iu.test(text)) {
     return {
-      message: `${region} already has an account-level log subscription, and AWS allows one per region. Remove it, or choose another region.`,
+      message: `${region} already has an account-level log subscription, and AWS allows one per account and region. Find out what sends logs through it before you change it: choose another region, or remove that policy only if nothing depends on it.`,
       problem: "subscription_exists",
     };
   }
-  if (/destination/iu.test(text)) {
+  if (destinationArn && text.includes(destinationArn)) {
     return { message: `Superlog's log destination in ${region} did not accept this account yet. Superlog retries on its own.`, problem: "destination_unavailable" };
   }
-  if (name === "AccessDeniedException" || name === "AccessDenied" || /not authorized/iu.test(text)) {
+  if (isAccessDenied(error)) {
     return {
       message: `AWS denied the change in ${region}. A service control policy or permission boundary may block CloudWatch Logs account policies there.`,
       problem: "access_denied",

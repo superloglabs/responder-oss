@@ -42,8 +42,8 @@ export function isOfferedAwsRegion(value: string): value is AwsRegion {
 
 // The region a picker starts on: the one nearest the workspace's cell. The
 // cells are eu and us; an unknown cell, or none yet, starts on us-east-1.
-const cellRegions: Record<string, AwsRegion> = { eu: "eu-west-1", us: "us-east-1" };
+const cellRegions = new Map<string, AwsRegion>([["eu", "eu-west-1"], ["us", "us-east-1"]]);
 
 export function defaultAwsRegion(cellId: string | null | undefined): AwsRegion {
-  return (cellId ? cellRegions[cellId] : undefined) ?? "us-east-1";
+  return (cellId ? cellRegions.get(cellId) : undefined) ?? "us-east-1";
 }
