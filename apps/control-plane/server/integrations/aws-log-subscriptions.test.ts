@@ -16,6 +16,7 @@ import {
   createAwsLogSubscriptionManager,
   createAwsLogSubscriptionRoutes,
   removeAwsLogSubscriptionsBeforeDisconnect,
+  restoreAwsLogSubscriptions,
   type AwsLogSubscriptionDependencies,
 } from "./aws-log-subscriptions.js";
 
@@ -42,6 +43,7 @@ function row(overrides: Partial<AwsLogSubscription> = {}): AwsLogSubscription {
   return {
     appliedAt: null,
     awsAccountId: "123456789012",
+    claimToken: "claim-1",
     filterPattern: awsLogSubscriptionFilterPattern,
     id: `row-${overrides.region ?? "eu-west-1"}`,
     integrationAccountId,
@@ -196,7 +198,7 @@ describe("removing an AWS connection", () => {
 
   it("deletes every policy before the connection goes, and the destinations stop accepting the account", async () => {
     const { deps, lastList, rows } = stateful();
-    expect(await removeAwsLogSubscriptionsBeforeDisconnect(input, deps)).toEqual({ left: [], ok: true });
+    expect(await removeAwsLogSubscriptionsBeforeDisconnect(input, deps)).toEqual({ left: [], ok: true, removed: ["eu-west-1", "us-east-1"] });
     expect(vi.mocked(deps.deleteSubscription).mock.calls.map(([call]) => call.region)).toEqual(["eu-west-1", "us-east-1"]);
     expect(rows.size).toBe(0);
     expect(lastList("eu-west-1")).toEqual([]);
@@ -224,27 +226,37 @@ describe("removing an AWS connection", () => {
     const { deps, lastList, rows } = stateful({
       assume: vi.fn(async () => { throw new AwsLogSubscriptionRoleUnavailableError(new Error("denied")); }),
     });
-    expect(await removeAwsLogSubscriptionsBeforeDisconnect(input, deps)).toEqual({ left: ["eu-west-1", "us-east-1"], ok: true });
+    expect(await removeAwsLogSubscriptionsBeforeDisconnect(input, deps)).toEqual({ left: ["eu-west-1", "us-east-1"], ok: true, removed: [] });
     expect(rows.size).toBe(0);
     expect(lastList("eu-west-1")).toEqual([]);
   });
 
   it("cleans up even while Superlog cannot take logs in", async () => {
     const { deps, rows } = stateful({ config: () => ({ ...config, acceptsLogs: false }) });
-    expect(await removeAwsLogSubscriptionsBeforeDisconnect(input, deps)).toEqual({ left: [], ok: true });
+    expect(await removeAwsLogSubscriptionsBeforeDisconnect(input, deps)).toMatchObject({ left: [], ok: true });
     expect(rows.size).toBe(0);
   });
 
   it("waits for another process that is working on the rows, letting go of the ones it claimed", async () => {
     const { deps } = stateful({ claim: vi.fn(async () => [row({ status: "removing" })]) });
     expect(await removeAwsLogSubscriptionsBeforeDisconnect(input, deps)).toMatchObject({ ok: false, error: expect.stringContaining("Try again") });
-    expect(deps.release).toHaveBeenCalledWith(["row-eu-west-1"]);
+    expect(deps.release).toHaveBeenCalledWith("claim-1");
     expect(deps.deleteSubscription).not.toHaveBeenCalled();
   });
 
   it("has nothing to do without subscriptions or settings", async () => {
-    expect(await removeAwsLogSubscriptionsBeforeDisconnect(input, dependencies().deps)).toEqual({ left: [], ok: true });
-    expect(await removeAwsLogSubscriptionsBeforeDisconnect(input, dependencies({ config: () => null }).deps)).toEqual({ left: [], ok: true });
+    expect(await removeAwsLogSubscriptionsBeforeDisconnect(input, dependencies().deps)).toEqual({ left: [], ok: true, removed: [] });
+    expect(await removeAwsLogSubscriptionsBeforeDisconnect(input, dependencies({ config: () => null }).deps)).toEqual({ left: [], ok: true, removed: [] });
+  });
+
+  it("puts subscriptions back when the removal is blocked after they were deleted", async () => {
+    const saved = [row(), row({ id: "row-us-east-1", region: "us-east-1" })];
+    const { deps } = dependencies({ setRegions: vi.fn(async () => saved) });
+    await restoreAwsLogSubscriptions({ ...input, regions: ["eu-west-1", "us-east-1"] }, deps);
+    expect(deps.setRegions).toHaveBeenCalledWith(expect.objectContaining({ awsAccountId: "123456789012", regions: ["eu-west-1", "us-east-1"] }));
+    expect(deps.putSubscription).toHaveBeenCalledTimes(2);
+    const broken = dependencies({ setRegions: vi.fn(async () => { throw new Error("database down"); }) });
+    await expect(restoreAwsLogSubscriptions({ ...input, regions: ["eu-west-1"] }, broken.deps)).resolves.toBeUndefined();
   });
 });
 

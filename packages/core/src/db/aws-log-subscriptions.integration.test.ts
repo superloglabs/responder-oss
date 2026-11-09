@@ -99,8 +99,14 @@ describe.skipIf(!testUrl)("AWS log subscriptions (PostgreSQL)", () => {
     // A claimed row is not handed out again until its lease ends.
     expect(mine(await claimDueAwsLogSubscriptions({ filterPattern: "?ERROR", leaseMs: 60_000, limit: 100, retryFailedBefore: later }))).toEqual([]);
     expect(await claimAwsLogSubscriptions([us!.id], 60_000)).toEqual([]);
-    // Releasing or recording the outcome lets it go.
-    await releaseAwsLogSubscriptions([us!.id]);
+    // Releasing its claim, or recording the outcome, lets it go. A release
+    // with an older claim's token leaves a newer claim alone.
+    await releaseAwsLogSubscriptions(due.find((row) => row.region === "us-east-1")!.claimToken!);
+    const reclaimed = await claimAwsLogSubscriptions([us!.id], 60_000);
+    expect(mine(reclaimed)).toEqual(["us-east-1"]);
+    await releaseAwsLogSubscriptions(due.find((row) => row.region === "us-east-1")!.claimToken!);
+    expect(await claimAwsLogSubscriptions([us!.id], 60_000)).toEqual([]);
+    await releaseAwsLogSubscriptions(reclaimed[0]!.claimToken!);
     expect(mine(await claimAwsLogSubscriptions([us!.id], 60_000))).toEqual(["us-east-1"]);
     await markAwsLogSubscriptionFailed(us!.id, "boom again");
     expect(mine(await claimAwsLogSubscriptions([us!.id], 60_000))).toEqual(["us-east-1"]);

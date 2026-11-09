@@ -9,6 +9,7 @@ CREATE TABLE "aws_log_subscriptions" (
 	"last_error" text,
 	"applied_at" timestamp with time zone,
 	"claimed_until" timestamp with time zone,
+	"claim_token" uuid,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "aws_log_subscriptions_status_check" CHECK ("aws_log_subscriptions"."status" IN ('pending', 'active', 'failed', 'removing'))

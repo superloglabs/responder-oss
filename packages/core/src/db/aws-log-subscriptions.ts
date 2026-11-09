@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { and, asc, eq, inArray, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm";
 import { getDatabase } from "./client.js";
 import { awsLogSubscriptions, integrationAccounts } from "./schema.js";
@@ -6,6 +7,8 @@ export type AwsLogSubscriptionStatus = "active" | "failed" | "pending" | "removi
 
 export interface AwsLogSubscription {
   appliedAt: Date | null;
+  // Set on rows returned by a claim.
+  claimToken: string | null;
   awsAccountId: string;
   filterPattern: string;
   id: string;
@@ -19,6 +22,7 @@ export interface AwsLogSubscription {
 
 const columns = {
   appliedAt: awsLogSubscriptions.appliedAt,
+  claimToken: awsLogSubscriptions.claimToken,
   awsAccountId: awsLogSubscriptions.awsAccountId,
   filterPattern: awsLogSubscriptions.filterPattern,
   id: awsLogSubscriptions.id,
@@ -170,7 +174,7 @@ export async function claimDueAwsLogSubscriptions(input: {
     .for("update", { skipLocked: true });
   return db
     .update(awsLogSubscriptions)
-    .set({ claimedUntil: sql`now() + make_interval(secs => ${input.leaseMs / 1000})` })
+    .set({ claimedUntil: sql`now() + make_interval(secs => ${input.leaseMs / 1000})`, claimToken: randomUUID() })
     .where(inArray(awsLogSubscriptions.id, due))
     .returning(columns);
 }
@@ -181,7 +185,7 @@ export async function claimAwsLogSubscriptions(ids: string[], leaseMs: number): 
   if (ids.length === 0) return [];
   return getDatabase()
     .update(awsLogSubscriptions)
-    .set({ claimedUntil: sql`now() + make_interval(secs => ${leaseMs / 1000})` })
+    .set({ claimedUntil: sql`now() + make_interval(secs => ${leaseMs / 1000})`, claimToken: randomUUID() })
     .where(and(
       inArray(awsLogSubscriptions.id, ids),
       or(isNull(awsLogSubscriptions.claimedUntil), lt(awsLogSubscriptions.claimedUntil, sql`now()`)),
@@ -189,27 +193,27 @@ export async function claimAwsLogSubscriptions(ids: string[], leaseMs: number): 
     .returning(columns);
 }
 
-// Lets other processes work on rows again without recording an outcome.
-export async function releaseAwsLogSubscriptions(ids: string[]): Promise<void> {
-  if (ids.length === 0) return;
+// Lets other processes work on a claim's rows again without recording an
+// outcome. Rows another claim took over since are left alone.
+export async function releaseAwsLogSubscriptions(claimToken: string): Promise<void> {
   await getDatabase()
     .update(awsLogSubscriptions)
-    .set({ claimedUntil: null })
-    .where(inArray(awsLogSubscriptions.id, ids));
+    .set({ claimedUntil: null, claimToken: null })
+    .where(eq(awsLogSubscriptions.claimToken, claimToken));
 }
 
 export async function markAwsLogSubscriptionActive(id: string, filterPattern: string): Promise<void> {
   const now = new Date();
   await getDatabase()
     .update(awsLogSubscriptions)
-    .set({ appliedAt: now, claimedUntil: null, filterPattern, lastError: null, status: "active", updatedAt: now })
+    .set({ appliedAt: now, claimedUntil: null, claimToken: null, filterPattern, lastError: null, status: "active", updatedAt: now })
     .where(and(eq(awsLogSubscriptions.id, id), ne(awsLogSubscriptions.status, "removing")));
 }
 
 export async function markAwsLogSubscriptionFailed(id: string, error: string): Promise<void> {
   await getDatabase()
     .update(awsLogSubscriptions)
-    .set({ claimedUntil: null, lastError: error.slice(0, 1000), status: "failed", updatedAt: new Date() })
+    .set({ claimedUntil: null, claimToken: null, lastError: error.slice(0, 1000), status: "failed", updatedAt: new Date() })
     .where(and(eq(awsLogSubscriptions.id, id), ne(awsLogSubscriptions.status, "removing")));
 }
 
@@ -217,7 +221,7 @@ export async function markAwsLogSubscriptionFailed(id: string, error: string): P
 export async function markAwsLogSubscriptionRemovalFailed(id: string, error: string): Promise<void> {
   await getDatabase()
     .update(awsLogSubscriptions)
-    .set({ claimedUntil: null, lastError: error.slice(0, 1000), updatedAt: new Date() })
+    .set({ claimedUntil: null, claimToken: null, lastError: error.slice(0, 1000), updatedAt: new Date() })
     .where(and(eq(awsLogSubscriptions.id, id), eq(awsLogSubscriptions.status, "removing")));
 }
 

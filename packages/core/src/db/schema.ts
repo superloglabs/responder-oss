@@ -409,6 +409,8 @@ export const awsLogSubscriptions = pgTable(
     // An API process working on the row holds it until then, so several
     // processes do not apply or remove the same subscription at once.
     claimedUntil: timestamp("claimed_until", { withTimezone: true }),
+    // Which claim holds the row, so a late release cannot free a newer one.
+    claimToken: uuid("claim_token"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

@@ -1,7 +1,7 @@
 import { integrationAccountDetails } from "./account-details.js";
 import { chatConnectionRoutes } from "./chat-connection.js";
 import { customMcpToolRoutes } from "./custom-mcp-tools.js";
-import { awsLogSubscriptionRoutes, removeAwsLogSubscriptionsBeforeDisconnect } from "./aws-log-subscriptions.js";
+import { awsLogSubscriptionRoutes, removeAwsLogSubscriptionsBeforeDisconnect, restoreAwsLogSubscriptions } from "./aws-log-subscriptions.js";
 import { awsLogSubscriptionPrincipalArnForStacks } from "../../../../packages/core/src/integrations/aws-log-subscriptions.js";
 import {
   AWS_REGISTRATION_UNAVAILABLE_ERROR,
@@ -1272,6 +1272,7 @@ async function removeIntegrationAccount(input: {
   // An AWS connection's log subscriptions are deleted before it is removed,
   // once nothing else blocks the removal. If some cannot be deleted, the
   // connection stays, so Superlog keeps the credentials to retry.
+  let restoreRegions: string[] = [];
   if (input.provider === "aws") {
     const check = blocked(await deleteIntegrationAccount({ ...target, dryRun: true }));
     if (check) return check;
@@ -1286,9 +1287,15 @@ async function removeIntegrationAccount(input: {
       return Response.json({ error: "Superlog could not remove this account's log subscriptions. Try again." }, { status: 502 });
     }
     if (!cleanup.ok) return Response.json({ error: cleanup.error }, { status: 409 });
+    restoreRegions = cleanup.removed;
   }
   const removal = blocked(await deleteIntegrationAccount(target));
-  if (removal) return removal;
+  if (removal) {
+    // Something started using the connection after the check, so it stays:
+    // give it back the subscriptions removed above.
+    await restoreAwsLogSubscriptions({ integrationAccountId: accountId.data, organizationId: tenant.organizationId, regions: restoreRegions });
+    return removal;
+  }
   return Response.json({ removed: true });
 }
 

@@ -251,16 +251,17 @@ export function createAwsLogSubscriptionManager(deps: AwsLogSubscriptionDependen
   async function removeBeforeDisconnect(input: {
     integrationAccountId: string;
     organizationId: string;
-  }): Promise<{ ok: true; left: string[] } | { error: string; ok: false }> {
+  }): Promise<{ ok: true; left: string[]; removed: string[] } | { error: string; ok: false }> {
     const config = deps.config();
-    if (!config) return { left: [], ok: true };
+    if (!config) return { left: [], ok: true, removed: [] };
     const rows = await deps.removeAll(input);
-    if (rows.length === 0) return { left: [], ok: true };
+    if (rows.length === 0) return { left: [], ok: true, removed: [] };
     const claimed = await deps.claim(rows.map((row) => row.id), leaseMs);
     if (claimed.length < rows.length) {
       // Another process holds some rows; let go of the ones claimed here so
       // a retry is not blocked by this attempt too.
-      await deps.release(claimed.map((row) => row.id));
+      const token = claimed[0]?.claimToken;
+      if (token) await deps.release(token);
       return { error: "Superlog is still updating this account's log subscriptions. Try again in a minute.", ok: false };
     }
     const connection = await deps.connection(input);
@@ -280,7 +281,7 @@ export function createAwsLogSubscriptionManager(deps: AwsLogSubscriptionDependen
       for (const row of rows) await deps.deleteRow(row.id);
       await syncDestinations(config, rows.map((row) => row.region));
       log({ awsAccountId: rows[0]!.awsAccountId, outcome: "forgotten", stage: "disconnect" });
-      return { left: rows.map((row) => row.region), ok: true };
+      return { left: rows.map((row) => row.region), ok: true, removed: [] };
     }
     const failed: string[] = [];
     for (const row of rows) {
@@ -297,10 +298,28 @@ export function createAwsLogSubscriptionManager(deps: AwsLogSubscriptionDependen
     if (failed.length > 0) {
       return { error: `Superlog could not remove the log subscriptions in ${failed.join("; ")} Try again, or remove those regions first.`, ok: false };
     }
-    return { left: [], ok: true };
+    return { left: [], ok: true, removed: rows.map((row) => row.region) };
   }
 
-  return { applyNow, reconcile, removeBeforeDisconnect, syncDestinations };
+  // Puts a connection's subscriptions back when its removal was blocked
+  // after they were deleted, as when an automation started using it in
+  // between.
+  async function restore(input: { integrationAccountId: string; organizationId: string; regions: string[] }): Promise<void> {
+    const config = deps.config();
+    if (!config?.acceptsLogs || input.regions.length === 0) return;
+    const connection = await deps.connection(input);
+    if (!connection?.credentials) return;
+    const rows = await deps.setRegions({
+      awsAccountId: connection.credentials.accountId,
+      filterPattern: awsLogSubscriptionFilterPattern,
+      integrationAccountId: input.integrationAccountId,
+      organizationId: input.organizationId,
+      regions: input.regions,
+    });
+    await applyNow(config, rows);
+  }
+
+  return { applyNow, reconcile, removeBeforeDisconnect, restore, syncDestinations };
 }
 
 // --- Scheduler ------------------------------------------------------------
@@ -341,6 +360,20 @@ export async function removeAwsLogSubscriptionsBeforeDisconnect(input: {
   organizationId: string;
 }, deps: AwsLogSubscriptionDependencies = defaultAwsLogSubscriptionDependencies) {
   return createAwsLogSubscriptionManager(deps).removeBeforeDisconnect(input);
+}
+
+// Puts subscriptions back after a removal that was blocked at the last step.
+// Best effort: the scheduler retries whatever does not apply now.
+export async function restoreAwsLogSubscriptions(input: {
+  integrationAccountId: string;
+  organizationId: string;
+  regions: string[];
+}, deps: AwsLogSubscriptionDependencies = defaultAwsLogSubscriptionDependencies): Promise<void> {
+  try {
+    await createAwsLogSubscriptionManager(deps).restore(input);
+  } catch (error) {
+    log({ error: errorText(error), organizationId: input.organizationId, outcome: "failed", stage: "restore" });
+  }
 }
 
 // --- Routes ---------------------------------------------------------------

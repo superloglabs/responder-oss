@@ -1,5 +1,5 @@
 {
-  "id": "95a16f0b-c0a6-4018-816b-042e3e632330",
+  "id": "83f74d30-8301-43fd-91b0-d18ae5d1a1a3",
   "prevId": "d8021629-0991-4060-af4e-5f40a8c41f4c",
   "version": "7",
   "dialect": "postgresql",
@@ -4950,6 +4950,12 @@
         "claimed_until": {
           "name": "claimed_until",
           "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "claim_token": {
+          "name": "claim_token",
+          "type": "uuid",
           "primaryKey": false,
           "notNull": false
         },

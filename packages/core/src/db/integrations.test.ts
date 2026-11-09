@@ -509,6 +509,15 @@ describe("integration account tenancy", () => {
       expect(deleted).toEqual([automationVersionIntegrationAccounts, integrationAccounts]);
     });
 
+    it("only checks in a dry run, deleting nothing", async () => {
+      const { deleted } = removalDouble({ automationNames: [] });
+
+      await expect(deleteIntegrationAccount({ ...removal, dryRun: true })).resolves.toEqual({
+        status: "removable",
+      });
+      expect(deleted).toEqual([]);
+    });
+
     it("keeps an account that Linear ticket records use", async () => {
       const { deleted } = removalDouble({ automationNames: [], linearTickets: 2 });
 
