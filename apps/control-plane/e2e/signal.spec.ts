@@ -469,6 +469,33 @@ test("connects OpenTelemetry with one agent prompt and waits for data", async ({
   await expect(page.getByRole("heading", { name: "Connect OpenTelemetry" })).toBeVisible();
 });
 
+test("sends a connected AWS account's CloudWatch to Signal", async ({ page }) => {
+  await workspace(page, { signal: fakeSignal(30, { setUp: false }) });
+  const now = new Date().toISOString();
+  await page.route("**/api/integrations", (route) => route.fulfill({ json: { integrations: [
+    { id: "aws", name: "AWS", description: "", state: "connected", accountCount: 1, resourceCount: 0, connectUrl: "/api/integrations/aws/connect", configurationUrl: null, accounts: [{ id: "44444444-4444-4444-8444-444444444444", displayName: "123456789012", status: "connected", resourceCount: 0, updatedAt: now, details: { awsAccountId: "123456789012", roleName: "ResponderInvestigationRole" } }] },
+  ] } }));
+  await page.route("**/api/telemetry/sources", (route) => route.fulfill({ json: { accounts: [], providers: { gcp: true, vercel: true }, sources: [] } }));
+  let created: unknown = null;
+  await page.route("**/api/telemetry/sources/aws", (route) => {
+    created = route.request().postDataJSON();
+    return route.fulfill({ status: 201, json: {
+      deployCommand: "aws cloudformation deploy --stack-name SuperlogTelemetry-abcd",
+      launchUrl: "https://us-east-1.console.aws.amazon.com/cloudformation/home",
+      sourceId: "55555555-5555-4555-8555-555555555555",
+      stackName: "SuperlogTelemetry-abcd",
+    } });
+  });
+
+  await page.goto("/signal/setup/telemetry/aws");
+  await expect(page.getByRole("heading", { name: "Connected to AWS account 123456789012" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Send CloudWatch to Signal" })).toBeVisible();
+  await page.getByRole("button", { name: "Create stack link" }).click();
+  await expect(page.getByRole("link", { name: "Open in the AWS console" })).toBeVisible();
+  expect(created).toEqual({ region: "us-east-1" });
+  await page.screenshot({ path: "test-results/signal-aws-stream.png", fullPage: true });
+});
+
 test("connects AWS with one launch and finishes when the stack reports back", async ({ page, context }) => {
   await workspace(page, { signal: fakeSignal(30, { setUp: false }) });
   await page.route("**/api/integrations", (route) => route.fulfill({ json: { integrations: [

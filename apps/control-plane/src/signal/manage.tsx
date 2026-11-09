@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { IconCheck, IconExclamationMark } from "@tabler/icons-react";
 import { removeIntegrationAccount, type IntegrationAccount, type IntegrationSummary } from "../agents-api";
 import { Button } from "../design-system";
+import { CloudSourceSetup } from "../pages/telemetry-source";
 import { fetchServices } from "../telemetry-api";
 import { Actions, Intro } from "./connect";
 import type { ConnectPage } from "./connect-pages";
@@ -44,6 +45,8 @@ export function SignalManage(props: ManageProps) {
         account={account}
         // With several accounts, each Disconnect names its own.
         several={accounts.length > 1}
+        // Sending telemetry covers the workspace, so it is shown once.
+        stream={(page === "aws" || page === "gcp") && account === accounts.at(-1) ? <CloudStream provider={page} /> : null}
         onReconnect={props.onReconnect}
         onRemoved={props.onRemoved} />)}
     <Actions onBack={onBack}><Button variant="primary" onClick={onBack}>Done</Button></Actions>
@@ -77,8 +80,8 @@ function updatedLabel(updatedAt: string) {
   return `Last updated ${label === "Just now" || label === "Yesterday" ? label.toLowerCase() : label}.`;
 }
 
-function ManagedAccount({ provider, name, account, several, onReconnect, onRemoved }: {
-  provider: ConnectPage; name: string; account: IntegrationAccount; several: boolean;
+function ManagedAccount({ provider, name, account, several, stream, onReconnect, onRemoved }: {
+  provider: ConnectPage; name: string; account: IntegrationAccount; several: boolean; stream: ReactNode;
   onReconnect: () => void; onRemoved: () => void;
 }) {
   const view = manageView(provider, name, account);
@@ -108,6 +111,7 @@ function ManagedAccount({ provider, name, account, several, onReconnect, onRemov
       </Status>
       : <Status title={`Connected to ${view.connectedTo}`}>{updatedLabel(account.updatedAt)}</Status>}
     <Rows rows={view.rows.map((row) => ({ ...row, onAction: onReconnect }))} />
+    {stream}
     <div className={`signalDisconnect${confirming ? " signalDisconnect--confirm" : ""}`}>
       <div>
         <h3>{confirming ? `Disconnect ${subject}?` : `Disconnect ${subject}`}</h3>
@@ -122,6 +126,27 @@ function ManagedAccount({ provider, name, account, several, onReconnect, onRemov
         : <Button className="signalDisconnect__start" onClick={() => setConfirming(true)}>Disconnect</Button>}
     </div>
   </>;
+}
+
+const streamText: Record<"aws" | "gcp", { title: string; body: string }> = {
+  aws: {
+    title: "Send CloudWatch to Signal",
+    body: "With CloudWatch logs and metrics sent to Superlog, Signal sees each new error as it arrives. Without them, Signal only reads CloudWatch while it investigates.",
+  },
+  gcp: {
+    title: "Send Google Cloud to Signal",
+    body: "With the project's logs and metrics read into Superlog, Signal sees each new error as it arrives. Without them, Signal only reads the project while it investigates.",
+  },
+};
+
+// The connection above lets Signal read the provider while it investigates.
+// Sending its telemetry to Superlog is what lets Signal find new problems.
+function CloudStream({ provider }: { provider: "aws" | "gcp" }) {
+  return <section className="signalCloudStream" aria-labelledby={`signal-${provider}-stream`}>
+    <h3 id={`signal-${provider}-stream`}>{streamText[provider].title}</h3>
+    <p>{streamText[provider].body}</p>
+    <div className="telemetrySetup"><CloudSourceSetup provider={provider} /></div>
+  </section>;
 }
 
 // OpenTelemetry has no account: services send data with an ingest key.

@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { decryptCredentials } from "../../../../packages/core/src/credentials/encryption.js";
 import { getOrganizationIntegrationAccount } from "../../../../packages/core/src/db/integrations.js";
-import { organizationHasCapability } from "../../../../packages/core/src/db/organization-capabilities.js";
+import { organizationReceivesTelemetry } from "../../../../packages/core/src/db/organization-capabilities.js";
 import { createTelemetryIngestKey } from "../../../../packages/core/src/db/telemetry-ingest-keys.js";
 import {
   deleteTelemetrySource,
@@ -37,7 +37,9 @@ import { getActiveTenant } from "../tenant.js";
 
 // Cloud providers that send telemetry to the workspace: Vercel drains, an AWS
 // stack that streams CloudWatch through Firehose, and Google Cloud projects
-// the worker reads. Available where applications can send telemetry.
+// the worker reads. Available where applications can send telemetry, to
+// workspaces with telemetry or Signal: Signal finds problems in the data
+// these sources send.
 export type SourceRouteDependencies = {
   accounts: typeof listTelemetrySourceAccounts;
   awsTemplateUrl: () => Promise<string | null>;
@@ -49,7 +51,7 @@ export type SourceRouteDependencies = {
   deleteVercelDrain: typeof deleteVercelDrain;
   getAccount: typeof getOrganizationIntegrationAccount;
   getSource: typeof getTelemetrySource;
-  hasTelemetry: (organizationId: string) => Promise<boolean>;
+  receivesTelemetry: (organizationId: string) => Promise<boolean>;
   ingestOrigin: () => string;
   listSources: typeof listTelemetrySources;
   providerConfigured: (provider: "gcp" | "vercel") => boolean;
@@ -75,7 +77,7 @@ const defaultDependencies: SourceRouteDependencies = {
   deleteVercelDrain,
   getAccount: getOrganizationIntegrationAccount,
   getSource: getTelemetrySource,
-  hasTelemetry: (organizationId) => organizationHasCapability(organizationId, "telemetry"),
+  receivesTelemetry: organizationReceivesTelemetry,
   ingestOrigin: cellOrigin,
   listSources: listTelemetrySources,
   providerConfigured: (provider) => {
@@ -113,7 +115,7 @@ export function createSourceRoutes(dependencies: SourceRouteDependencies = defau
   > {
     const tenant = await dependencies.tenant(headers);
     if (tenant.ok === false) return { error: tenant.error, ok: false, status: tenant.status };
-    if (!dependencies.collectorUrl() || !(await dependencies.hasTelemetry(tenant.organizationId))) {
+    if (!dependencies.collectorUrl() || !(await dependencies.receivesTelemetry(tenant.organizationId))) {
       return { error: "Sending telemetry is not available", ok: false, status: 404 };
     }
     return { ok: true, organizationId: tenant.organizationId, role: tenant.role, userId: tenant.user.id };

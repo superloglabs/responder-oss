@@ -339,6 +339,9 @@
 .signalManageRows__value > span { color: #666; }
 .signalManageRows code { font: 400 12px/20px ui-monospace, "SFMono-Regular", Consolas, monospace; }
 .signalManageRows .dsButton { flex-shrink: 0; }
+.signalCloudStream { display: flex; flex-direction: column; gap: 4px; padding: 16px 20px; border: .5px solid #00000014; border-radius: 6px; }
+.signal .signalCloudStream > p { font-size: 12px; color: #666; }
+.signalCloudStream .telemetrySetup { margin-top: 8px; }
 .signalDisconnect { display: flex; align-items: center; gap: 16px; padding: 14px 20px; border: .5px solid #00000014; border-radius: 6px; background: #fafafa; }
 .signalDisconnect > div:first-child { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 2px; }
 .signal .signalDisconnect p { font-size: 12px; color: #666; }

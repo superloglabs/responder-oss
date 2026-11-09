@@ -22,7 +22,7 @@ function routes(overrides: Partial<SourceRouteDependencies> = {}) {
     deleteVercelDrain: vi.fn(async () => undefined),
     getAccount: vi.fn(async () => ({ encryptedCredentials: "sealed", id: accountId, metadata: { projectSelection: "all" }, status: "connected" })),
     getSource: vi.fn(async () => null),
-    hasTelemetry: vi.fn(async () => true),
+    receivesTelemetry: vi.fn(async () => true),
     ingestOrigin: () => "https://eu.superlog.sh",
     listSources: vi.fn(async () => []),
     providerConfigured: () => true,
@@ -51,8 +51,8 @@ describe("telemetry source routes", () => {
     });
   });
 
-  it("is not there without telemetry", async () => {
-    expect((await routes({ hasTelemetry: vi.fn(async () => false) }).app.request("/")).status).toBe(404);
+  it("is not there for a workspace without telemetry or Signal", async () => {
+    expect((await routes({ receivesTelemetry: vi.fn(async () => false) }).app.request("/")).status).toBe(404);
     expect((await routes({ collectorUrl: () => null }).app.request("/")).status).toBe(404);
   });
 

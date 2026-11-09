@@ -161,7 +161,8 @@ function CreatedKeyField({ token }: { token: string }) {
   return <input aria-label="New ingest key" readOnly value={shown} />;
 }
 
-function CloudSourceSetup({ provider }: { provider: "aws" | "gcp" | "vercel" }) {
+// Also shown on Signal setup's AWS and Google Cloud pages.
+export function CloudSourceSetup({ provider }: { provider: "aws" | "gcp" | "vercel" }) {
   // Undefined while loading; null when the cell does not accept telemetry.
   const [overview, setOverview] = useState<TelemetrySourceOverview | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
