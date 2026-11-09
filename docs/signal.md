@@ -10,9 +10,9 @@ capability: it creates ingest keys, lists the services sending data, reads its
 logs, traces, and metrics through the API and MCP, and has its errors grouped
 into issues, which Signal reads. Those issues send no notifications, wake no
 agents, and start no automations. Signal setup reads `GET
-/api/telemetry/services`; the other `/api/telemetry/*` routes, the AWS, Google
-Cloud, and Vercel telemetry sources, error issue pages, dashboards, alerts,
-and error notifications still need `telemetry`.
+/api/telemetry/services` and adds AWS and Google Cloud telemetry sources
+(`/api/telemetry/sources`). The other `/api/telemetry/*` routes, error issue
+pages, dashboards, alerts, and error notifications still need `telemetry`.
 
 For a newly created local workspace, set
 `RESPONDER_NEW_ORGANIZATION_CAPABILITIES=signal` before creating it.
@@ -23,7 +23,12 @@ those requests fail and the pages show their errors.
 
 - **Setup** shows the workspace's real connections. Providers with their own
   connection dialog open it here; OAuth providers return to the same step.
-  Google Cloud and OpenTelemetry link to their settings pages. Repositories and
+  Google Cloud and OpenTelemetry link to their settings pages. The manage
+  page of a connected AWS account or Google Cloud project also sends that
+  provider's logs and metrics to Superlog: the AWS CloudWatch stream stack, or
+  reading the Google Cloud project. Signal finds new errors in telemetry
+  Superlog receives, and reads Datadog and Grafana on a schedule only for a
+  workspace whose telemetry does not reach Superlog. Repositories and
   the findings channel come from the workspace's GitHub and Slack connections
   and are saved to Signal's settings. The last step is the plan: Pro ($100 a
   month, up to 50 findings) or Max ($200 a month, up to 100). A Slack channel

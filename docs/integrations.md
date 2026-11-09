@@ -37,7 +37,10 @@ credentials remain server configuration, not tool arguments.
 
 Each connected Signal source has a manage page in setup. It shows what the
 connection is, from the non-secret metadata saved when it connected, and opens
-the connect form again to replace keys or sign in again.
+the connect form again to replace keys or sign in again. The AWS and Google
+Cloud pages also add the provider's telemetry source (see Telemetry sources),
+so Signal reads its logs and metrics as they arrive rather than only during an
+investigation.
 
 **Disconnect** calls `DELETE /api/integrations/<provider>/accounts/<id>`, where
 `<provider>` is `aws`, `datadog`, `gcp`, `grafana`, `linear`, `posthog`, or
@@ -1056,7 +1059,10 @@ separate integration boundary.
 
 Workspaces with the telemetry capability open **Add telemetry** from the
 telemetry Overview page to send logs, traces and metrics. Signal workspaces
-can set up OpenTelemetry from Signal setup. Every option needs a cell with a collector
+set up OpenTelemetry from Signal setup, and the AWS and Google Cloud sources
+from the manage page of a connected AWS account or Google Cloud project. The
+source routes (`/api/telemetry/sources`) accept either capability. Every
+option needs a cell with a collector
 (`TELEMETRY_COLLECTOR_URL`).
 
 - **OpenTelemetry**: create an ingest key and paste the generated prompt into a
