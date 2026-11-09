@@ -232,6 +232,22 @@ export function OAuthAuthorizePage() {
     );
   } else if (screen === "loading") {
     content = <CardContentSkeleton label="Loading Superlog…" />;
+  } else if (screen === "unavailable") {
+    content = (
+      <>
+        <div className="authIntro">
+          <h1>Could not reach Superlog</h1>
+          <p>Check your connection, then try again.</p>
+        </div>
+        <button
+          className="button button--secondary authSubmit"
+          onClick={() => void session.refetch()}
+          type="button"
+        >
+          Try again
+        </button>
+      </>
+    );
   } else if (!session.data) {
     content = <SignIn allowLegacyHandoff={false} allowRegionChoice={false} />;
   } else {
