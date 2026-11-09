@@ -419,6 +419,7 @@ export const awsLogSubscriptions = pgTable(
     uniqueIndex("aws_log_subscriptions_account_region_idx").on(table.awsAccountId, table.region),
     index("aws_log_subscriptions_integration_account_idx").on(table.integrationAccountId),
     index("aws_log_subscriptions_status_idx").on(table.status).where(sql`${table.status} <> 'active'`),
+    index("aws_log_subscriptions_claim_token_idx").on(table.claimToken).where(sql`${table.claimToken} is not null`),
   ],
 );
 

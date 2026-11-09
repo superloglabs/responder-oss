@@ -1,5 +1,5 @@
 {
-  "id": "83f74d30-8301-43fd-91b0-d18ae5d1a1a3",
+  "id": "8cb7ec83-edfc-429b-8ebd-923c428daedd",
   "prevId": "d8021629-0991-4060-af4e-5f40a8c41f4c",
   "version": "7",
   "dialect": "postgresql",
@@ -5023,6 +5023,22 @@
           ],
           "isUnique": false,
           "where": "\"aws_log_subscriptions\".\"status\" <> 'active'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "aws_log_subscriptions_claim_token_idx": {
+          "name": "aws_log_subscriptions_claim_token_idx",
+          "columns": [
+            {
+              "expression": "claim_token",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"aws_log_subscriptions\".\"claim_token\" is not null",
           "concurrently": false,
           "method": "btree",
           "with": {}

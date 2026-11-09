@@ -19,4 +19,5 @@ ALTER TABLE "aws_log_subscriptions" ADD CONSTRAINT "aws_log_subscriptions_organi
 ALTER TABLE "aws_log_subscriptions" ADD CONSTRAINT "aws_log_subscriptions_integration_account_id_integration_accounts_id_fk" FOREIGN KEY ("integration_account_id") REFERENCES "public"."integration_accounts"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE UNIQUE INDEX "aws_log_subscriptions_account_region_idx" ON "aws_log_subscriptions" USING btree ("aws_account_id","region");--> statement-breakpoint
 CREATE INDEX "aws_log_subscriptions_integration_account_idx" ON "aws_log_subscriptions" USING btree ("integration_account_id");--> statement-breakpoint
-CREATE INDEX "aws_log_subscriptions_status_idx" ON "aws_log_subscriptions" USING btree ("status") WHERE "aws_log_subscriptions"."status" <> 'active';
+CREATE INDEX "aws_log_subscriptions_status_idx" ON "aws_log_subscriptions" USING btree ("status") WHERE "aws_log_subscriptions"."status" <> 'active';--> statement-breakpoint
+CREATE INDEX "aws_log_subscriptions_claim_token_idx" ON "aws_log_subscriptions" USING btree ("claim_token") WHERE "aws_log_subscriptions"."claim_token" is not null;
