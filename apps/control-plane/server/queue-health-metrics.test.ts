@@ -37,6 +37,7 @@ describe("queue health metrics", () => {
         oldestPendingSeconds: 540,
         orphaned: 3,
         pending: 4,
+        workspaceLimited: 2,
       },
       jobs: [
         {
@@ -62,6 +63,7 @@ describe("queue health metrics", () => {
     expect(observed).toEqual([
       ["responder.automation_runs.pending", 4, undefined],
       ["responder.automation_runs.pending.oldest_age", 540, undefined],
+      ["responder.automation_runs.pending.workspace_limited", 2, undefined],
       ["responder.automation_runs.lease_expired", 1, undefined],
       ["responder.automation_runs.orphaned", 3, undefined],
       ["responder.automation_runs.finished", 7, { "automation_run.status": "succeeded" }],
