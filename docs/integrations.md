@@ -1001,9 +1001,13 @@ its credentials. An AWS account streams to one workspace. A stack created
 before the role existed gets it with one stack update. While the role cannot
 be assumed, its regions show "Waiting for the stack update" and the page offers
 **Update in AWS**. That link opens CloudFormation's update page for the stack,
-with the current template chosen, in the region where the API found the stack
-with the read-only role (`awsStackUpdateConsoleUrl`; AWS does not document
-this console route). When the API cannot find the stack, the link opens the
+with the current template chosen (`awsStackUpdateConsoleUrl`; AWS does not
+document this console route, which was checked on 2026-11-09). The API finds
+the stack with the read-only role: in every commercial region, the stack whose
+`ExternalId` parameter is the connection's and whose state allows an update,
+which skips a failed earlier attempt left in `ROLLBACK_COMPLETE`. That search
+has its own request (`GET .../log-subscriptions/<id>/stack-update`), so the
+regions show at once; a found stack is remembered until the role works. When the API cannot find the stack, the link opens the
 stacks list in the registration region instead, and the customer selects the
 stack and replaces its template there. The shipped template leaves
 `LogSubscriptionPrincipalArn` empty: a deployment that fills it in the template
