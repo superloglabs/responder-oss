@@ -1032,6 +1032,12 @@ export function AuthGate({ children }: AuthGateProps) {
   const signedInUserId = session.data?.user.id;
   const activeOrganizationId = session.data?.session.activeOrganizationId;
   const [isCreatingWorkspace, setIsCreatingWorkspace] = useState(false);
+  // Better Auth refetches the session when the tab becomes visible again, and
+  // marks a signed-out session as pending while it does. Showing the loading
+  // screen then would unmount the sign-in form and clear what was typed, so
+  // only the first session check shows it.
+  const [sessionChecked, setSessionChecked] = useState(false);
+  if (!session.isPending && !sessionChecked) setSessionChecked(true);
   // A signed-in visitor's next /app visit on any cell's host comes back here.
   useEffect(() => {
     if (signedInUserId && cells?.current) {
@@ -1095,7 +1101,7 @@ export function AuthGate({ children }: AuthGateProps) {
     <AppFrameSkeleton />
   );
 
-  if (session.isPending) return loading;
+  if (session.isPending && !sessionChecked) return loading;
 
   if (session.error) {
     return (
