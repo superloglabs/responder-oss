@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { decryptCredentials } from "../../../../packages/core/src/credentials/encryption.js";
 import { getOrganizationIntegrationAccount } from "../../../../packages/core/src/db/integrations.js";
-import { organizationHasCapability } from "../../../../packages/core/src/db/organization-capabilities.js";
+import { organizationReceivesTelemetry } from "../../../../packages/core/src/db/organization-capabilities.js";
 import { createTelemetryIngestKey } from "../../../../packages/core/src/db/telemetry-ingest-keys.js";
 import {
   deleteTelemetrySource,
@@ -75,7 +75,7 @@ const defaultDependencies: SourceRouteDependencies = {
   deleteVercelDrain,
   getAccount: getOrganizationIntegrationAccount,
   getSource: getTelemetrySource,
-  hasTelemetry: (organizationId) => organizationHasCapability(organizationId, "telemetry"),
+  hasTelemetry: organizationReceivesTelemetry,
   ingestOrigin: cellOrigin,
   listSources: listTelemetrySources,
   providerConfigured: (provider) => {

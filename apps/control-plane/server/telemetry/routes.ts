@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { organizationHasCapability } from "../../../../packages/core/src/db/organization-capabilities.js";
+import { organizationHasCapability, organizationReceivesTelemetry } from "../../../../packages/core/src/db/organization-capabilities.js";
 import {
   AiPriceOverrideConflictError,
   deleteAiPriceOverride,
@@ -247,7 +247,7 @@ const defaultDependencies: TelemetryRouteDependencies = {
   eventAggregate,
   eventSeries,
   hasDashboards: (organizationId) => organizationHasCapability(organizationId, "dashboards"),
-  hasTelemetry: (organizationId) => organizationHasCapability(organizationId, "telemetry"),
+  hasTelemetry: organizationReceivesTelemetry,
   listServices,
   metricCatalog: listMetricCatalog,
   metricDimensions: listMetricDimensions,

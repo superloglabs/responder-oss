@@ -16,8 +16,9 @@ import {
 } from "../telemetry/error-issues.js";
 import { enqueueErrorNotificationFollowups, enqueueErrorNotifications } from "./error-notifications.js";
 import { getDatabase } from "./client.js";
+import { listTelemetryOrganizationIds } from "./organization-capabilities.js";
 import { pausedTelemetryNotificationOrganizations } from "./telemetry-notification-pauses.js";
-import { errorIssueActivities, errorIssueCursors, errorIssueDailyCounts, errorIssueHourlyCounts, errorIssues, organizationCapabilities } from "./schema.js";
+import { errorIssueActivities, errorIssueCursors, errorIssueDailyCounts, errorIssueHourlyCounts, errorIssues } from "./schema.js";
 
 type Database = ReturnType<typeof getDatabase>;
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
@@ -51,22 +52,14 @@ export async function withErrorIssueStore<T>(pass: (store: ErrorIssueStore) => P
     if (!lock.rows[0]?.locked) return null;
     return pass({
       cursor: (kind) => errorIssueCursor(tx, kind),
-      organizationIds: () => telemetryOrganizationIds(tx),
+      // Signal reads the issues of workspaces without the telemetry product.
+      organizationIds: () => listTelemetryOrganizationIds(tx),
       pausedOrganizationIds: () => pausedTelemetryNotificationOrganizations(tx),
       // A savepoint per issue, so one failed write does not undo the others.
       record: (occurrences) => tx.transaction((savepoint) => recordErrorOccurrences(savepoint, occurrences)),
       saveCursor: (kind, cursor) => saveErrorIssueCursor(tx, kind, cursor),
     });
   });
-}
-
-// Workspaces whose telemetry is grouped into issues.
-async function telemetryOrganizationIds(executor: Executor): Promise<string[]> {
-  const rows = await executor
-    .select({ organizationId: organizationCapabilities.organizationId })
-    .from(organizationCapabilities)
-    .where(and(eq(organizationCapabilities.capability, "telemetry"), eq(organizationCapabilities.enabled, true)));
-  return rows.map((row) => row.organizationId);
 }
 
 async function errorIssueCursor(executor: Executor, kind: ErrorIssueKind): Promise<ErrorCandidateCursor | null> {

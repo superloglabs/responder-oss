@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { organizationHasCapability } from "../../../../packages/core/src/db/organization-capabilities.js";
+import { organizationReceivesTelemetry } from "../../../../packages/core/src/db/organization-capabilities.js";
 import {
   createTelemetryIngestKey,
   listTelemetryIngestKeys,
@@ -28,7 +28,7 @@ export type IngestKeyRouteDependencies = {
 const defaultDependencies: IngestKeyRouteDependencies = {
   collectorUrl: telemetryCollectorUrl,
   createKey: createTelemetryIngestKey,
-  hasTelemetry: (organizationId) => organizationHasCapability(organizationId, "telemetry"),
+  hasTelemetry: organizationReceivesTelemetry,
   listKeys: listTelemetryIngestKeys,
   revokeKey: revokeTelemetryIngestKey,
   tenant: getActiveTenant,

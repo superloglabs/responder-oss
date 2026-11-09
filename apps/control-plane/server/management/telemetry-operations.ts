@@ -5,7 +5,7 @@ import {
   LogWatchLimitError,
   maximumLogWatchesPerWorkspace,
 } from "../../../../packages/core/src/db/log-watches.js";
-import { organizationHasCapability } from "../../../../packages/core/src/db/organization-capabilities.js";
+import { organizationReceivesTelemetry } from "../../../../packages/core/src/db/organization-capabilities.js";
 import {
   getTelemetryClient,
   type TelemetryClient,
@@ -123,7 +123,7 @@ const metricPointSchema = z.object({
 
 async function telemetryClient(context: ManagementContext): Promise<TelemetryClient> {
   const client = getTelemetryClient();
-  if (!client || !(await organizationHasCapability(context.organizationId, "telemetry"))) {
+  if (!client || !(await organizationReceivesTelemetry(context.organizationId))) {
     throw new ManagementError(404, "Telemetry is not available in this workspace.", "telemetry_unavailable");
   }
   return client;

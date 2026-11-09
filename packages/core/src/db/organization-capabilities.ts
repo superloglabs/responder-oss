@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { getDatabase } from "./client.js";
 import {
   organizationCapabilities,
@@ -34,6 +34,52 @@ export async function organizationHasCapability(
     )
     .limit(1);
   return rows[0]?.enabled === true;
+}
+
+// A workspace stores and reads telemetry in Superlog when it has the
+// telemetry product or Signal, which reads the same data on its own. The
+// telemetry product's screens, dashboards, alerts, and error notifications
+// still need `telemetry` itself.
+export const telemetryDataCapabilities = [
+  "telemetry",
+  "signal",
+] as const satisfies readonly OrganizationCapability[];
+
+export async function organizationReceivesTelemetry(
+  organizationId: string,
+): Promise<boolean> {
+  const rows = await getDatabase()
+    .select({ enabled: organizationCapabilities.enabled })
+    .from(organizationCapabilities)
+    .where(
+      and(
+        eq(organizationCapabilities.organizationId, organizationId),
+        inArray(organizationCapabilities.capability, [...telemetryDataCapabilities]),
+        eq(organizationCapabilities.enabled, true),
+      ),
+    )
+    .limit(1);
+  return rows[0]?.enabled === true;
+}
+
+type Database = ReturnType<typeof getDatabase>;
+type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
+
+// Every workspace that receives telemetry, such as for grouping errors into
+// issues.
+export async function listTelemetryOrganizationIds(
+  executor: Database | Transaction = getDatabase(),
+): Promise<string[]> {
+  const rows = await executor
+    .selectDistinct({ organizationId: organizationCapabilities.organizationId })
+    .from(organizationCapabilities)
+    .where(
+      and(
+        inArray(organizationCapabilities.capability, [...telemetryDataCapabilities]),
+        eq(organizationCapabilities.enabled, true),
+      ),
+    );
+  return rows.map((row) => row.organizationId);
 }
 
 export async function setOrganizationCapability(input: {

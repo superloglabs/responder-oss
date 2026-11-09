@@ -5,6 +5,12 @@ Signal is an optional product area behind the organization capability named
 with Settings in a separate Workspace group; Automations and telemetry are not
 in its navigation. Direct Signal URLs also require the capability.
 
+A Signal workspace receives telemetry without the `telemetry` capability: it
+creates ingest keys, adds telemetry sources, reads its logs, traces, and
+metrics, and has its errors grouped into issues, which Signal reads. The
+telemetry pages, error issue pages, dashboards, alerts, and error
+notifications still need `telemetry`.
+
 For a newly created local workspace, set
 `RESPONDER_NEW_ORGANIZATION_CAPABILITIES=signal` before creating it.
 
