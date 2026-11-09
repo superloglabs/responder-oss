@@ -130,3 +130,25 @@ export function manageView(provider: string, name: string, account: IntegrationA
 export function manageableAccounts(accounts: IntegrationAccount[] | undefined) {
   return (accounts ?? []).filter((account) => account.status !== "pending");
 }
+
+// One line about a connected account, for the list of sources.
+export function accountSummary(provider: string, account: IntegrationAccount) {
+  const details = account.details ?? {};
+  const projects = account.resourceCount > 0
+    ? `${account.resourceCount} ${account.resourceCount === 1 ? "project" : "projects"}`
+    : null;
+  switch (provider) {
+    case "datadog":
+      return [account.displayName, details.siteName ?? DATADOG_SITES.find((site) => site.id === details.site)?.name].filter(Boolean).join(" · ");
+    case "grafana":
+      return details.url?.replace(/^https?:\/\//u, "") ?? account.displayName;
+    case "sentry":
+      return [details.organizationSlug ?? account.displayName, projects].filter(Boolean).join(" · ");
+    case "aws":
+      return details.awsAccountId ? `Account ${details.awsAccountId}` : account.displayName;
+    case "gcp":
+      return account.projectId ?? account.displayName.replace(/^GCP · /u, "");
+    default:
+      return account.displayName;
+  }
+}

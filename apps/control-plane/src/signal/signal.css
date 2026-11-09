@@ -373,3 +373,102 @@
   .signalManageRows > div { flex-wrap: wrap; gap: 2px 16px; }
   .signalManageRows__label { width: 100%; }
 }
+
+/* Settings: setup once Signal has been turned on. */
+.signalSettings { display: flex; flex-direction: column; gap: 36px; margin-top: 24px; }
+.signalSettingsHeader { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.signalStatusPill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 999px; background: #f5f5f5; box-shadow: inset 0 0 0 .5px #00000024; color: #444; font-size: 12px; font-weight: 500; line-height: 20px; white-space: nowrap; }
+.signalStatusPill i { width: 6px; height: 6px; flex-shrink: 0; border-radius: 50%; background: #999; }
+.signalStatusPill--on { background: #f2f8f1; box-shadow: inset 0 0 0 .5px #d4e4d4; color: #38643b; }
+.signalStatusPill--on i { background: #168255; }
+.signalSettingsColumns { display: flex; align-items: flex-start; gap: 64px; }
+.signalSettingsNav { display: flex; flex-direction: column; gap: 2px; width: 200px; flex-shrink: 0; padding-top: 2px; }
+.signalSettingsNav a { display: flex; align-items: center; gap: 10px; height: 32px; padding: 0 10px; border-radius: 6px; color: #5d5d5d; font-weight: 500; text-decoration: none; white-space: nowrap; }
+.signalSettingsNav a svg { flex-shrink: 0; color: #666; }
+.signalSettingsNav a:hover { background: #ededed; }
+.signalSettingsNav a.active { background: #e3e3e3; color: #121212; font-weight: 600; }
+.signalSettingsNav a.active svg { color: #444; }
+.signalSettingsContent { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 16px; }
+.signalSettingsPage { display: flex; flex-direction: column; gap: 32px; }
+.signalSettingsSource { display: flex; flex-direction: column; gap: 24px; }
+.signalSettingsPage__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding-bottom: 8px; }
+.signalSettingsPage__head > div { display: flex; flex-direction: column; gap: 4px; }
+.signal .signalSettingsPage__head h2 { font-size: 15px; color: #121212; }
+.signal .signalSettingsPage__head p { font-size: 13px; line-height: 20px; color: #444; }
+.signalSaveStatus { flex-shrink: 0; color: #666; font-size: 12px; line-height: 23px; }
+.signalSettingsGroup { display: flex; flex-direction: column; gap: 12px; }
+.signalSettingsGroup__head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; }
+.signal .signalSettingsGroup__head h3 { color: #121212; font-size: 14px; font-weight: 600; line-height: 23px; }
+.signalSettingsCard { border: .5px solid #00000014; border-radius: 6px; overflow: hidden; background: #fafafa; }
+.signalSettingsCard--rows { padding: 0 20px; }
+.signal .signalSettingsEmpty { padding: 20px; color: #666; }
+.signalSettingsRow { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 20px 0; }
+.signalSettingsRow + .signalSettingsRow { border-top: .5px solid #00000014; }
+.signalSettingsRow--stacked { flex-direction: column; align-items: stretch; gap: 10px; }
+.signalSettingsRow--stacked .signalSettingsRow__label { flex: none; }
+.signalSettingsRow__label { display: flex; flex: 1 1 240px; min-width: 0; flex-direction: column; gap: 2px; }
+.signalSettingsRow__label strong { color: #161616; font-weight: 600; }
+.signalSettingsRow__label span { color: #666; }
+.signal .signalSettingsSelect { width: 240px; flex-shrink: 0; border-radius: 6px; }
+.signalSettingsActions { display: flex; justify-content: flex-end; gap: 8px; }
+.signalSourceRow + .signalSourceRow, .signalSourceRow + .signalSettingsCard--rows { border-top: .5px solid #00000014; }
+.signalSourceRow__main { display: flex; align-items: center; gap: 16px; padding: 20px; }
+.signalSourceRow:has(.signalSourceRow__more) .signalSourceRow__main { padding-bottom: 12px; }
+.signalSourceRow__label { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 2px; }
+.signalSourceRow__label strong { color: #202020; font-weight: 600; }
+.signalSourceRow__label span { color: #666; overflow-wrap: anywhere; }
+.signalSourceRow__meta { flex-shrink: 0; color: #666; text-align: right; }
+.signalSourceRow__main > .dsButton { flex-shrink: 0; }
+.signalSourceRow__more { padding: 0 20px 20px 68px; }
+.signalSourceRow__more .signalRepositories { padding: 0 0 12px; }
+.signalChips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.signalChip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 4px; background: #fff; box-shadow: inset 0 0 0 .5px #00000020; color: #444; font: 400 12px/18px ui-monospace, "SFMono-Regular", Consolas, monospace; }
+.signalChip:has(button) { padding-right: 6px; }
+.signalChip code { font: inherit; }
+.signalChip button { display: flex; padding: 0; border: 0; background: none; color: #777; cursor: pointer; }
+.signalChip button:hover { color: #202020; }
+.signalSkipped { display: flex; width: 360px; flex-shrink: 0; flex-direction: column; align-items: flex-end; gap: 6px; }
+.signalSkipped .signalChips { justify-content: flex-end; }
+.signalChipAdd { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 6px; border: 0; border-radius: 4px; background: none; color: #666; font: 500 12px/18px var(--ds-font-sans); cursor: pointer; }
+.signalChipAdd:hover { background: #ededed; color: #202020; }
+.signalChipForm { display: inline-flex; align-items: center; gap: 6px; }
+.signalChipForm input { width: 160px; height: 24px; padding: 0 8px; border: 0; border-radius: 4px; background: #fff; box-shadow: 0 0 0 .5px #00000024, inset 0 1px 1px #0000000d; color: #202020; font: 400 12px/18px ui-monospace, "SFMono-Regular", Consolas, monospace; }
+.signalChipForm input[aria-invalid="true"] { box-shadow: 0 0 0 1px #b33d43; }
+.signal .signalChipForm .dsButton { height: 24px; min-height: 24px; padding: 2px 8px; font-size: 12px; }
+.signalNotes { min-height: 76px; padding: 8px 10px; border: 0; border-radius: 6px; background: #fff; box-shadow: 0 1px 1.5px #0000001a, 0 0 0 .5px #00000024; color: #202020; font: 400 13px/20px var(--ds-font-sans); resize: vertical; }
+.signal .signalNotes:focus-visible { outline: 2px solid var(--signal-accent); outline-offset: 2px; }
+.signalNotesActions { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: #777; font-size: 12px; }
+.signal .signalSwitch { width: auto; flex-shrink: 0; gap: 8px; }
+.signal .signalSwitch .dsSwitch__copy { order: 1; }
+.signal .signalSwitch .dsSwitch__copy strong { color: #202020; font-size: 13px; font-weight: 400; line-height: 20px; }
+.signal .signalSwitch .dsSwitch__track { width: 24px; height: 16px; padding: 2px; border: 0; border-radius: 4px; background: #d6d6d6; box-shadow: inset 0 1px 1px #0000001a, inset 0 0 0 .5px #00000033; }
+.signal .signalSwitch .dsSwitch__track > span { width: 12px; height: 12px; border: .5px solid #fff; border-radius: 2px; background: linear-gradient(#fff, #fff0), #eee; box-shadow: 0 .5px .5px #00000066; }
+.signal .signalSwitch[aria-checked="true"] .dsSwitch__track { border: 0; background: linear-gradient(#fff0, #ffffff1a), var(--signal-accent); }
+.signal .signalSwitch[aria-checked="true"] .dsSwitch__track > span { background: linear-gradient(#fff, #fff0), #eee; transform: translateX(8px); }
+.signalSeverityChoice { flex-shrink: 0; }
+.signal .signalSeverityChoice .dsSegmentedControl { height: 28px; padding: 0; gap: 0; border: 0; border-radius: 4px; overflow: hidden; background: #fff; box-shadow: 0 1px 1.5px #0000001a, 0 0 0 .5px #00000024; }
+.signal .signalSeverityChoice .dsSegmentedControl__option { min-height: 28px; padding: 0 10px; border-radius: 0; color: #000; font: 600 13px/20px var(--ds-font-sans); }
+.signal .signalSeverityChoice .dsSegmentedControl__option + .dsSegmentedControl__option { border-left: .5px solid #00000024; }
+.signal .signalSeverityChoice .dsSegmentedControl__option[aria-checked="true"] { background: #f5f5f5; box-shadow: none; color: #000; }
+.signal .signalSeverityChoice .dsSegmentedControl__option:focus-visible { outline-offset: -2px; }
+.signalCurrentPlan { display: flex; flex-direction: column; gap: 14px; padding: 20px; }
+.signalCurrentPlan__summary { display: flex; align-items: center; gap: 8px; }
+.signalCurrentPlan__summary > div { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 2px; margin-right: 16px; }
+.signal .signalCurrentPlan p { color: #666; }
+.signalCurrentPlan strong { color: #202020; font-weight: 600; }
+.signalCurrentPlan p:first-child strong { margin-right: 8px; }
+.signalMeter { height: 6px; border-radius: 999px; overflow: hidden; background: #e6e6e6; }
+.signalMeter span { display: block; height: 100%; background: var(--signal-accent); }
+@media (max-width: 800px) {
+  .signalSettingsColumns { flex-direction: column; gap: 24px; }
+  .signalSettingsNav { width: 100%; flex-direction: row; overflow-x: auto; }
+}
+@media (max-width: 600px) {
+  .signalSettings { margin-top: 8px; gap: 24px; }
+  .signalSettingsRow, .signalCurrentPlan__summary { flex-wrap: wrap; }
+  .signal .signalSettingsSelect, .signalSkipped { width: 100%; }
+  .signalSkipped { align-items: flex-start; }
+  .signalSkipped .signalChips { justify-content: flex-start; }
+  .signalSourceRow__main { flex-wrap: wrap; gap: 12px; padding: 16px 12px; }
+  .signalSourceRow__more { padding: 0 12px 16px; }
+}

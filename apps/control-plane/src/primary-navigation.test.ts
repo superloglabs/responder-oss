@@ -192,8 +192,8 @@ describe("Signal navigation", () => {
     expect(primaryNavigation({ automations: false, simplified: false, signal: true, signalSetupComplete: false })
       .map((item) => item.label)).toEqual(["Setup", "Settings"]);
     expect(primaryNavigation({ automations: false, simplified: false, signal: true, signalSetupComplete: true })
-      .map((item) => item.label)).toEqual(["Setup", "Findings", "Usage", "Settings"]);
+      .map((item) => item.label)).toEqual(["Findings", "Usage", "Setup", "Settings"]);
     expect(primaryNavigation({ automations: false, simplified: false, signal: true })
-      .map((item) => item.label)).toEqual(["Setup", "Findings", "Usage", "Settings"]);
+      .map((item) => item.label)).toEqual(["Findings", "Usage", "Setup", "Settings"]);
   });
 });

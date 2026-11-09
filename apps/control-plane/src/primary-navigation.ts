@@ -54,11 +54,11 @@ interface NavigationOptions {
 // labels, and lists the remaining product areas above them.
 export function primaryNavigation(options: NavigationOptions): NavigationItem[] {
   if (options.signal) return [
-    { group: "Signal", label: "Setup", section: "signal-setup", to: "/signal/setup" },
     ...(options.signalSetupComplete === false ? [] : [
       { group: "Signal" as const, label: "Findings", section: "signal-findings" as const, to: "/signal/findings" },
       { group: "Signal" as const, label: "Usage", section: "signal-usage" as const, to: "/signal/usage" },
     ]),
+    { group: "Signal", label: "Setup", section: "signal-setup", to: "/signal/setup" },
     { group: "Workspace", label: "Settings", section: "settings", to: "/settings/workspace" },
   ];
   const grouped = Boolean(options.telemetry);
