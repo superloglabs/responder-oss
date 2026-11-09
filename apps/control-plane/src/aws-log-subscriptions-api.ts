@@ -11,17 +11,11 @@ export interface AwsLogStreaming {
   filter?: string;
   // Regions where Superlog can receive logs.
   regions: string[];
-  // Shown when the stack predates ResponderLogSubscriptionRole.
+  // Shown when the stack predates ResponderLogSubscriptionRole. How to
+  // update it comes from fetchAwsStackUpdate.
   stackUpdate: {
-    command: string;
-    // Opens the stack's update page in AWS, or the region's stacks list when
-    // Superlog could not find the stack. Its template link lasts 15 minutes,
-    // so the page refreshes it while it waits.
-    consoleUrl: string | null;
     logSubscriptionPrincipalArn: string;
-    region: string | null;
     stackName: string;
-    templateUrl: string | null;
   } | null;
   subscriptions: Array<{
     appliedAt: string | null;
@@ -68,6 +62,24 @@ export async function saveAwsLogStreaming(integrationAccountId: string, regions:
 }
 
 export type AwsLogSubscriptionTone = "danger" | "info" | "live" | "neutral" | "warning";
+
+export interface AwsStackUpdate {
+  command: string;
+  // Opens the stack's update page in AWS, or the region's stacks list when
+  // Superlog could not find the stack. Its template link lasts 15 minutes.
+  consoleUrl: string | null;
+  found: boolean;
+  region: string | null;
+}
+
+// Finding the stack searches the customer's account, so it has its own
+// request and the page does not wait for it.
+export async function fetchAwsStackUpdate(integrationAccountId: string): Promise<AwsStackUpdate> {
+  const response = await fetch(`${path(integrationAccountId)}/stack-update`);
+  const body = (await response.json().catch(() => null)) as (Partial<AwsStackUpdate> & { error?: string }) | null;
+  if (!response.ok || !body || typeof body.command !== "string") throw new Error(body?.error ?? "Could not prepare the stack update.");
+  return { command: body.command, consoleUrl: body.consoleUrl ?? null, found: body.found === true, region: body.region ?? null };
+}
 
 export const awsLogSubscriptionStatusLabels: Record<AwsLogSubscriptionStatus, { label: string; tone: AwsLogSubscriptionTone }> = {
   active: { label: "Streaming", tone: "live" },

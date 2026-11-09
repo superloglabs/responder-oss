@@ -855,21 +855,31 @@ test("asks for one AWS stack update when the stack predates log streaming", asyn
     canManage: true,
     regions: ["eu-west-1"],
     stackUpdate: {
-      command: "aws cloudformation update-stack --region us-west-2 --stack-name ResponderInvestigationAccess",
-      consoleUrl,
       logSubscriptionPrincipalArn: "arn:aws:iam::121638211609:role/ResponderLogSubscriptionBroker",
-      region: "us-west-2",
       stackName: "ResponderInvestigationAccess",
-      templateUrl: null,
     },
     subscriptions: [{ appliedAt: null, lastError: null, region: "eu-west-1", status: "waiting" }],
   } }));
+  // Finding the stack takes a while; the page does not wait for it.
+  let answerStackUpdate: () => void = () => {};
+  const stackUpdateAsked = new Promise<void>((resolve) => { answerStackUpdate = resolve; });
+  await page.route(`**/api/integrations/aws/log-subscriptions/${accountId}/stack-update`, async (route) => {
+    await stackUpdateAsked;
+    await route.fulfill({ json: {
+      command: "aws cloudformation update-stack --region us-west-2 --stack-name ResponderInvestigationAccess",
+      consoleUrl,
+      found: true,
+      region: "us-west-2",
+    } });
+  });
 
   await page.goto("/signal/setup/telemetry/aws");
   await expect(page.getByRole("heading", { name: "A new version of the Superlog AWS stack is available" })).toBeVisible();
   await expect(page.getByText("Waiting for the stack update", { exact: true })).toBeVisible();
   // Waiting is not an error.
   await expect(page.getByText("Error", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Update in AWS" })).toBeDisabled();
+  answerStackUpdate();
   const update = page.getByRole("link", { name: "Update in AWS" });
   await expect(update).toHaveAttribute("href", consoleUrl);
   await expect(update).toHaveAttribute("target", "_blank");

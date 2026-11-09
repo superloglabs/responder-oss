@@ -323,59 +323,96 @@ describe("log subscription routes", () => {
     expect(deps.putSubscription).toHaveBeenCalledTimes(1);
   });
 
-  it("shows a missing role as waiting for the stack update, with a link to update the stack where it is", async () => {
-    const waiting = [row({ lastError: new AwsLogSubscriptionRoleUnavailableError(null).message, status: "failed" })];
-    const stackId = "arn:aws:cloudformation:us-west-2:123456789012:stack/ResponderInvestigationAccess/abc";
+  const base = `/api/integrations/aws/log-subscriptions/${integrationAccountId}`;
+  const waitingRows = () => [row({ lastError: new AwsLogSubscriptionRoleUnavailableError(null).message, status: "failed" })];
+
+  it("shows a missing role as waiting for the stack update at once, without looking for the stack", async () => {
+    const { deps } = dependencies({ list: vi.fn(async () => waitingRows()) });
+    const body = await (await app(deps).request(base)).json() as {
+      stackUpdate: Record<string, unknown>;
+      subscriptions: Array<{ lastError: string | null; status: string }>;
+    };
+    expect(body.subscriptions).toMatchObject([{ lastError: null, status: "waiting" }]);
+    expect(body.stackUpdate).toEqual({ logSubscriptionPrincipalArn: config.principalArn, stackName: "ResponderInvestigationAccess" });
+    expect(deps.locateStack).not.toHaveBeenCalled();
+  });
+
+  it("links to the update page of the stack it finds, wherever it is, and keeps the stack until the role works", async () => {
+    let rows = waitingRows();
+    // Found by its ExternalId, under the name the customer gave it.
+    const stackId = "arn:aws:cloudformation:us-west-2:123456789012:stack/superlog-access/abc";
     const { deps } = dependencies({
-      list: vi.fn(async () => waiting),
+      list: vi.fn(async () => rows),
       locateStack: vi.fn(async () => ({ parameterKeys: ["ResponderPrincipalArn", "ExternalId"], region: "us-west-2", stackId })),
       templateUrl: vi.fn(async () => "https://bucket.s3.eu-west-3.amazonaws.com/t.yaml?X-Amz-Signature=x"),
     });
     const target = app(deps);
-    const body = await (await target.request(`/api/integrations/aws/log-subscriptions/${integrationAccountId}`)).json() as {
-      stackUpdate: { command: string; consoleUrl: string; region: string; stackName: string };
-      subscriptions: Array<{ lastError: string | null; status: string }>;
-    };
-    expect(body.subscriptions).toMatchObject([{ lastError: null, status: "waiting" }]);
+    const body = await (await target.request(`${base}/stack-update`)).json() as { command: string; consoleUrl: string; found: boolean; region: string };
     expect(deps.locateStack).toHaveBeenCalledWith(connectionCredentials, "eu-west-3");
-    expect(body.stackUpdate.stackName).toBe("ResponderInvestigationAccess");
-    expect(body.stackUpdate.region).toBe("us-west-2");
-    expect(body.stackUpdate.command).toContain("--region us-west-2");
-    expect(body.stackUpdate.command).toContain("ParameterKey=ExternalId,UsePreviousValue=true");
+    expect(body.found).toBe(true);
+    expect(body.region).toBe("us-west-2");
+    expect(body.command).toContain("--region us-west-2");
+    expect(body.command).toContain("--stack-name superlog-access ");
+    expect(body.command).toContain("ParameterKey=ExternalId,UsePreviousValue=true");
     // This stack predates one-click setup, so it has no RegistrationTopicArn.
-    expect(body.stackUpdate.command).not.toContain("RegistrationTopicArn");
-    expect(body.stackUpdate.command).toContain(`ParameterKey=LogSubscriptionPrincipalArn,ParameterValue=${config.principalArn}`);
-    const consoleUrl = new URL(body.stackUpdate.consoleUrl);
+    expect(body.command).not.toContain("RegistrationTopicArn");
+    expect(body.command).toContain(`ParameterKey=LogSubscriptionPrincipalArn,ParameterValue=${config.principalArn}`);
+    const consoleUrl = new URL(body.consoleUrl);
     expect(consoleUrl.host).toBe("us-west-2.console.aws.amazon.com");
     const route = new URLSearchParams(consoleUrl.hash.replace(/^#\/stacks\/update\/template\?/u, ""));
     expect(route.get("stackId")).toBe(stackId);
     expect(route.get("templateURL")).toBe("https://bucket.s3.eu-west-3.amazonaws.com/t.yaml?X-Amz-Signature=x");
-    // The stack's location is kept, so the next page load does not look again.
-    await target.request(`/api/integrations/aws/log-subscriptions/${integrationAccountId}`);
+    // Later requests use the stack it found.
+    await target.request(`${base}/stack-update`);
     expect(deps.locateStack).toHaveBeenCalledTimes(1);
+    // Once the role works, the stack is looked up again next time.
+    rows = [row({ appliedAt: new Date(), status: "active" })];
+    await target.request(base);
+    await target.request(`${base}/stack-update`);
+    expect(deps.locateStack).toHaveBeenCalledTimes(2);
   });
 
-  it("falls back to the stacks list in the registration region when the stack cannot be found", async () => {
-    const waiting = [row({ lastError: new AwsLogSubscriptionRoleUnavailableError(null).message, status: "failed" })];
-    const { deps } = dependencies({ list: vi.fn(async () => waiting) });
-    const body = await (await app(deps).request(`/api/integrations/aws/log-subscriptions/${integrationAccountId}`)).json() as {
-      stackUpdate: { command: string; consoleUrl: string };
-    };
-    expect(body.stackUpdate.consoleUrl).toBe("https://eu-west-3.console.aws.amazon.com/cloudformation/home?region=eu-west-3#/stacks");
-    expect(body.stackUpdate.command).toContain("--region eu-west-3");
+  it("falls back to the stacks list in the registration region, and looks again next time", async () => {
+    const { deps } = dependencies({ list: vi.fn(async () => waitingRows()) });
+    const target = app(deps);
+    const body = await (await target.request(`${base}/stack-update`)).json() as { command: string; consoleUrl: string; found: boolean };
+    expect(body.found).toBe(false);
+    expect(body.consoleUrl).toBe("https://eu-west-3.console.aws.amazon.com/cloudformation/home?region=eu-west-3#/stacks");
+    expect(body.command).toContain("--region eu-west-3");
+    await target.request(`${base}/stack-update`);
+    expect(deps.locateStack).toHaveBeenCalledTimes(2);
+    // Only for this workspace's connections.
+    const missing = dependencies({ connection: vi.fn(async () => null) });
+    expect((await app(missing.deps).request(`${base}/stack-update`)).status).toBe(404);
+  });
+
+  it("answers the page while the retry of waiting regions is still running", async () => {
+    let finish: (rows: AwsLogSubscription[]) => void = () => {};
+    const { deps } = dependencies({
+      claim: vi.fn(() => new Promise<AwsLogSubscription[]>((resolve) => { finish = resolve; })),
+      list: vi.fn(async () => waitingRows()),
+    });
+    const response = await app(deps).request(base);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ subscriptions: [{ status: "waiting" }] });
+    expect(deps.claim).toHaveBeenCalledTimes(1);
+    finish([]);
   });
 
   it("tries waiting regions again while the page is open, at most every 20 seconds", async () => {
-    const waiting = [row({ lastError: new AwsLogSubscriptionRoleUnavailableError(null).message, status: "failed" })];
-    const { advance, deps } = dependencies({ list: vi.fn(async () => waiting) });
+    const { advance, deps } = dependencies({ list: vi.fn(async () => waitingRows()) });
     const target = app(deps);
-    await target.request(`/api/integrations/aws/log-subscriptions/${integrationAccountId}`);
-    await target.request(`/api/integrations/aws/log-subscriptions/${integrationAccountId}`);
+    // Lets the background passes the requests started finish.
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+    await target.request(base);
+    await settle();
+    await target.request(base);
+    await settle();
     expect(deps.claim).toHaveBeenCalledTimes(1);
     expect(deps.putSubscription).toHaveBeenCalledTimes(1);
     advance(20_000);
-    await target.request(`/api/integrations/aws/log-subscriptions/${integrationAccountId}`);
-    expect(deps.claim).toHaveBeenCalledTimes(2);
+    await target.request(base);
+    await vi.waitFor(() => expect(deps.claim).toHaveBeenCalledTimes(2));
   });
 
   it("refuses members, unknown regions, unfinished or foreign connections, and accounts streaming elsewhere", async () => {

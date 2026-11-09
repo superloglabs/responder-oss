@@ -3,8 +3,10 @@ import { IconExternalLink, IconPlus, IconX } from "@tabler/icons-react";
 import {
   awsLogSubscriptionStatusLabels,
   fetchAwsLogStreaming,
+  fetchAwsStackUpdate,
   saveAwsLogStreaming,
   type AwsLogStreaming as AwsLogStreamingState,
+  type AwsStackUpdate,
 } from "../aws-log-subscriptions-api";
 import { Alert, Button, CodeBlock } from "../design-system";
 import "./aws-log-streaming.css";
@@ -58,7 +60,8 @@ export function AwsLogStreaming({ integrationAccountId, fallback = null, childre
   if (loadError) {
     return <>{children({ available: true, notice: <Alert tone="danger" title="Could not load log streaming">{loadError}</Alert>, row: null })}</>;
   }
-  if (!streaming) return <>{children({ available: false, notice: null, row: null })}</>;
+  // The row is there from the start, so the details do not jump.
+  if (!streaming) return <>{children({ available: true, notice: null, row: <p className="awsLogStreaming__none" role="status">Loading…</p> })}</>;
   if (!streaming.available) return <>{children({ available: false, notice: fallback, row: null })}</>;
 
   const regions = streaming.subscriptions.filter((row) => row.status !== "removing").map((row) => row.region);
@@ -77,7 +80,7 @@ export function AwsLogStreaming({ integrationAccountId, fallback = null, childre
 
   return <>{children({
     available: true,
-    notice: streaming.stackUpdate ? <StackUpdate update={streaming.stackUpdate} /> : null,
+    notice: streaming.stackUpdate ? <StackUpdate integrationAccountId={integrationAccountId} /> : null,
     row: <RegionChips
       canManage={streaming.canManage}
       error={error}
@@ -178,23 +181,48 @@ function AddRegion({ disabled, regions, onAdd }: { disabled: boolean; regions: s
   </div>;
 }
 
-function StackUpdate({ update }: { update: NonNullable<AwsLogStreamingState["stackUpdate"]> }) {
+// The template link in the update lasts 15 minutes; it is renewed before then.
+const stackUpdateRefreshMs = 10 * 60_000;
+
+function StackUpdate({ integrationAccountId }: { integrationAccountId: string }) {
   const [showCommand, setShowCommand] = useState(false);
+  const [update, setUpdate] = useState<AwsStackUpdate | null>(null);
+  const [error, setError] = useState("");
   // Settings can show one of these per AWS account.
   const titleId = useId();
+
+  useEffect(() => {
+    let current = true;
+    const load = () => fetchAwsStackUpdate(integrationAccountId)
+      .then((value) => { if (current) { setUpdate(value); setError(""); } })
+      .catch((failure: unknown) => {
+        if (!current) return;
+        // The old link's template URL may have expired, so it is not kept.
+        setUpdate(null);
+        setError(failure instanceof Error ? failure.message : "Could not prepare the stack update.");
+      });
+    void load();
+    const timer = window.setInterval(() => void load(), stackUpdateRefreshMs);
+    return () => { current = false; window.clearInterval(timer); };
+  }, [integrationAccountId]);
+
   return <section className="awsStackUpdate" aria-labelledby={titleId}>
     <div className="awsStackUpdate__text">
       <h3 id={titleId}>A new version of the Superlog AWS stack is available</h3>
       <p>It lets Superlog send new errors from the regions you choose. Updating takes about a minute in AWS and changes nothing else in your account.</p>
-      <button className="awsStackUpdate__cli" onClick={() => setShowCommand(!showCommand)} type="button" aria-expanded={showCommand}>
+      {update && !update.found && (update.consoleUrl
+        ? <p>Superlog could not find the stack, so the button opens CloudFormation{update.region ? ` in ${update.region}` : ""}: select the Superlog stack there and replace its template.</p>
+        : <p>Superlog could not find the stack. Update it in CloudFormation, or use the CLI command.</p>)}
+      {error && <p className="awsLogStreaming__error" role="alert">{error}</p>}
+      {update && <button className="awsStackUpdate__cli" onClick={() => setShowCommand(!showCommand)} type="button" aria-expanded={showCommand}>
         {showCommand ? "Hide the CLI command" : "Use the CLI instead"}
-      </button>
-      {showCommand && <CodeBlock code={update.command} language="bash" />}
+      </button>}
+      {update && showCommand && <CodeBlock code={update.command} language="bash" />}
     </div>
-    {update.consoleUrl
+    {update?.consoleUrl
       ? <a className="dsButton dsButton--primary dsButton--medium awsStackUpdate__action" href={update.consoleUrl} rel="noreferrer" target="_blank">
         Update in AWS<IconExternalLink aria-hidden="true" size={13} stroke={2} />
       </a>
-      : <Button disabled variant="primary">Update in AWS</Button>}
+      : <Button disabled loading={!update && !error} variant="primary">Update in AWS</Button>}
   </section>;
 }
