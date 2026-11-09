@@ -109,7 +109,7 @@ export function SignalFindings() {
         <p>We’re now looking through billions of logs. As soon as we see an issue, we’ll report it.</p>
       </div>)}
     <footer className="signalListFooter">
-      <span role="status">{loading ? "Loading…" : `Showing ${findings.length} of ${total} findings`}</span>
+      <span role="status">{loading ? "Loading…" : findings.length > 0 ? `Showing ${findings.length} of ${total} findings` : ""}</span>
       {!loading && error
         ? <Button onClick={() => setRequested({ filters, offset, attempt: attempt + 1 })}>Try again</Button>
         : !loading && findings.length < total && <Button onClick={() => setRequested({ filters, offset: findings.length, attempt: 0 })}>Load more</Button>}
