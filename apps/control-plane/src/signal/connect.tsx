@@ -12,7 +12,7 @@ import {
 } from "@tabler/icons-react";
 import type { IntegrationSummary } from "../agents-api";
 import { DATADOG_SITES, type DatadogSiteId } from "../components/datadog-sites";
-import { AwsLogStreamingSettings } from "../components/aws-log-streaming";
+import { AwsLogStreaming } from "../components/aws-log-streaming";
 import { Button } from "../design-system";
 import { GCP_SETUP_STEPS, useGcpSetupStatus, type GcpSetupStatus } from "../gcp-setup-status";
 import { createIngestKey, existingOpenTelemetryPrompt, openTelemetryPrompt } from "../ingest-keys-api";
@@ -484,16 +484,22 @@ function AwsConnect({ integration, organizationId, listPath, onBack, onDone }: P
       : "Finish creating the stack in AWS. This page updates on its own."}</Intro>
     {pollFailed && !connected && <p className="signalError" role="alert">Could not check the stack. Retrying…</p>}
     {connected
-      ? <section className="signalCard">
-        <header className="signalCard__header signalCard__header--success">
-          <span className="signalStepMarker signalStepMarker--success"><IconCheck size={13} stroke={3} /></span>
-          <div><h3>AWS account {state.awsAccountId} connected</h3><p>The stack finished and Signal assumed the role.</p></div>
-        </header>
-        <dl className="signalDetails">
-          <div><dt>Account</dt><dd>{state.awsAccountId}</dd></div>
-          <div><dt>Role</dt><dd><code>{state.roleArn}</code></dd></div>
-        </dl>
-      </section>
+      ? <AwsLogStreaming integrationAccountId={state.integrationAccountId ?? setupId ?? ""}>
+        {({ notice, row }) => <>
+          <section className="signalCard">
+            <header className="signalCard__header signalCard__header--success">
+              <span className="signalStepMarker signalStepMarker--success"><IconCheck size={13} stroke={3} /></span>
+              <div><h3>AWS account {state.awsAccountId} connected</h3><p>The stack finished and Signal assumed the role.</p></div>
+            </header>
+            <dl className="signalDetails">
+              <div><dt>Account</dt><dd>{state.awsAccountId}</dd></div>
+              <div><dt>Role</dt><dd><code>{state.roleArn}</code></dd></div>
+              {row && <div className="signalDetails__regions"><dt>Telemetry from</dt><dd>{row}</dd></div>}
+            </dl>
+          </section>
+          {notice}
+        </>}
+      </AwsLogStreaming>
       : <ol className="signalCard signalStepCard">
         <li>
           <StepMarker state="done" number={1} />
@@ -510,7 +516,6 @@ function AwsConnect({ integration, organizationId, listPath, onBack, onDone }: P
           <div><h3>Verify the role</h3><p>Signal assumes the role once to check it works.</p></div>
         </li>
       </ol>}
-    {connected && <AwsLogStreamingSettings integrationAccountId={state.integrationAccountId ?? setupId} />}
     <Actions onBack={() => {
       if (!connected) { sessionStorage.removeItem(storageKey); setSetupId(null); setPollFailed(false); return; }
       onBack();

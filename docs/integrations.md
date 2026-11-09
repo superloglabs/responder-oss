@@ -983,19 +983,29 @@ permission for every other account policy type, so the role cannot change data
 protection, transformers, field indexes, or retention, and it reads no log
 data.
 
-Workspace owners and admins choose regions on the connection's manage page or
-in settings (`GET` and `PUT /api/integrations/aws/log-subscriptions/<id>`). For
+Workspace owners and admins choose regions in the connection's "Telemetry from"
+row, on its manage page or in settings (`GET` and
+`PUT /api/integrations/aws/log-subscriptions/<id>`); adding or removing a
+region saves at once. For
 each region, the API assumes the role and creates one account-level
 subscription policy named `superlog-<region>` that sends error lines to the
 deployment's log destination in that region. Superlog owns the filter pattern
 (`awsLogSubscriptionFilterPattern`); changing it re-applies every active
 subscription. The API also keeps each destination's access policy limited to
 the AWS accounts that subscribe there, retries failed subscriptions every ten
-minutes, and deletes the policies when regions or the connection are removed.
+minutes (every minute for a region waiting for the stack update, and every
+20 seconds while its page is open), and deletes the policies when regions or
+the connection are removed.
 Only the API assumes this role; agents, the worker, and Signal never receive
 its credentials. An AWS account streams to one workspace. A stack created
-before the role existed gets it with one stack update, which the page shows
-when the role cannot be assumed. Removing the AWS connection first deletes its
+before the role existed gets it with one stack update. While the role cannot
+be assumed, its regions show "Waiting for the stack update" and the page offers
+**Update in AWS**. That link opens CloudFormation's update page for the stack,
+with the current template chosen, in the region where the API found the stack
+with the read-only role (`awsStackUpdateConsoleUrl`; AWS does not document
+this console route). The deployment's template sets
+`LogSubscriptionPrincipalArn` by default, so the update needs no typing. The
+page also offers the equivalent CLI command. Removing the AWS connection first deletes its
 policies; if a deletion fails, the connection stays and the API retries.
 
 AWS allows one account-level subscription policy per account and region. In a

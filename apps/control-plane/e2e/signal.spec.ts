@@ -785,30 +785,33 @@ test("streams a connected AWS account's errors from the regions an admin picks",
     stackUpdate: null,
     subscriptions: [] as Array<Record<string, unknown>>,
   };
-  let saved: unknown = null;
+  const saves: unknown[] = [];
   await page.route(`**/api/integrations/aws/log-subscriptions/${accountId}`, (route) => {
     if (route.request().method() === "PUT") {
-      saved = route.request().postDataJSON();
-      streaming.subscriptions = [{ appliedAt: now, lastError: null, region: "eu-west-1", status: "active" }];
+      const body = route.request().postDataJSON() as { regions: string[] };
+      saves.push(body);
+      streaming.subscriptions = body.regions.map((region) => ({ appliedAt: now, lastError: null, region, status: "active" }));
     }
     return route.fulfill({ json: streaming });
   });
 
   await page.goto("/signal/setup/telemetry/aws");
-  await expect(page.getByRole("heading", { name: "Send new errors to Superlog" })).toBeVisible();
-  // The region nearest the workspace's cell is suggested, not yet saved.
-  await expect(page.getByText("eu-west-1", { exact: true })).toBeVisible();
-  await expect(page.getByText("Not saved")).toBeVisible();
+  // The regions are a row of the account's details; the old section is gone.
+  const regions = page.getByRole("list", { name: "Regions sending error lines to Superlog" });
+  await expect(page.getByText("Telemetry from", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Send new errors to Superlog" })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Send CloudWatch to Signal" })).toHaveCount(0);
-  // The admin adds us-east-1 and eu-west-3, then drops eu-west-3 again.
-  await page.getByRole("button", { name: /Add a region/u }).click();
+  // Each region the admin adds or removes is saved at once.
+  await page.getByRole("button", { name: "Add region" }).click();
+  await page.getByRole("option", { name: "eu-west-1", exact: true }).click();
+  await expect.poll(() => saves).toEqual([{ regions: ["eu-west-1"] }]);
+  await expect(regions.getByText("Streaming", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Add region" }).click();
   await page.getByRole("option", { name: "us-east-1", exact: true }).click();
-  await page.getByRole("button", { name: /Add a region/u }).click();
-  await page.getByRole("option", { name: "eu-west-3", exact: true }).click();
-  await page.getByRole("listitem").filter({ hasText: "eu-west-3" }).getByRole("button", { name: "Remove" }).click();
-  await page.getByRole("button", { name: "Start streaming" }).click();
-  await expect.poll(() => saved).toEqual({ regions: ["eu-west-1", "us-east-1"] });
-  await expect(page.getByText("Streaming", { exact: true })).toBeVisible();
+  await expect.poll(() => saves.at(-1)).toEqual({ regions: ["eu-west-1", "us-east-1"] });
+  await page.getByRole("button", { name: "Stop sending errors from us-east-1" }).click();
+  await expect.poll(() => saves.at(-1)).toEqual({ regions: ["eu-west-1"] });
+  await expect(regions.getByText("us-east-1")).toHaveCount(0);
   await page.screenshot({ path: "test-results/signal-aws-log-streaming.png", fullPage: true });
 });
 
@@ -833,17 +836,17 @@ test("shows a member the AWS regions without letting them change them", async ({
   await page.goto("/signal/setup/telemetry/aws");
   await expect(page.getByText("Streaming", { exact: true })).toBeVisible();
   // A region being removed stays listed with its error.
-  await expect(page.getByText("Stopping", { exact: true })).toBeVisible();
-  await expect(page.getByText("AWS returned an error in us-east-1: throttled")).toBeVisible();
-  await expect(page.getByText("Workspace owners and admins choose the regions.")).toBeVisible();
-  await expect(page.getByRole("button", { name: /Add a region/u })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Remove" })).toHaveCount(0);
+  await expect(page.getByText("Removing", { exact: true })).toBeVisible();
+  await expect(page.getByText("us-east-1: AWS returned an error in us-east-1: throttled")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Add region" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Stop sending errors/u })).toHaveCount(0);
 });
 
-test("asks an admin to update an AWS stack that predates log streaming", async ({ page }) => {
+test("asks for one AWS stack update when the stack predates log streaming", async ({ page }) => {
   await workspace(page, { signal: fakeSignal(30, { setUp: false }) });
   const now = new Date().toISOString();
   const accountId = "44444444-4444-4444-8444-444444444444";
+  const consoleUrl = "https://us-west-2.console.aws.amazon.com/cloudformation/home?region=us-west-2#/stacks/update/template?stackId=arn&templateURL=t";
   await page.route("**/api/integrations", (route) => route.fulfill({ json: { integrations: [
     { id: "aws", name: "AWS", description: "", state: "connected", accountCount: 1, resourceCount: 0, connectUrl: "/api/integrations/aws/connect", configurationUrl: null, accounts: [{ id: accountId, displayName: "123456789012", status: "connected", resourceCount: 0, updatedAt: now, details: { awsAccountId: "123456789012", roleName: "ResponderInvestigationRole" } }] },
   ] } }));
@@ -852,19 +855,29 @@ test("asks an admin to update an AWS stack that predates log streaming", async (
     canManage: true,
     regions: ["eu-west-1"],
     stackUpdate: {
-      command: "aws cloudformation update-stack --region eu-west-3 --stack-name ResponderInvestigationAccess",
+      command: "aws cloudformation update-stack --region us-west-2 --stack-name ResponderInvestigationAccess",
+      consoleUrl,
       logSubscriptionPrincipalArn: "arn:aws:iam::121638211609:role/ResponderLogSubscriptionBroker",
+      region: "us-west-2",
       stackName: "ResponderInvestigationAccess",
       templateUrl: null,
     },
-    subscriptions: [{ appliedAt: null, lastError: "Superlog could not assume ResponderLogSubscriptionRole in this AWS account. Update the Superlog stack to the latest template.", region: "eu-west-1", status: "failed" }],
+    subscriptions: [{ appliedAt: null, lastError: null, region: "eu-west-1", status: "waiting" }],
   } }));
 
   await page.goto("/signal/setup/telemetry/aws");
-  await expect(page.getByText("Update your Superlog stack first")).toBeVisible();
-  await expect(page.getByText("aws cloudformation update-stack --region eu-west-3 --stack-name ResponderInvestigationAccess")).toBeVisible();
-  await expect(page.getByText("Error", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "A new version of the Superlog AWS stack is available" })).toBeVisible();
+  await expect(page.getByText("Waiting for the stack update", { exact: true })).toBeVisible();
+  // Waiting is not an error.
+  await expect(page.getByText("Error", { exact: true })).toHaveCount(0);
+  const update = page.getByRole("link", { name: "Update in AWS" });
+  await expect(update).toHaveAttribute("href", consoleUrl);
+  await expect(update).toHaveAttribute("target", "_blank");
   await page.screenshot({ path: "test-results/signal-aws-stack-update.png", fullPage: true });
+  // The CLI command is there for people who do not use the console.
+  await expect(page.getByText("aws cloudformation update-stack --region us-west-2")).toHaveCount(0);
+  await page.getByRole("button", { name: "Use the CLI instead" }).click();
+  await expect(page.getByText("aws cloudformation update-stack --region us-west-2 --stack-name ResponderInvestigationAccess")).toBeVisible();
 });
 
 test("connects AWS with one launch and finishes when the stack reports back", async ({ page, context }) => {

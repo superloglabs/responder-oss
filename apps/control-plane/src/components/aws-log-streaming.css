@@ -1,16 +1,49 @@
-.awsLogStreaming { display: flex; flex-direction: column; gap: 10px; padding: 16px 20px; border-radius: 12px; background: var(--ds-surface-base); outline: .5px solid var(--ds-border-default); }
-.awsLogStreaming h3 { margin: 0; font-size: 13px; font-weight: 600; }
-.awsLogStreaming > p { margin: 0; color: var(--ds-text-secondary); font-size: 12px; line-height: 18px; }
-.awsLogStreaming .awsLogStreaming__filter { color: var(--ds-text-muted); }
-.awsLogStreaming__regions { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
-.awsLogStreaming__regions > li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; }
-.awsLogStreaming__regions > li > .dsButton { margin-left: auto; }
-.awsLogStreaming__empty { color: var(--ds-text-muted); }
-.awsLogStreaming__error { color: var(--ds-danger); font-size: 12px; }
-.awsLogStreaming__actions { display: flex; justify-content: flex-end; gap: 8px; }
-.awsLogStreaming .dsAlert ol { margin: 6px 0; padding-left: 18px; font-size: 12px; line-height: 18px; }
-.awsLogStreaming .dsAlert p { margin: 4px 0; font-size: 12px; line-height: 18px; }
-/* In the settings account list, the streaming settings take a full row. */
+/* Regions in an AWS account's "Telemetry from" row. */
+.awsLogStreaming__regions { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 6px; }
+.awsLogStreaming__regions > ul { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.awsLogStreaming__none { color: var(--ds-text-muted); font-size: 12px; line-height: 20px; }
+.awsLogStreaming__error { margin: 0; color: var(--ds-danger); font-size: 12px; line-height: 18px; }
+
+.awsRegionChip { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 6px 0 10px; border-radius: var(--ds-radius-small, 4px); background: var(--ds-surface-raised, #fff); box-shadow: 0 1px 1.5px #0000001a, 0 0 0 .5px #00000024; font-size: 12px; }
+.awsRegionChip code { color: var(--ds-text-primary); font: 400 12px/20px ui-monospace, "SFMono-Regular", Consolas, monospace; }
+.awsRegionChip__status { display: inline-flex; align-items: center; gap: 5px; line-height: 16px; white-space: nowrap; }
+.awsRegionChip__status::before { content: ""; width: 5px; height: 5px; flex-shrink: 0; border-radius: 50%; background: currentColor; }
+.awsRegionChip__status--live { color: var(--ds-positive); }
+.awsRegionChip__status--warning { color: var(--ds-warning); }
+.awsRegionChip__status--danger { color: var(--ds-danger); }
+.awsRegionChip__status--info { color: var(--ds-info); }
+.awsRegionChip__status--neutral { color: var(--ds-text-muted); }
+.awsRegionChip:not(:has(.awsRegionChip__remove)) { padding-right: 10px; }
+.awsRegionChip__remove { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; padding: 0; border: 0; border-radius: 3px; background: none; color: var(--ds-text-muted); cursor: pointer; }
+.awsRegionChip__remove:hover:not(:disabled) { background: var(--ds-surface-hover); color: var(--ds-text-primary); }
+
+.awsAddRegion { position: relative; }
+.awsAddRegion__button { display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 0 9px 0 7px; border: .5px dashed #00000033; border-radius: var(--ds-radius-small, 4px); background: none; color: var(--ds-text-secondary); font: 500 12px/20px var(--ds-font-sans); cursor: pointer; }
+.awsAddRegion__button:hover:not(:disabled) { border-style: solid; background: var(--ds-surface-hover); color: var(--ds-text-primary); }
+.awsAddRegion__menu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 20; width: 180px; max-height: 240px; overflow-y: auto; margin: 0; padding: 4px; list-style: none; border-radius: var(--ds-radius-medium, 6px); background: var(--ds-surface-overlay, #fff); box-shadow: 0 8px 24px #0000001f, 0 0 0 .5px #00000024; }
+.awsAddRegion__menu li { padding: 5px 8px; border-radius: 4px; font: 400 12px/18px ui-monospace, "SFMono-Regular", Consolas, monospace; cursor: pointer; }
+.awsAddRegion__menu li:hover, .awsAddRegion__menu li:focus-visible { outline: none; background: var(--ds-surface-hover); }
+
+/* Asks for the one stack update that adds the subscription role. */
+.awsStackUpdate { display: flex; align-items: center; gap: 16px; padding: 14px 20px; border: .5px solid #00000014; border-radius: 6px; background: #fafafa; }
+.awsStackUpdate__text { display: flex; flex: 1; min-width: 0; flex-direction: column; align-items: flex-start; gap: 2px; }
+.awsStackUpdate h3 { margin: 0; color: var(--ds-text-primary); font-size: 13px; font-weight: 500; line-height: 20px; }
+.awsStackUpdate p { margin: 0; color: #666; font-size: 12px; line-height: 20px; }
+.awsStackUpdate__cli { padding: 0; border: 0; background: none; color: var(--ds-text-secondary); font: 400 12px/20px var(--ds-font-sans); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.awsStackUpdate__text .dsCodeBlock { align-self: stretch; margin-top: 6px; }
+.awsStackUpdate__action { flex-shrink: 0; gap: 6px; text-decoration: none; }
+@media (max-width: 720px) { .awsStackUpdate { flex-wrap: wrap; } }
+
+/* The Settings AWS card has no details table, so the row stands alone. */
+.awsLogStreaming__row { display: flex; align-items: flex-start; gap: 16px; font-size: 12px; }
+.awsLogStreaming__label { width: 120px; flex-shrink: 0; padding-top: 4px; color: #666; line-height: 20px; }
 .appShell--settings .integrationCard__accounts li.integrationCard__account--stacked { flex-wrap: wrap; }
-.integrationCard__account--stacked > .awsLogStreaming { flex: 1 1 100%; }
-.appShell--settings .integrationCard__accounts .awsLogStreaming__regions li { padding: 0; border: 0; background: none; justify-content: flex-start; }
+.integrationCard__account--stacked > .awsLogStreaming__row, .integrationCard__account--stacked > .awsStackUpdate { flex: 1 1 100%; }
+.appShell--settings .integrationCard__accounts .awsRegionChip { padding-block: 0; border: 0; }
+
+/* Inside Signal's account details, the regions are one more row. */
+.signalManageRows > .signalManageRows__regions { align-items: flex-start; }
+.signalManageRows__regions > .signalManageRows__label { padding-top: 4px; }
+.signalDetails > .signalDetails__regions { align-items: flex-start; }
+.signalDetails__regions dt { padding-top: 4px; }
+.signalDetails__regions dd { display: flex; flex: 1; }

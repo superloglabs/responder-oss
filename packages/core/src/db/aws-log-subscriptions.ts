@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, eq, inArray, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, like, lt, ne, or, sql } from "drizzle-orm";
+import { awsLogSubscriptionRoleName } from "../integrations/aws-log-subscriptions.js";
 import { getDatabase } from "./client.js";
 import { awsLogSubscriptions, integrationAccounts } from "./schema.js";
 
@@ -153,6 +154,8 @@ export async function claimDueAwsLogSubscriptions(input: {
   // Only removals, as when Superlog cannot take logs in.
   removalsOnly?: boolean;
   retryFailedBefore: Date;
+  // Rows waiting for the customer's stack update are retried sooner.
+  retryWaitingBefore?: Date;
 }): Promise<AwsLogSubscription[]> {
   const db = getDatabase();
   const due = db
@@ -166,6 +169,13 @@ export async function claimDueAwsLogSubscriptions(input: {
           eq(awsLogSubscriptions.status, "pending"),
           eq(awsLogSubscriptions.status, "removing"),
           and(eq(awsLogSubscriptions.status, "failed"), lt(awsLogSubscriptions.updatedAt, input.retryFailedBefore)),
+          ...(input.retryWaitingBefore
+            ? [and(
+              eq(awsLogSubscriptions.status, "failed"),
+              like(awsLogSubscriptions.lastError, `%${awsLogSubscriptionRoleName}%`),
+              lt(awsLogSubscriptions.updatedAt, input.retryWaitingBefore),
+            )]
+            : []),
           and(eq(awsLogSubscriptions.status, "active"), ne(awsLogSubscriptions.filterPattern, input.filterPattern)),
         ),
     ))
