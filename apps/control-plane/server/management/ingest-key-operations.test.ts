@@ -29,7 +29,9 @@ vi.mock("../../../../packages/core/src/db/oauth-access-tokens.js", () => ({
 vi.mock("../../../../packages/core/src/db/organization-capabilities.js", () => ({
   listEnabledOrganizationCapabilities: vi.fn().mockResolvedValue([]),
   organizationHasCapability: mocks.capability,
-  organizationReceivesTelemetry: (organizationId: string) => mocks.capability(organizationId, "telemetry"),
+  // The telemetry product or Signal, like the real check.
+  organizationReceivesTelemetry: async (organizationId: string) =>
+    (await mocks.capability(organizationId, "telemetry")) || (await mocks.capability(organizationId, "signal")),
 }));
 vi.mock("../../../../packages/core/src/db/telemetry-ingest-keys.js", async (importOriginal) => ({
   ...(await importOriginal<object>()),
@@ -123,6 +125,13 @@ describe("ingest key operations", () => {
       token: ingestToken,
     });
     expect(mocks.create).toHaveBeenCalledWith({ createdBy: userId, name: "checkout-api production", organizationId });
+  });
+
+  it("creates a key in a Signal workspace without the telemetry product", async () => {
+    mocks.capability.mockImplementation(async (_organization: string, capability: string) => capability === "signal");
+
+    expect((await callTool("create_ingest_key", { name: "web" })).body).toMatchObject({ token: ingestToken });
+    expect(mocks.create).toHaveBeenCalledWith({ createdBy: userId, name: "web", organizationId });
   });
 
   it("answers 201 from the REST API", async () => {

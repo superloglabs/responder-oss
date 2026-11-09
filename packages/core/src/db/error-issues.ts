@@ -36,6 +36,7 @@ export type RecordedErrorOccurrences = {
 export type ErrorIssueStore = {
   cursor(kind: ErrorIssueKind): Promise<ErrorCandidateCursor | null>;
   organizationIds(): Promise<string[]>;
+  // Workspaces whose new issues start nothing.
   pausedOrganizationIds(): Promise<Set<string>>;
   record(occurrences: ErrorOccurrences): Promise<RecordedErrorOccurrences>;
   saveCursor(kind: ErrorIssueKind, cursor: ErrorCandidateCursor): Promise<void>;
@@ -54,12 +55,24 @@ export async function withErrorIssueStore<T>(pass: (store: ErrorIssueStore) => P
       cursor: (kind) => errorIssueCursor(tx, kind),
       // Signal reads the issues of workspaces without the telemetry product.
       organizationIds: () => listTelemetryOrganizationIds(tx),
-      pausedOrganizationIds: () => pausedTelemetryNotificationOrganizations(tx),
+      pausedOrganizationIds: () => quietOrganizationIds(tx),
       // A savepoint per issue, so one failed write does not undo the others.
       record: (occurrences) => tx.transaction((savepoint) => recordErrorOccurrences(savepoint, occurrences)),
       saveCursor: (kind, cursor) => saveErrorIssueCursor(tx, kind, cursor),
     });
   });
+}
+
+// Workspaces whose new issues wake no agents and start no automations: those
+// that paused notifications, and Signal workspaces without the telemetry
+// product.
+async function quietOrganizationIds(executor: Executor): Promise<Set<string>> {
+  const quiet = await pausedTelemetryNotificationOrganizations(executor);
+  const product = new Set(await listTelemetryOrganizationIds(executor, ["telemetry"]));
+  for (const organizationId of await listTelemetryOrganizationIds(executor)) {
+    if (!product.has(organizationId)) quiet.add(organizationId);
+  }
+  return quiet;
 }
 
 async function errorIssueCursor(executor: Executor, kind: ErrorIssueKind): Promise<ErrorCandidateCursor | null> {

@@ -1056,7 +1056,7 @@ separate integration boundary.
 
 Workspaces with the telemetry capability open **Add telemetry** from the
 telemetry Overview page to send logs, traces and metrics. Signal workspaces
-reach the same options from Signal setup. Every option needs a cell with a collector
+can set up OpenTelemetry from Signal setup. Every option needs a cell with a collector
 (`TELEMETRY_COLLECTOR_URL`).
 
 - **OpenTelemetry**: create an ingest key and paste the generated prompt into a

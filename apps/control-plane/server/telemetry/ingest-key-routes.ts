@@ -9,8 +9,8 @@ import {
 import { telemetryCollectorUrl } from "../../../../packages/core/src/telemetry/client.js";
 import { getActiveTenant } from "../tenant.js";
 
-// Keys applications send telemetry with. Available with the telemetry
-// capability in a cell that accepts telemetry.
+// Keys applications send telemetry with. Available with the telemetry or
+// Signal capability in a cell that accepts telemetry.
 export type IngestKeyRouteDependencies = {
   collectorUrl: () => string | null;
   createKey: typeof createTelemetryIngestKey;

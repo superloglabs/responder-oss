@@ -3,6 +3,7 @@ import { inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { organization } from "./auth-schema.js";
 import { closeDatabase, getDatabase } from "./client.js";
+import { withErrorIssueStore } from "./error-issues.js";
 import { listTelemetryOrganizationIds, organizationReceivesTelemetry } from "./organization-capabilities.js";
 import { organizationCapabilities, type OrganizationCapability } from "./schema.js";
 
@@ -49,5 +50,16 @@ describe.skipIf(!testUrl)("organization capabilities (PostgreSQL)", () => {
     expect(receiving).toEqual(expect.arrayContaining([workspaces.telemetry, workspaces.signal]));
     expect(receiving).not.toContain(workspaces.signalOff);
     expect(receiving).not.toContain(workspaces.automationsOnly);
+  });
+
+  it("groups a Signal workspace's errors without waking anything for them", async () => {
+    const store = await withErrorIssueStore(async (store) => ({
+      grouped: await store.organizationIds(),
+      paused: await store.pausedOrganizationIds(),
+    }));
+
+    expect(store?.grouped).toEqual(expect.arrayContaining([workspaces.telemetry, workspaces.signal]));
+    expect(store?.paused.has(workspaces.signal)).toBe(true);
+    expect(store?.paused.has(workspaces.telemetry)).toBe(false);
   });
 });

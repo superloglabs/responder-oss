@@ -66,16 +66,17 @@ type Database = ReturnType<typeof getDatabase>;
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 
 // Every workspace that receives telemetry, such as for grouping errors into
-// issues.
+// issues, or only those with the given capabilities.
 export async function listTelemetryOrganizationIds(
   executor: Database | Transaction = getDatabase(),
+  capabilities: readonly OrganizationCapability[] = telemetryDataCapabilities,
 ): Promise<string[]> {
   const rows = await executor
     .selectDistinct({ organizationId: organizationCapabilities.organizationId })
     .from(organizationCapabilities)
     .where(
       and(
-        inArray(organizationCapabilities.capability, [...telemetryDataCapabilities]),
+        inArray(organizationCapabilities.capability, [...capabilities]),
         eq(organizationCapabilities.enabled, true),
       ),
     );
