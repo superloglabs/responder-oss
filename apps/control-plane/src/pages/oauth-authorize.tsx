@@ -2,6 +2,7 @@ import { type FormEvent, useEffect, useState } from "react";
 import { authClient } from "../auth-client";
 import { AuthFrame, SignIn } from "../components/auth-gate";
 import { CardContentSkeleton, WorkspaceListSkeleton } from "../components/screen-skeletons";
+import { useSessionScreen } from "../components/session-screen";
 import { workspaceSlug } from "../components/workspace";
 import {
   oauthAuthorizationRequest,
@@ -215,6 +216,7 @@ function Consent({
 export function OAuthAuthorizePage() {
   useDocumentTitle("Connect an MCP client");
   const session = authClient.useSession();
+  const screen = useSessionScreen(session);
   const [request] = useState(() => oauthAuthorizationRequest(window.location.search));
 
   let content;
@@ -228,7 +230,7 @@ export function OAuthAuthorizePage() {
         </p>
       </div>
     );
-  } else if (session.isPending) {
+  } else if (screen === "loading") {
     content = <CardContentSkeleton label="Loading Superlog…" />;
   } else if (!session.data) {
     content = <SignIn allowLegacyHandoff={false} allowRegionChoice={false} />;

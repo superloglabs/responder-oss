@@ -13,6 +13,7 @@ import {
   tryLegacyEmailSignIn,
 } from "../legacy-account-handoff";
 import { workspaceSlug } from "./workspace";
+import { useSessionScreen } from "./session-screen";
 import { automationSetupReturnPath } from "../pages/shared-automation-template-presentation";
 import { ActiveWorkspaceCheck } from "./active-workspace-check";
 import { ImpersonationBanner } from "./impersonation-banner";
@@ -202,7 +203,7 @@ export function SignIn({
         setError(result.error.message ?? "Authentication failed");
         return;
       }
-      setIsSubmitting(false);
+      // The form stays busy until the new session replaces it.
       console.info(
         JSON.stringify({
           event: isCreatingAccount
@@ -1032,12 +1033,7 @@ export function AuthGate({ children }: AuthGateProps) {
   const signedInUserId = session.data?.user.id;
   const activeOrganizationId = session.data?.session.activeOrganizationId;
   const [isCreatingWorkspace, setIsCreatingWorkspace] = useState(false);
-  // Better Auth refetches the session when the tab becomes visible again, and
-  // marks a signed-out session as pending while it does. Showing the loading
-  // screen then would unmount the sign-in form and clear what was typed, so
-  // only the first session check shows it.
-  const [sessionChecked, setSessionChecked] = useState(false);
-  if (!session.isPending && !sessionChecked) setSessionChecked(true);
+  const screen = useSessionScreen(session);
   // A signed-in visitor's next /app visit on any cell's host comes back here.
   useEffect(() => {
     if (signedInUserId && cells?.current) {
@@ -1101,9 +1097,9 @@ export function AuthGate({ children }: AuthGateProps) {
     <AppFrameSkeleton />
   );
 
-  if (session.isPending && !sessionChecked) return loading;
+  if (screen === "loading") return loading;
 
-  if (session.error) {
+  if (screen === "unavailable") {
     return (
       <AuthFrame>
         <div className="authIntro">
