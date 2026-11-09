@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { awsStackUpdateConsoleUrl, findAwsStack, findAwsStackInRegion, type AwsFetch } from "./aws-stack.js";
+import { awsStackName, awsStackUpdateConsoleUrl, findAwsStack, findAwsStackInRegion, type AwsFetch } from "./aws-stack.js";
 
 const credentials = { accessKeyId: "AKIA", expiration: new Date(), secretAccessKey: "secret", sessionToken: "token" };
 const externalId = "responder_RbX3tZstVoPQhAbXhdzc-b5BTOgaAR0CVOm-WccAW-c";
@@ -97,6 +97,13 @@ describe("finding the connection's stack", () => {
     expect(await findAwsStackInRegion({ credentials, externalId, fetch: denied, region: "me-south-1" })).toBeNull();
     const offline = vi.fn<AwsFetch>(async () => { throw new Error("getaddrinfo ENOTFOUND"); });
     expect(await findAwsStackInRegion({ credentials, externalId, fetch: offline, region: "me-south-1" })).toBeNull();
+  });
+});
+
+describe("a stack's name", () => {
+  it("comes from its ARN", () => {
+    expect(awsStackName(stackId("us-west-2", "superlog-access"))).toBe("superlog-access");
+    expect(awsStackName("not-an-arn")).toBeNull();
   });
 });
 

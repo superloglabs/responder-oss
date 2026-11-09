@@ -195,7 +195,12 @@ function StackUpdate({ integrationAccountId }: { integrationAccountId: string })
     let current = true;
     const load = () => fetchAwsStackUpdate(integrationAccountId)
       .then((value) => { if (current) { setUpdate(value); setError(""); } })
-      .catch((failure: unknown) => { if (current) setError(failure instanceof Error ? failure.message : "Could not prepare the stack update."); });
+      .catch((failure: unknown) => {
+        if (!current) return;
+        // The old link's template URL may have expired, so it is not kept.
+        setUpdate(null);
+        setError(failure instanceof Error ? failure.message : "Could not prepare the stack update.");
+      });
     void load();
     const timer = window.setInterval(() => void load(), stackUpdateRefreshMs);
     return () => { current = false; window.clearInterval(timer); };
@@ -205,7 +210,9 @@ function StackUpdate({ integrationAccountId }: { integrationAccountId: string })
     <div className="awsStackUpdate__text">
       <h3 id={titleId}>A new version of the Superlog AWS stack is available</h3>
       <p>It lets Superlog send new errors from the regions you choose. Updating takes about a minute in AWS and changes nothing else in your account.</p>
-      {update && !update.found && <p>Superlog could not find the stack, so the button opens CloudFormation{update.region ? ` in ${update.region}` : ""}: select the Superlog stack there and replace its template.</p>}
+      {update && !update.found && (update.consoleUrl
+        ? <p>Superlog could not find the stack, so the button opens CloudFormation{update.region ? ` in ${update.region}` : ""}: select the Superlog stack there and replace its template.</p>
+        : <p>Superlog could not find the stack. Update it in CloudFormation, or use the CLI command.</p>)}
       {error && <p className="awsLogStreaming__error" role="alert">{error}</p>}
       {update && <button className="awsStackUpdate__cli" onClick={() => setShowCommand(!showCommand)} type="button" aria-expanded={showCommand}>
         {showCommand ? "Hide the CLI command" : "Use the CLI instead"}

@@ -26,7 +26,7 @@ import {
   type AwsConnectionCredentials,
 } from "../../../../packages/core/src/integrations/aws.js";
 import { awsRegions } from "../../../../packages/core/src/integrations/aws-regions.js";
-import { awsStackUpdateConsoleUrl, findAwsStack, type AwsStackLocation } from "../../../../packages/core/src/integrations/aws-stack.js";
+import { awsStackName, awsStackUpdateConsoleUrl, findAwsStack, type AwsStackLocation } from "../../../../packages/core/src/integrations/aws-stack.js";
 import {
   assumeAwsLogSubscriptionRole,
   awsLogSubscriptionRoleName,
@@ -412,6 +412,8 @@ export function awsStackUpdateCommand(input: {
   logSubscriptionPrincipalArn: string;
   parameterKeys?: string[] | null;
   region: string | null;
+  // The found stack's name; customers may have renamed it.
+  stackName?: string | null;
   templateUrl: string | null;
 }): string {
   const kept = (input.parameterKeys ?? ["ResponderPrincipalArn", "ExternalId", "RegistrationTopicArn"])
@@ -419,7 +421,7 @@ export function awsStackUpdateCommand(input: {
   return [
     "aws cloudformation update-stack",
     ...(input.region ? [`--region ${input.region}`] : []),
-    `--stack-name ${AWS_STACK_NAME}`,
+    `--stack-name ${input.stackName ?? AWS_STACK_NAME}`,
     input.templateUrl ? `--template-url '${input.templateUrl}'` : "--template-body file://responder-aws-access.yaml",
     "--capabilities CAPABILITY_NAMED_IAM",
     "--parameters",
@@ -437,8 +439,11 @@ export function isWaitingForStackUpdate(row: Pick<AwsLogSubscription, "lastError
 export function createAwsLogSubscriptionRoutes(deps: AwsLogSubscriptionDependencies = defaultAwsLogSubscriptionDependencies) {
   const manager = createAwsLogSubscriptionManager(deps);
   // Where each connection's stack is. A found stack is kept until the role
-  // becomes assumable; a miss is not kept, so the next request looks again.
-  const stacks = new Map<string, AwsStackLocation>();
+  // becomes assumable, or for a few hours at most, so connections that are
+  // never opened again do not stay; a miss is not kept, so the next request
+  // looks again.
+  const stacks = new Map<string, { at: number; location: AwsStackLocation }>();
+  const stackCacheMs = 6 * 60 * 60_000;
   // When each connection's waiting regions were last tried from a page load.
   const checked = new Map<string, number>();
   const recheckMs = 20_000;
@@ -450,12 +455,14 @@ export function createAwsLogSubscriptionRoutes(deps: AwsLogSubscriptionDependenc
 
   async function stackOf(integrationAccountId: string, organizationId: string): Promise<AwsStackLocation | null> {
     const cached = stacks.get(integrationAccountId);
-    if (cached) return cached;
+    if (cached && deps.now() - cached.at < stackCacheMs) return cached.location;
+    stacks.delete(integrationAccountId);
+    for (const [id, entry] of stacks) if (deps.now() - entry.at >= stackCacheMs) stacks.delete(id);
     const connection = await deps.connection({ integrationAccountId, organizationId });
     const location = connection?.credentials
       ? await deps.locateStack(connection.credentials, topicRegion()).catch(() => null)
       : null;
-    if (location) stacks.set(integrationAccountId, location);
+    if (location) stacks.set(integrationAccountId, { at: deps.now(), location });
     return location;
   }
 
@@ -514,6 +521,7 @@ export function createAwsLogSubscriptionRoutes(deps: AwsLogSubscriptionDependenc
         logSubscriptionPrincipalArn: config.principalArn,
         parameterKeys: stack?.parameterKeys ?? null,
         region,
+        stackName: stack ? awsStackName(stack.stackId) : null,
         templateUrl,
       }),
       consoleUrl: region ? awsStackUpdateConsoleUrl({ region, stackId: stack?.stackId ?? null, templateUrl }) : null,

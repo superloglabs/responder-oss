@@ -339,7 +339,8 @@ describe("log subscription routes", () => {
 
   it("links to the update page of the stack it finds, wherever it is, and keeps the stack until the role works", async () => {
     let rows = waitingRows();
-    const stackId = "arn:aws:cloudformation:us-west-2:123456789012:stack/ResponderInvestigationAccess/abc";
+    // Found by its ExternalId, under the name the customer gave it.
+    const stackId = "arn:aws:cloudformation:us-west-2:123456789012:stack/superlog-access/abc";
     const { deps } = dependencies({
       list: vi.fn(async () => rows),
       locateStack: vi.fn(async () => ({ parameterKeys: ["ResponderPrincipalArn", "ExternalId"], region: "us-west-2", stackId })),
@@ -351,6 +352,7 @@ describe("log subscription routes", () => {
     expect(body.found).toBe(true);
     expect(body.region).toBe("us-west-2");
     expect(body.command).toContain("--region us-west-2");
+    expect(body.command).toContain("--stack-name superlog-access ");
     expect(body.command).toContain("ParameterKey=ExternalId,UsePreviousValue=true");
     // This stack predates one-click setup, so it has no RegistrationTopicArn.
     expect(body.command).not.toContain("RegistrationTopicArn");
@@ -387,10 +389,14 @@ describe("log subscription routes", () => {
   it("tries waiting regions again while the page is open, at most every 20 seconds, without holding up the page", async () => {
     const { advance, deps } = dependencies({ list: vi.fn(async () => waitingRows()) });
     const target = app(deps);
+    // Lets the background passes the requests started finish.
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
     await target.request(base);
+    await settle();
     await target.request(base);
-    await vi.waitFor(() => expect(deps.putSubscription).toHaveBeenCalledTimes(1));
+    await settle();
     expect(deps.claim).toHaveBeenCalledTimes(1);
+    expect(deps.putSubscription).toHaveBeenCalledTimes(1);
     advance(20_000);
     await target.request(base);
     await vi.waitFor(() => expect(deps.claim).toHaveBeenCalledTimes(2));

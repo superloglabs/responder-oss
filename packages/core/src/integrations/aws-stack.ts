@@ -14,6 +14,11 @@ export interface AwsStackLocation {
   stackId: string;
 }
 
+// The stack's name, from its ARN: arn:aws:cloudformation:<region>:<account>:stack/<name>/<id>.
+export function awsStackName(stackId: string): string | null {
+  return /:stack\/([^/]+)\//u.exec(stackId)?.[1] ?? null;
+}
+
 export type AwsFetch = (url: string, init: { body: string; headers: Record<string, string>; method: "POST" }) => Promise<{
   ok: boolean;
   status: number;
@@ -31,8 +36,8 @@ const updatableStatuses = new Set([
   "IMPORT_ROLLBACK_COMPLETE",
 ]);
 
-// A region with more stacks than this is not read further.
-const maxPages = 20;
+// How long one region's stacks are read before giving up on that region.
+const regionDeadlineMs = 15_000;
 
 interface DescribedStack {
   Parameters?: Array<{ ParameterKey?: unknown; ParameterValue?: unknown }> | null;
@@ -72,8 +77,10 @@ export async function findAwsStackInRegion(input: {
   });
   const send: AwsFetch = input.fetch ?? ((url, init) => fetch(url, { ...init, signal: AbortSignal.timeout(5_000) }));
   let nextToken: string | null = null;
+  const deadline = Date.now() + regionDeadlineMs;
   try {
-    for (let page = 0; page < maxPages; page += 1) {
+    // Every page, however many stacks the region has, within the deadline.
+    while (Date.now() < deadline) {
       // Every stack in the region: a customer may have renamed this one.
       const body = new URLSearchParams({
         Action: "DescribeStacks",
