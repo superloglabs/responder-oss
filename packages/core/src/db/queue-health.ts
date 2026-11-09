@@ -1,5 +1,9 @@
 import { sql } from "drizzle-orm";
-import { automationRunQueue, legacyAutomationRunQueue } from "../jobs.js";
+import {
+  automationRunGroupConcurrency,
+  automationRunQueue,
+  legacyAutomationRunQueue,
+} from "../jobs.js";
 import { getDatabase } from "./client.js";
 
 // Counts that show whether queued work is being taken and finished. They are
@@ -11,11 +15,17 @@ export type QueueHealth = {
     finished: Record<string, number>;
     // Running runs whose worker lease expired more than two minutes ago.
     leaseExpired: number;
+    // Seconds the oldest pending run has waited for a worker slot. Runs that
+    // wait only because their workspace already has
+    // automationRunGroupConcurrency runs active are left out: a burst from one
+    // workspace waits by design while the worker is healthy.
     oldestPendingSeconds: number;
     // Unfinished runs older than five minutes with no queued or active job.
     // Nothing will start them again.
     orphaned: number;
     pending: number;
+    // Pending runs held back by their own workspace's limit.
+    workspaceLimited: number;
   };
   jobs: Array<{
     // Jobs that failed in the last 15 minutes after their last retry.
@@ -42,11 +52,21 @@ export async function readQueueHealth(): Promise<QueueHealth> {
       oldest_pending_seconds: string | null;
       orphaned: string;
       pending: string;
+      workspace_limited: string;
     }>(sql`
+      with limited_workspaces as (
+        select group_id from pgboss.job
+        where name = ${automationRunQueue} and state = 'active' and group_id is not null
+        group by group_id
+        having count(*) >= ${automationRunGroupConcurrency}
+      )
       select
         count(*) filter (where r.status = 'pending') as pending,
-        extract(epoch from now() - min(r.created_at) filter (where r.status = 'pending'))
-          as oldest_pending_seconds,
+        count(*) filter (where r.status = 'pending' and l.group_id is not null)
+          as workspace_limited,
+        extract(epoch from now() - min(r.created_at) filter (
+          where r.status = 'pending' and l.group_id is null
+        )) as oldest_pending_seconds,
         count(*) filter (
           where r.status = 'running' and r.lease_expires_at < now() - ${leaseGrace}
         ) as lease_expired,
@@ -62,6 +82,7 @@ export async function readQueueHealth(): Promise<QueueHealth> {
             )
         ) as orphaned
       from automation_runs r
+      left join limited_workspaces l on l.group_id = r.organization_id::text
       where r.status in ('pending', 'running')
     `);
     const finished = await database.execute<{ count: string; status: string }>(sql`
@@ -110,6 +131,7 @@ export async function readQueueHealth(): Promise<QueueHealth> {
       oldestPendingSeconds: Number(run?.oldest_pending_seconds ?? 0),
       orphaned: Number(run?.orphaned ?? 0),
       pending: Number(run?.pending ?? 0),
+      workspaceLimited: Number(run?.workspace_limited ?? 0),
     },
     jobs: jobs.rows.map((row) => ({
       failed: Number(row.failed),

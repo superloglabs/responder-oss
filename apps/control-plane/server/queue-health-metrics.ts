@@ -20,6 +20,7 @@ type QueueHealthGauges = {
   oldestPendingRunAge: ObservableGauge;
   orphanedRuns: ObservableGauge;
   pendingRuns: ObservableGauge;
+  workspaceLimitedRuns: ObservableGauge;
 };
 
 function createGauges(meter: Meter): QueueHealthGauges {
@@ -49,7 +50,8 @@ function createGauges(meter: Meter): QueueHealthGauges {
       unit: "{run}",
     }),
     oldestPendingRunAge: meter.createObservableGauge("responder.automation_runs.pending.oldest_age", {
-      description: "Seconds the oldest pending automation run has waited.",
+      description:
+        "Seconds the oldest pending automation run has waited, leaving out runs held by their workspace's run limit.",
       unit: "s",
     }),
     orphanedRuns: meter.createObservableGauge("responder.automation_runs.orphaned", {
@@ -60,6 +62,13 @@ function createGauges(meter: Meter): QueueHealthGauges {
       description: "Automation runs waiting for a worker.",
       unit: "{run}",
     }),
+    workspaceLimitedRuns: meter.createObservableGauge(
+      "responder.automation_runs.pending.workspace_limited",
+      {
+        description: "Pending automation runs held back because their workspace has its run limit active.",
+        unit: "{run}",
+      },
+    ),
   };
 }
 
@@ -71,6 +80,7 @@ export function recordQueueHealth(
   const runs = health.automationRuns;
   result.observe(gauges.pendingRuns, runs.pending);
   result.observe(gauges.oldestPendingRunAge, runs.oldestPendingSeconds);
+  result.observe(gauges.workspaceLimitedRuns, runs.workspaceLimited);
   result.observe(gauges.leaseExpiredRuns, runs.leaseExpired);
   result.observe(gauges.orphanedRuns, runs.orphaned);
   for (const status of ["succeeded", "failed", "usage_limit_reached", "cancelled"]) {
