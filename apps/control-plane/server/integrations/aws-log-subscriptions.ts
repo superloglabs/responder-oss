@@ -11,6 +11,7 @@ import {
   markAwsLogSubscriptionActive,
   markAwsLogSubscriptionFailed,
   markAwsLogSubscriptionRemovalFailed,
+  releaseAwsLogSubscriptions,
   removeAllAwsLogSubscriptions,
   setAwsLogSubscriptionRegions,
   withAwsLogDestinationAccounts,
@@ -62,6 +63,7 @@ export interface AwsLogSubscriptionDependencies {
   now: () => number;
   putDestinationPolicy: typeof putAwsLogDestinationPolicy;
   putSubscription: typeof putAwsLogSubscription;
+  release: typeof releaseAwsLogSubscriptions;
   removeAll: typeof removeAllAwsLogSubscriptions;
   setRegions: typeof setAwsLogSubscriptionRegions;
   templateUrl: () => Promise<string | null>;
@@ -101,6 +103,7 @@ export const defaultAwsLogSubscriptionDependencies: AwsLogSubscriptionDependenci
   now: Date.now,
   putDestinationPolicy: putAwsLogDestinationPolicy,
   putSubscription: putAwsLogSubscription,
+  release: releaseAwsLogSubscriptions,
   removeAll: removeAllAwsLogSubscriptions,
   setRegions: setAwsLogSubscriptionRegions,
   templateUrl: () => createAwsCloudFormationTemplateUrl(),
@@ -217,7 +220,7 @@ export function createAwsLogSubscriptionManager(deps: AwsLogSubscriptionDependen
 
   // One pass: the destinations first, since CloudWatch Logs checks a
   // destination's policy when a subscription is created, then the due work
-  // this process claims.
+  // this process claims. Without the ingest token only removals run.
   async function reconcile(): Promise<void> {
     const config = deps.config();
     if (!config) return;
@@ -226,6 +229,7 @@ export function createAwsLogSubscriptionManager(deps: AwsLogSubscriptionDependen
       filterPattern: awsLogSubscriptionFilterPattern,
       leaseMs,
       limit: 100,
+      removalsOnly: !config.acceptsLogs,
       retryFailedBefore: new Date(deps.now() - retryFailedAfterMs),
     });
     await process(config, rows);
@@ -254,6 +258,9 @@ export function createAwsLogSubscriptionManager(deps: AwsLogSubscriptionDependen
     if (rows.length === 0) return { left: [], ok: true };
     const claimed = await deps.claim(rows.map((row) => row.id), leaseMs);
     if (claimed.length < rows.length) {
+      // Another process holds some rows; let go of the ones claimed here so
+      // a retry is not blocked by this attempt too.
+      await deps.release(claimed.map((row) => row.id));
       return { error: "Superlog is still updating this account's log subscriptions. Try again in a minute.", ok: false };
     }
     const connection = await deps.connection(input);
@@ -411,7 +418,7 @@ export function createAwsLogSubscriptionRoutes(deps: AwsLogSubscriptionDependenc
       const tenant = await getActiveTenant(context.req.raw.headers);
       if (!tenant.ok) return context.json({ error: tenant.error }, tenant.status);
       const config = deps.config();
-      if (!config) return context.json({ available: false, canManage: false, regions: [], stackUpdate: null, subscriptions: [] });
+      if (!config?.acceptsLogs) return context.json({ available: false, canManage: false, regions: [], stackUpdate: null, subscriptions: [] });
       const input = { integrationAccountId: context.req.param("integrationAccountId"), organizationId: tenant.organizationId };
       if (!z.uuid().safeParse(input.integrationAccountId).success || !(await deps.connection(input))) {
         return context.json({ error: "AWS connection not found" }, 404);
@@ -425,7 +432,7 @@ export function createAwsLogSubscriptionRoutes(deps: AwsLogSubscriptionDependenc
         return context.json({ error: "Only workspace owners and admins can change log streaming" }, 403);
       }
       const config = deps.config();
-      if (!config) return context.json({ error: "Log streaming is not available here" }, 404);
+      if (!config?.acceptsLogs) return context.json({ error: "Log streaming is not available here" }, 404);
       const input = { integrationAccountId: context.req.param("integrationAccountId"), organizationId: tenant.organizationId };
       if (!z.uuid().safeParse(input.integrationAccountId).success) return context.json({ error: "AWS connection not found" }, 404);
       const body = regionsSchema.safeParse(await context.req.json().catch(() => null));

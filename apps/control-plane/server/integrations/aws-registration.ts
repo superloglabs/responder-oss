@@ -44,7 +44,7 @@ import {
   snsMessageSchema,
   verifySnsMessageSignature,
 } from "../../../../packages/core/src/integrations/aws-registration.js";
-import { awsLogSubscriptionConfig } from "../../../../packages/core/src/integrations/aws-log-subscriptions.js";
+import { awsLogSubscriptionPrincipalArnForStacks } from "../../../../packages/core/src/integrations/aws-log-subscriptions.js";
 import { getActiveTenant } from "../tenant.js";
 
 export const AWS_REGISTRATION_UNAVAILABLE_ERROR =
@@ -93,7 +93,7 @@ export async function startAwsRegistration(
   const registrationTopicArn = awsRegistrationTopicArn();
   if (!registrationTopicArn) return { available: false };
   const principalArn = awsIntegrationPrincipalArn();
-  const logSubscriptionPrincipalArn = awsLogSubscriptionConfig()?.principalArn ?? null;
+  const logSubscriptionPrincipalArn = awsLogSubscriptionPrincipalArnForStacks();
 
   const pending = await getPendingIntegrationRegistration({
     externalAccountIdPrefix: AWS_REGISTRATION_EXTERNAL_ACCOUNT_PREFIX,

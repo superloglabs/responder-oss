@@ -26,6 +26,10 @@ export const awsLogSubscriptionFilterPattern =
   '?ERROR ?Error ?error ?FATAL ?Fatal ?fatal ?CRITICAL ?Critical ?critical ?Exception ?exception ?Traceback ?panic ?"\\"level\\":50" ?"\\"level\\":60"';
 
 export interface AwsLogSubscriptionConfig {
+  // Whether Superlog can take the logs in: the ingest token is set. Without
+  // it, no new subscriptions are offered or applied, but existing ones can
+  // still be removed.
+  acceptsLogs: boolean;
   // The account that owns the broker and the destinations.
   destinationAccountId: string;
   destinationName: string;
@@ -38,12 +42,13 @@ const roleArnPattern = /^arn:aws:iam::(\d{12}):role\/[A-Za-z0-9+=,.@_/-]+$/u;
 const destinationNamePattern = /^[A-Za-z0-9_.-]{1,512}$/u;
 
 // The log streaming settings the infrastructure gives the API, or null when
-// this installation offers no log streaming. All four must be set: without
-// the ingest token, subscriptions would send logs the ingest route refuses.
+// this installation has no log destinations. Streaming is offered only when
+// the ingest token is set too (`acceptsLogs`): without it, subscriptions would
+// send logs the ingest route refuses.
 export function awsLogSubscriptionConfig(
   environment: NodeJS.ProcessEnv = process.env,
 ): AwsLogSubscriptionConfig | null {
-  if (!environment.AWS_CLOUDWATCH_LOGS_INGEST_TOKEN?.trim()) return null;
+  const acceptsLogs = Boolean(environment.AWS_CLOUDWATCH_LOGS_INGEST_TOKEN?.trim());
   const principalArn = environment.AWS_LOG_SUBSCRIPTION_PRINCIPAL_ARN?.trim();
   const destinationName = environment.AWS_LOG_DESTINATION_NAME?.trim();
   const listed = (environment.AWS_LOG_DESTINATION_REGIONS ?? "")
@@ -56,7 +61,15 @@ export function awsLogSubscriptionConfig(
   }
   const regions = awsRegions.filter((region) => listed.includes(region));
   if (regions.length === 0) return null;
-  return { destinationAccountId, destinationName, principalArn, regions };
+  return { acceptsLogs, destinationAccountId, destinationName, principalArn, regions };
+}
+
+// The broker a new or updated stack should trust, when streaming is offered.
+export function awsLogSubscriptionPrincipalArnForStacks(
+  environment: NodeJS.ProcessEnv = process.env,
+): string | null {
+  const config = awsLogSubscriptionConfig(environment);
+  return config?.acceptsLogs ? config.principalArn : null;
 }
 
 export function awsLogSubscriptionRoleArn(accountId: string): string {

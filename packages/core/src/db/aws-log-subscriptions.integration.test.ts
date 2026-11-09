@@ -13,6 +13,7 @@ import {
   listAwsLogSubscriptions,
   markAwsLogSubscriptionActive,
   markAwsLogSubscriptionFailed,
+  releaseAwsLogSubscriptions,
   removeAllAwsLogSubscriptions,
   setAwsLogSubscriptionRegions,
   withAwsLogDestinationAccounts,
@@ -98,11 +99,15 @@ describe.skipIf(!testUrl)("AWS log subscriptions (PostgreSQL)", () => {
     // A claimed row is not handed out again until its lease ends.
     expect(mine(await claimDueAwsLogSubscriptions({ filterPattern: "?ERROR", leaseMs: 60_000, limit: 100, retryFailedBefore: later }))).toEqual([]);
     expect(await claimAwsLogSubscriptions([us!.id], 60_000)).toEqual([]);
-    // Recording the outcome releases it.
+    // Releasing or recording the outcome lets it go.
+    await releaseAwsLogSubscriptions([us!.id]);
+    expect(mine(await claimAwsLogSubscriptions([us!.id], 60_000))).toEqual(["us-east-1"]);
     await markAwsLogSubscriptionFailed(us!.id, "boom again");
     expect(mine(await claimAwsLogSubscriptions([us!.id], 60_000))).toEqual(["us-east-1"]);
     await markAwsLogSubscriptionFailed(us!.id, "boom again");
     // A new filter pattern makes active subscriptions due again.
+    // Without the ingest token, only removals are handed out.
+    expect(mine(await claimDueAwsLogSubscriptions({ filterPattern: "?ERROR ?FATAL", leaseMs: 60_000, limit: 100, removalsOnly: true, retryFailedBefore: new Date(0) }))).toEqual([]);
     const changed = await claimDueAwsLogSubscriptions({ filterPattern: "?ERROR ?FATAL", leaseMs: 60_000, limit: 100, retryFailedBefore: new Date(0) });
     expect(mine(changed)).toEqual(["eu-west-1"]);
     await markAwsLogSubscriptionActive(eu!.id, "?ERROR");

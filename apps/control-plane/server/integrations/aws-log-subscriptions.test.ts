@@ -24,6 +24,7 @@ vi.mock("../tenant.js", () => ({ getActiveTenant: vi.fn() }));
 const organizationId = "22222222-2222-4222-8222-222222222222";
 const integrationAccountId = "33333333-3333-4333-8333-333333333333";
 const config: AwsLogSubscriptionConfig = {
+  acceptsLogs: true,
   destinationAccountId: "121638211609",
   destinationName: "superlog-logs-eu",
   principalArn: "arn:aws:iam::121638211609:role/ResponderLogSubscriptionBroker",
@@ -76,6 +77,7 @@ function dependencies(overrides: Partial<AwsLogSubscriptionDependencies> = {}) {
     now: () => now,
     putDestinationPolicy: vi.fn(async () => undefined),
     putSubscription: vi.fn(async () => undefined),
+    release: vi.fn(async () => undefined),
     removeAll: vi.fn(async () => [] as AwsLogSubscription[]),
     setRegions: vi.fn(async () => [] as AwsLogSubscription[]),
     templateUrl: vi.fn(async () => null),
@@ -154,6 +156,12 @@ describe("reconciling subscriptions", () => {
     expect(roleGone.deps.deleteRow).toHaveBeenCalledWith(removing.id);
   });
 
+  it("only removes subscriptions while Superlog cannot take logs in", async () => {
+    const { deps } = dependencies({ config: () => ({ ...config, acceptsLogs: false }) });
+    await createAwsLogSubscriptionManager(deps).reconcile();
+    expect(deps.claimDue).toHaveBeenCalledWith(expect.objectContaining({ removalsOnly: true }));
+  });
+
   it("does nothing without log streaming settings", async () => {
     const { deps } = dependencies({ config: () => null });
     await createAwsLogSubscriptionManager(deps).reconcile();
@@ -164,43 +172,73 @@ describe("reconciling subscriptions", () => {
 
 describe("removing an AWS connection", () => {
   const input = { integrationAccountId, organizationId };
-  const both = () => [row({ status: "removing" }), row({ id: "row-us-east-1", region: "us-east-1", status: "removing" })];
 
-  it("deletes every policy before the connection goes", async () => {
-    const { deps } = dependencies({ removeAll: vi.fn(async () => both()) });
+  // Rows that change as the manager works, so the destination lists it
+  // writes reflect what is left.
+  function stateful(overrides: Partial<AwsLogSubscriptionDependencies> = {}) {
+    const rows = new Map<string, AwsLogSubscription>([
+      ["row-eu-west-1", row({ status: "removing" })],
+      ["row-us-east-1", row({ id: "row-us-east-1", region: "us-east-1", status: "removing" })],
+    ]);
+    const result = dependencies({
+      deleteRow: vi.fn(async (id: string) => { rows.delete(id); }),
+      destinationAccounts: vi.fn(async (region: string, write: (ids: string[]) => Promise<void>) => {
+        const ids = [...new Set([...rows.values()].filter((value) => value.region === region).map((value) => value.awsAccountId))];
+        await write(ids);
+        return ids;
+      }),
+      removeAll: vi.fn(async () => [...rows.values()]),
+      ...overrides,
+    });
+    const lastList = (region: string) => vi.mocked(result.deps.putDestinationPolicy).mock.calls.filter(([call]) => call.region === region).at(-1)?.[0].accountIds;
+    return { ...result, lastList, rows };
+  }
+
+  it("deletes every policy before the connection goes, and the destinations stop accepting the account", async () => {
+    const { deps, lastList, rows } = stateful();
     expect(await removeAwsLogSubscriptionsBeforeDisconnect(input, deps)).toEqual({ left: [], ok: true });
     expect(vi.mocked(deps.deleteSubscription).mock.calls.map(([call]) => call.region)).toEqual(["eu-west-1", "us-east-1"]);
-    expect(deps.deleteRow).toHaveBeenCalledTimes(2);
-    expect(deps.destinationAccounts).toHaveBeenCalled();
+    expect(rows.size).toBe(0);
+    expect(lastList("eu-west-1")).toEqual([]);
+    expect(lastList("us-east-1")).toEqual([]);
   });
 
   it("blocks the removal and keeps retrying when a policy cannot be deleted", async () => {
-    const { deps } = dependencies({
+    const { deps, lastList, rows } = stateful({
       deleteSubscription: vi.fn(async ({ region }: { region: string }) => { if (region === "us-east-1") throw throttled; }),
-      removeAll: vi.fn(async () => both()),
     });
     const result = await removeAwsLogSubscriptionsBeforeDisconnect(input, deps);
     expect(result).toMatchObject({ ok: false, error: expect.stringContaining("us-east-1") });
-    expect(deps.deleteRow).toHaveBeenCalledTimes(1);
+    expect([...rows.keys()]).toEqual(["row-us-east-1"]);
     expect(deps.markRemovalFailed).toHaveBeenCalledWith("row-us-east-1", expect.any(String));
+    // Only the region whose policy is still there keeps accepting the account.
+    expect(lastList("eu-west-1")).toEqual([]);
+    expect(lastList("us-east-1")).toEqual(["123456789012"]);
 
-    const assumeFails = dependencies({ assume: vi.fn(async () => { throw throttled; }), removeAll: vi.fn(async () => both()) });
+    const assumeFails = stateful({ assume: vi.fn(async () => { throw throttled; }) });
     expect(await removeAwsLogSubscriptionsBeforeDisconnect(input, assumeFails.deps)).toMatchObject({ ok: false });
-    expect(assumeFails.deps.deleteRow).not.toHaveBeenCalled();
+    expect(assumeFails.rows.size).toBe(2);
   });
 
   it("lets the removal go ahead when the role is already gone, and names what is left", async () => {
-    const { deps } = dependencies({
+    const { deps, lastList, rows } = stateful({
       assume: vi.fn(async () => { throw new AwsLogSubscriptionRoleUnavailableError(new Error("denied")); }),
-      removeAll: vi.fn(async () => both()),
     });
     expect(await removeAwsLogSubscriptionsBeforeDisconnect(input, deps)).toEqual({ left: ["eu-west-1", "us-east-1"], ok: true });
-    expect(deps.deleteRow).toHaveBeenCalledTimes(2);
+    expect(rows.size).toBe(0);
+    expect(lastList("eu-west-1")).toEqual([]);
   });
 
-  it("waits for another process that is working on the rows", async () => {
-    const { deps } = dependencies({ claim: vi.fn(async () => [row({ status: "removing" })]), removeAll: vi.fn(async () => both()) });
+  it("cleans up even while Superlog cannot take logs in", async () => {
+    const { deps, rows } = stateful({ config: () => ({ ...config, acceptsLogs: false }) });
+    expect(await removeAwsLogSubscriptionsBeforeDisconnect(input, deps)).toEqual({ left: [], ok: true });
+    expect(rows.size).toBe(0);
+  });
+
+  it("waits for another process that is working on the rows, letting go of the ones it claimed", async () => {
+    const { deps } = stateful({ claim: vi.fn(async () => [row({ status: "removing" })]) });
     expect(await removeAwsLogSubscriptionsBeforeDisconnect(input, deps)).toMatchObject({ ok: false, error: expect.stringContaining("Try again") });
+    expect(deps.release).toHaveBeenCalledWith(["row-eu-west-1"]);
     expect(deps.deleteSubscription).not.toHaveBeenCalled();
   });
 
@@ -229,10 +267,13 @@ describe("log subscription routes", () => {
     method: "PUT",
   });
 
-  it("says when log streaming is not available here", async () => {
-    const { deps } = dependencies({ config: () => null });
-    const response = await app(deps).request(`/api/integrations/aws/log-subscriptions/${integrationAccountId}`);
-    expect(await response.json()).toMatchObject({ available: false, canManage: false });
+  it("says when log streaming is not available here, including without the ingest token", async () => {
+    for (const unavailable of [() => null, () => ({ ...config, acceptsLogs: false })]) {
+      const { deps } = dependencies({ config: unavailable });
+      const response = await app(deps).request(`/api/integrations/aws/log-subscriptions/${integrationAccountId}`);
+      expect(await response.json()).toMatchObject({ available: false, canManage: false });
+      expect((await put(app(deps), ["eu-west-1"])).status).toBe(404);
+    }
   });
 
   it("lists region statuses for a connection in the workspace, and who may change them", async () => {

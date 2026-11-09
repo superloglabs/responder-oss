@@ -146,6 +146,8 @@ export async function claimDueAwsLogSubscriptions(input: {
   filterPattern: string;
   leaseMs: number;
   limit: number;
+  // Only removals, as when Superlog cannot take logs in.
+  removalsOnly?: boolean;
   retryFailedBefore: Date;
 }): Promise<AwsLogSubscription[]> {
   const db = getDatabase();
@@ -154,12 +156,14 @@ export async function claimDueAwsLogSubscriptions(input: {
     .from(awsLogSubscriptions)
     .where(and(
       or(isNull(awsLogSubscriptions.claimedUntil), lt(awsLogSubscriptions.claimedUntil, sql`now()`)),
-      or(
-        eq(awsLogSubscriptions.status, "pending"),
-        eq(awsLogSubscriptions.status, "removing"),
-        and(eq(awsLogSubscriptions.status, "failed"), lt(awsLogSubscriptions.updatedAt, input.retryFailedBefore)),
-        and(eq(awsLogSubscriptions.status, "active"), ne(awsLogSubscriptions.filterPattern, input.filterPattern)),
-      ),
+      input.removalsOnly
+        ? eq(awsLogSubscriptions.status, "removing")
+        : or(
+          eq(awsLogSubscriptions.status, "pending"),
+          eq(awsLogSubscriptions.status, "removing"),
+          and(eq(awsLogSubscriptions.status, "failed"), lt(awsLogSubscriptions.updatedAt, input.retryFailedBefore)),
+          and(eq(awsLogSubscriptions.status, "active"), ne(awsLogSubscriptions.filterPattern, input.filterPattern)),
+        ),
     ))
     .orderBy(asc(awsLogSubscriptions.updatedAt))
     .limit(input.limit)
@@ -183,6 +187,15 @@ export async function claimAwsLogSubscriptions(ids: string[], leaseMs: number): 
       or(isNull(awsLogSubscriptions.claimedUntil), lt(awsLogSubscriptions.claimedUntil, sql`now()`)),
     ))
     .returning(columns);
+}
+
+// Lets other processes work on rows again without recording an outcome.
+export async function releaseAwsLogSubscriptions(ids: string[]): Promise<void> {
+  if (ids.length === 0) return;
+  await getDatabase()
+    .update(awsLogSubscriptions)
+    .set({ claimedUntil: null })
+    .where(inArray(awsLogSubscriptions.id, ids));
 }
 
 export async function markAwsLogSubscriptionActive(id: string, filterPattern: string): Promise<void> {

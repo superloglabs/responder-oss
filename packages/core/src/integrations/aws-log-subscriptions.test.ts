@@ -13,6 +13,7 @@ import {
   awsLogSubscriptionConfig,
   awsLogSubscriptionFilterPattern,
   awsLogSubscriptionPolicyName,
+  awsLogSubscriptionPrincipalArnForStacks,
   awsLogSubscriptionRoleArn,
   deleteAwsLogSubscription,
   describeAwsLogSubscriptionError,
@@ -56,6 +57,7 @@ function fakeLogs() {
 describe("AWS log subscription settings", () => {
   it("reads the infrastructure's settings and offers only real regions, in list order", () => {
     expect(config).toEqual({
+      acceptsLogs: true,
       destinationAccountId: "121638211609",
       destinationName: "superlog-logs-eu",
       principalArn: environment.AWS_LOG_SUBSCRIPTION_PRINCIPAL_ARN,
@@ -68,8 +70,11 @@ describe("AWS log subscription settings", () => {
     expect(awsLogSubscriptionConfig({ ...environment, AWS_LOG_DESTINATION_REGIONS: "" })).toBeNull();
     expect(awsLogSubscriptionConfig({ ...environment, AWS_LOG_SUBSCRIPTION_PRINCIPAL_ARN: "role" })).toBeNull();
     expect(awsLogSubscriptionConfig({ ...environment, AWS_LOG_DESTINATION_NAME: "bad name" })).toBeNull();
-    // Without the ingest token, subscriptions would send logs nobody accepts.
-    expect(awsLogSubscriptionConfig({ ...environment, AWS_CLOUDWATCH_LOGS_INGEST_TOKEN: " " })).toBeNull();
+    // Without the ingest token, nothing new is offered, but existing
+    // subscriptions can still be removed.
+    expect(awsLogSubscriptionConfig({ ...environment, AWS_CLOUDWATCH_LOGS_INGEST_TOKEN: " " })).toMatchObject({ acceptsLogs: false, regions: config.regions });
+    expect(awsLogSubscriptionPrincipalArnForStacks({ ...environment, AWS_CLOUDWATCH_LOGS_INGEST_TOKEN: "" })).toBeNull();
+    expect(awsLogSubscriptionPrincipalArnForStacks(environment)).toBe(environment.AWS_LOG_SUBSCRIPTION_PRINCIPAL_ARN);
   });
 
   it("names the customer's role, the destination, and the policy", () => {

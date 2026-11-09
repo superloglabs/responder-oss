@@ -403,7 +403,8 @@ export const awsLogSubscriptions = pgTable(
     // last attempt failed; removing: the policy is being deleted.
     status: text("status").$type<"active" | "failed" | "pending" | "removing">().notNull().default("pending"),
     lastError: text("last_error"),
-    // When AWS first confirmed the policy. Logs are routed only after that.
+    // When AWS last confirmed the policy, set on every successful apply.
+    // Logs are routed only once it is set.
     appliedAt: timestamp("applied_at", { withTimezone: true }),
     // An API process working on the row holds it until then, so several
     // processes do not apply or remove the same subscription at once.

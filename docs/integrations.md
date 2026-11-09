@@ -969,7 +969,8 @@ supports the commercial AWS partition (`arn:aws`) only.
 Where the deployment sets `AWS_LOG_SUBSCRIPTION_PRINCIPAL_ARN`,
 `AWS_LOG_DESTINATION_NAME`, `AWS_LOG_DESTINATION_REGIONS`, and
 `AWS_CLOUDWATCH_LOGS_INGEST_TOKEN` (all four; without the token the API
-offers no log streaming), the stack also creates
+offers and applies no new subscriptions but still removes existing ones), the
+stack also creates
 `ResponderLogSubscriptionRole`. Its trust requires the log subscription broker
 and the same external ID. It allows `logs:PutAccountPolicy`,
 `logs:PutSubscriptionFilter`, `logs:DeleteAccountPolicy`, and
