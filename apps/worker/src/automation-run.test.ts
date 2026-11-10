@@ -2,7 +2,7 @@ import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/da
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import type { createAutomationToolHandler } from "./automation-actions.js";
-import { AutomationHarnessError } from "./automation-harness.js";
+import { AutomationHarnessError, AutomationSubscriptionRefusalError } from "./automation-harness.js";
 import { processAutomationRun, type AutomationRunDependencies } from "./automation-run.js";
 import { ModelCatalogError } from "@responder/core/automations/model-catalog";
 import { awsScriptRunnerGuidance } from "@responder/core/investigations/prompt-parts";
@@ -2171,6 +2171,7 @@ describe("automation run processor", () => {
       expect(deps.runInSandbox).not.toHaveBeenCalled();
       expect(deps.trackBilledRun).not.toHaveBeenCalled();
       expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({
+        failureCategory: "execution_failed",
         failureMessage: expect.stringContaining("Plan model"),
         status: "failed",
       }));
@@ -2183,6 +2184,7 @@ describe("automation run processor", () => {
 
       expect(deps.createGrant).not.toHaveBeenCalled();
       expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({
+        failureCategory: "execution_failed",
         failureMessage: expect.stringContaining("plan no longer provides"),
         status: "failed",
       }));
@@ -2461,7 +2463,7 @@ describe("automation run processor", () => {
     vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
     const deps = dependencies();
     const refusal = "The ChatGPT workspace of the connected subscription is deactivated. Reconnect a ChatGPT account with an active plan.";
-    deps.runCodex.mockRejectedValue(new AutomationHarnessError(refusal, "", true));
+    deps.runCodex.mockRejectedValue(new AutomationSubscriptionRefusalError(refusal, ""));
 
     await processAutomationRun("job-1", {
       kind: "automation_run",
@@ -2482,7 +2484,7 @@ describe("automation run processor", () => {
     vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
     const deps = dependencies();
     const refusal = "gpt-5.4 is not available with the connected ChatGPT subscription. Choose another model for this automation.";
-    const harnessFailure = new AutomationHarnessError(refusal, "", true);
+    const harnessFailure = new AutomationSubscriptionRefusalError(refusal, "");
     deps.runCodex.mockRejectedValue(harnessFailure);
     const runInSandbox = deps.runInSandbox.getMockImplementation()!;
     deps.runInSandbox.mockImplementation(async (input) => {

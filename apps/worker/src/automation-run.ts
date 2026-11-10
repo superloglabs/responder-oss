@@ -68,6 +68,7 @@ import type { AutomationRunJob } from "@responder/core/jobs";
 import type { SandboxSession } from "./sandbox-session.js";
 import {
   AutomationHarnessError,
+  AutomationSubscriptionRefusalError,
   automationWorkspaceRoot,
   type AutomationHarnessInput,
   type AutomationHarnessResult,
@@ -1445,6 +1446,7 @@ export async function processAutomationRun(
     // A refusal the organization can fix is its own failure, not Responder's.
     const organizationRefusal = causes.find((cause): cause is AutomationHarnessError =>
       cause instanceof AutomationHarnessError && cause.organizationFixable);
+    const subscriptionRefused = organizationRefusal instanceof AutomationSubscriptionRefusalError;
     const message = cancelled
       ? "Automation run was cancelled"
       : timedOut
@@ -1478,7 +1480,7 @@ export async function processAutomationRun(
                 ? "runtime_limit_exceeded"
                 : allowanceExhausted
                   ? "usage_limit_reached"
-                  : organizationRefusal
+                  : subscriptionRefused
                     ? "subscription_refused"
                     : "execution_failed",
               failureMessage: message,

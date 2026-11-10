@@ -8,6 +8,7 @@ import { sandboxHome } from "@responder/core/sandbox-config";
 import { isVercelSandboxSession, type SandboxSession } from "./sandbox-session.js";
 import {
   AutomationHarnessError,
+  AutomationSubscriptionRefusalError,
   assertAutomationHarnessModelCompatibility,
   assertAutomationWorkspaceHasNoSymlinkRedirects,
   automationHarnessMaxOutputTokens,
@@ -329,7 +330,7 @@ export async function runCodexAutomation(
   // Checked after redaction so a failed run can keep its transcript.
   if (!commandSucceeded(output)) {
     const refusal = input.model.subscription ? subscriptionRefusal(output, input.model.model) : null;
-    if (refusal) throw new AutomationHarnessError(refusal, output, true);
+    if (refusal) throw new AutomationSubscriptionRefusalError(refusal, output);
     throw new AutomationHarnessError(harnessFailure(output), output);
   }
   return { eventStream: output };
