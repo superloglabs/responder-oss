@@ -10,6 +10,7 @@ import {
   type Context,
   type ContextManager,
   type Link,
+  type Meter,
   type SpanKind,
 } from "@opentelemetry/api";
 import { logs, SeverityNumber, type Logger } from "@opentelemetry/api-logs";
@@ -295,6 +296,37 @@ export function forwardConsoleToLogger(
   };
 }
 
+// Reports the process's memory beside the V8 heap metrics from
+// RuntimeNodeInstrumentation. Resident memory that grows while the heap stays
+// flat is held outside V8: buffers (external, array buffers) or native
+// allocations, which neither heap metric shows.
+export function observeProcessMemory(
+  meter: Meter,
+  read: () => NodeJS.MemoryUsage = () => process.memoryUsage(),
+): void {
+  const resident = meter.createObservableGauge("process.memory.usage", {
+    description: "Resident set size of the process.",
+    unit: "By",
+  });
+  const external = meter.createObservableGauge("nodejs.memory.external", {
+    description: "Memory of C++ objects bound to JavaScript objects, including array buffers.",
+    unit: "By",
+  });
+  const arrayBuffers = meter.createObservableGauge("nodejs.memory.array_buffers", {
+    description: "Memory of ArrayBuffers and SharedArrayBuffers, including Node.js Buffers.",
+    unit: "By",
+  });
+  meter.addBatchObservableCallback(
+    (result) => {
+      const usage = read();
+      result.observe(resident, usage.rss);
+      result.observe(external, usage.external);
+      result.observe(arrayBuffers, usage.arrayBuffers);
+    },
+    [resident, external, arrayBuffers],
+  );
+}
+
 // Starts trace, metric, and log export over OTLP. Traces use one tracer
 // provider for Sentry and OTLP, so both receive the same sampled spans.
 export function startNodeTelemetry(options: NodeTelemetryOptions): NodeTelemetry {
@@ -325,6 +357,7 @@ export function startNodeTelemetry(options: NodeTelemetryOptions): NodeTelemetry
   metrics.setGlobalMeterProvider(meterProvider);
   const runtimeMetrics = new RuntimeNodeInstrumentation();
   runtimeMetrics.setMeterProvider(meterProvider);
+  observeProcessMemory(meterProvider.getMeter("responder.process"));
 
   const loggerProvider = new LoggerProvider({
     processors: [new BatchLogRecordProcessor({ exporter: new OTLPLogExporter() })],

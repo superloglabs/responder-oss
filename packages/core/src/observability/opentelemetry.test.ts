@@ -1,5 +1,6 @@
 import { ROOT_CONTEXT, SpanKind, trace, TraceFlags } from "@opentelemetry/api";
 import type { Logger, LogRecord } from "@opentelemetry/api-logs";
+import { MeterProvider, MetricReader } from "@opentelemetry/sdk-metrics";
 import { SamplingDecision, type Sampler } from "@opentelemetry/sdk-trace-base";
 import { describe, expect, it } from "vitest";
 import {
@@ -7,6 +8,7 @@ import {
   DetachedSpanSampler,
   forwardConsoleToLogger,
   nodeTelemetryResource,
+  observeProcessMemory,
   otlpExportConfigured,
   otlpSignalEndpoint,
   otlpSignalHeaders,
@@ -169,5 +171,37 @@ describe("console log records", () => {
       ["WARN", "telemetry_ingest_forward_failed"],
       ["ERROR", "plain line"],
     ]);
+  });
+});
+
+class CollectingReader extends MetricReader {
+  protected async onForceFlush() {}
+  protected async onShutdown() {}
+}
+
+describe("process memory metrics", () => {
+  it("reports resident, external, and array buffer memory", async () => {
+    const reader = new CollectingReader();
+    const provider = new MeterProvider({ readers: [reader] });
+    observeProcessMemory(provider.getMeter("test"), () => ({
+      arrayBuffers: 30,
+      external: 40,
+      heapTotal: 20,
+      heapUsed: 10,
+      rss: 100,
+    }));
+
+    const { resourceMetrics } = await reader.collect();
+    const values = Object.fromEntries(
+      resourceMetrics.scopeMetrics.flatMap((scope) =>
+        scope.metrics.map((metric) => [metric.descriptor.name, metric.dataPoints[0]?.value]),
+      ),
+    );
+    expect(values).toEqual({
+      "nodejs.memory.array_buffers": 30,
+      "nodejs.memory.external": 40,
+      "process.memory.usage": 100,
+    });
+    await provider.shutdown();
   });
 });
