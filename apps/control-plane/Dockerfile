@@ -28,6 +28,7 @@ RUN corepack enable
 WORKDIR /app
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.json ./
+COPY patches patches
 COPY LICENSE THIRD_PARTY_NOTICES.md ./
 COPY apps/control-plane/package.json apps/control-plane/package.json
 COPY packages/core/package.json packages/core/package.json
