@@ -67,6 +67,19 @@ export function databasePoolOptions(
   };
 }
 
+// The pool emits an idle client's error, such as the database shutting down
+// for a failover, and removes the client. Without a listener the process
+// would crash on it.
+function logIdleClientError(error: Error & { code?: string }): void {
+  console.error(
+    JSON.stringify({
+      code: error.code,
+      errorMessage: error.message,
+      event: "database_idle_client_error",
+    }),
+  );
+}
+
 export function getDatabase(): NodePgDatabase<typeof schema> {
   if (database) return database;
 
@@ -78,6 +91,7 @@ export function getDatabase(): NodePgDatabase<typeof schema> {
   }
 
   pool = new Pool({ connectionString, ...databasePoolOptions() });
+  pool.on("error", logIdleClientError);
   database = drizzle(pool, { schema });
   return database;
 }
