@@ -1,0 +1,31 @@
+diff --git a/dist/db.js b/dist/db.js
+index 75db86222cf5999816f1e2468432ce169f59229f..1efef8675834f2f50edac2fba1ce3d1ebbb628c4 100644
+--- a/dist/db.js
++++ b/dist/db.js
+@@ -91,6 +91,10 @@ class Db extends EventEmitter {
+             clearHeartbeat();
+             client = null;
+             target.removeAllListeners();
++            // The socket may still fail while end() writes to it (a dead TCP
++            // connection times out about 15 minutes later). Keep a listener so
++            // that error does not crash the process.
++            target.on('error', () => { });
+             target.end().catch(() => { });
+             this.emit('error', error);
+             if (established)
+@@ -159,6 +163,7 @@ class Db extends EventEmitter {
+             }
+             catch (err) {
+                 next.removeAllListeners();
++                next.on('error', () => { });
+                 await next.end().catch(() => { });
+                 if (client === next)
+                     client = null;
+@@ -180,6 +185,7 @@ class Db extends EventEmitter {
+                 clearHeartbeat();
+                 if (client) {
+                     client.removeAllListeners();
++                    client.on('error', () => { });
+                     await client.end().catch(() => { });
+                     client = null;
+                 }
