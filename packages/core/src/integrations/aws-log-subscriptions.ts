@@ -205,12 +205,15 @@ export async function deleteAwsLogSubscription(input: {
 
 // The access policy of Superlog's destination in a region: only these AWS
 // accounts may subscribe to it. With none, only Superlog's own account is
-// listed, since the policy needs a principal.
+// listed, since the policy needs a principal. An account-level subscription
+// policy from another account needs logs:PutAccountPolicy as well as
+// logs:PutSubscriptionFilter; without it, CloudWatch Logs refuses the
+// customer's PutAccountPolicy call.
 export function awsLogDestinationPolicy(config: AwsLogSubscriptionConfig, region: string, accountIds: string[]): string {
   const principals = [...new Set(accountIds.filter((id) => awsAccountIdSchema.safeParse(id).success))].sort();
   return JSON.stringify({
     Statement: [{
-      Action: "logs:PutSubscriptionFilter",
+      Action: ["logs:PutSubscriptionFilter", "logs:PutAccountPolicy"],
       Effect: "Allow",
       Principal: { AWS: principals.length > 0 ? principals : [config.destinationAccountId] },
       Resource: awsLogDestinationArn(config, region),

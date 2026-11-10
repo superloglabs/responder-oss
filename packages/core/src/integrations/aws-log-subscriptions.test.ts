@@ -171,7 +171,8 @@ describe("CloudWatch Logs calls", () => {
   it("lets only connected accounts subscribe to a destination", async () => {
     expect(JSON.parse(awsLogDestinationPolicy(config, "eu-west-1", ["222233334444", "111122223333", "111122223333", "bad"]))).toEqual({
       Statement: [{
-        Action: "logs:PutSubscriptionFilter",
+        // Account-level subscription policies need PutAccountPolicy too.
+        Action: ["logs:PutSubscriptionFilter", "logs:PutAccountPolicy"],
         Effect: "Allow",
         Principal: { AWS: ["111122223333", "222233334444"] },
         Resource: "arn:aws:logs:eu-west-1:121638211609:destination:superlog-logs-eu",
