@@ -348,8 +348,10 @@ share and defaults to 1 while OTLP export is on.
   writes one per forwarded call; the OpenAI client and AI SDK calls that pass
   `modelCallTelemetry` are traced by their instrumentations. Prompts and
   outputs are not recorded.
-- Metrics are the Node.js runtime metrics and `http.server.request.duration`
-  by route template, exported every 60 seconds.
+- Metrics are the Node.js runtime metrics, process memory
+  (`process.memory.usage` for resident set size, `nodejs.memory.external`, and
+  `nodejs.memory.array_buffers`), and `http.server.request.duration` by route
+  template, exported every 60 seconds.
 - With `VITE_SUPERLOG_INGEST_ENDPOINT` and `VITE_SUPERLOG_INGEST_KEY`, every
   page load starts `@superlog/browser`, for signed-out visitors too. It sends
   errors, page loads, and Web Vitals straight to that ingest endpoint with the
