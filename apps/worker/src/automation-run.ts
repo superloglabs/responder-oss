@@ -43,6 +43,7 @@ import {
   automationModelBrokerGrantAllowanceExhausted,
   createAutomationModelBrokerGrant,
   revokeAutomationModelBrokerGrant,
+  moveAutomationModelBrokerGrantToResponderInference,
   type AutomationModelBrokerGrantCredential,
 } from "@responder/core/db/automation-model-broker";
 import { checkWorkAllowance, trackBilledRun } from "@responder/core/billing/autumn";
@@ -221,6 +222,7 @@ export interface AutomationRunDependencies {
   deleteSubscriptionSecret: (secretId: string) => Promise<void>;
   updateEvent: typeof updateAutomationRunEvent;
   usageWaiverStart: typeof usageWaiverStart;
+  moveGrantToResponderInference: typeof moveAutomationModelBrokerGrantToResponderInference;
   telemetryTools: typeof telemetryToolSpecs;
   waiveUsage: typeof waiveAutomationRunUsage;
   workspaceTools: typeof workspaceToolSpecs;
@@ -283,6 +285,7 @@ export const defaultAutomationRunDependencies: AutomationRunDependencies = {
   deleteSubscriptionSecret: (secretId) => deleteSubscriptionRunSecret(secretId),
   updateEvent: updateAutomationRunEvent,
   usageWaiverStart,
+  moveGrantToResponderInference: moveAutomationModelBrokerGrantToResponderInference,
   telemetryTools: telemetryToolSpecs,
   waiveUsage: waiveAutomationRunUsage,
   workspaceTools: workspaceToolSpecs,
@@ -1076,6 +1079,24 @@ export async function processAutomationRun(
       runId: run.runId,
     });
     grantId = grant.id;
+    // Moves a subscription turn to Responder-funded inference after the
+    // subscription refused it. A workspace that pays per run, or whose usage
+    // credit is used up, keeps the refusal.
+    const fallBackToResponderInference = async (refusal: AutomationSubscriptionRefusalError): Promise<boolean> => {
+      if (grantCredential.inferenceSource !== "byos") return false;
+      const fallback = await dependencies.checkAllowance(run.organizationId, { responderModels: true })
+        .catch(() => null);
+      if (!fallback?.allowed || fallback.runBilling) return false;
+      const moved = await dependencies.moveGrantToResponderInference({
+        grantId: grant.id,
+        organizationId: run.organizationId,
+        runId: run.runId,
+      });
+      if (!moved) return false;
+      grantCredential = { inferenceSource: "responder" };
+      await recordEvent(dependencies, run.runId, "subscription_fallback", { reason: refusal.message });
+      return true;
+    };
     const [sandbox, automationSecrets, skills, memories, connections, sandboxNetwork] = await Promise.all([
       dependencies.getWorkspaceSandbox(run.organizationId, requireSandboxConfig(environment)),
       dependencies.getWorkspaceSecrets(run.automationVersionId),
@@ -1283,43 +1304,54 @@ export async function processAutomationRun(
             .then((transcript) => slackCard?.progress(transcript.items)),
           read: readEvents,
         });
+        const prompt = automationPrompt(
+          run,
+          repositories,
+          agentDocs,
+          conversation,
+          resumed,
+          firstTurn,
+          notificationChannels,
+          connections,
+          { dependencyInstalls, memories, runtimeVersions, secrets: workspaceSecrets, skills },
+          workspaceTools.length > 0 ? { integrationsUrl } : undefined,
+          reviewCheckout,
+          issueCatalog !== null,
+          telemetryTools.length > 0,
+        );
+        const harness = (subscription: typeof nativeSubscription) => withModelBroker(() =>
+          runHarness(
+            runnable,
+            session,
+            {
+              contextServers,
+              eventsPath,
+              model: {
+                brokerBaseUrl: automationBrokerBaseUrl(environment),
+                maxOutputTokensPerRequest: run.maxOutputTokensPerRequest,
+                model,
+                provider: target.modelProvider,
+                ...(subscription ? { subscription } : {}),
+              },
+              prompt,
+              toolServer: automationToolServer,
+              workspacePath: repositories[0]?.path ?? automationWorkspaceRoot,
+            },
+            dependencies,
+          )
+        );
         let harnessResult: AutomationHarnessResult;
         try {
-          harnessResult = await withModelBroker(() =>
-            runHarness(
-              runnable,
-              session,
-              {
-                contextServers,
-                eventsPath,
-                model: {
-                  brokerBaseUrl: automationBrokerBaseUrl(environment),
-                  maxOutputTokensPerRequest: run.maxOutputTokensPerRequest,
-                  model,
-                  provider: target.modelProvider,
-                  ...(nativeSubscription ? { subscription: nativeSubscription } : {}),
-                },
-                prompt: automationPrompt(
-                  run,
-                  repositories,
-                  agentDocs,
-                  conversation,
-                  resumed,
-                  firstTurn,
-                  notificationChannels,
-                  connections,
-                  { dependencyInstalls, memories, runtimeVersions, secrets: workspaceSecrets, skills },
-                  workspaceTools.length > 0 ? { integrationsUrl } : undefined,
-                  reviewCheckout,
-                  issueCatalog !== null,
-                  telemetryTools.length > 0,
-                ),
-                toolServer: automationToolServer,
-                workspacePath: repositories[0]?.path ?? automationWorkspaceRoot,
-              },
-              dependencies,
-            )
-          );
+          try {
+            harnessResult = await harness(nativeSubscription);
+          } catch (error) {
+            // When the organization's ChatGPT subscription refuses the model,
+            // the turn runs again on Responder-funded inference if the
+            // workspace's usage allows it. The refusal comes on the first
+            // model request, so nothing ran before it.
+            if (!(error instanceof AutomationSubscriptionRefusalError) || !await fallBackToResponderInference(error)) throw error;
+            harnessResult = await harness(undefined);
+          }
         } catch (error) {
           await Promise.all([watcher.stop(), tools.stop()]);
           if (error instanceof AutomationHarnessError) {

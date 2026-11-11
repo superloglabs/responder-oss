@@ -10,6 +10,7 @@ import {
   createAutomationModelBrokerGrant,
   markAutomationModelBrokerGrantAllowanceExhausted,
   revokeAutomationModelBrokerGrant,
+  moveAutomationModelBrokerGrantToResponderInference,
 } from "./automation-model-broker.js";
 import { automationModelBrokerGrants } from "./schema.js";
 
@@ -273,6 +274,34 @@ describe("automation model broker grant storage", () => {
 
     limit.mockResolvedValue([]);
     await expect(automationModelBrokerGrantAllowanceExhausted({
+      grantId,
+      organizationId,
+      runId: "run-1",
+    })).resolves.toBe(false);
+  });
+
+  it("moves only a subscription grant of its own run to Responder-funded inference", async () => {
+    const returning = vi.fn().mockResolvedValue([{ id: grantId }]);
+    const where = vi.fn<(condition: SQL) => { returning: typeof returning }>(() => ({ returning }));
+    const set = vi.fn(() => ({ where }));
+    const update = vi.fn(() => ({ set }));
+    vi.mocked(getDatabase).mockReturnValue({ update } as never);
+
+    await expect(moveAutomationModelBrokerGrantToResponderInference({
+      grantId,
+      organizationId,
+      runId: "run-1",
+    })).resolves.toBe(true);
+    expect(update).toHaveBeenCalledWith(automationModelBrokerGrants);
+    expect(set).toHaveBeenCalledWith({ contextOnly: false, encryptedCredentials: null, inferenceSource: "responder" });
+    const query = new PgDialect().sqlToQuery(where.mock.calls[0]![0]);
+    expect(query.sql).toContain('"organization_id" = $');
+    expect(query.sql).toContain('"run_id" = $');
+    expect(query.sql).toContain('"inference_source" = $');
+    expect(query.params).toContain("byos");
+
+    returning.mockResolvedValue([]);
+    await expect(moveAutomationModelBrokerGrantToResponderInference({
       grantId,
       organizationId,
       runId: "run-1",

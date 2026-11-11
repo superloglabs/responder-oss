@@ -169,6 +169,7 @@ function dependencies() {
     updateEvent: vi.fn().mockResolvedValue(undefined),
     usageWaiverStart: vi.fn<AutomationRunDependencies["usageWaiverStart"]>()
       .mockResolvedValue(new Date("2026-09-22T18:59:59.000Z")),
+    moveGrantToResponderInference: vi.fn<AutomationRunDependencies["moveGrantToResponderInference"]>().mockResolvedValue(true),
     telemetryTools: vi.fn<AutomationRunDependencies["telemetryTools"]>(() => []),
     waiveUsage: vi.fn<AutomationRunDependencies["waiveUsage"]>().mockResolvedValue(true),
     issueCatalog: vi.fn<AutomationRunDependencies["issueCatalog"]>(() => ({
@@ -2064,6 +2065,84 @@ describe("automation run processor", () => {
     await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
     expect(deps.runInSandbox).not.toHaveBeenCalled();
     expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({ status: "failed" }));
+  });
+
+  describe("when the ChatGPT subscription refuses the model", () => {
+    const refusal = "gpt-6.1-sol is not available with the connected ChatGPT subscription. Choose another model for this automation.";
+    const grantId = "71717171-7171-4171-8171-717171717171";
+    const allowance = { allowed: true, exhausted: null, machinesUseCredit: false, nextResetAt: null };
+
+    function subscriptionDependencies() {
+      vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+      vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+      const deps = dependencies();
+      const authJson = JSON.stringify({ tokens: { id_token: "id", access_token: "access", refresh_token: "refresh", account_id: "account" } });
+      deps.getCredential.mockResolvedValue({ apiKey: "subscription-context-only", provider: "openai", subscription: { credentialId, authJson } });
+      deps.subscriptionAuth.mockResolvedValue(authJson);
+      deps.runCodex
+        .mockRejectedValueOnce(new AutomationSubscriptionRefusalError(refusal, ""))
+        .mockResolvedValueOnce({ eventStream: "completed" });
+      return deps;
+    }
+
+    it("runs the turn again on Responder-funded inference", async () => {
+      const deps = subscriptionDependencies();
+
+      await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
+
+      expect(deps.checkAllowance).toHaveBeenNthCalledWith(1, organizationId, { responderModels: false });
+      expect(deps.checkAllowance).toHaveBeenNthCalledWith(2, organizationId, { responderModels: true });
+      expect(deps.moveGrantToResponderInference).toHaveBeenCalledWith({ grantId, organizationId, runId });
+      expect(deps.runCodex).toHaveBeenCalledTimes(2);
+      expect(deps.runCodex.mock.calls[0]![1].model.subscription).toBeDefined();
+      expect(deps.runCodex.mock.calls[1]![1].model.subscription).toBeUndefined();
+      expect(deps.runCodex.mock.calls[1]![1].prompt).toBe(deps.runCodex.mock.calls[0]![1].prompt);
+      expect(deps.appendEvent).toHaveBeenCalledWith({ data: { reason: refusal }, runId, type: "subscription_fallback" });
+      expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({ status: "succeeded" }));
+      expect(deps.deleteSubscriptionSecret).toHaveBeenCalledWith("secret-1");
+    });
+
+    it.each([
+      ["the usage credit is used up", { ...allowance, allowed: false, exhausted: "usage_credit" }],
+      ["the workspace pays per run", { ...allowance, runBilling: { customerId: "per-run", featureId: "run", modelName: "Sonnet" } }],
+    ])("keeps the refusal when %s", async (_case, fallbackAllowance) => {
+      const deps = subscriptionDependencies();
+      deps.checkAllowance.mockResolvedValueOnce(allowance).mockResolvedValueOnce(fallbackAllowance);
+
+      await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
+
+      expect(deps.moveGrantToResponderInference).not.toHaveBeenCalled();
+      expect(deps.notifyLimitReached).not.toHaveBeenCalled();
+      expect(deps.runCodex).toHaveBeenCalledOnce();
+      expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({
+        failureCategory: "subscription_refused",
+        failureMessage: refusal,
+        status: "failed",
+      }));
+    });
+
+    it("keeps the refusal when the allowance cannot be read", async () => {
+      const deps = subscriptionDependencies();
+      deps.checkAllowance.mockResolvedValueOnce(allowance).mockRejectedValueOnce(new Error("Autumn unavailable"));
+
+      await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
+
+      expect(deps.runCodex).toHaveBeenCalledOnce();
+      expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({ failureCategory: "subscription_refused" }));
+    });
+
+    it("stops at the usage limit when the credit runs out during the fallback turn", async () => {
+      const deps = subscriptionDependencies();
+      deps.runCodex.mockReset()
+        .mockRejectedValueOnce(new AutomationSubscriptionRefusalError(refusal, ""))
+        .mockRejectedValueOnce(new AutomationHarnessError("Codex automation harness failed", ""));
+      deps.grantAllowanceExhausted.mockResolvedValue(true);
+
+      await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
+
+      expect(deps.grantAllowanceExhausted).toHaveBeenCalledWith({ grantId, organizationId, runId });
+      expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({ failureCategory: "usage_limit_reached" }));
+    });
   });
 
   it("uses Responder-funded inference without reading an organization key", async () => {
