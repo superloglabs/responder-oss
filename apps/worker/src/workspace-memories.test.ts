@@ -5,9 +5,12 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { materializeWorkspaceMemories } from "./workspace-memories.js";
+import { automationWorkspaceRoot } from "./automation-harness.js";
+import { materializeWorkspaceMemories, workspaceMemoryRoot } from "./workspace-memories.js";
 
 const run = promisify(execFile);
+const responderRoot = `${automationWorkspaceRoot}/.responder`;
+const archivePath = `${responderRoot}/memory.tar`;
 const directories: string[] = [];
 
 afterEach(async () => {
@@ -40,15 +43,15 @@ describe("materializeWorkspaceMemories", () => {
     await materializeWorkspaceMemories(sandbox, memories);
 
     const prepare: string = sandbox.execCommand.mock.calls[0]![0].cmd;
-    const guard = prepare.indexOf("[ \"$(realpath -e -- '/home/daytona/workspace/.responder')\" = '/home/daytona/workspace/.responder' ]");
+    const guard = prepare.indexOf(`[ "$(realpath -e -- '${responderRoot}')" = '${responderRoot}' ]`);
     expect(guard).toBeGreaterThanOrEqual(0);
-    expect(guard).toBeLessThan(prepare.indexOf("rm -rf -- '/home/daytona/workspace/.responder/memory'"));
+    expect(guard).toBeLessThan(prepare.indexOf(`rm -rf -- '${workspaceMemoryRoot}'`));
     expect(sandbox.materializeEntry).toHaveBeenCalledTimes(1);
-    expect(sandbox.materializeEntry.mock.calls[0]![0].path).toBe("/home/daytona/workspace/.responder/memory.tar");
+    expect(sandbox.materializeEntry.mock.calls[0]![0].path).toBe(archivePath);
     const extract: string = sandbox.execCommand.mock.calls[1]![0].cmd;
-    expect(extract).toContain("tar -xf '/home/daytona/workspace/.responder/memory.tar'");
-    expect(extract).toContain("-C '/home/daytona/workspace/.responder/memory'");
-    expect(extract).toContain("rm -f -- '/home/daytona/workspace/.responder/memory.tar'");
+    expect(extract).toContain(`tar -xf '${archivePath}'`);
+    expect(extract).toContain(`-C '${workspaceMemoryRoot}'`);
+    expect(extract).toContain(`rm -f -- '${archivePath}'`);
     expect(sandbox.execCommand).toHaveBeenCalledTimes(2);
   });
 
