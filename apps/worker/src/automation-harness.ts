@@ -97,6 +97,16 @@ export class AutomationHarnessError extends Error {
   }
 }
 
+// The organization's own model subscription refused the run, such as a
+// ChatGPT plan that does not serve the model. The run records it as
+// subscription_refused.
+export class AutomationSubscriptionRefusalError extends AutomationHarnessError {
+  constructor(message: string, eventStream: string) {
+    super(message, eventStream, true);
+    this.name = "AutomationSubscriptionRefusalError";
+  }
+}
+
 export interface AutomationHarness {
   readonly kind: AutomationHarnessKind;
   run(

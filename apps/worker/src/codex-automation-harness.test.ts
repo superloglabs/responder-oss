@@ -1,7 +1,11 @@
 import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/daytona";
 import { runOnlyRefreshToken } from "@responder/core/automations/chatgpt-subscription";
 import { describe, expect, it, vi } from "vitest";
-import { AutomationHarnessError, automationWorkspaceRoot } from "./automation-harness.js";
+import {
+  AutomationHarnessError,
+  AutomationSubscriptionRefusalError,
+  automationWorkspaceRoot,
+} from "./automation-harness.js";
 import {
   buildCodexAutomationCommand,
   codexCliVersion,
@@ -381,7 +385,7 @@ it("names the model when the ChatGPT subscription does not offer it", async () =
   await expect(run).rejects.toThrow(
     "gpt-5.4 is not available with the connected ChatGPT subscription. Choose another model for this automation.",
   );
-  await expect(run).rejects.toHaveProperty("organizationFixable", true);
+  await expect(run).rejects.toBeInstanceOf(AutomationSubscriptionRefusalError);
 });
 
 it("says so when the ChatGPT workspace behind the subscription is deactivated", async () => {
@@ -417,7 +421,7 @@ it("says so when the ChatGPT workspace behind the subscription is deactivated", 
   await expect(run).rejects.toThrow(
     "The ChatGPT workspace of the connected subscription is deactivated. Reconnect a ChatGPT account with an active plan.",
   );
-  await expect(run).rejects.toHaveProperty("organizationFixable", true);
+  await expect(run).rejects.toBeInstanceOf(AutomationSubscriptionRefusalError);
 });
 
 it("names only the refusal that ended the turn", async () => {
