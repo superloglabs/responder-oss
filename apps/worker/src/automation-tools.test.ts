@@ -101,6 +101,7 @@ describe("tool definitions", () => {
 
   it("offers review_pull_request only to a run that a pull request started", () => {
     expect(automationToolDefinitions().map((tool) => tool.name)).not.toContain("review_pull_request");
+    expect(automationToolDefinitions(["#ops"]).map((tool) => tool.name)).not.toContain("review_pull_request");
     const review = automationToolDefinitions(["#ops"], [], false, { number: 7, repository: "acme/web" })
       .find((tool) => tool.name === "review_pull_request");
     expect(review?.description).toContain("acme/web#7");

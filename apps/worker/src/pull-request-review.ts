@@ -36,11 +36,17 @@ export async function reviewPullRequest(
   input: {
     body: string;
     comments: PullRequestReviewComment[];
+    // The head commit the agent read. Without it, GitHub places the comments
+    // on the latest commit, which may have changed since.
+    commitSha?: string;
     target: PullRequestTarget;
   },
   dependencies: PullRequestReviewDependencies = defaultDependencies,
 ): Promise<{ comments: number; reviewId: number; url: string }> {
-  assertNoDaytonaSecretPlaceholders([input.body, ...input.comments.map((comment) => comment.body)], "Pull request review");
+  assertNoDaytonaSecretPlaceholders(
+    [input.body, ...input.comments.flatMap((comment) => [comment.body, comment.path])],
+    "Pull request review",
+  );
   const token = await dependencies.createInstallationToken(input.target.installationId);
   const review = reviewSchema.parse(await githubJson(
     dependencies.fetch,
@@ -58,6 +64,7 @@ export async function reviewPullRequest(
             ? {}
             : { start_line: comment.startLine, start_side: comment.side ?? "RIGHT" }),
         })),
+        ...(input.commitSha ? { commit_id: input.commitSha } : {}),
         event: "COMMENT",
       }),
       method: "POST",

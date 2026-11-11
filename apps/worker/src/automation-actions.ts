@@ -101,6 +101,7 @@ const reviewSchema = z.object({
   }).refine((comment) => comment.startLine === undefined || comment.startLine < comment.line, {
     message: "startLine must be before line",
   })).max(maxReviewComments).default([]),
+  commitSha: z.string().regex(/^[0-9a-f]{40}$/u).optional(),
 });
 
 export interface AutomationActionResult {
@@ -530,12 +531,12 @@ export function createAutomationToolHandler(input: {
     if (!trigger) return toolError("No pull request started this run");
     const parsed = reviewSchema.safeParse(args);
     if (!parsed.success) return toolError(`Invalid tool arguments: ${parsed.error.issues.map((issue) => issue.message).join("; ").slice(0, 500)}`);
-    const { body, comments } = parsed.data;
+    const { body, commitSha, comments } = parsed.data;
     const kind = "review_github_pull_request";
     input.signal?.throwIfAborted();
     await input.assertActive?.();
     const attempt = await dependencies.beginAttempt({
-      idempotencyKey: idempotencyKey(input.runId, kind, [trigger.repositoryId, trigger.number, body, comments]),
+      idempotencyKey: idempotencyKey(input.runId, kind, [trigger.repositoryId, trigger.number, body, comments, commitSha ?? null]),
       kind,
       redactedInput: { comments: comments.length, pullRequestNumber: trigger.number },
       retryFailed: true,
@@ -545,6 +546,7 @@ export function createAutomationToolHandler(input: {
     if (attempt.status === "existing_succeeded") {
       return toolText({ note: "This review was already posted.", url: attempt.externalReference });
     }
+    let posted: { repository: string; result: Awaited<ReturnType<typeof reviewPullRequest>> };
     try {
       const repository = await dependencies.getTriggerRepository({
         organizationId: input.organizationId,
@@ -554,21 +556,25 @@ export function createAutomationToolHandler(input: {
       const result = await dependencies.reviewPullRequest({
         body,
         comments,
+        ...(commitSha ? { commitSha } : {}),
         target: { installationId: repository.installationId, number: trigger.number, repository: repository.fullName },
       });
-      await dependencies.completeAttempt({ attemptId: attempt.id, externalReference: result.url });
-      await input.onAction({
-        externalReference: result.url,
-        kind,
-        repository: repository.fullName,
-        title: `Review of #${trigger.number}`,
-      });
-      return toolText(result);
+      posted = { repository: repository.fullName, result };
     } catch (error) {
       await dependencies.failAttempt({ attemptId: attempt.id, failureMessage: errorMessage(error).slice(0, 2_000) });
       input.signal?.throwIfAborted();
       return toolError(`Unable to post the review: ${errorMessage(error).slice(0, 500)}`);
     }
+    // The review is posted. A failure to record it leaves the attempt
+    // running, so a retry is refused rather than posting it again.
+    await dependencies.completeAttempt({ attemptId: attempt.id, externalReference: posted.result.url });
+    await input.onAction({
+      externalReference: posted.result.url,
+      kind,
+      repository: posted.repository,
+      title: `Review of #${trigger.number}`,
+    });
+    return toolText(posted.result);
   }
 
   return async (request: AutomationToolRequest): Promise<AutomationToolResult> => {

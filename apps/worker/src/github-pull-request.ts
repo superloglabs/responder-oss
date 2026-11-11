@@ -163,8 +163,14 @@ export async function githubJson(
           .map((error: unknown): string | null =>
             typeof error === "string"
               ? error
-              : error && typeof error === "object" && "message" in error && typeof error.message === "string"
-                ? error.message
+              : error && typeof error === "object"
+                ? "message" in error && typeof error.message === "string"
+                  ? error.message
+                  // A validation error may name only what was invalid.
+                  : ["resource", "field", "code"]
+                      .map((key) => (error as Record<string, unknown>)[key])
+                      .filter((value): value is string => typeof value === "string")
+                      .join(" ") || null
                 : null
           )
           .filter((error): error is string => error !== null)

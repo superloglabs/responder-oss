@@ -81,6 +81,11 @@ function reviewPullRequestToolDefinition(pullRequest: { number: number; reposito
           maxItems: maxReviewComments,
           type: "array",
         },
+        commitSha: {
+          description: "The pull request's head commit you reviewed, its head.sha. The comments' lines refer to this commit.",
+          pattern: "^[0-9a-f]{40}$",
+          type: "string",
+        },
       },
       required: ["body"],
       type: "object",

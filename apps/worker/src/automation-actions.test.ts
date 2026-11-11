@@ -691,17 +691,40 @@ describe("automation pull request review tool", () => {
 
   it("does not post the same review twice", async () => {
     const deps = dependencies();
+    deps.getTriggerRepository.mockResolvedValue(triggerRepository);
+    const { handle } = handler(deps, { triggerPullRequest: { number: 7, repositoryId: "repository-2" } });
+
+    await handle(review);
     deps.beginAttempt.mockResolvedValue({
       externalReference: "https://github.com/acme/web/pull/7#pullrequestreview-99",
       id: "attempt-1",
       status: "existing_succeeded",
     });
+    const repeated = await handle(review);
+
+    expect(resultText(repeated)).toMatchObject({ note: "This review was already posted." });
+    expect(deps.reviewPullRequest).toHaveBeenCalledTimes(1);
+    expect(deps.beginAttempt.mock.calls[0]![0].idempotencyKey).toBe(deps.beginAttempt.mock.calls[1]![0].idempotencyKey);
+  });
+
+  it("keeps a posted review's attempt open when recording it fails, so a retry cannot post it again", async () => {
+    const deps = dependencies();
+    deps.getTriggerRepository.mockResolvedValue(triggerRepository);
+    deps.completeAttempt.mockRejectedValue(new Error("connection reset"));
     const { handle } = handler(deps, { triggerPullRequest: { number: 7, repositoryId: "repository-2" } });
 
-    const result = await handle(review);
+    await expect(handle(review)).rejects.toThrow("connection reset");
+    expect(deps.failAttempt).not.toHaveBeenCalled();
+  });
 
-    expect(resultText(result)).toMatchObject({ note: "This review was already posted." });
-    expect(deps.reviewPullRequest).not.toHaveBeenCalled();
+  it("passes the commit the agent reviewed", async () => {
+    const deps = dependencies();
+    deps.getTriggerRepository.mockResolvedValue(triggerRepository);
+    const { handle } = handler(deps, { triggerPullRequest: { number: 7, repositoryId: "repository-2" } });
+
+    await handle({ ...review, arguments: { ...review.arguments, commitSha: "b".repeat(40) } });
+
+    expect(deps.reviewPullRequest).toHaveBeenCalledWith(expect.objectContaining({ commitSha: "b".repeat(40) }));
   });
 
   it("refuses a run that no pull request started", async () => {

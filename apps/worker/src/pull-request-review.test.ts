@@ -45,6 +45,38 @@ describe("pull request review", () => {
     });
   });
 
+  it("anchors the review to the commit the agent read", async () => {
+    const deps = dependencies(new Response(JSON.stringify({ html_url: "https://github.com/acme/web/pull/7#pullrequestreview-99", id: 99 })));
+
+    await reviewPullRequest({ body: "One gap.", comments: [], commitSha: "b".repeat(40), target }, deps);
+
+    expect(JSON.parse(String(deps.fetch.mock.calls[0]![1]?.body))).toMatchObject({ commit_id: "b".repeat(40) });
+  });
+
+  it("refuses a secret placeholder in a comment's path", async () => {
+    const deps = dependencies(new Response("{}"));
+
+    await expect(reviewPullRequest({
+      body: "One gap.",
+      comments: [{ body: "Log it.", line: 1, path: "src/dtn_secret_abc123.ts" }],
+      target,
+    }, deps)).rejects.toThrow("cannot contain a workspace secret placeholder");
+    expect(deps.fetch).not.toHaveBeenCalled();
+  });
+
+  it("names the field of a GitHub validation error without a message", async () => {
+    const deps = dependencies(new Response(JSON.stringify({
+      errors: [{ code: "invalid", field: "line", resource: "PullRequestReviewComment" }],
+      message: "Validation Failed",
+    }), { status: 422 }));
+
+    await expect(reviewPullRequest({
+      body: "One gap.",
+      comments: [{ body: "Log it.", line: 999, path: "src/charge.ts" }],
+      target,
+    }, deps)).rejects.toThrow("Validation Failed: PullRequestReviewComment line invalid");
+  });
+
   it("names the line GitHub could not place", async () => {
     const deps = dependencies(new Response(JSON.stringify({
       errors: ["Line could not be resolved"],
