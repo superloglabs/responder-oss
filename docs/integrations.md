@@ -440,6 +440,12 @@ subscription.
   arrived. The agent's `github_api` tool can read the pull request's
   repository even when the automation does not check it out. The run cannot
   change that repository unless the automation checks it out.
+- The agent can post one review on the pull request that started the run with
+  `review_pull_request`: a summary and inline comments on lines of its diff.
+  The review only comments; it never approves or requests changes. The tool
+  is offered only to runs that a pull request started, and it posts only on
+  that pull request. A repeated call with the same review returns the review
+  already posted.
 - Runs report to the automation's Slack notification channels, like scheduled
   and Sentry runs.
 

@@ -99,6 +99,14 @@ describe("tool definitions", () => {
     expect(notify?.inputSchema.properties).toHaveProperty("buttons");
   });
 
+  it("offers review_pull_request only to a run that a pull request started", () => {
+    expect(automationToolDefinitions().map((tool) => tool.name)).not.toContain("review_pull_request");
+    const review = automationToolDefinitions(["#ops"], [], false, { number: 7, repository: "acme/web" })
+      .find((tool) => tool.name === "review_pull_request");
+    expect(review?.description).toContain("acme/web#7");
+    expect(review?.description).toContain("never approves or requests changes");
+  });
+
   it("replies in a pressed button's thread without offering to skip", () => {
     const tools = automationToolDefinitions(["#ops"], [], true);
     expect(tools.map((tool) => tool.name)).not.toContain("skip_notification");

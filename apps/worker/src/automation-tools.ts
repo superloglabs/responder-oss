@@ -43,6 +43,51 @@ export const openPullRequestToolName = "open_pull_request";
 export const checkoutPullRequestToolName = "checkout_pull_request";
 export const updatePullRequestToolName = "update_pull_request";
 export const replyToPullRequestCommentToolName = "reply_to_pull_request_comment";
+export const reviewPullRequestToolName = "review_pull_request";
+
+export const maxReviewBodyLength = 12_000;
+export const maxReviewCommentLength = 4_000;
+export const maxReviewComments = 30;
+
+// Offered only to a run that a pull request started, and posts on that pull
+// request alone.
+function reviewPullRequestToolDefinition(pullRequest: { number: number; repository: string }) {
+  return {
+    annotations: {
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+      readOnlyHint: false,
+    },
+    description:
+      `Post one review on ${pullRequest.repository}#${pullRequest.number}, the pull request that started this run, as the Superlog GitHub App. The review only comments; it never approves or requests changes. body is the review's summary. Each comment is an inline comment on a line of the pull request's diff: line is the line number in the file, on the RIGHT side (the new version) by default or the LEFT side (the old version) for a removed line. Set startLine to comment on a range ending at line. GitHub rejects a line outside the diff. Calling again with the same body and comments returns the review already posted.`,
+    inputSchema: {
+      additionalProperties: false,
+      properties: {
+        body: { maxLength: maxReviewBodyLength, minLength: 1, type: "string" },
+        comments: {
+          items: {
+            additionalProperties: false,
+            properties: {
+              body: { maxLength: maxReviewCommentLength, minLength: 1, type: "string" },
+              line: { minimum: 1, type: "integer" },
+              path: { description: "The file's path in the repository.", maxLength: 1_000, minLength: 1, type: "string" },
+              side: { enum: ["LEFT", "RIGHT"], type: "string" },
+              startLine: { minimum: 1, type: "integer" },
+            },
+            required: ["path", "line", "body"],
+            type: "object",
+          },
+          maxItems: maxReviewComments,
+          type: "array",
+        },
+      },
+      required: ["body"],
+      type: "object",
+    },
+    name: reviewPullRequestToolName,
+  };
+}
 
 const pullRequestProperties = {
   pullRequestNumber: { minimum: 1, type: "integer" },
@@ -149,7 +194,7 @@ export const maxNotificationLength = 11_000;
 export const maxNotificationDetails = 10;
 export const maxSkipReasonLength = 500;
 
-export type AutomationToolDefinition = (typeof repositoryToolDefinitions)[number] | {
+export type AutomationToolDefinition = (typeof repositoryToolDefinitions)[number] | ReturnType<typeof reviewPullRequestToolDefinition> | {
   annotations: Record<string, boolean>;
   description: string;
   inputSchema: Record<string, unknown>;
@@ -159,13 +204,17 @@ export type AutomationToolDefinition = (typeof repositoryToolDefinitions)[number
 // A run with notification channels can post to them itself, so the agent
 // knows where its results go. A turn that answers a button pressed on one of
 // its posts replies in that post's thread instead. Workspace tools follow
-// the run's own tools.
+// the run's own tools. A run that a pull request started can review it.
 export function automationToolDefinitions(
   notificationChannels: string[] = [],
   workspaceTools: AutomationToolDefinition[] = [],
   inThread = false,
+  triggerPullRequest?: { number: number; repository: string },
 ): AutomationToolDefinition[] {
-  if (notificationChannels.length === 0) return [...repositoryToolDefinitions, ...workspaceTools];
+  const repositoryTools: AutomationToolDefinition[] = triggerPullRequest
+    ? [...repositoryToolDefinitions, reviewPullRequestToolDefinition(triggerPullRequest)]
+    : repositoryToolDefinitions;
+  if (notificationChannels.length === 0) return [...repositoryTools, ...workspaceTools];
   const postNotification = {
     annotations: {
       destructiveHint: false,
@@ -192,9 +241,9 @@ export function automationToolDefinitions(
     },
     name: postNotificationToolName,
   };
-  if (inThread) return [...repositoryToolDefinitions, postNotification, ...workspaceTools];
+  if (inThread) return [...repositoryTools, postNotification, ...workspaceTools];
   return [
-    ...repositoryToolDefinitions,
+    ...repositoryTools,
     postNotification,
     {
       annotations: {
@@ -289,6 +338,7 @@ export async function installAutomationToolServer(
   notificationChannels: string[] = [],
   workspaceTools: AutomationToolDefinition[] = [],
   inThread = false,
+  triggerPullRequest?: { number: number; repository: string },
 ): Promise<void> {
   await session.materializeEntry({
     entry: {
@@ -296,7 +346,7 @@ export async function installAutomationToolServer(
       content: automationToolServerSource(
         toolsRoot,
         automationToolServerWaitMs,
-        automationToolDefinitions(notificationChannels, workspaceTools, inThread),
+        automationToolDefinitions(notificationChannels, workspaceTools, inThread, triggerPullRequest),
       ),
     },
     path: serverPath,

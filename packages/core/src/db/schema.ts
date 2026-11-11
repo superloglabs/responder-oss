@@ -2148,6 +2148,7 @@ export type AutomationActionKind =
   | "open_github_pull_request"
   | "remove_slack_reaction"
   | "reply_github_pull_request_comment"
+  | "review_github_pull_request"
   | "send_slack_message"
   | "update_github_pull_request";
 
