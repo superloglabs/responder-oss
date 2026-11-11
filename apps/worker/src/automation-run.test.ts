@@ -368,13 +368,17 @@ describe("automation run processor", () => {
     }, process.env, deps);
 
     expect(deps.getMemories).toHaveBeenCalledWith(organizationId);
-    const written = Object.fromEntries(deps.session.materializeEntry.mock.calls.map(([call]) => [call.path, call.entry.content]));
-    expect(written["/home/daytona/workspace/.responder/memory/MEMORY.md"]).toBe(
-      "- [production-regions](production-regions.md) — Where production runs\n",
-    );
-    expect(written["/home/daytona/workspace/.responder/memory/production-regions.md"]).toBe(
+    const archive = deps.session.materializeEntry.mock.calls
+      .find(([call]) => call.path === "/home/daytona/workspace/.responder/memory.tar")?.[0].entry.content;
+    const archived = Buffer.from(archive as Uint8Array).toString("utf8");
+    expect(archived).toContain("MEMORY.md\0");
+    expect(archived).toContain("- [production-regions](production-regions.md) — Where production runs\n");
+    expect(archived).toContain("production-regions.md\0");
+    expect(archived).toContain(
       "---\nname: \"production-regions\"\ndescription: \"Where production runs\"\nmetadata:\n  type: project\n---\n\nThe EU cell runs in eu-west-3.\n",
     );
+    expect(deps.session.execCommand.mock.calls.map(([call]) => call.cmd).join("\n"))
+      .toContain("tar -xf '/home/daytona/workspace/.responder/memory.tar'");
     const prompt = deps.runCodex.mock.calls[0]![1].prompt;
     expect(prompt).toContain("Each memory is a file in /home/daytona/workspace/.responder/memory:\n- production-regions: Where production runs (production-regions.md)");
     expect(prompt).toContain("Changes to these files are not saved.");
