@@ -157,7 +157,25 @@ export async function githubJson(
       typeof payload.message === "string"
         ? payload.message
         : `GitHub request failed (${response.status})`;
-    throw new Error(message);
+    // A 422 names what was wrong, such as a review line outside the diff.
+    const errors = payload && typeof payload === "object" && "errors" in payload && Array.isArray(payload.errors)
+      ? (payload.errors as unknown[])
+          .map((error: unknown): string | null =>
+            typeof error === "string"
+              ? error
+              : error && typeof error === "object"
+                ? "message" in error && typeof error.message === "string"
+                  ? error.message
+                  // A validation error may name only what was invalid.
+                  : ["resource", "field", "code"]
+                      .map((key) => (error as Record<string, unknown>)[key])
+                      .filter((value): value is string => typeof value === "string")
+                      .join(" ") || null
+                : null
+          )
+          .filter((error): error is string => error !== null)
+      : [];
+    throw new Error(errors.length > 0 ? `${message}: ${errors.join("; ")}` : message);
   }
   return payload;
 }

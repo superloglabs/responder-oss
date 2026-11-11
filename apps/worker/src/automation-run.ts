@@ -1207,6 +1207,9 @@ export async function processAutomationRun(
           notificationChannels.names,
           workspaceToolDefinitions(runTools),
           notificationChannels.inThread,
+          triggerPullRequest
+            ? { number: triggerPullRequest.pullRequestNumber, repository: triggerPullRequest.repository }
+            : undefined,
         );
         const handleTool = dependencies.createToolHandler({
             ...(notificationTargets.length > 0
@@ -1245,7 +1248,14 @@ export async function processAutomationRun(
             runId: run.runId,
             session,
             signal: runAbort.signal,
-            ...(triggerPullRequest ? { triggerRepositoryId: triggerPullRequest.repositoryId } : {}),
+            ...(triggerPullRequest
+              ? {
+                  triggerPullRequest: {
+                    number: triggerPullRequest.pullRequestNumber,
+                    repositoryId: triggerPullRequest.repositoryId,
+                  },
+                }
+              : {}),
             workspaceTools: runTools,
           });
         // A review of a pull request the run opened is answered on the pull

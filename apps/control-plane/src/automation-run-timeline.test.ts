@@ -75,6 +75,14 @@ describe("automationRunTimeline", () => {
     ]);
   });
 
+  it("shows the review the run posted on its pull request", () => {
+    const entries = automationRunTimeline(run([
+      { data: { externalReference: "https://github.com/acme/app/pull/7#pullrequestreview-99", kind: "review_github_pull_request", repository: "acme/app", title: "Review of #7" }, type: "action_succeeded" },
+    ]));
+
+    expect(entries.at(-1)).toMatchObject({ kind: "notice", text: "Posted a review on pull request #7." });
+  });
+
   it("opens a test chat with the member's message and keeps turns in order", () => {
     const entries = automationRunTimeline(run([
       { data: { authorId: "user-1", authorName: "Ash", text: "Try the checkout flow." }, type: "user_message" },

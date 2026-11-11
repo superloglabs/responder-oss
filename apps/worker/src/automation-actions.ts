@@ -33,7 +33,11 @@ import {
   maxSkipReasonLength,
   checkoutPullRequestToolName,
   openPullRequestToolName,
+  maxReviewBodyLength,
+  maxReviewCommentLength,
+  maxReviewComments,
   replyToPullRequestCommentToolName,
+  reviewPullRequestToolName,
   updatePullRequestToolName,
   type AutomationToolRequest,
   type AutomationToolResult,
@@ -45,6 +49,7 @@ import {
   replyToPullRequestComment,
   updatePullRequest,
 } from "./pull-request-follow-up.js";
+import { reviewPullRequest } from "./pull-request-review.js";
 import {
   checkoutAutomationRuntimeRepositoryAtRef,
   type CheckedOutRepository,
@@ -85,6 +90,20 @@ const replyToCommentSchema = pullRequestTargetSchema.extend({
   resolve: z.boolean(),
 });
 
+const reviewSchema = z.object({
+  body: z.string().trim().min(1).max(maxReviewBodyLength),
+  comments: z.array(z.object({
+    body: z.string().trim().min(1).max(maxReviewCommentLength),
+    line: z.number().int().positive(),
+    path: z.string().trim().min(1).max(1_000),
+    side: z.enum(["LEFT", "RIGHT"]).optional(),
+    startLine: z.number().int().positive().optional(),
+  }).refine((comment) => comment.startLine === undefined || comment.startLine < comment.line, {
+    message: "startLine must be before line",
+  })).max(maxReviewComments).default([]),
+  commitSha: z.string().regex(/^[0-9a-f]{40}$/u).optional(),
+});
+
 export interface AutomationActionResult {
   externalReference: string | null;
   kind: string;
@@ -106,6 +125,7 @@ interface AutomationActionDependencies {
   readTools?: Parameters<typeof createGitHubReadTools>[1];
   recordOrigin: typeof recordPullRequestOrigin;
   replyToComment: typeof replyToPullRequestComment;
+  reviewPullRequest: typeof reviewPullRequest;
   updatePullRequest: typeof updatePullRequest;
 }
 
@@ -122,6 +142,7 @@ const defaultDependencies: AutomationActionDependencies = {
   postNotification: postAutomationNotification,
   recordOrigin: recordPullRequestOrigin,
   replyToComment: replyToPullRequestComment,
+  reviewPullRequest,
   updatePullRequest,
 };
 
@@ -191,9 +212,10 @@ export function createAutomationToolHandler(input: {
   runId: string;
   session: SandboxSession;
   signal?: AbortSignal;
-  // The repository of the pull request that started the run. The read tools
-  // reach it even when the automation does not check it out.
-  triggerRepositoryId?: string;
+  // The pull request that started the run. The read tools reach its
+  // repository even when the automation does not check it out, and the run
+  // may review it.
+  triggerPullRequest?: { number: number; repositoryId: string };
   workspaceTools?: WorkspaceTool[];
 }, dependencies: AutomationActionDependencies = defaultDependencies) {
   const channelName = (notification: AutomationNotification) =>
@@ -322,7 +344,7 @@ export function createAutomationToolHandler(input: {
   let readableRepositories: Promise<RuntimeRepository[]> | undefined;
   const readRepositories = () => {
     if (!readableRepositories) {
-      const triggerRepositoryId = input.triggerRepositoryId;
+      const triggerRepositoryId = input.triggerPullRequest?.repositoryId;
       readableRepositories = Promise.all([
         selectedRepositories(),
         triggerRepositoryId
@@ -504,6 +526,57 @@ export function createAutomationToolHandler(input: {
     }
   }
 
+  async function reviewTriggerPullRequest(args: unknown): Promise<AutomationToolResult> {
+    const trigger = input.triggerPullRequest;
+    if (!trigger) return toolError("No pull request started this run");
+    const parsed = reviewSchema.safeParse(args);
+    if (!parsed.success) return toolError(`Invalid tool arguments: ${parsed.error.issues.map((issue) => issue.message).join("; ").slice(0, 500)}`);
+    const { body, commitSha, comments } = parsed.data;
+    const kind = "review_github_pull_request";
+    input.signal?.throwIfAborted();
+    await input.assertActive?.();
+    const attempt = await dependencies.beginAttempt({
+      idempotencyKey: idempotencyKey(input.runId, kind, [trigger.repositoryId, trigger.number, body, comments, commitSha ?? null]),
+      kind,
+      redactedInput: { comments: comments.length, pullRequestNumber: trigger.number },
+      retryFailed: true,
+      runId: input.runId,
+      toolCallId: reviewPullRequestToolName,
+    });
+    if (attempt.status === "existing_succeeded") {
+      return toolText({ note: "This review was already posted.", url: attempt.externalReference });
+    }
+    let posted: { repository: string; result: Awaited<ReturnType<typeof reviewPullRequest>> };
+    try {
+      const repository = await dependencies.getTriggerRepository({
+        organizationId: input.organizationId,
+        repositoryId: trigger.repositoryId,
+      });
+      if (!repository) throw new Error("The pull request's repository is no longer connected");
+      const result = await dependencies.reviewPullRequest({
+        body,
+        comments,
+        ...(commitSha ? { commitSha } : {}),
+        target: { installationId: repository.installationId, number: trigger.number, repository: repository.fullName },
+      });
+      posted = { repository: repository.fullName, result };
+    } catch (error) {
+      await dependencies.failAttempt({ attemptId: attempt.id, failureMessage: errorMessage(error).slice(0, 2_000) });
+      input.signal?.throwIfAborted();
+      return toolError(`Unable to post the review: ${errorMessage(error).slice(0, 500)}`);
+    }
+    // The review is posted. A failure to record it leaves the attempt
+    // running, so a retry is refused rather than posting it again.
+    await dependencies.completeAttempt({ attemptId: attempt.id, externalReference: posted.result.url });
+    await input.onAction({
+      externalReference: posted.result.url,
+      kind,
+      repository: posted.repository,
+      title: `Review of #${trigger.number}`,
+    });
+    return toolText(posted.result);
+  }
+
   return async (request: AutomationToolRequest): Promise<AutomationToolResult> => {
     if (request.name === postNotificationToolName) return postNotification(request.arguments);
     if (request.name === skipNotificationToolName) return skipNotification(request.arguments);
@@ -518,6 +591,7 @@ export function createAutomationToolHandler(input: {
     if (request.name === checkoutPullRequestToolName) return checkoutOwnedPullRequest(request.arguments);
     if (request.name === updatePullRequestToolName) return updateOwnedPullRequest(request.arguments);
     if (request.name === replyToPullRequestCommentToolName) return replyToComment(request.arguments);
+    if (request.name === reviewPullRequestToolName) return reviewTriggerPullRequest(request.arguments);
     if (request.name !== openPullRequestToolName) return toolError("Unknown tool");
     const parsed = pullRequestSchema.safeParse(request.arguments);
     if (!parsed.success) return toolError("Invalid tool arguments");

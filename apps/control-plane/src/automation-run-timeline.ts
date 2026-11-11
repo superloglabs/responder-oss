@@ -110,6 +110,9 @@ export function automationRunTimeline(run: AutomationRunDetail): AutomationRunEn
       } else if (kind === "update_github_pull_request" && url) {
         const number = /\/pull\/(\d+)/u.exec(url)?.[1];
         entries.push({ key, kind: "notice", text: number ? `Pushed a commit to pull request #${number}.` : "Pushed a commit to the pull request." });
+      } else if (kind === "review_github_pull_request" && url) {
+        const number = /\/pull\/(\d+)/u.exec(url)?.[1];
+        entries.push({ key, kind: "notice", text: number ? `Posted a review on pull request #${number}.` : "Posted a review on the pull request." });
       } else if (kind === "send_slack_message") {
         entries.push({ key, kind: "notice", text: "Sent a Slack message." });
       }

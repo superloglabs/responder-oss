@@ -43,6 +43,11 @@ function dependencies() {
     postNotification: vi.fn().mockResolvedValue([]),
     recordOrigin: vi.fn().mockResolvedValue(undefined),
     replyToComment: vi.fn().mockResolvedValue({ resolved: true }),
+    reviewPullRequest: vi.fn().mockResolvedValue({
+      comments: 1,
+      reviewId: 99,
+      url: "https://github.com/acme/web/pull/7#pullrequestreview-99",
+    }),
     updatePullRequest: vi.fn().mockResolvedValue({
       changedFiles: ["src/index.ts"],
       headSha: "d".repeat(40),
@@ -649,6 +654,108 @@ describe("automation pull request follow-up tools", () => {
   });
 });
 
+describe("automation pull request review tool", () => {
+  const triggerRepository = {
+    defaultBranch: "main",
+    fullName: "acme/web",
+    installationId: 456,
+    private: true,
+  };
+  const review = {
+    arguments: {
+      body: "One observability gap.",
+      comments: [{ body: "Log the error with orgId.", line: 12, path: "src/charge.ts" }],
+    },
+    name: "review_pull_request",
+  };
+
+  it("posts a review on the pull request that started the run", async () => {
+    const deps = dependencies();
+    deps.getTriggerRepository.mockResolvedValue(triggerRepository);
+    const { handle, onAction } = handler(deps, { triggerPullRequest: { number: 7, repositoryId: "repository-2" } });
+
+    const result = await handle(review);
+
+    expect(result.isError).toBeUndefined();
+    expect(deps.reviewPullRequest).toHaveBeenCalledWith({
+      body: "One observability gap.",
+      comments: [{ body: "Log the error with orgId.", line: 12, path: "src/charge.ts" }],
+      target: { installationId: 456, number: 7, repository: "acme/web" },
+    });
+    expect(deps.completeAttempt).toHaveBeenCalledWith({
+      attemptId: "attempt-1",
+      externalReference: "https://github.com/acme/web/pull/7#pullrequestreview-99",
+    });
+    expect(onAction).toHaveBeenCalledWith(expect.objectContaining({ kind: "review_github_pull_request" }));
+  });
+
+  it("does not post the same review twice", async () => {
+    const deps = dependencies();
+    deps.getTriggerRepository.mockResolvedValue(triggerRepository);
+    const { handle } = handler(deps, { triggerPullRequest: { number: 7, repositoryId: "repository-2" } });
+
+    await handle(review);
+    deps.beginAttempt.mockResolvedValue({
+      externalReference: "https://github.com/acme/web/pull/7#pullrequestreview-99",
+      id: "attempt-1",
+      status: "existing_succeeded",
+    });
+    const repeated = await handle(review);
+
+    expect(resultText(repeated)).toMatchObject({ note: "This review was already posted." });
+    expect(deps.reviewPullRequest).toHaveBeenCalledTimes(1);
+    expect(deps.beginAttempt.mock.calls[0]![0].idempotencyKey).toBe(deps.beginAttempt.mock.calls[1]![0].idempotencyKey);
+  });
+
+  it("keeps a posted review's attempt open when recording it fails, so a retry cannot post it again", async () => {
+    const deps = dependencies();
+    deps.getTriggerRepository.mockResolvedValue(triggerRepository);
+    deps.completeAttempt.mockRejectedValue(new Error("connection reset"));
+    const { handle } = handler(deps, { triggerPullRequest: { number: 7, repositoryId: "repository-2" } });
+
+    await expect(handle(review)).rejects.toThrow("connection reset");
+    expect(deps.failAttempt).not.toHaveBeenCalled();
+
+    // The attempt is still running, so the next identical call is refused.
+    deps.beginAttempt.mockRejectedValue(new Error("Automation action has an unresolved prior attempt"));
+    await expect(handle(review)).rejects.toThrow("unresolved prior attempt");
+    expect(deps.reviewPullRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it("passes the commit the agent reviewed", async () => {
+    const deps = dependencies();
+    deps.getTriggerRepository.mockResolvedValue(triggerRepository);
+    const { handle } = handler(deps, { triggerPullRequest: { number: 7, repositoryId: "repository-2" } });
+
+    await handle({ ...review, arguments: { ...review.arguments, commitSha: "b".repeat(40) } });
+
+    expect(deps.reviewPullRequest).toHaveBeenCalledWith(expect.objectContaining({ commitSha: "b".repeat(40) }));
+  });
+
+  it("refuses a run that no pull request started", async () => {
+    const deps = dependencies();
+    const { handle } = handler(deps);
+
+    const result = await handle(review);
+
+    expect(result.isError).toBe(true);
+    expect(deps.beginAttempt).not.toHaveBeenCalled();
+  });
+
+  it("reports GitHub's reason when it rejects the review", async () => {
+    const deps = dependencies();
+    deps.getTriggerRepository.mockResolvedValue(triggerRepository);
+    deps.reviewPullRequest.mockRejectedValue(new Error("Unprocessable Entity: Line could not be resolved"));
+    const { handle } = handler(deps, { triggerPullRequest: { number: 7, repositoryId: "repository-2" } });
+
+    const result = await handle(review);
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toContain("Line could not be resolved");
+    expect(deps.failAttempt).toHaveBeenCalled();
+  });
+});
+
 describe("automation GitHub read tools", () => {
   function readDependencies() {
     const deps = dependencies();
@@ -674,7 +781,7 @@ describe("automation GitHub read tools", () => {
       installationId: 456,
       private: true,
     });
-    const { handle } = handler(deps, { triggerRepositoryId: "repository-2" });
+    const { handle } = handler(deps, { triggerPullRequest: { number: 7, repositoryId: "repository-2" } });
 
     const result = await handle({
       arguments: { format: "diff", path: "/repos/acme/web/pulls/7" },
@@ -698,7 +805,7 @@ describe("automation GitHub read tools", () => {
       installationId: 456,
       private: true,
     });
-    const { handle } = handler(deps, { triggerRepositoryId: "repository-2" });
+    const { handle } = handler(deps, { triggerPullRequest: { number: 7, repositoryId: "repository-2" } });
 
     const result = await handle({
       ...openPullRequest,
@@ -712,7 +819,7 @@ describe("automation GitHub read tools", () => {
   it("still reads the automation's repositories when the trigger repository cannot be loaded", async () => {
     const { deps, fetch } = readDependencies();
     deps.getTriggerRepository.mockRejectedValue(new Error("Trigger repository installation is invalid"));
-    const { handle } = handler(deps, { triggerRepositoryId: "repository-2" });
+    const { handle } = handler(deps, { triggerPullRequest: { number: 7, repositoryId: "repository-2" } });
 
     const result = await handle({
       arguments: { path: "/repos/acme/app/pulls/7" },
