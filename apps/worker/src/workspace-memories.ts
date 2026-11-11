@@ -9,46 +9,75 @@ import {
   renderMemoryMarkdown,
 } from "@responder/core/memories/config";
 import { automationWorkspaceRoot } from "./automation-harness.js";
+import { createTarArchive } from "./tar-archive.js";
 
 // The workspace's memories, one file each and a MEMORY.md index, as Claude
 // Code keeps them. Automation runs and investigations share the folder.
 export const workspaceMemoryRoot = `${automationWorkspaceRoot}/.responder/memory`;
+const workspaceMemoryArchive = `${automationWorkspaceRoot}/.responder/memory.tar`;
 
 // Writes the memories. The folder is emptied first: a sandbox can hold the
 // memories of an earlier turn, and edits and deletions since then must
 // apply, as must anything the agent changed there. The agent controls the
 // sandbox between turns, so `.responder` must resolve to itself before
-// anything under it is removed.
+// anything under it is removed or written.
+//
+// The files travel as one archive. Written one at a time, each costs a
+// provider round trip, and a workspace with 149 memories spent over three
+// minutes of every run on them.
 export async function materializeWorkspaceMemories(
   session: SandboxSession,
   memories: RuntimeWorkspaceMemory[],
 ): Promise<void> {
   const parent = path.posix.dirname(workspaceMemoryRoot);
-  const output = await session.execCommand({
+  const prepared = await session.execCommand({
     cmd: [
       "set -eu",
       `mkdir -p -- '${parent}'`,
       `[ "$(realpath -e -- '${parent}')" = '${parent}' ]`,
-      `rm -rf -- '${workspaceMemoryRoot}'`,
+      `rm -rf -- '${workspaceMemoryRoot}' '${workspaceMemoryArchive}'`,
       ...(memories.length > 0 ? [`mkdir -- '${workspaceMemoryRoot}'`] : []),
     ].join("\n"),
     maxOutputTokens: 200,
     workdir: automationWorkspaceRoot,
   });
-  if (!/(?:^|\n)Process exited with code 0(?:\n|$)/u.test(output)) {
+  if (!exitedCleanly(prepared)) {
     throw new Error("Unable to prepare the sandbox memory folder");
   }
   if (memories.length === 0) return;
   await session.materializeEntry({
-    entry: { type: "file", content: renderMemoryIndex(memories) },
-    path: `${workspaceMemoryRoot}/${memoryIndexFileName}`,
+    entry: {
+      type: "file",
+      content: createTarArchive([
+        { content: renderMemoryIndex(memories), path: memoryIndexFileName },
+        ...memories.map((memory) => ({
+          content: renderMemoryMarkdown(memory),
+          path: memoryFileName(memory),
+        })),
+      ]),
+    },
+    path: workspaceMemoryArchive,
   });
-  for (const memory of memories) {
-    await session.materializeEntry({
-      entry: { type: "file", content: renderMemoryMarkdown(memory) },
-      path: `${workspaceMemoryRoot}/${memoryFileName(memory)}`,
-    });
+  const extracted = await session.execCommand({
+    cmd: [
+      "set -eu",
+      [
+        `tar -xf '${workspaceMemoryArchive}'`,
+        "--no-same-owner --no-same-permissions",
+        `-C '${workspaceMemoryRoot}'`,
+      ].join(" "),
+      `rm -f -- '${workspaceMemoryArchive}'`,
+    ].join("\n"),
+    maxOutputTokens: 200,
+    workdir: automationWorkspaceRoot,
+  });
+  if (!exitedCleanly(extracted)) {
+    throw new Error("Unable to write the sandbox memories");
   }
+}
+
+function exitedCleanly(output: string): boolean {
+  return /(?:^|\n)Process exited with code 0(?:\n|$)/u.test(output);
 }
 
 // Lists every memory so the agent can choose which to read.
