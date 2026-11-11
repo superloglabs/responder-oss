@@ -316,13 +316,13 @@ export async function revokeAutomationModelBrokerGrant(input: {
 }
 
 // Moves a subscription run's grant to Responder-funded inference, after the
-// organization's ChatGPT subscription refused the model. Only a grant that
-// still serves a subscription changes. Returns whether it changed.
+// organization's ChatGPT subscription refused the model. Only a live grant
+// that still serves a subscription changes. Returns whether it changed.
 export async function moveAutomationModelBrokerGrantToResponderInference(input: {
   grantId: string;
   organizationId: string;
   runId: string;
-}): Promise<boolean> {
+}, now = new Date()): Promise<boolean> {
   const rows = await getDatabase()
     .update(automationModelBrokerGrants)
     .set({ contextOnly: false, encryptedCredentials: null, inferenceSource: "responder" })
@@ -331,6 +331,8 @@ export async function moveAutomationModelBrokerGrantToResponderInference(input: 
       eq(automationModelBrokerGrants.organizationId, input.organizationId),
       eq(automationModelBrokerGrants.runId, input.runId),
       eq(automationModelBrokerGrants.inferenceSource, "byos"),
+      isNull(automationModelBrokerGrants.revokedAt),
+      gt(automationModelBrokerGrants.expiresAt, now),
     ))
     .returning({ id: automationModelBrokerGrants.id });
   return rows.length > 0;

@@ -1319,7 +1319,7 @@ export async function processAutomationRun(
           issueCatalog !== null,
           telemetryTools.length > 0,
         );
-        const harness = (subscription: typeof nativeSubscription) => withModelBroker(() =>
+        const harness = (subscription: typeof nativeSubscription) =>
           runHarness(
             runnable,
             session,
@@ -1338,20 +1338,23 @@ export async function processAutomationRun(
               workspacePath: repositories[0]?.path ?? automationWorkspaceRoot,
             },
             dependencies,
-          )
-        );
+          );
         let harnessResult: AutomationHarnessResult;
         try {
-          try {
-            harnessResult = await harness(nativeSubscription);
-          } catch (error) {
-            // When the organization's ChatGPT subscription refuses the model,
-            // the turn runs again on Responder-funded inference if the
-            // workspace's usage allows it. The refusal comes on the first
-            // model request, so nothing ran before it.
-            if (!(error instanceof AutomationSubscriptionRefusalError) || !await fallBackToResponderInference(error)) throw error;
-            harnessResult = await harness(undefined);
-          }
+          // One broker operation for both attempts: the sandbox reports a
+          // failed operation when it drains, even after a retry succeeds.
+          harnessResult = await withModelBroker(async () => {
+            try {
+              return await harness(nativeSubscription);
+            } catch (error) {
+              // When the organization's ChatGPT subscription refuses the
+              // model, the turn runs again on Responder-funded inference if
+              // the workspace's usage allows it. The refusal comes on the
+              // first model request, so nothing ran before it.
+              if (!(error instanceof AutomationSubscriptionRefusalError) || !await fallBackToResponderInference(error)) throw error;
+              return await harness(undefined);
+            }
+          });
         } catch (error) {
           await Promise.all([watcher.stop(), tools.stop()]);
           if (error instanceof AutomationHarnessError) {

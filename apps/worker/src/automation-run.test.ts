@@ -2102,6 +2102,34 @@ describe("automation run processor", () => {
       expect(deps.deleteSubscriptionSecret).toHaveBeenCalledWith("secret-1");
     });
 
+    it("leaves no failed model operation for the sandbox to report at cleanup", async () => {
+      const deps = subscriptionDependencies();
+      // Like the sandbox's model broker queue, which rethrows the first
+      // failed operation when it drains.
+      const failedOperations: unknown[] = [];
+      deps.runInSandbox.mockImplementation(async (input) => {
+        try {
+          const value = await input.run(deps.session, async (operation: () => Promise<unknown>) => {
+            try {
+              return await operation();
+            } catch (error) {
+              failedOperations.push(error);
+              throw error;
+            }
+          });
+          if (failedOperations.length > 0) throw failedOperations[0];
+          return value;
+        } finally {
+          input.onCleanupConfirmed?.();
+        }
+      });
+
+      await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
+
+      expect(failedOperations).toEqual([]);
+      expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({ status: "succeeded" }));
+    });
+
     it.each([
       ["the usage credit is used up", { ...allowance, allowed: false, exhausted: "usage_credit" }],
       ["the workspace pays per run", { ...allowance, runBilling: { customerId: "per-run", featureId: "run", modelName: "Sonnet" } }],
