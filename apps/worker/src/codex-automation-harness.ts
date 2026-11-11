@@ -104,7 +104,7 @@ function subscriptionRefusal(output: string, model: string): string | null {
     return "The ChatGPT workspace of the connected subscription is deactivated. Reconnect a ChatGPT account with an active plan.";
   // The ChatGPT plan's Codex usage limit. Codex's message says how to add
   // credit and when the limit resets.
-  const usageLimit = /hit your usage limit\.\s*(.*)$/su.exec(failure);
+  const usageLimit = /hit your usage limit\.\s*(.*)$/su.exec(responseErrorMessage(failure));
   if (usageLimit)
     return `The connected ChatGPT subscription has reached its usage limit.${usageLimit[1] ? ` ${usageLimit[1].trim()}` : ""}`;
   return null;
@@ -139,6 +139,18 @@ function codexThreadId(output: string): string | null {
 function codexThreadIdValue(threadId: string): string {
   if (!codexThreadIdPattern.test(threadId)) throw new Error("Invalid Codex thread ID");
   return threadId;
+}
+
+// Codex may report a failed request as the response body serialized to JSON.
+// Returns the error message inside such a body, or the failure as it is.
+function responseErrorMessage(failure: string): string {
+  try {
+    const body: { error?: { message?: unknown } } = JSON.parse(failure);
+    if (typeof body?.error?.message === "string") return body.error.message;
+  } catch {
+    // Not a serialized response body.
+  }
+  return failure;
 }
 
 // Whether Codex started any item, such as a message or a command, before the

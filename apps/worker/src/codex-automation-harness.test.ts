@@ -462,11 +462,16 @@ describe("when the ChatGPT subscription has hit its usage limit", () => {
   it.each([
     ["an error and a failed turn", limitEvents],
     ["only an error", limitEvents.slice(0, 1)],
+    ["a failed turn with the response body", [JSON.stringify({
+      type: "turn.failed",
+      error: { message: JSON.stringify({ type: "error", status: 429, error: { type: "usage_limit_reached", message: limit } }) },
+    })]],
   ])("refuses the run as the subscription's own limit when Codex reports %s", async (_case, events) => {
     const run = runWith([JSON.stringify({ type: "turn.started" }), ...events]);
 
     await expect(run).rejects.toBeInstanceOf(AutomationSubscriptionRefusalError);
-    await expect(run).rejects.toThrow(
+    await expect(run).rejects.toHaveProperty(
+      "message",
       "The connected ChatGPT subscription has reached its usage limit. Visit https://chatgpt.com/settings/usage to purchase more credits or try again at Nov 11th, 2026 4:57 PM.",
     );
     await expect(run).rejects.toHaveProperty("workStarted", false);
