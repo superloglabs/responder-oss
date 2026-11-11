@@ -385,6 +385,9 @@ export async function uploadVercelSandboxFile(
 ): Promise<void> {
   const partBytes = options.partBytes ?? uploadPartBytes;
   const concurrency = options.concurrency ?? uploadConcurrency;
+  if (!Number.isSafeInteger(partBytes) || partBytes <= 0 || !Number.isSafeInteger(concurrency) || concurrency <= 0) {
+    throw new RangeError("Upload part size and concurrency must be positive integers");
+  }
   const sandbox = await sandboxForSession(session);
   const partsPath = `${remotePath}.parts`;
   const quotedPath = shellQuote(remotePath);
@@ -430,7 +433,15 @@ export async function uploadVercelSandboxFile(
     await runVercelCommand(sandbox, {
       args: ["-c", `rm -rf ${quotedParts} ${quotedPath}`],
       cmd: "/bin/sh",
-    }).catch(() => undefined);
+    }).then((result) => {
+      if (result.exitCode !== 0) throw new Error(`exit code ${result.exitCode}`);
+    }).catch((cleanupError: unknown) => {
+      console.error(JSON.stringify({
+        error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+        event: "vercel_sandbox_upload_cleanup_failed",
+        path: remotePath,
+      }));
+    });
     throw error;
   } finally {
     await file.close();

@@ -479,6 +479,9 @@ describe("uploadVercelSandboxFile", () => {
     const local = await localFile(20 * 1024);
     const remote = join(directory, "sandbox", "archive.tar.gz");
     failPart = `${remote}.parts/2`;
+    // A file left by an earlier attempt is removed too.
+    await mkdir(dirname(remote), { recursive: true });
+    await writeFile(remote, "stale");
 
     await expect(uploadVercelSandboxFile(session(), local.path, remote, { concurrency: 2, partBytes: 1024 }))
       .rejects.toThrow("write failed");
@@ -486,5 +489,13 @@ describe("uploadVercelSandboxFile", () => {
     expect(sandbox.writeFiles.mock.calls.length).toBeLessThan(20);
     expect(existsSync(remote)).toBe(false);
     expect(existsSync(`${remote}.parts`)).toBe(false);
+  });
+
+  it("refuses a part size that would never finish", async () => {
+    const local = await localFile(10);
+
+    await expect(uploadVercelSandboxFile(session(), local.path, join(directory, "out"), { partBytes: 0 }))
+      .rejects.toThrow(RangeError);
+    expect(sandbox.writeFiles).not.toHaveBeenCalled();
   });
 });
