@@ -1084,6 +1084,9 @@ export async function processAutomationRun(
     // credit is used up, keeps the refusal.
     const fallBackToResponderInference = async (refusal: AutomationSubscriptionRefusalError): Promise<boolean> => {
       if (grantCredential.inferenceSource !== "byos") return false;
+      // A turn that already ran commands or tools is not run again, so it
+      // cannot repeat what it did.
+      if (refusal.workStarted) return false;
       const fallback = await dependencies.checkAllowance(run.organizationId, { responderModels: true })
         .catch(() => null);
       if (!fallback?.allowed || fallback.runBilling) return false;
@@ -1359,9 +1362,8 @@ export async function processAutomationRun(
               return await harness(nativeSubscription);
             } catch (error) {
               // When the organization's ChatGPT subscription refuses the
-              // model, the turn runs again on Responder-funded inference if
-              // the workspace's usage allows it. The refusal comes on the
-              // first model request, so nothing ran before it.
+              // turn before it did any work, the turn runs again on
+              // Responder-funded inference if the workspace's usage allows it.
               if (!(error instanceof AutomationSubscriptionRefusalError) || !await fallBackToResponderInference(error)) throw error;
               return await harness(undefined);
             }

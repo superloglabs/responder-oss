@@ -96,12 +96,17 @@ function harnessFailure(output: string): string {
 
 // Names the ChatGPT refusals the organization can fix itself.
 function subscriptionRefusal(output: string, model: string): string | null {
-  const failure = turnFailure(output) ?? "";
+  const failure = turnFailure(output) ?? codexError(output) ?? "";
   // A ChatGPT account serves fewer models than the included catalog.
   if (failure.includes("model is not supported when using Codex with a ChatGPT account"))
     return `${model} is not available with the connected ChatGPT subscription. Choose another model for this automation.`;
   if (failure.includes("auth error code: deactivated_workspace"))
     return "The ChatGPT workspace of the connected subscription is deactivated. Reconnect a ChatGPT account with an active plan.";
+  // The ChatGPT plan's Codex usage limit. Codex's message says how to add
+  // credit and when the limit resets.
+  const usageLimit = /hit your usage limit\.\s*(.*)$/su.exec(failure);
+  if (usageLimit)
+    return `The connected ChatGPT subscription has reached its usage limit.${usageLimit[1] ? ` ${usageLimit[1].trim()}` : ""}`;
   return null;
 }
 
@@ -134,6 +139,20 @@ function codexThreadId(output: string): string | null {
 function codexThreadIdValue(threadId: string): string {
   if (!codexThreadIdPattern.test(threadId)) throw new Error("Invalid Codex thread ID");
   return threadId;
+}
+
+// Whether Codex started any item, such as a message or a command, before the
+// turn failed.
+function turnDidWork(output: string): boolean {
+  return output.split("\n").some((line) => {
+    if (!line.includes("\"item.")) return false;
+    try {
+      const event: { type?: unknown } = JSON.parse(line);
+      return typeof event.type === "string" && event.type.startsWith("item.");
+    } catch {
+      return false;
+    }
+  });
 }
 
 function shellQuote(value: string): string {
@@ -382,7 +401,7 @@ export async function runCodexAutomation(
   // last attempt names the failure.
   if (!commandSucceeded(attempt)) {
     const refusal = input.model.subscription ? subscriptionRefusal(attempt, input.model.model) : null;
-    if (refusal) throw new AutomationSubscriptionRefusalError(refusal, output);
+    if (refusal) throw new AutomationSubscriptionRefusalError(refusal, output, { workStarted: turnDidWork(output) });
     throw new AutomationHarnessError(harnessFailure(attempt), output);
   }
   return { eventStream: output };

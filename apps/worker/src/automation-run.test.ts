@@ -2153,6 +2153,24 @@ describe("automation run processor", () => {
       }));
     });
 
+    it("keeps the refusal when the turn had already done work", async () => {
+      const deps = subscriptionDependencies();
+      const limit = "The connected ChatGPT subscription has reached its usage limit.";
+      deps.runCodex.mockReset()
+        .mockRejectedValueOnce(new AutomationSubscriptionRefusalError(limit, "", { workStarted: true }))
+        .mockResolvedValueOnce({ eventStream: "completed" });
+
+      await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
+
+      expect(deps.moveGrantToResponderInference).not.toHaveBeenCalled();
+      expect(deps.runCodex).toHaveBeenCalledOnce();
+      expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({
+        failureCategory: "subscription_refused",
+        failureMessage: limit,
+        status: "failed",
+      }));
+    });
+
     it("keeps the refusal when the allowance cannot be read", async () => {
       const deps = subscriptionDependencies();
       deps.checkAllowance.mockResolvedValueOnce(allowance).mockRejectedValueOnce(new Error("Autumn unavailable"));

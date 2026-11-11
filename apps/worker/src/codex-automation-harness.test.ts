@@ -426,6 +426,64 @@ it("says so when the ChatGPT workspace behind the subscription is deactivated", 
   await expect(run).rejects.toBeInstanceOf(AutomationSubscriptionRefusalError);
 });
 
+describe("when the ChatGPT subscription has hit its usage limit", () => {
+  const authJson = JSON.stringify({
+    tokens: {
+      id_token: "id-token",
+      access_token: "dtn_secret_access",
+      refresh_token: runOnlyRefreshToken,
+      account_id: "account",
+    },
+  });
+  const limit = "You’ve hit your usage limit. Visit https://chatgpt.com/settings/usage to purchase more credits or try again at Nov 11th, 2026 4:57 PM.";
+  const limitEvents = [
+    JSON.stringify({ type: "error", message: limit }),
+    JSON.stringify({ type: "turn.failed", error: { message: limit } }),
+  ];
+
+  function runWith(events: string[]) {
+    const session = {
+      execCommand: vi
+        .fn()
+        .mockResolvedValue("Process exited with code 0\n")
+        .mockResolvedValueOnce("Process exited with code 0\n")
+        .mockResolvedValueOnce("Process exited with code 0\n")
+        .mockResolvedValueOnce("Process exited with code 0\n")
+        .mockResolvedValueOnce("Process exited with code 0\n")
+        .mockResolvedValueOnce(`Process exited with code 1\nOutput:\n${events.join("\n")}\n`),
+      materializeEntry: vi.fn().mockResolvedValue(undefined),
+    } as unknown as DaytonaSandboxSession;
+    return runCodexAutomation(session, {
+      ...input,
+      model: { ...input.model, subscription: { authJson } },
+    });
+  }
+
+  it.each([
+    ["an error and a failed turn", limitEvents],
+    ["only an error", limitEvents.slice(0, 1)],
+  ])("refuses the run as the subscription's own limit when Codex reports %s", async (_case, events) => {
+    const run = runWith([JSON.stringify({ type: "turn.started" }), ...events]);
+
+    await expect(run).rejects.toBeInstanceOf(AutomationSubscriptionRefusalError);
+    await expect(run).rejects.toThrow(
+      "The connected ChatGPT subscription has reached its usage limit. Visit https://chatgpt.com/settings/usage to purchase more credits or try again at Nov 11th, 2026 4:57 PM.",
+    );
+    await expect(run).rejects.toHaveProperty("workStarted", false);
+  });
+
+  it("records that the turn had already done work when the limit came partway through", async () => {
+    const run = runWith([
+      JSON.stringify({ type: "turn.started" }),
+      JSON.stringify({ type: "item.completed", item: { id: "item_0", type: "command_execution", command: "ls", status: "completed" } }),
+      ...limitEvents,
+    ]);
+
+    await expect(run).rejects.toBeInstanceOf(AutomationSubscriptionRefusalError);
+    await expect(run).rejects.toHaveProperty("workStarted", true);
+  });
+});
+
 it("names only the refusal that ended the turn", async () => {
   const authJson = JSON.stringify({
     tokens: {
