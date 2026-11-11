@@ -4,6 +4,12 @@ import type {
 } from "@openai/agents-extensions/sandbox/vercel";
 import { Manifest } from "@openai/agents/sandbox";
 import { Sandbox } from "@vercel/sandbox";
+import { execFileSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
+import { existsSync } from "node:fs";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { encryptCredentials } from "@responder/core/credentials/encryption";
 import type { VercelSandboxConfig } from "@responder/core/sandbox-config";
@@ -17,6 +23,7 @@ import {
   resumedSameVercelSandbox,
   runVercelCommand,
   secretNetworkPolicy,
+  uploadVercelSandboxFile,
   vercelSecretPlaceholder,
 } from "./vercel-sandbox.js";
 
@@ -379,5 +386,105 @@ describe("pausing and resuming", () => {
     expect(resumedSameVercelSandbox({ sandboxId: "a", snapshotId: "s", snapshotSandboxId: "a" })).toBe(true);
     expect(resumedSameVercelSandbox({ sandboxId: "b", snapshotId: "s", snapshotSandboxId: "a" })).toBe(false);
     expect(resumedSameVercelSandbox({ sandboxId: "a" })).toBe(false);
+  });
+});
+
+describe("uploadVercelSandboxFile", () => {
+  let directory: string;
+  let inFlight: number;
+  let mostInFlight: number;
+  let failPart: string | null;
+  const written: string[] = [];
+
+  // Stands in for a sandbox whose filesystem is a local directory: writes
+  // land on disk and commands run in the local shell.
+  const sandbox = {
+    runCommand: vi.fn(async (params: { args: string[] }) => {
+      let exitCode = 0;
+      try {
+        execFileSync("/bin/sh", params.args, { stdio: "ignore" });
+      } catch {
+        exitCode = 1;
+      }
+      return { cmdId: "cmd_1", wait: async () => ({ exitCode }) };
+    }),
+    writeFiles: vi.fn(async (files: Array<{ content: Buffer; path: string }>) => {
+      inFlight += 1;
+      mostInFlight = Math.max(mostInFlight, inFlight);
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        for (const file of files) {
+          if (file.path === failPart) throw new Error("write failed");
+          await mkdir(dirname(file.path), { recursive: true });
+          await writeFile(file.path, file.content);
+          written.push(file.path);
+        }
+      } finally {
+        inFlight -= 1;
+      }
+    }),
+  };
+
+  beforeEach(async () => {
+    directory = await mkdtemp(join(tmpdir(), "vercel-upload-test-"));
+    inFlight = 0;
+    mostInFlight = 0;
+    failPart = null;
+    written.length = 0;
+    sandbox.runCommand.mockClear();
+    sandbox.writeFiles.mockClear();
+    vi.mocked(Sandbox.get).mockReset();
+    vi.mocked(Sandbox.get).mockResolvedValue(sandbox as unknown as Awaited<ReturnType<typeof Sandbox.get>>);
+  });
+
+  afterEach(async () => {
+    await rm(directory, { force: true, recursive: true });
+  });
+
+  function session(): VercelSandboxSession {
+    return {
+      state: { projectId: "prj_1", sandboxId: "sbx_1", teamId: "team_1", token: "vercel-token" },
+    } as unknown as VercelSandboxSession;
+  }
+
+  async function localFile(bytes: number): Promise<{ content: Buffer; path: string }> {
+    const content = randomBytes(bytes);
+    const path = join(directory, "archive.tar.gz");
+    await writeFile(path, content);
+    return { content, path };
+  }
+
+  it("writes the file's parts at the same time and joins them in order", async () => {
+    const local = await localFile(10 * 1024 + 7);
+    const remote = join(directory, "sandbox", "archives", "archive.tar.gz");
+
+    await uploadVercelSandboxFile(session(), local.path, remote, { concurrency: 4, partBytes: 1024 });
+
+    expect(await readFile(remote)).toEqual(local.content);
+    expect(sandbox.writeFiles).toHaveBeenCalledTimes(11);
+    expect(mostInFlight).toBe(4);
+    expect(existsSync(`${remote}.parts`)).toBe(false);
+  });
+
+  it("writes an empty file", async () => {
+    const local = await localFile(0);
+    const remote = join(directory, "sandbox", "empty");
+
+    await uploadVercelSandboxFile(session(), local.path, remote, { concurrency: 4, partBytes: 1024 });
+
+    expect(await readFile(remote)).toEqual(Buffer.alloc(0));
+  });
+
+  it("stops writing parts and leaves no file after a part fails", async () => {
+    const local = await localFile(20 * 1024);
+    const remote = join(directory, "sandbox", "archive.tar.gz");
+    failPart = `${remote}.parts/2`;
+
+    await expect(uploadVercelSandboxFile(session(), local.path, remote, { concurrency: 2, partBytes: 1024 }))
+      .rejects.toThrow("write failed");
+
+    expect(sandbox.writeFiles.mock.calls.length).toBeLessThan(20);
+    expect(existsSync(remote)).toBe(false);
+    expect(existsSync(`${remote}.parts`)).toBe(false);
   });
 });

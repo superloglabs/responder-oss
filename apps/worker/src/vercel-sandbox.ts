@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { createReadStream } from "node:fs";
+import { open } from "node:fs/promises";
 import { Manifest } from "@openai/agents/sandbox";
 import {
   VercelSandboxClient,
@@ -29,7 +29,10 @@ const vercelSandboxTimeoutMs = 2 * 60 * 60 * 1_000;
 const pausedSnapshotLifetimeMs = 24 * 60 * 60 * 1_000;
 const vercelCreateAttempts = 3;
 const vercelCreateRetryDelayMs = 5_000;
-const uploadChunkBytes = 32 * 1024 * 1024;
+// Vercel's file API writes about 1 MB/s per request, so a file is sent as
+// parts in parallel. Sixteen 4 MB parts keep about 64 MB in memory per upload.
+const uploadPartBytes = 4 * 1024 * 1024;
+const uploadConcurrency = 16;
 // Enough waits to outlast the sandbox even when each one drops early.
 const commandWaitAttempts = 50;
 const commandWaitRetryDelayMs = 2_000;
@@ -372,20 +375,65 @@ async function runChecked(sandbox: Sandbox, command: string): Promise<void> {
 }
 
 // Written in parts, because Vercel's file API holds each write in memory and
-// a repository archive can reach several gigabytes.
+// a repository archive can reach several gigabytes. The parts are written at
+// the same time and joined in order in the sandbox.
 export async function uploadVercelSandboxFile(
   session: VercelSandboxSession,
   localPath: string,
   remotePath: string,
+  options: { concurrency?: number; partBytes?: number } = {},
 ): Promise<void> {
+  const partBytes = options.partBytes ?? uploadPartBytes;
+  const concurrency = options.concurrency ?? uploadConcurrency;
   const sandbox = await sandboxForSession(session);
-  const partPath = `${remotePath}.part`;
+  const partsPath = `${remotePath}.parts`;
   const quotedPath = shellQuote(remotePath);
-  const quotedPart = shellQuote(partPath);
-  await runChecked(sandbox, `mkdir -p "$(dirname ${quotedPath})" && : > ${quotedPath}`);
-  for await (const chunk of createReadStream(localPath, { highWaterMark: uploadChunkBytes })) {
-    await sandbox.writeFiles([{ content: chunk as Buffer, path: partPath }]);
-    await runChecked(sandbox, `cat ${quotedPart} >> ${quotedPath} && rm -f ${quotedPart}`);
+  const quotedParts = shellQuote(partsPath);
+  const file = await open(localPath, "r");
+  try {
+    const { size } = await file.stat();
+    const partCount = Math.ceil(size / partBytes);
+    await runChecked(sandbox, `rm -rf ${quotedParts} && mkdir -p ${quotedParts}`);
+    let next = 0;
+    let failed = false;
+    const writeParts = async () => {
+      while (!failed && next < partCount) {
+        const index = next;
+        next += 1;
+        const length = Math.min(partBytes, size - index * partBytes);
+        const content = Buffer.allocUnsafe(length);
+        const { bytesRead } = await file.read(content, 0, length, index * partBytes);
+        if (bytesRead !== length) throw new Error("The file changed while it was uploaded");
+        await sandbox.writeFiles([{ content, path: `${partsPath}/${index}` }]);
+      }
+    };
+    const writers = await Promise.allSettled(
+      Array.from({ length: Math.min(concurrency, partCount) }, () => writeParts().catch((error: unknown) => {
+        failed = true;
+        throw error;
+      })),
+    );
+    const failure = writers.find((writer) => writer.status === "rejected");
+    if (failure) throw failure.reason;
+    await runChecked(sandbox, [
+      "set -eu",
+      `: > ${quotedPath}`,
+      "i=0",
+      `while [ "$i" -lt ${partCount} ]; do`,
+      `  cat ${quotedParts}/"$i" >> ${quotedPath}`,
+      `  rm -f ${quotedParts}/"$i"`,
+      "  i=$((i + 1))",
+      "done",
+      `rmdir ${quotedParts}`,
+    ].join("\n"));
+  } catch (error) {
+    await runVercelCommand(sandbox, {
+      args: ["-c", `rm -rf ${quotedParts} ${quotedPath}`],
+      cmd: "/bin/sh",
+    }).catch(() => undefined);
+    throw error;
+  } finally {
+    await file.close();
   }
 }
 
