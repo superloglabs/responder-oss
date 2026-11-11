@@ -715,6 +715,11 @@ describe("automation pull request review tool", () => {
 
     await expect(handle(review)).rejects.toThrow("connection reset");
     expect(deps.failAttempt).not.toHaveBeenCalled();
+
+    // The attempt is still running, so the next identical call is refused.
+    deps.beginAttempt.mockRejectedValue(new Error("Automation action has an unresolved prior attempt"));
+    await expect(handle(review)).rejects.toThrow("unresolved prior attempt");
+    expect(deps.reviewPullRequest).toHaveBeenCalledTimes(1);
   });
 
   it("passes the commit the agent reviewed", async () => {
