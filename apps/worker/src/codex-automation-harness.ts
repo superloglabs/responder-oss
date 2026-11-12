@@ -5,6 +5,7 @@ import {
   subscriptionCliVersion,
 } from "@responder/core/automations/chatgpt-subscription";
 import { sandboxHome } from "@responder/core/sandbox-config";
+import { setTimeout as sleep } from "node:timers/promises";
 import { isVercelSandboxSession, type SandboxSession } from "./sandbox-session.js";
 import {
   AutomationHarnessError,
@@ -104,6 +105,37 @@ function subscriptionRefusal(output: string, model: string): string | null {
   return null;
 }
 
+// ChatGPT answers server_is_overloaded when the model is at capacity, and
+// Codex ends the turn on it without retrying. The thread is resumed after
+// each of these delays.
+export const subscriptionCapacityRetryDelaysMs = [30_000, 60_000];
+const subscriptionCapacityFailure = "Selected model is at capacity. Please try a different model.";
+export const subscriptionCapacityResumePrompt =
+  "Your last model request failed because the model was at capacity. Continue the task from where you stopped. Do not repeat actions that already completed.";
+
+const codexThreadIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
+
+// The thread Codex started, from its thread.started event.
+function codexThreadId(output: string): string | null {
+  for (const line of output.split("\n")) {
+    if (!line.includes("\"thread.started\"")) continue;
+    let event: { thread_id?: unknown; type?: unknown };
+    try {
+      event = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (event.type !== "thread.started") continue;
+    return typeof event.thread_id === "string" && codexThreadIdPattern.test(event.thread_id) ? event.thread_id : null;
+  }
+  return null;
+}
+
+function codexThreadIdValue(threadId: string): string {
+  if (!codexThreadIdPattern.test(threadId)) throw new Error("Invalid Codex thread ID");
+  return threadId;
+}
+
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
@@ -119,6 +151,7 @@ function tomlString(value: string): string {
 export function buildCodexAutomationCommand(
   input: AutomationHarnessInput,
   executable = input.model.subscription ? subscriptionExecutable : codexExecutable,
+  resumeThreadId?: string,
 ): string {
   assertAutomationHarnessModelCompatibility("codex", input.model);
   const workspacePath = resolveAutomationWorkspacePath(input.workspacePath);
@@ -128,7 +161,9 @@ export function buildCodexAutomationCommand(
   const args = [
     "exec",
     "--json",
-    "--ephemeral",
+    // A subscription run keeps its thread in the private Codex home so it
+    // can resume after a capacity failure. The home is removed afterwards.
+    ...(input.model.subscription ? [] : ["--ephemeral"]),
     "--ignore-user-config",
     "--ignore-rules",
     "--strict-config",
@@ -197,7 +232,7 @@ export function buildCodexAutomationCommand(
           `mcp_servers.${toolServer.name}.tool_timeout_sec=${Math.ceil(automationToolCallTimeoutMs / 1_000)}`,
         ]
       : []),
-    "-",
+    ...(resumeThreadId ? ["resume", codexThreadIdValue(resumeThreadId), subscriptionCapacityResumePrompt] : ["-"]),
   ];
 
   return [
@@ -209,8 +244,9 @@ export function buildCodexAutomationCommand(
       : []),
     `trap ${shellQuote(`rm -f ${shellQuote(promptPath)}`)} EXIT`,
     harnessInvocation(
-      `CODEX_HOME=${shellQuote(input.model.subscription ? subscriptionHome : codexHome)} ${shellQuote(executable)} ${args.map(shellQuote).join(" ")} < ${shellQuote(promptPath)}`,
+      `CODEX_HOME=${shellQuote(input.model.subscription ? subscriptionHome : codexHome)} ${shellQuote(executable)} ${args.map(shellQuote).join(" ")} < ${shellQuote(resumeThreadId ? "/dev/null" : promptPath)}`,
       input.eventsPath,
+      !!resumeThreadId,
     ),
   ].join("\n");
 }
@@ -248,6 +284,7 @@ export async function prepareCodexAutomationHarness(
 export async function runCodexAutomation(
   session: SandboxSession,
   input: AutomationHarnessInput,
+  { capacityRetryDelaysMs = subscriptionCapacityRetryDelaysMs }: { capacityRetryDelaysMs?: readonly number[] } = {},
 ): Promise<AutomationHarnessResult> {
   await assertAutomationWorkspaceHasNoSymlinkRedirects(
     session,
@@ -259,6 +296,7 @@ export async function runCodexAutomation(
     path: promptPath,
   });
   let output = "";
+  let attempt = "";
   try {
     if (input.model.subscription) {
       const { tokens } = parseSubscriptionAuth(input.model.subscription.authJson);
@@ -306,13 +344,24 @@ export async function runCodexAutomation(
       if (!commandSucceeded(moved))
         throw new Error("Unable to prepare subscription credentials");
     }
-    output = await session.execCommand({
-      cmd: input.model.subscription
-        ? subscriptionRootCommand(buildCodexAutomationCommand(input, executable))
-        : buildCodexAutomationCommand(input, executable),
-      maxOutputTokens: automationHarnessMaxOutputTokens,
-      workdir: automationWorkspaceRoot,
-    });
+    const runCodex = (resumeThreadId?: string) =>
+      session.execCommand({
+        cmd: input.model.subscription
+          ? subscriptionRootCommand(buildCodexAutomationCommand(input, executable, resumeThreadId))
+          : buildCodexAutomationCommand(input, executable, resumeThreadId),
+        maxOutputTokens: automationHarnessMaxOutputTokens,
+        workdir: automationWorkspaceRoot,
+      });
+    attempt = output = await runCodex();
+    for (const delayMs of input.model.subscription ? capacityRetryDelaysMs : []) {
+      if (commandSucceeded(attempt) || turnFailure(attempt) !== subscriptionCapacityFailure) break;
+      const threadId = codexThreadId(attempt);
+      if (!threadId) break;
+      await sleep(delayMs, undefined, input.signal ? { signal: input.signal } : {});
+      // A resumed attempt prints only its own events.
+      attempt = await runCodex(threadId);
+      output += attempt;
+    }
   } finally {
     if (input.model.subscription) {
       await session.execCommand({
@@ -324,14 +373,17 @@ export async function runCodexAutomation(
   }
   if (input.model.subscription) {
     const tokens = parseSubscriptionAuth(input.model.subscription.authJson).tokens;
-    for (const secret of [tokens.access_token, tokens.id_token])
+    for (const secret of [tokens.access_token, tokens.id_token]) {
       output = output.replaceAll(secret, "[redacted]");
+      attempt = attempt.replaceAll(secret, "[redacted]");
+    }
   }
-  // Checked after redaction so a failed run can keep its transcript.
-  if (!commandSucceeded(output)) {
-    const refusal = input.model.subscription ? subscriptionRefusal(output, input.model.model) : null;
+  // Checked after redaction so a failed run can keep its transcript. The
+  // last attempt names the failure.
+  if (!commandSucceeded(attempt)) {
+    const refusal = input.model.subscription ? subscriptionRefusal(attempt, input.model.model) : null;
     if (refusal) throw new AutomationSubscriptionRefusalError(refusal, output);
-    throw new AutomationHarnessError(harnessFailure(output), output);
+    throw new AutomationHarnessError(harnessFailure(attempt), output);
   }
   return { eventStream: output };
 }
