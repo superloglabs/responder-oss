@@ -11,6 +11,7 @@ import {
   codexCliVersion,
   prepareCodexAutomationHarness,
   runCodexAutomation,
+  subscriptionCapacityResumePrompt,
 } from "./codex-automation-harness.js";
 
 const input = {
@@ -561,4 +562,92 @@ it("refuses a credential cache that holds a real access token", async () => {
     }),
   ).rejects.toThrow("run-only");
   expect(JSON.stringify(vi.mocked(session.materializeEntry).mock.calls)).not.toContain("real-access-token");
+});
+
+describe("ChatGPT capacity failures", () => {
+  const authJson = JSON.stringify({
+    tokens: {
+      id_token: "id-token",
+      access_token: "dtn_secret_access",
+      refresh_token: runOnlyRefreshToken,
+      account_id: "account",
+    },
+  });
+  const subscriptionInput = {
+    ...input,
+    eventsPath: `${automationWorkspaceRoot}/.responder/harness-events-1.jsonl`,
+    model: { ...input.model, subscription: { authJson } },
+  };
+  const threadId = "01a1cfe2-dde5-7401-99dc-70c8558e2218";
+  const events = (...lines: unknown[]) => lines.map((line) => JSON.stringify(line)).join("\n");
+  const started = { type: "thread.started", thread_id: threadId };
+  const worked = { type: "item.completed", item: { id: "item_0", type: "agent_message", text: "Read the Sentry event." } };
+  const atCapacity = { type: "turn.failed", error: { message: "Selected model is at capacity. Please try a different model." } };
+  const finished = { type: "item.completed", item: { id: "item_1", type: "agent_message", text: "Posted the fix." } };
+  // Symlink check, harness install, credential home, credential move.
+  const setup = ["Process exited with code 0\n", "Process exited with code 0\n", "Process exited with code 0\n", "Process exited with code 0\n"];
+  const sessionWith = (codexResults: string[]) => {
+    const execCommand = vi.fn().mockResolvedValue("Process exited with code 0\n");
+    for (const result of [...setup, ...codexResults]) execCommand.mockResolvedValueOnce(result);
+    return {
+      execCommand,
+      materializeEntry: vi.fn().mockResolvedValue(undefined),
+    } as unknown as DaytonaSandboxSession;
+  };
+  const codexCommands = (session: DaytonaSandboxSession) =>
+    vi.mocked(session.execCommand).mock.calls.map(([args]) => args.cmd).filter((cmd) => cmd.includes("CODEX_HOME="));
+
+  it("keeps the subscription thread so it can resume, and the broker run ephemeral", () => {
+    expect(buildCodexAutomationCommand(subscriptionInput)).not.toContain("--ephemeral");
+    expect(buildCodexAutomationCommand(input)).toContain("--ephemeral");
+  });
+
+  it("resumes the thread with a fixed prompt and appends to the events file", () => {
+    const command = buildCodexAutomationCommand(subscriptionInput, undefined, threadId);
+    expect(command).toContain(`'resume' '${threadId}' '${subscriptionCapacityResumePrompt}' < '/dev/null'`);
+    expect(command).toContain(`>> '${subscriptionInput.eventsPath}' || harness_status=$?`);
+    expect(command).not.toContain("automation-prompt.txt' >");
+    expect(() => buildCodexAutomationCommand(subscriptionInput, undefined, "x; rm -rf /"))
+      .toThrow("Invalid Codex thread ID");
+  });
+
+  it("resumes the thread when the model is at capacity", async () => {
+    const session = sessionWith([
+      `Process exited with code 1\nOutput:\n${events(started, worked, atCapacity)}\n`,
+      `Process exited with code 0\nOutput:\n${events(started, worked, atCapacity, started, finished)}\n`,
+    ]);
+
+    const result = await runCodexAutomation(session, subscriptionInput, { capacityRetryDelaysMs: [0, 0] });
+
+    expect(result.eventStream).toContain("Posted the fix.");
+    const commands = codexCommands(session);
+    expect(commands).toHaveLength(2);
+    expect(commands[0]).not.toContain("resume");
+    expect(commands[1]).toMatch(new RegExp(`resume'"'"' '"'"'${threadId}'"'"' `, "u"));
+    expect(session.execCommand).toHaveBeenLastCalledWith(
+      expect.objectContaining({ cmd: expect.stringContaining("rm -rf /home/daytona/.responder-subscription-auth") }),
+    );
+  });
+
+  it("fails with the capacity error once the retries are used up", async () => {
+    const failed = `Process exited with code 1\nOutput:\n${events(started, worked, atCapacity)}\n`;
+    const session = sessionWith([failed, failed, failed]);
+
+    const run = runCodexAutomation(session, subscriptionInput, { capacityRetryDelaysMs: [0, 0] });
+
+    await expect(run).rejects.toThrow(
+      /^Codex automation harness failed: Selected model is at capacity\. Please try a different model\.$/u,
+    );
+    await expect(run).rejects.not.toBeInstanceOf(AutomationSubscriptionRefusalError);
+    expect(codexCommands(session)).toHaveLength(3);
+  });
+
+  it("does not resume after other failures", async () => {
+    const disconnected = { type: "turn.failed", error: { message: "stream disconnected before completion" } };
+    const session = sessionWith([`Process exited with code 1\nOutput:\n${events(started, disconnected)}\n`]);
+
+    await expect(runCodexAutomation(session, subscriptionInput, { capacityRetryDelaysMs: [0, 0] }))
+      .rejects.toThrow("stream disconnected before completion");
+    expect(codexCommands(session)).toHaveLength(1);
+  });
 });
