@@ -5,6 +5,7 @@ import {
   subscriptionCliVersion,
 } from "@responder/core/automations/chatgpt-subscription";
 import { sandboxHome } from "@responder/core/sandbox-config";
+import { setTimeout as sleep } from "node:timers/promises";
 import { isVercelSandboxSession, type SandboxSession } from "./sandbox-session.js";
 import {
   AutomationHarnessError,
@@ -356,10 +357,10 @@ export async function runCodexAutomation(
       if (commandSucceeded(attempt) || turnFailure(attempt) !== subscriptionCapacityFailure) break;
       const threadId = codexThreadId(attempt);
       if (!threadId) break;
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      await sleep(delayMs, undefined, input.signal ? { signal: input.signal } : {});
+      // A resumed attempt prints only its own events.
       attempt = await runCodex(threadId);
-      // The events file already holds every attempt.
-      output = input.eventsPath ? attempt : `${output}${attempt}`;
+      output += attempt;
     }
   } finally {
     if (input.model.subscription) {
@@ -372,14 +373,17 @@ export async function runCodexAutomation(
   }
   if (input.model.subscription) {
     const tokens = parseSubscriptionAuth(input.model.subscription.authJson).tokens;
-    for (const secret of [tokens.access_token, tokens.id_token])
+    for (const secret of [tokens.access_token, tokens.id_token]) {
       output = output.replaceAll(secret, "[redacted]");
+      attempt = attempt.replaceAll(secret, "[redacted]");
+    }
   }
-  // Checked after redaction so a failed run can keep its transcript.
+  // Checked after redaction so a failed run can keep its transcript. The
+  // last attempt names the failure.
   if (!commandSucceeded(attempt)) {
-    const refusal = input.model.subscription ? subscriptionRefusal(output, input.model.model) : null;
+    const refusal = input.model.subscription ? subscriptionRefusal(attempt, input.model.model) : null;
     if (refusal) throw new AutomationSubscriptionRefusalError(refusal, output);
-    throw new AutomationHarnessError(harnessFailure(output), output);
+    throw new AutomationHarnessError(harnessFailure(attempt), output);
   }
   return { eventStream: output };
 }

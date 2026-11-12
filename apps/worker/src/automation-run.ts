@@ -1344,6 +1344,7 @@ export async function processAutomationRun(
                 ...(subscription ? { subscription } : {}),
               },
               prompt,
+              ...(sandboxSignal ? { signal: sandboxSignal } : {}),
               toolServer: automationToolServer,
               workspacePath: repositories[0]?.path ?? automationWorkspaceRoot,
             },

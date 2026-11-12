@@ -12,6 +12,7 @@ import {
   prepareCodexAutomationHarness,
   runCodexAutomation,
   subscriptionCapacityResumePrompt,
+  subscriptionCapacityRetryDelaysMs,
 } from "./codex-automation-harness.js";
 
 const input = {
@@ -602,10 +603,15 @@ describe("ChatGPT capacity failures", () => {
     expect(buildCodexAutomationCommand(input)).toContain("--ephemeral");
   });
 
-  it("resumes the thread with a fixed prompt and appends to the events file", () => {
+  it("waits 30 s, then 60 s, before resuming", () => {
+    expect(subscriptionCapacityRetryDelaysMs).toEqual([30_000, 60_000]);
+  });
+
+  it("resumes the thread with a fixed prompt and prints only the new events", () => {
     const command = buildCodexAutomationCommand(subscriptionInput, undefined, threadId);
     expect(command).toContain(`'resume' '${threadId}' '${subscriptionCapacityResumePrompt}' < '/dev/null'`);
     expect(command).toContain(`>> '${subscriptionInput.eventsPath}' || harness_status=$?`);
+    expect(command).toContain(`tail -c +$((harness_offset + 1)) '${subscriptionInput.eventsPath}'`);
     expect(command).not.toContain("automation-prompt.txt' >");
     expect(() => buildCodexAutomationCommand(subscriptionInput, undefined, "x; rm -rf /"))
       .toThrow("Invalid Codex thread ID");
@@ -614,11 +620,12 @@ describe("ChatGPT capacity failures", () => {
   it("resumes the thread when the model is at capacity", async () => {
     const session = sessionWith([
       `Process exited with code 1\nOutput:\n${events(started, worked, atCapacity)}\n`,
-      `Process exited with code 0\nOutput:\n${events(started, worked, atCapacity, started, finished)}\n`,
+      `Process exited with code 0\nOutput:\n${events(started, finished)}\n`,
     ]);
 
     const result = await runCodexAutomation(session, subscriptionInput, { capacityRetryDelaysMs: [0, 0] });
 
+    expect(result.eventStream).toContain("Read the Sentry event.");
     expect(result.eventStream).toContain("Posted the fix.");
     const commands = codexCommands(session);
     expect(commands).toHaveLength(2);
@@ -640,6 +647,30 @@ describe("ChatGPT capacity failures", () => {
     );
     await expect(run).rejects.not.toBeInstanceOf(AutomationSubscriptionRefusalError);
     expect(codexCommands(session)).toHaveLength(3);
+  });
+
+  it("names the resumed attempt's own failure instead of the earlier capacity error", async () => {
+    const session = sessionWith([
+      `Process exited with code 1\nOutput:\n${events(started, worked, atCapacity)}\n`,
+      `Process exited with code 137\nOutput:\n${events(started)}\n`,
+    ]);
+
+    await expect(runCodexAutomation(session, subscriptionInput, { capacityRetryDelaysMs: [0, 0] }))
+      .rejects.toThrow(/^Codex automation harness failed: Codex exited with code 137$/u);
+    expect(codexCommands(session)).toHaveLength(2);
+  });
+
+  it("does not resume once the run has stopped", async () => {
+    const session = sessionWith([`Process exited with code 1\nOutput:\n${events(started, worked, atCapacity)}\n`]);
+    const stop = new AbortController();
+    stop.abort(new Error("cancelled"));
+
+    await expect(runCodexAutomation(session, { ...subscriptionInput, signal: stop.signal }, { capacityRetryDelaysMs: [60_000] }))
+      .rejects.toThrow();
+    expect(codexCommands(session)).toHaveLength(1);
+    expect(session.execCommand).toHaveBeenLastCalledWith(
+      expect.objectContaining({ cmd: expect.stringContaining("rm -rf /home/daytona/.responder-subscription-auth") }),
+    );
   });
 
   it("does not resume after other failures", async () => {

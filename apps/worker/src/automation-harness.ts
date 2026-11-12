@@ -60,6 +60,8 @@ export interface AutomationHarnessInput {
   eventsPath?: string;
   model: AutomationModelRoute;
   prompt: string;
+  // Ends a wait between attempts when the run stops.
+  signal?: AbortSignal;
   toolServer?: AutomationToolServer;
   workspacePath: string;
 }
@@ -163,13 +165,22 @@ function shellQuote(value: string): string {
 
 // Runs the harness with its output in the events file, then prints the file
 // so the command result still carries the whole stream. `append` keeps the
-// events of an earlier attempt in the same turn.
+// events of an earlier attempt in the file and prints only the new ones.
 export function harnessInvocation(command: string, eventsPath?: string, append = false): string {
   if (!eventsPath) return command;
   const path = shellQuote(resolveAutomationWorkspacePath(eventsPath));
+  if (append) {
+    return [
+      "harness_status=0",
+      `harness_offset=$(wc -c 2>/dev/null < ${path} || echo 0)`,
+      `${command} >> ${path} || harness_status=$?`,
+      `tail -c +$((harness_offset + 1)) ${path}`,
+      'exit "$harness_status"',
+    ].join("\n");
+  }
   return [
     "harness_status=0",
-    `${command} ${append ? ">>" : ">"} ${path} || harness_status=$?`,
+    `${command} > ${path} || harness_status=$?`,
     `cat ${path}`,
     'exit "$harness_status"',
   ].join("\n");
