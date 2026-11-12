@@ -1,6 +1,5 @@
 import { type FormEvent, type ReactNode, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowRightIcon } from "@phosphor-icons/react";
 import { authErrorCode } from "../auth-error-code";
 import { authClient } from "../auth-client";
 import { resetBrowserAnalytics } from "../browser-analytics";
@@ -22,8 +21,8 @@ import { requestCapabilities } from "../organization-capabilities";
 import { newWorkspacePath } from "../primary-navigation";
 import { ProviderGlyph } from "./icons";
 import { ColorThemeToggle } from "./color-theme-toggle";
-import { OnboardingFrame, OnboardingLoading } from "./onboarding-frame";
-import { AppFrameSkeleton, WorkspaceListSkeleton } from "./screen-skeletons";
+import { OnboardingLoading } from "./onboarding-frame";
+import { AppFrameSkeleton, CardContentSkeleton, WorkspaceListSkeleton } from "./screen-skeletons";
 import { onboardingStepAtPath } from "../pages/onboarding-presentation";
 import {
   cellSwitchUrl,
@@ -560,6 +559,16 @@ function WorkspaceInOtherCell({
   );
 }
 
+// The sign-in card holds the place while the workspace list loads, so a new
+// member does not see the workspace picker before naming their workspace.
+function WorkspaceSetupLoading() {
+  return (
+    <AuthFrame>
+      <CardContentSkeleton label="Loading workspaces…" />
+    </AuthFrame>
+  );
+}
+
 interface WorkspaceSetupProps {
   // Reports while a new workspace is being created, so the gate keeps this
   // setup on screen after the workspace becomes active.
@@ -676,14 +685,12 @@ function WorkspaceSetup({ onCreating, onReady }: WorkspaceSetupProps) {
     onCreating(false);
   }
 
-  // The setup card holds the place while the workspace list loads, so a new
-  // member does not see the workspace picker before guided setup.
   if (organizations.isPending && !automationSetupReturnPath(window.location)) {
-    return <OnboardingLoading step="workspace" />;
+    return <WorkspaceSetupLoading />;
   }
 
   if (lookForOtherCells && !stayHere) {
-    if (elsewhere === undefined) return <OnboardingLoading step="workspace" />;
+    if (elsewhere === undefined) return <WorkspaceSetupLoading />;
     if (elsewhere && elsewhere.workspaces.length > 0) {
       return <WorkspaceInOtherCell found={elsewhere} onStay={() => setStayHere(true)} />;
     }
@@ -693,27 +700,13 @@ function WorkspaceSetup({ onCreating, onReady }: WorkspaceSetupProps) {
   // they came to set up a template.
   if (isGuided) {
     return (
-      <OnboardingFrame
-        footer={
-          <button
-            className="onboarding__primary"
-            disabled={isSubmitting}
-            form="workspace-create"
-            type="submit"
-          >
-            {isSubmitting ? "Creating workspace…" : "Create workspace"}
-            <ArrowRightIcon aria-hidden="true" size={14} />
-          </button>
-        }
-        step="workspace"
-        steps={[]}
-      >
-        <div className="onboarding__intro">
+      <AuthFrame>
+        <div className="authIntro">
           <h1>Name your workspace</h1>
           <p>Usually your company name. Your team will see it.</p>
         </div>
-        <form className="onboarding__form" id="workspace-create" onSubmit={create}>
-          <label className="onboarding__field">
+        <form className="authForm" onSubmit={create}>
+          <label className="authField">
             <span>Workspace name</span>
             <input
               autoFocus
@@ -724,9 +717,24 @@ function WorkspaceSetup({ onCreating, onReady }: WorkspaceSetupProps) {
               type="text"
             />
           </label>
-          {error ? <p className="onboarding__error" role="alert">{error}</p> : null}
+          <button
+            aria-busy={isSubmitting}
+            aria-label={isSubmitting ? "Creating workspace…" : "Create workspace"}
+            className="button button--primary authSubmit authSubmit--animated"
+            disabled={isSubmitting}
+            type="submit"
+          >
+            <span aria-hidden="true" className="authSubmitIdle">Create workspace</span>
+            <span aria-hidden="true" className="authSubmitPending">
+              {isSubmitting && <span className="dsSpinner" />}
+              Creating workspace…
+            </span>
+          </button>
         </form>
-      </OnboardingFrame>
+        <div className="authFeedback" aria-live="polite" aria-atomic="true">
+          {error ? <p className="authError">{error}</p> : null}
+        </div>
+      </AuthFrame>
     );
   }
 
