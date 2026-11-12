@@ -31,6 +31,7 @@ export function OnboardingFrame({
   connected?: readonly string[];
   footer: ReactNode;
   step: OnboardingStep;
+  // An empty list hides the progress.
   steps: readonly OnboardingStep[];
 }) {
   const currentIndex = steps.indexOf(step);
@@ -38,17 +39,19 @@ export function OnboardingFrame({
     <main className="onboarding">
       <section className={`onboarding__card${activeStages ? "" : " onboarding__card--wide"}`}>
         <div className="onboarding__main">
-          <ol aria-label="Setup progress" className="onboarding__steps">
-            {steps.map((candidate, index) => (
-              <li
-                aria-current={candidate === step ? "step" : undefined}
-                className={index < currentIndex ? "isComplete" : index === currentIndex ? "isCurrent" : undefined}
-                key={candidate}
-              >
-                {onboardingStepLabels[candidate]}
-              </li>
-            ))}
-          </ol>
+          {steps.length > 0 ? (
+            <ol aria-label="Setup progress" className="onboarding__steps">
+              {steps.map((candidate, index) => (
+                <li
+                  aria-current={candidate === step ? "step" : undefined}
+                  className={index < currentIndex ? "isComplete" : index === currentIndex ? "isCurrent" : undefined}
+                  key={candidate}
+                >
+                  {onboardingStepLabels[candidate]}
+                </li>
+              ))}
+            </ol>
+          ) : null}
           <div className="onboarding__content">{children}</div>
           <footer className="onboarding__footer">{footer}</footer>
         </div>
@@ -66,8 +69,16 @@ export function OnboardingFrame({
 // so the progress stays on screen between steps and after a page load. It
 // has the step's layout, so the card keeps its shape when the step appears.
 export function OnboardingLoading({ step }: { step: OnboardingStep }) {
+  // Naming a workspace comes before its product is known, so that step shows
+  // neither the automation setup progress nor its explainer.
+  const workspace = step === "workspace";
   return (
-    <OnboardingFrame activeStages={onboardingStepStages[step]} footer={null} step={step} steps={onboardingSteps}>
+    <OnboardingFrame
+      activeStages={workspace ? undefined : onboardingStepStages[step]}
+      footer={null}
+      step={step}
+      steps={workspace ? [] : onboardingSteps}
+    >
       <CardContentSkeleton label="Loading setup…" />
     </OnboardingFrame>
   );

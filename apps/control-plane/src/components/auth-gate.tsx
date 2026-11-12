@@ -24,7 +24,7 @@ import { ProviderGlyph } from "./icons";
 import { ColorThemeToggle } from "./color-theme-toggle";
 import { OnboardingFrame, OnboardingLoading } from "./onboarding-frame";
 import { AppFrameSkeleton, WorkspaceListSkeleton } from "./screen-skeletons";
-import { onboardingStepAtPath, onboardingStepStages, onboardingSteps } from "../pages/onboarding-presentation";
+import { onboardingStepAtPath } from "../pages/onboarding-presentation";
 import {
   cellSwitchUrl,
   fetchWorkspacesInOtherCells,
@@ -694,7 +694,6 @@ function WorkspaceSetup({ onCreating, onReady }: WorkspaceSetupProps) {
   if (isGuided) {
     return (
       <OnboardingFrame
-        activeStages={onboardingStepStages.workspace}
         footer={
           <button
             className="onboarding__primary"
@@ -707,7 +706,7 @@ function WorkspaceSetup({ onCreating, onReady }: WorkspaceSetupProps) {
           </button>
         }
         step="workspace"
-        steps={onboardingSteps}
+        steps={[]}
       >
         <div className="onboarding__intro">
           <h1>Name your workspace</h1>
