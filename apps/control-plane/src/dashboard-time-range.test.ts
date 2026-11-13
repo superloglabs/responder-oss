@@ -93,7 +93,7 @@ describe("URL parameters", () => {
       { from: now - 3_600_000, kind: "absolute", to: null },
     ];
     for (const range of ranges) {
-      expect(timeRangeFromParams(timeRangeParams(range, new URLSearchParams("var=1")))).toEqual(range);
+      expect(timeRangeFromParams(timeRangeParams(range, new URLSearchParams("var=1")), now)).toEqual(range);
     }
     expect(timeRangeParams({ kind: "relative", minutes: 10_080 }, new URLSearchParams()).toString()).toBe("range=7d");
   });

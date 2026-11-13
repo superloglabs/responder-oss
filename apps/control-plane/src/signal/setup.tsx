@@ -97,7 +97,7 @@ function SignalWizard({ data, organizationId, reload, setSettings }: SetupViewPr
 
   // A provider's own site sends people back here with the outcome.
   const failedProvider = searchParams.get("status") === "error" ? searchParams.get("integration") : null;
-  const header = <header className="signalWelcome"><h1>Welcome to Signal</h1><p>Step {stepNumber[step]} out of 5</p></header>;
+  const header = <header className="signalWelcome"><h1>Welcome to Superlog</h1><p>Step {stepNumber[step]} out of 5</p></header>;
 
   if (page) {
     return <section className="signalSetup">
