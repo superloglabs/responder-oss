@@ -2084,7 +2084,7 @@ describe("automation run processor", () => {
       deps.getCredential.mockResolvedValue({ apiKey: "subscription-context-only", provider: "openai", subscription: { credentialId, authJson } });
       deps.subscriptionAuth.mockResolvedValue(authJson);
       deps.runCodex
-        .mockRejectedValueOnce(new AutomationSubscriptionRefusalError(refusal, ""))
+        .mockRejectedValueOnce(new AutomationSubscriptionRefusalError(refusal, "", { workStarted: false }))
         .mockResolvedValueOnce({ eventStream: "completed" });
       return deps;
     }
@@ -2153,6 +2153,24 @@ describe("automation run processor", () => {
       }));
     });
 
+    it("keeps the refusal when the turn had already done work", async () => {
+      const deps = subscriptionDependencies();
+      const limit = "The connected ChatGPT subscription has reached its usage limit.";
+      deps.runCodex.mockReset()
+        .mockRejectedValueOnce(new AutomationSubscriptionRefusalError(limit, "", { workStarted: true }))
+        .mockResolvedValueOnce({ eventStream: "completed" });
+
+      await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
+
+      expect(deps.moveGrantToResponderInference).not.toHaveBeenCalled();
+      expect(deps.runCodex).toHaveBeenCalledOnce();
+      expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({
+        failureCategory: "subscription_refused",
+        failureMessage: limit,
+        status: "failed",
+      }));
+    });
+
     it("keeps the refusal when the allowance cannot be read", async () => {
       const deps = subscriptionDependencies();
       deps.checkAllowance.mockResolvedValueOnce(allowance).mockRejectedValueOnce(new Error("Autumn unavailable"));
@@ -2166,7 +2184,7 @@ describe("automation run processor", () => {
     it("stops at the usage limit when the credit runs out during the fallback turn", async () => {
       const deps = subscriptionDependencies();
       deps.runCodex.mockReset()
-        .mockRejectedValueOnce(new AutomationSubscriptionRefusalError(refusal, ""))
+        .mockRejectedValueOnce(new AutomationSubscriptionRefusalError(refusal, "", { workStarted: false }))
         .mockRejectedValueOnce(new AutomationHarnessError("Codex automation harness failed", ""));
       deps.grantAllowanceExhausted.mockResolvedValue(true);
 
@@ -2574,7 +2592,7 @@ describe("automation run processor", () => {
     vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
     const deps = dependencies();
     const refusal = "The ChatGPT workspace of the connected subscription is deactivated. Reconnect a ChatGPT account with an active plan.";
-    deps.runCodex.mockRejectedValue(new AutomationSubscriptionRefusalError(refusal, ""));
+    deps.runCodex.mockRejectedValue(new AutomationSubscriptionRefusalError(refusal, "", { workStarted: false }));
 
     await processAutomationRun("job-1", {
       kind: "automation_run",
@@ -2595,7 +2613,7 @@ describe("automation run processor", () => {
     vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
     const deps = dependencies();
     const refusal = "gpt-5.4 is not available with the connected ChatGPT subscription. Choose another model for this automation.";
-    const harnessFailure = new AutomationSubscriptionRefusalError(refusal, "");
+    const harnessFailure = new AutomationSubscriptionRefusalError(refusal, "", { workStarted: false });
     deps.runCodex.mockRejectedValue(harnessFailure);
     const runInSandbox = deps.runInSandbox.getMockImplementation()!;
     deps.runInSandbox.mockImplementation(async (input) => {
