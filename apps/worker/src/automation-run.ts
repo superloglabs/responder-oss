@@ -1084,8 +1084,8 @@ export async function processAutomationRun(
     // credit is used up, keeps the refusal.
     const fallBackToResponderInference = async (refusal: AutomationSubscriptionRefusalError): Promise<boolean> => {
       if (grantCredential.inferenceSource !== "byos") return false;
-      // A turn that already ran commands or tools is not run again, so it
-      // cannot repeat what it did.
+      // A turn that already emitted an item, such as a message or a command,
+      // is not run again, so it cannot repeat what it did.
       if (refusal.workStarted) return false;
       const fallback = await dependencies.checkAllowance(run.organizationId, { responderModels: true })
         .catch(() => null);

@@ -111,9 +111,9 @@ function subscriptionRefusal(output: string, model: string): string | null {
   // A ChatGPT Business or Enterprise workspace pays for Codex with credits,
   // and its owner can cap what members spend.
   if (message.includes("Your workspace is out of credits."))
-    return "The ChatGPT workspace of the connected subscription is out of credits. Add credits in ChatGPT, or ask the workspace owner to.";
+    return "The ChatGPT workspace of the connected subscription is out of credits. Add credits in ChatGPT, or ask the workspace owner to add them.";
   if (/You hit your spend cap set (in your workspace|by the owner of your workspace)\./u.test(message))
-    return "The connected ChatGPT subscription has reached the spend cap of its ChatGPT workspace. Raise the cap in ChatGPT, or ask the workspace owner to.";
+    return "The connected ChatGPT subscription has reached the spend cap of its ChatGPT workspace. Raise the cap in ChatGPT, or ask the workspace owner to raise it.";
   return null;
 }
 

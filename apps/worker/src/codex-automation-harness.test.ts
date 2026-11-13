@@ -477,8 +477,8 @@ describe("when the ChatGPT subscription has hit its usage limit", () => {
     await expect(run).rejects.toHaveProperty("workStarted", false);
   });
 
-  const outOfCredits = "The ChatGPT workspace of the connected subscription is out of credits. Add credits in ChatGPT, or ask the workspace owner to.";
-  const spendCap = "The connected ChatGPT subscription has reached the spend cap of its ChatGPT workspace. Raise the cap in ChatGPT, or ask the workspace owner to.";
+  const outOfCredits = "The ChatGPT workspace of the connected subscription is out of credits. Add credits in ChatGPT, or ask the workspace owner to add them.";
+  const spendCap = "The connected ChatGPT subscription has reached the spend cap of its ChatGPT workspace. Raise the cap in ChatGPT, or ask the workspace owner to raise it.";
   it.each([
     ["Your workspace is out of credits. Add credits to continue.", outOfCredits],
     ["Your workspace is out of credits. Ask your workspace owner to refill in order to continue.", outOfCredits],

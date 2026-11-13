@@ -107,10 +107,10 @@ export class AutomationHarnessError extends Error {
 export class AutomationSubscriptionRefusalError extends AutomationHarnessError {
   readonly workStarted: boolean;
 
-  constructor(message: string, eventStream: string, options: { workStarted?: boolean } = {}) {
+  constructor(message: string, eventStream: string, options: { workStarted: boolean }) {
     super(message, eventStream, true);
     this.name = "AutomationSubscriptionRefusalError";
-    this.workStarted = options.workStarted ?? false;
+    this.workStarted = options.workStarted;
   }
 }
 
