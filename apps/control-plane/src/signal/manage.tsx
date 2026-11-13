@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { IconCheck, IconExclamationMark } from "@tabler/icons-react";
 import { removeIntegrationAccount, type IntegrationAccount, type IntegrationSummary } from "../agents-api";
 import { AwsLogStreaming } from "../components/aws-log-streaming";
+import { RailwayLogReading } from "../components/railway-log-reading";
 import { Button } from "../design-system";
 import { CloudSourceSetup } from "../pages/telemetry-source";
 import { fetchServices } from "../telemetry-api";
@@ -29,6 +30,7 @@ const descriptions: Record<ConnectPage, string> = {
   sentry: "Signal reads your errors and issues to find what broke and who it affects.",
   aws: "Signal reads CloudWatch logs, metrics, and alarms through a read-only role.",
   gcp: "Signal reads logs and metrics in your project through a read-only service account.",
+  railway: "Signal reads your Railway logs, deployments, and metrics. Superlog reads the logs of the environments you choose every minute, so Signal sees each new error as it happens.",
   linear: "Signal checks Linear before posting, so it skips problems your team already tracks.",
   posthog: "Signal uses product usage to tell how many customers a problem affects.",
 };
@@ -116,9 +118,18 @@ function ManagedAccount({ provider, name, account, several, awsStreaming, stream
         {`Signal can't read ${view.connectedTo.replace(/^the /u, "")} until you reconnect.`}
       </Status>
       : <Status title={`Connected to ${view.connectedTo}`}>{updatedLabel(account.updatedAt)}</Status>}
-    {/* An account that lost access cannot change regions; it keeps the
-        CloudWatch stream fallback. */}
-    {awsStreaming && account.status !== "connected"
+    {/* A Railway connection lists the environments whose logs Superlog
+        reads. An AWS account that lost access cannot change regions; it
+        keeps the CloudWatch stream fallback. */}
+    {provider === "railway" && account.status === "connected"
+      ? <RailwayLogReading integrationAccountId={account.id}>
+        {({ row }) => <Rows rows={view.rows.map((row) => ({ ...row, onAction: onReconnect }))}
+          extra={row && <div className="signalManageRows__regions">
+            <span className="signalManageRows__label">Telemetry from</span>
+            {row}
+          </div>} />}
+      </RailwayLogReading>
+      : awsStreaming && account.status !== "connected"
       ? <><Rows rows={view.rows.map((row) => ({ ...row, onAction: onReconnect }))} />{awsStreaming.fallback}</>
       : awsStreaming
       ? <AwsLogStreaming integrationAccountId={account.id} fallback={awsStreaming.fallback}>

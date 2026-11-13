@@ -5,6 +5,8 @@ import { relativeTime } from "../agents-api";
 import { AppShell } from "../components/app-shell";
 import { TelemetrySourceSkeleton } from "../components/screen-skeletons";
 import { ProviderGlyph } from "../components/icons";
+import { RailwayConnectionDialog } from "../components/railway-connection-dialog";
+import { RailwayLogReading } from "../components/railway-log-reading";
 import { ScrambleText } from "../components/scramble-text";
 import { useIntegrationConnect } from "../components/use-integration-connect";
 import { copyToClipboard } from "../copy-to-clipboard";
@@ -162,7 +164,7 @@ function CreatedKeyField({ token }: { token: string }) {
 }
 
 // Also shown on Signal setup's AWS and Google Cloud pages.
-export function CloudSourceSetup({ provider }: { provider: "aws" | "gcp" | "vercel" }) {
+export function CloudSourceSetup({ provider }: { provider: "aws" | "gcp" | "railway" | "vercel" }) {
   // Undefined while loading; null when the cell does not accept telemetry.
   const [overview, setOverview] = useState<TelemetrySourceOverview | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
@@ -190,6 +192,7 @@ export function CloudSourceSetup({ provider }: { provider: "aws" | "gcp" | "verc
   const list = <SourceList onChanged={load} sources={sources} />;
   if (provider === "aws") return <AwsSetup list={list} onCreated={load} />;
   const accounts = overview.accounts.filter((account) => account.provider === provider);
+  if (provider === "railway") return <RailwaySetup accounts={accounts} configured={overview.providers.railway ?? false} />;
   return provider === "vercel" ? (
     <VercelSetup accounts={accounts} configured={overview.providers.vercel} list={list} reload={load} />
   ) : (
@@ -335,6 +338,51 @@ function GcpSetup({
         )}
       </section>
       {list}
+    </>
+  );
+}
+
+// Each Railway connection lists the environments it shares; adding one
+// starts reading its logs, and removing it stops.
+function RailwaySetup({ accounts, configured }: { accounts: Account[]; configured: boolean }) {
+  const [connecting, setConnecting] = useState(false);
+  return (
+    <>
+      <p className="telemetrySetup__intro">
+        Railway has no log drains, so Superlog reads the runtime logs of the environments you choose every minute
+        with your Railway connection. Lines your services write to stderr arrive as errors unless they name a lower
+        level, and the lines of one stack trace arrive as one log. Pull request environments are not offered.
+      </p>
+      <section aria-labelledby="railway-connect-title" className="telemetrySetup__section">
+        <h2 id="railway-connect-title">Read environments</h2>
+        {!configured ? (
+          <p>Railway connections are not configured for this installation.</p>
+        ) : accounts.length === 0 ? (
+          <>
+            <p>Connect Railway first. Read-only access is enough.</p>
+            <div className="telemetrySetup__actions">
+              <Button onClick={() => setConnecting(true)} variant="primary">Connect Railway</Button>
+            </div>
+          </>
+        ) : (
+          accounts.map((account) => (
+            <RailwayLogReading integrationAccountId={account.id} key={account.id}>
+              {({ available, row }) => available ? (
+                <div className="awsLogStreaming__row">
+                  <span className="awsLogStreaming__label">{account.displayName}</span>
+                  {row}
+                </div>
+              ) : <Unavailable />}
+            </RailwayLogReading>
+          ))
+        )}
+      </section>
+      <RailwayConnectionDialog
+        connectUrl="/api/integrations/railway/start"
+        onCancel={() => setConnecting(false)}
+        open={connecting}
+        returnTo="/telemetry/setup/railway"
+      />
     </>
   );
 }

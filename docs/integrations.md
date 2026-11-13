@@ -41,12 +41,13 @@ the connect form again to replace keys or sign in again. The AWS page chooses
 the regions whose CloudWatch error lines Superlog receives (see CloudWatch Logs
 subscriptions), or, where the deployment has no log destinations, adds the
 CloudWatch telemetry source. The Google Cloud page adds the project's
-telemetry source (see Telemetry sources). Either way Signal reads new errors as
+telemetry source, and the Railway page chooses the environments whose logs
+Superlog reads (see Telemetry sources). Either way Signal reads new errors as
 they arrive rather than only during an investigation.
 
 **Disconnect** calls `DELETE /api/integrations/<provider>/accounts/<id>`, where
-`<provider>` is `aws`, `datadog`, `gcp`, `grafana`, `linear`, `posthog`, or
-`sentry`. It deletes the stored credentials but does not revoke access on the
+`<provider>` is `aws`, `datadog`, `gcp`, `grafana`, `linear`, `posthog`,
+`railway`, or `sentry`. It deletes the stored credentials but does not revoke access on the
 provider's side; each manage page says what to revoke there. Responder refuses
 with `409` while an active automation still uses the connection, or while
 records of Linear tickets created with it remain. OpenTelemetry has no connection to
@@ -652,8 +653,11 @@ investigations, and the run-scoped context broker at
 Railway access tokens last an hour; the broker refreshes one before it
 expires. The OAuth tokens stay outside the investigation sandbox.
 
-Railway is context only. Runs start from another trigger, such as a watched
-Slack channel or a schedule.
+Railway has no log drains. To start runs and Signal from Railway errors, read
+a connection's environments into Superlog (see Telemetry sources): their error
+lines become error issues, which can trigger automations, alert, and start
+Signal. Signal setup lists Railway with the other telemetry sources; it
+connects read-only and its manage page chooses the environments.
 
 ## Axiom
 
@@ -1192,6 +1196,27 @@ option needs a cell with a collector
 
   The worker reads their metrics, not their logs. Without both variables these
   sources are not read. They give investigations no Google Cloud context.
+- **Railway**: choose environments of a connected Railway account. A connection
+  shows its environments in a "Telemetry from" row in Settings, on its Signal
+  manage page, and under **Add telemetry** (`GET
+  /api/telemetry/sources/railway/<connection>`; `POST
+  /api/telemetry/sources/railway` with `integrationAccountId` and
+  `environmentId`). Pull request environments are not offered. The worker
+  reads each environment's runtime logs every minute through Railway's
+  `environmentLogs` query with the connection's OAuth token, which read-only
+  access allows; it refreshes the token under the connection's credential
+  lease when it has less than five minutes left. Reads stop 20 seconds behind
+  the present, start five minutes back for a new environment, and skip ahead
+  when more than an hour behind. A window holds up to 10,000 logs a minute;
+  beyond that its oldest logs are skipped and the worker logs
+  `railway_telemetry_pulled` with `truncated`. Railway keeps each line as its
+  own log and marks lines written to stderr as errors, so the worker joins
+  the lines of one stack trace from the same replica into one log, records a
+  Node error's type, message and stack as exception attributes, and gives a
+  stderr line the level it names at its start (`INFO:`, `[WARN]`, or logfmt
+  `level=`). Logs carry the Railway service name as `service.name` and the
+  environment as `deployment.environment.name`. Removing the Railway
+  connection removes its sources.
 - **Vercel**: choose a connected installation. Responder creates a trace drain
   that sends OTLP to `<cell>/api/ingest/v1/traces` and a log drain that sends
   NDJSON to `<cell>/api/ingest/vercel/logs`, both for the projects the

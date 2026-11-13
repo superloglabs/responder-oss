@@ -2,7 +2,7 @@ import { and, asc, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { getDatabase } from "./client.js";
 import { integrationAccounts, integrationResources, telemetryIngestKeys, telemetrySources } from "./schema.js";
 
-export type TelemetrySourceProvider = "aws" | "gcp" | "vercel";
+export type TelemetrySourceProvider = "aws" | "gcp" | "railway" | "vercel";
 export type TelemetrySourceStatus = "active" | "failed" | "pending";
 
 export type TelemetrySourceSummary = {
@@ -183,7 +183,7 @@ export async function revokeTelemetrySourceIngestKey(keyId: string): Promise<voi
 
 // Connected accounts a source can use, by provider.
 export async function listTelemetrySourceAccounts(organizationId: string): Promise<
-  Array<{ displayName: string; id: string; provider: "gcp" | "vercel" }>
+  Array<{ displayName: string; id: string; provider: "gcp" | "railway" | "vercel" }>
 > {
   const rows = await getDatabase()
     .select({
@@ -195,13 +195,13 @@ export async function listTelemetrySourceAccounts(organizationId: string): Promi
     .where(
       and(
         eq(integrationAccounts.organizationId, organizationId),
-        inArray(integrationAccounts.provider, ["gcp", "vercel"]),
+        inArray(integrationAccounts.provider, ["gcp", "railway", "vercel"]),
         eq(integrationAccounts.status, "connected"),
         isNotNull(integrationAccounts.encryptedCredentials),
       ),
     )
     .orderBy(asc(integrationAccounts.displayName));
-  return rows as Array<{ displayName: string; id: string; provider: "gcp" | "vercel" }>;
+  return rows as Array<{ displayName: string; id: string; provider: "gcp" | "railway" | "vercel" }>;
 }
 
 // Google Cloud sources the worker reads, with their connection's credentials.
@@ -231,6 +231,32 @@ export async function listGcpTelemetrySources(): Promise<
       ),
     );
   return rows.flatMap((row) => (row.encryptedCredentials ? [{ ...row, encryptedCredentials: row.encryptedCredentials }] : []));
+}
+
+// Railway environments the worker reads, each with its connection. The
+// external ID is the Railway environment ID. Failed sources are read again,
+// so a passing error does not stop them.
+export async function listRailwayTelemetrySources(): Promise<
+  Array<{
+    environmentId: string;
+    id: string;
+    integrationAccountId: string;
+    organizationId: string;
+    state: Record<string, unknown>;
+  }>
+> {
+  const rows = await getDatabase()
+    .select({
+      environmentId: telemetrySources.externalId,
+      id: telemetrySources.id,
+      integrationAccountId: telemetrySources.integrationAccountId,
+      organizationId: telemetrySources.organizationId,
+      state: telemetrySources.state,
+    })
+    .from(telemetrySources)
+    .innerJoin(integrationAccounts, eq(integrationAccounts.id, telemetrySources.integrationAccountId))
+    .where(and(eq(telemetrySources.provider, "railway"), eq(integrationAccounts.status, "connected")));
+  return rows.flatMap((row) => (row.integrationAccountId ? [{ ...row, integrationAccountId: row.integrationAccountId }] : []));
 }
 
 // Google Cloud sources with no integration account: projects that granted

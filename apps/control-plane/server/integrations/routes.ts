@@ -1221,7 +1221,7 @@ export async function startIntegrationConnection(input: {
 
 // Connections Signal setup can remove. Removing one deletes the stored
 // credentials; it does not revoke access on the provider's side.
-const removableProviderSchema = z.enum(["aws", "datadog", "gcp", "grafana", "linear", "posthog", "sentry"]);
+const removableProviderSchema = z.enum(["aws", "datadog", "gcp", "grafana", "linear", "posthog", "railway", "sentry"]);
 
 async function removeIntegrationAccount(input: {
   headers: Headers;

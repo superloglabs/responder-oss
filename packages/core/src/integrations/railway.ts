@@ -152,7 +152,10 @@ const graphqlResponseSchema = z.object({
   errors: z.array(z.object({ message: z.string() })).optional(),
 });
 
-async function boundedResponseText(response: Response): Promise<string> {
+async function boundedResponseText(
+  response: Response,
+  maxBytes: number = MAX_RESPONSE_BYTES,
+): Promise<string> {
   if (!response.body) return "";
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -161,9 +164,9 @@ async function boundedResponseText(response: Response): Promise<string> {
     const { done, value } = await reader.read();
     if (done) break;
     size += value.byteLength;
-    if (size > MAX_RESPONSE_BYTES) {
+    if (size > maxBytes) {
       await reader.cancel();
-      throw new Error("Railway response exceeded the 500 KB safety limit; narrow the query");
+      throw new Error(`Railway response exceeded the ${Math.round(maxBytes / 1000)} KB safety limit; narrow the query`);
     }
     chunks.push(value);
   }
@@ -180,6 +183,8 @@ async function boundedResponseText(response: Response): Promise<string> {
 export async function railwayGraphql<T>(input: {
   accessToken: string;
   fetch?: RailwayFetch;
+  // Tool results stay under 500 KB; reading logs into Superlog allows more.
+  maxResponseBytes?: number;
   query: string;
   signal?: AbortSignal;
   variables?: Record<string, unknown>;
@@ -196,7 +201,7 @@ export async function railwayGraphql<T>(input: {
     redirect: "error",
     signal: input.signal ? AbortSignal.any([input.signal, timeout]) : timeout,
   });
-  const text = await boundedResponseText(response);
+  const text = await boundedResponseText(response, input.maxResponseBytes);
   let payload: z.infer<typeof graphqlResponseSchema>;
   try {
     payload = graphqlResponseSchema.parse(JSON.parse(text) as unknown);
@@ -613,6 +618,77 @@ async function listProjects(
       })),
     };
   }));
+}
+
+/** A Railway environment whose logs Superlog can read. */
+export interface RailwayEnvironment {
+  environmentId: string;
+  environmentName: string;
+  projectId: string;
+  projectName: string;
+  workspaceId: string;
+  workspaceName: string;
+}
+
+const environmentListQuery = `query ($workspaceId: String!) {
+  workspace(workspaceId: $workspaceId) {
+    projects(first: 100) {
+      edges { node {
+        id
+        name
+        environments(first: 50, isEphemeral: false) { edges { node { id name } } }
+      } }
+    }
+  }
+}`;
+
+/**
+ * The persistent environments of every project the connection shares, by
+ * workspace and project. Pull request environments are left out: they come
+ * and go with each pull request.
+ */
+export async function railwayEnvironments(
+  connection: Pick<RailwayToolConnection, "accessToken" | "workspaces">,
+  options: RailwayCallOptions = {},
+): Promise<RailwayEnvironment[]> {
+  const workspaces = connection.workspaces.length > 0
+    ? connection.workspaces
+    : await railwaySharedWorkspaces({ ...options, accessToken: connection.accessToken });
+  const listed = await Promise.all(workspaces.map(async (workspace) => {
+    const data = await railwayGraphql<{
+      workspace: { projects: Connection<{ environments: Connection<{ id: string; name: string }>; id: string; name: string }> };
+    }>({
+      ...options,
+      accessToken: connection.accessToken,
+      query: environmentListQuery,
+      variables: { workspaceId: workspace.id },
+    });
+    return nodes(data.workspace.projects).flatMap((project) =>
+      nodes(project.environments).map((environment) => ({
+        environmentId: environment.id,
+        environmentName: environment.name,
+        projectId: project.id,
+        projectName: project.name,
+        workspaceId: workspace.id,
+        workspaceName: workspace.name,
+      })));
+  }));
+  return listed.flat();
+}
+
+/** The names of a project's services, by service ID. */
+export async function railwayProjectServiceNames(input: {
+  accessToken: string;
+  fetch?: RailwayFetch;
+  projectId: string;
+  signal?: AbortSignal;
+}): Promise<Record<string, string>> {
+  const data = await railwayGraphql<{ project: { services: Connection<{ id: string; name: string }> } }>({
+    ...input,
+    query: "query ($projectId: String!) { project(id: $projectId) { services(first: 200) { edges { node { id name } } } } }",
+    variables: { projectId: input.projectId },
+  });
+  return Object.fromEntries(nodes(data.project.services).map((service) => [service.id, service.name]));
 }
 
 export interface RailwayCallOptions {

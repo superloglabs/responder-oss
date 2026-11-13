@@ -69,6 +69,7 @@ export function integrationAccountDetails(account: {
       });
     }
     case "posthog":
+    case "railway":
       return withoutEmpty({ accessLevel: text(metadata.accessLevel) });
     default:
       return undefined;

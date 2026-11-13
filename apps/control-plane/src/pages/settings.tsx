@@ -23,6 +23,7 @@ import { BetterStackConnectionDialog } from "../components/betterstack-connectio
 import { SupabaseConnectionDialog } from "../components/supabase-connection-dialog";
 import { PostHogConnectionDialog } from "../components/posthog-connection-dialog";
 import { RailwayConnectionDialog } from "../components/railway-connection-dialog";
+import { RailwayLogReadingSettings } from "../components/railway-log-reading";
 import { currentProjectSelectionState } from "../project-selection";
 import {
   Dash0ConnectionDialog,
@@ -75,6 +76,7 @@ interface IntegrationSummary {
   resourceCount: number;
   accounts: Array<{
     allowedTools?: string[] | null;
+    details?: { accessLevel?: string };
     id: string;
     displayName: string;
     status: "connected" | "error" | "pending";
@@ -393,6 +395,9 @@ function IntegrationCard({
   }
   if (integration.id === "aws" && integration.accountCount > 0) {
     return <AwsIntegrationCard integration={integration} />;
+  }
+  if (integration.id === "railway" && integration.accountCount > 0) {
+    return <RailwayIntegrationCard integration={integration} />;
   }
   return <DefaultIntegrationCard integration={integration} sentryHealth={sentryHealth} />;
 }
@@ -831,6 +836,84 @@ function AwsIntegrationCard({
         </div>
       ) : null}
       <AwsConnectionDialog
+        connectUrl={integration.connectUrl ?? ""}
+        onCancel={() => setAdding(false)}
+        open={adding && canConnect}
+        returnTo="/settings"
+      />
+    </article>
+  );
+}
+
+// Connected Railway users, each with its access and the environments whose
+// logs Superlog reads.
+function RailwayIntegrationCard({
+  integration,
+}: {
+  integration: IntegrationSummary;
+}) {
+  const [showAccounts, setShowAccounts] = useState(
+    new URLSearchParams(window.location.search).get("integration") === "railway",
+  );
+  const [adding, setAdding] = useState(false);
+  const canConnect = Boolean(integration.connectUrl);
+  const accounts = integration.accounts;
+
+  return (
+    <article
+      className="integrationCard integrationCard--managed"
+      id={`integration-${integration.id}`}
+    >
+      <ProviderGlyph className="integrationLogo integrationLogo--railway" decorative provider="railway" />
+      <div className="integrationCard__body">
+        <strong>{integration.name}</strong>
+        <small>
+          {integration.accountCount} connection{integration.accountCount === 1 ? "" : "s"}
+        </small>
+      </div>
+      {accounts.some((account) => account.status === "error") || integrationReconnectRecommended(integration) ? (
+        <span className="connectedBadge connectedBadge--warning">Reconnect</span>
+      ) : (
+        <span className="connectedBadge">Connected</span>
+      )}
+      <div className="integrationCard__actions">
+        <button
+          aria-expanded={showAccounts}
+          className="button button--secondary button--small"
+          onClick={() => setShowAccounts((value) => !value)}
+          type="button"
+        >
+          Manage
+        </button>
+      </div>
+      {showAccounts ? (
+        <ul className="integrationCard__accounts" aria-label="Connected Railway users">
+          {accounts.map((account) => (
+            <li key={account.id} className="integrationCard__account--stacked">
+              <span>
+                <strong>{account.displayName}</strong>
+                <small>{account.details?.accessLevel === "redeploy" ? "Read and redeploy" : "Read only"}</small>
+              </span>
+              <span
+                className={`integrationCard__accountStatus${
+                  account.status === "error" ? " integrationCard__accountStatus--error" : ""
+                }`}
+              >
+                {account.status === "connected" ? "Connected" : account.status === "pending" ? "Pending" : "Error"}
+              </span>
+              {account.status === "connected" ? <RailwayLogReadingSettings integrationAccountId={account.id} /> : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {showAccounts && canConnect ? (
+        <div className="integrationCard__actions integrationCard__manageActions">
+          <button className="button button--primary button--small" onClick={() => setAdding(true)} type="button">
+            Add connection
+          </button>
+        </div>
+      ) : null}
+      <RailwayConnectionDialog
         connectUrl={integration.connectUrl ?? ""}
         onCancel={() => setAdding(false)}
         open={adding && canConnect}

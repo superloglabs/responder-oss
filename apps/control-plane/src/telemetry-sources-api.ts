@@ -6,9 +6,9 @@ export type { TelemetrySourceSummary };
 const base = "/api/telemetry/sources";
 
 export type TelemetrySourceOverview = {
-  accounts: Array<{ displayName: string; id: string; provider: "gcp" | "vercel" }>;
+  accounts: Array<{ displayName: string; id: string; provider: "gcp" | "railway" | "vercel" }>;
   // Whether this installation can connect each provider.
-  providers: { gcp: boolean; vercel: boolean };
+  providers: { gcp: boolean; railway?: boolean; vercel: boolean };
   sources: TelemetrySourceSummary[];
 };
 
@@ -45,6 +45,34 @@ export function connectVercelSource(integrationAccountId: string): Promise<{ sou
 
 export function connectGcpSource(integrationAccountId: string): Promise<{ sourceId: string }> {
   return request("/gcp", { body: JSON.stringify({ integrationAccountId }), method: "POST" });
+}
+
+export type RailwayEnvironmentOption = {
+  environmentId: string;
+  environmentName: string;
+  projectId: string;
+  projectName: string;
+  workspaceId: string;
+  workspaceName: string;
+};
+
+// The environments one Railway connection shares, and the ones Superlog
+// reads. Null when this workspace or cell cannot receive telemetry.
+export type RailwayLogReading = {
+  environments: RailwayEnvironmentOption[];
+  sources: TelemetrySourceSummary[];
+};
+
+export async function fetchRailwayLogReading(integrationAccountId: string): Promise<RailwayLogReading | null> {
+  const response = await fetch(`${base}/railway/${encodeURIComponent(integrationAccountId)}`);
+  const body = (await response.json().catch(() => null)) as (RailwayLogReading & { error?: string }) | null;
+  if (response.status === 404 && body?.error === "Sending telemetry is not available") return null;
+  if (!response.ok || !body) throw new Error(apiErrorMessage(body, response.status));
+  return { environments: body.environments ?? [], sources: body.sources ?? [] };
+}
+
+export function readRailwayEnvironment(integrationAccountId: string, environmentId: string): Promise<{ sourceId: string }> {
+  return request("/railway", { body: JSON.stringify({ environmentId, integrationAccountId }), method: "POST" });
 }
 
 export function createAwsStack(region: string): Promise<AwsStackLaunch> {
