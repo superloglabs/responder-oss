@@ -17,6 +17,11 @@ export const telemetrySourceOptions = [
     title: "Google Cloud",
   },
   {
+    description: "Read the runtime logs of the Railway environments you choose, every minute.",
+    id: "railway",
+    title: "Railway",
+  },
+  {
     description: "Create drains that stream the traces and logs of your Vercel deployments.",
     id: "vercel",
     title: "Vercel",

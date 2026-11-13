@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { type GcpTelemetryPullDependencies, pullGcpTelemetrySources } from "./telemetry-sources.js";
+import { McpOAuthRefreshError } from "@responder/core/integrations/custom-mcp";
+import {
+  type GcpTelemetryPullDependencies,
+  pullGcpTelemetrySources,
+  pullRailwayTelemetrySources,
+  type RailwayTelemetryPullDependencies,
+} from "./telemetry-sources.js";
 
 const credentials = { projectId: "shop-prod", projectNumber: "123456789", sessionName: `responder-gcp-${"a".repeat(32)}` };
 
@@ -92,5 +98,66 @@ describe("pullGcpTelemetrySources", () => {
 
     expect(await pullGcpTelemetrySources(deps)).toEqual({ failed: 0, sources: 0 });
     expect(deps.listShared).not.toHaveBeenCalled();
+  });
+});
+
+function railwayDependencies(overrides: Partial<RailwayTelemetryPullDependencies> = {}): RailwayTelemetryPullDependencies {
+  return {
+    accessToken: vi.fn(async () => "railway-token"),
+    collectorUrl: () => "http://collector:4318",
+    forward: vi.fn(async () => new Response(null, { status: 200 })),
+    list: vi.fn(async () => [{
+      environmentId: "env-prod",
+      id: "source-1",
+      integrationAccountId: "account-1",
+      organizationId: "org-1",
+      state: { services: {} },
+    }]),
+    now: () => new Date("2026-11-13T10:00:00Z"),
+    pull: vi.fn(async (input) => {
+      await input.forward({ resourceLogs: [] });
+      return { error: null, logs: 3, received: true, state: { logsCursor: "2026-11-13T09:59:40.000Z", services: {} }, truncated: false };
+    }),
+    update: vi.fn(async () => undefined),
+    ...overrides,
+  };
+}
+
+describe("pullRailwayTelemetrySources", () => {
+  it("reads each environment with its connection's token and saves the cursor", async () => {
+    const deps = railwayDependencies();
+
+    expect(await pullRailwayTelemetrySources(deps)).toEqual({ failed: 0, sources: 1 });
+    expect(deps.accessToken).toHaveBeenCalledWith({ integrationAccountId: "account-1", organizationId: "org-1" });
+    expect(deps.pull).toHaveBeenCalledWith(expect.objectContaining({ accessToken: "railway-token", environmentId: "env-prod" }));
+    expect(deps.forward).toHaveBeenCalledWith(expect.objectContaining({ organizationId: "org-1", signal: "logs" }));
+    expect(deps.update).toHaveBeenCalledWith("source-1", {
+      lastError: null,
+      lastReceivedAt: new Date("2026-11-13T10:00:00Z"),
+      state: { logsCursor: "2026-11-13T09:59:40.000Z", services: {} },
+      status: "active",
+    });
+  });
+
+  it("asks for a reconnect when Railway refuses the refresh", async () => {
+    const deps = railwayDependencies({ accessToken: vi.fn(async () => { throw new McpOAuthRefreshError(true); }) });
+
+    expect(await pullRailwayTelemetrySources(deps)).toEqual({ failed: 1, sources: 1 });
+    expect(deps.pull).not.toHaveBeenCalled();
+    expect(deps.update).toHaveBeenCalledWith("source-1", {
+      lastError: "Railway refused the connection's access. Reconnect Railway.",
+      status: "failed",
+    });
+  });
+
+  it("skips a connection that is gone and does nothing without a collector", async () => {
+    const gone = railwayDependencies({ accessToken: vi.fn(async () => null) });
+    expect(await pullRailwayTelemetrySources(gone)).toEqual({ failed: 0, sources: 1 });
+    expect(gone.pull).not.toHaveBeenCalled();
+    expect(gone.update).not.toHaveBeenCalled();
+
+    const noCollector = railwayDependencies({ collectorUrl: () => null });
+    expect(await pullRailwayTelemetrySources(noCollector)).toEqual({ failed: 0, sources: 0 });
+    expect(noCollector.list).not.toHaveBeenCalled();
   });
 });

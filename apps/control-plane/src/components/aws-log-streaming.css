@@ -24,6 +24,9 @@
 .awsAddRegion__menu li { padding: 5px 8px; border-radius: 4px; font: 400 12px/18px ui-monospace, "SFMono-Regular", Consolas, monospace; cursor: pointer; }
 .awsAddRegion__menu li:hover, .awsAddRegion__menu li:focus-visible { background: var(--ds-surface-hover); }
 .awsAddRegion__menu li:focus-visible, .awsAddRegion__button:focus-visible, .awsRegionChip__remove:focus-visible, .awsStackUpdate__cli:focus-visible { outline: 2px solid var(--ds-text-primary); outline-offset: 2px; }
+/* Railway environments use the same chips; their names are longer. */
+.railwayEnvironmentMenu { width: 280px; }
+.railwayEnvironmentMenu li { font: 400 12px/18px var(--ds-font-sans); }
 
 /* Asks for the one stack update that adds the subscription role. */
 .awsStackUpdate { display: flex; align-items: center; gap: 16px; padding: 14px 20px; border: .5px solid #00000014; border-radius: 6px; background: #fafafa; }
@@ -44,6 +47,9 @@
    the Add region item are not rows. */
 .appShell--workspace.appShell--settings .integrationCard__accounts li.awsRegionChip,
 .appShell--settings .integrationCard__accounts li.awsRegionChip { padding: 0 6px 0 10px; border: 0; border-radius: var(--ds-radius-small, 4px); background: var(--ds-surface-raised, #fff); }
+/* A Railway environment chip starts with its name, which is not the row's title. */
+.appShell--workspace.appShell--settings .integrationCard__accounts li.awsRegionChip > span:first-child,
+.appShell--settings .integrationCard__accounts li.awsRegionChip > span:first-child { display: inline; flex: none; }
 .appShell--workspace.appShell--settings .integrationCard__accounts li.awsLogStreaming__item,
 .appShell--settings .integrationCard__accounts li.awsLogStreaming__item,
 .appShell--workspace.appShell--settings .integrationCard__accounts .awsAddRegion__menu li,
@@ -52,6 +58,8 @@
 .appShell--settings .integrationCard__accounts .awsAddRegion__menu li { padding: 5px 8px; }
 
 /* Inside Signal's account details, the regions are one more row. */
+/* The add menu opens below the card, so the card does not clip it. */
+.signalCard:has(.awsAddRegion) { overflow: visible; }
 .signalManageRows > .signalManageRows__regions { align-items: flex-start; }
 .signalManageRows__regions > .signalManageRows__label { padding-top: 4px; }
 .signalDetails > .signalDetails__regions { align-items: flex-start; }

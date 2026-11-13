@@ -63,6 +63,14 @@ describe("Signal manage pages", () => {
     expect(view.disconnect).toContain("uninstall it in Sentry");
   });
 
+  it("shows a Railway connection's access and what disconnecting stops", () => {
+    const view = manageView("railway", "Railway", account({ displayName: "Acme · redeploy", details: { accessLevel: "redeploy" } }));
+    expect(view.connectedTo).toBe("Acme");
+    expect(view.rows).toEqual([{ label: "Access", value: "Read and redeploy", action: "Reconnect" }]);
+    expect(view.disconnect).toContain("stops reading its environments' logs");
+    expect(manageView("railway", "Railway", account({ details: { accessLevel: "read_only" } })).rows[0]?.value).toBe("Read only");
+  });
+
   it("leaves accounts that are still connecting off the page", () => {
     expect(manageableAccounts([
       account({ id: "a", status: "connected" }),

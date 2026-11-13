@@ -16,6 +16,7 @@ export const telemetrySources: Source[] = [
   { provider: "grafana", name: providerDisplayName("grafana"), description: "Dashboards, alerts, and queries" },
   { provider: "aws", name: `${providerDisplayName("aws")} CloudWatch`, description: "Logs, metrics, and resources" },
   { provider: "gcp", name: providerDisplayName("gcp"), description: "Logs, metrics, and resources" },
+  { provider: "railway", name: providerDisplayName("railway"), description: "Logs, deployments, and metrics" },
 ];
 
 export const contextSources: Source[] = [

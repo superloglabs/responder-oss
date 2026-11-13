@@ -344,7 +344,14 @@ function DatadogConnect({ integration, listPath, onBack }: PageProps) {
 
 // --- Providers approved on their own site -----------------------------------
 
-const approvals: Record<"sentry" | "linear" | "posthog", { name: string; description: string; allowed: string[]; denied: string }> = {
+// What Signal does with Railway, shared by its connect and manage pages.
+export const railwaySignalReads = "Signal reads your Railway logs, deployments, and metrics.";
+
+const approvals: Record<"sentry" | "linear" | "posthog" | "railway", {
+  name: string; description: string; allowed: string[]; denied: string;
+  // Come back to this page rather than the list, to finish setup here.
+  returnHere?: boolean;
+}> = {
   sentry: {
     name: "Sentry",
     description: "Signal reads your errors and issues to find what broke and who it affects.",
@@ -363,6 +370,13 @@ const approvals: Record<"sentry" | "linear" | "posthog", { name: string; descrip
     allowed: ["Read insights, dashboards, and events", "Read logs, errors, and session replays"],
     denied: "Read-only access. Nothing in PostHog can be changed",
   },
+  railway: {
+    name: "Railway",
+    description: `${railwaySignalReads} After you connect, choose the environments whose logs Superlog reads, so Signal sees new errors as they happen.`,
+    allowed: ["Read projects, deployments, and runtime, build, and HTTP logs", "Read resource and HTTP metrics"],
+    denied: "Read-only access. Never redeploys, restarts, or reads environment variables",
+    returnHere: true,
+  },
 };
 
 function OAuthApproval({ page, integration, listPath, onBack }: PageProps & { page: ConnectPage }) {
@@ -373,10 +387,10 @@ function OAuthApproval({ page, integration, listPath, onBack }: PageProps & { pa
     <Intro provider={page} title={`Connect ${approval.name}`}>{approval.description}</Intro>
     <AccessList title="What Signal does" allowed={approval.allowed} denied={approval.denied} />
     <Actions onBack={onBack}>
-      {/* PostHog starts read-only when no access mode is given. */}
+      {/* PostHog and Railway start read-only when no access mode is given. */}
       <Button variant="primary" loading={leaving} disabled={!integration?.connectUrl} onClick={() => {
         setLeaving(true);
-        window.location.assign(connectionStartUrl(integration!.connectUrl!, listPath));
+        window.location.assign(connectionStartUrl(integration!.connectUrl!, approval.returnHere ? `${listPath}/${page}` : listPath));
       }}><External>Continue to {approval.name}</External></Button>
     </Actions>
   </>;

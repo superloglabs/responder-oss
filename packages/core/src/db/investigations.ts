@@ -1889,7 +1889,7 @@ export async function getRuntimeGcpConnections(
   return connections;
 }
 
-function mcpOAuthRedirectUrl(
+export function mcpOAuthRedirectUrl(
   provider:
     | "axiom"
     | "cloudflare"

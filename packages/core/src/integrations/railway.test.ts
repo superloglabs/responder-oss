@@ -5,6 +5,7 @@ import {
   parseRailwayCredentials,
   RAILWAY_GRAPHQL_URL,
   railwayAccessTokenIsFresh,
+  railwayEnvironments,
   railwayOAuthScope,
   RailwayScopeError,
   railwaySharedWorkspaces,
@@ -246,5 +247,68 @@ describe("Railway workspaces", () => {
 
     await expect(railwaySharedWorkspaces({ accessToken: "t", fetch }))
       .resolves.toEqual([{ id: "w1", name: "Acme" }]);
+  });
+});
+
+describe("railwayEnvironments", () => {
+  const environments = (ids: string[], next: string | null = null) => ({
+    edges: ids.map((id) => ({ node: { id, name: id } })),
+    pageInfo: { endCursor: next, hasNextPage: next !== null },
+  });
+
+  it("lists every persistent environment of every project, page by page", async () => {
+    const fetch = graphqlFetch(({ query, variables }) => {
+      expect(query).toContain("isEphemeral: false");
+      if (query.includes("workspace(")) {
+        return variables.after === null
+          ? { data: { workspace: { projects: {
+              edges: [{ node: { environments: environments(["production"], "env-page-2"), id: "p1", name: "shop" } }],
+              pageInfo: { endCursor: "project-page-2", hasNextPage: true },
+            } } } }
+          : { data: { workspace: { projects: {
+              edges: [{ node: { environments: environments(["staging"]), id: "p2", name: "blog" } }],
+              pageInfo: { endCursor: null, hasNextPage: false },
+            } } } };
+      }
+      expect(variables).toEqual({ after: "env-page-2", projectId: "p1" });
+      return { data: { project: { environments: environments(["preview-main"]) } } };
+    });
+
+    const listed = await railwayEnvironments({ accessToken: "t", workspaces: [{ id: "w1", name: "Acme" }] }, { fetch });
+
+    expect(listed.map((item) => `${item.projectName} · ${item.environmentName}`)).toEqual([
+      "shop · production",
+      "shop · preview-main",
+      "blog · staging",
+    ]);
+    expect(listed[0]).toEqual({
+      environmentId: "production",
+      environmentName: "production",
+      projectId: "p1",
+      projectName: "shop",
+      workspaceId: "w1",
+      workspaceName: "Acme",
+    });
+  });
+
+  it("reads the shared workspaces when none were stored, and skips one that fails", async () => {
+    const fetch = graphqlFetch(({ query, variables }) => {
+      if (query.includes("me {")) return { data: { me: { workspaces: [{ id: "w1", name: "Acme" }, { id: "w2", name: "Gone" }] } } };
+      if (query.includes("workspace(workspaceId: $workspaceId) { id }")) return { data: { workspace: { id: variables.workspaceId } } };
+      if (variables.workspaceId === "w2") return { errors: [{ message: "Not Authorized" }] };
+      return { data: { workspace: { projects: {
+        edges: [{ node: { environments: environments(["production"]), id: "p1", name: "shop" } }],
+        pageInfo: { endCursor: null, hasNextPage: false },
+      } } } };
+    });
+
+    const listed = await railwayEnvironments({ accessToken: "t", workspaces: [] }, { fetch });
+    expect(listed.map((item) => item.workspaceName)).toEqual(["Acme"]);
+  });
+
+  it("fails when no workspace can be read", async () => {
+    const fetch = graphqlFetch(() => ({ errors: [{ message: "Not Authorized" }] }));
+    await expect(railwayEnvironments({ accessToken: "t", workspaces: [{ id: "w1", name: "Acme" }] }, { fetch }))
+      .rejects.toThrow("Not Authorized");
   });
 });

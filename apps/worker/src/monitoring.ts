@@ -18,6 +18,7 @@ export interface WorkerErrorContext {
     | "automation"
     | "error_issues"
     | "gcp_telemetry_pull"
+    | "railway_telemetry_pull"
     | "investigation"
     | "linear_ticket"
     | "remediation"

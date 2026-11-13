@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { McpOAuthRefreshError } from "../../../../packages/core/src/integrations/custom-mcp.js";
 import { VercelDrainError } from "../../../../packages/core/src/telemetry/sources/vercel-drains.js";
 import { createSourceRoutes, type SourceRouteDependencies } from "./source-routes.js";
 
@@ -6,6 +7,14 @@ const organizationId = "b925b1df-5b78-43c8-a816-6f00afb174af";
 const accountId = "3f1f2a1e-8d47-4a5e-9c55-0b0c3ad3b0aa";
 const sourceId = "6a7f8c2b-2f3d-4f0e-8f8a-1b2c3d4e5f60";
 const token = `sl_ingest_${"a".repeat(43)}`;
+const railwayEnvironment = {
+  environmentId: "env-prod",
+  environmentName: "production",
+  projectId: "project-1",
+  projectName: "shop",
+  workspaceId: "workspace-1",
+  workspaceName: "Acme",
+};
 
 function routes(overrides: Partial<SourceRouteDependencies> = {}) {
   const dependencies: SourceRouteDependencies = {
@@ -26,6 +35,7 @@ function routes(overrides: Partial<SourceRouteDependencies> = {}) {
     ingestOrigin: () => "https://eu.superlog.sh",
     listSources: vi.fn(async () => []),
     providerConfigured: () => true,
+    railwayEnvironments: vi.fn(async () => [railwayEnvironment]),
     revokeKey: vi.fn(async () => undefined),
     saveSource: vi.fn(async () => ({ id: sourceId, previousIngestKeyId: null, previousState: null })),
     tenant: vi.fn(async () => ({ ok: true as const, organizationId, role: "member", user: { id: "user-1" } })),
@@ -46,12 +56,15 @@ describe("telemetry source routes", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
       accounts: [{ displayName: "Acme", id: accountId, provider: "vercel" }],
-      providers: { gcp: true, vercel: true },
+      providers: { gcp: true, railway: true, vercel: true },
       sources: [],
     });
   });
 
   it("is not there for a workspace without telemetry or Signal", async () => {
+    const unavailable = await routes({ receivesTelemetry: vi.fn(async () => false) }).app.request(`/railway/${accountId}`);
+    expect(unavailable.status).toBe(404);
+    expect(await unavailable.json()).toEqual({ code: "telemetry_unavailable", error: "Sending telemetry is not available" });
     expect((await routes({ receivesTelemetry: vi.fn(async () => false) }).app.request("/")).status).toBe(404);
     expect((await routes({ collectorUrl: () => null }).app.request("/")).status).toBe(404);
   });
@@ -230,6 +243,100 @@ describe("telemetry source routes", () => {
       tenant: vi.fn(async () => ({ ok: true as const, organizationId, role: "admin", user: { id: "user-1" } })),
     });
     expect((await admin.app.request(`/${sourceId}`, { method: "DELETE" })).status).toBe(204);
+  });
+
+  it("lists a Railway connection's environments and the ones it reads", async () => {
+    const reading = {
+      createdAt: "",
+      displayName: "shop · production",
+      externalId: "env-prod",
+      id: sourceId,
+      integrationAccountId: accountId,
+      lastError: null,
+      lastReceivedAt: null,
+      provider: "railway" as const,
+      state: {},
+      status: "pending" as const,
+    };
+    const other = { ...reading, id: "other", integrationAccountId: "another-connection" };
+    const { app, dependencies } = routes({ listSources: vi.fn(async () => [reading, other]) });
+    const response = await app.request(`/railway/${accountId}`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ environments: [railwayEnvironment], sources: [reading] });
+    expect(dependencies.railwayEnvironments).toHaveBeenCalledWith({ integrationAccountId: accountId, organizationId });
+  });
+
+  it("reads a Railway environment the connection shares, without a key", async () => {
+    const { app, dependencies } = routes();
+    const response = await post(app, "/railway", { environmentId: "env-prod", integrationAccountId: accountId });
+    expect(response.status).toBe(201);
+    expect(dependencies.createKey).not.toHaveBeenCalled();
+    expect(dependencies.saveSource).toHaveBeenCalledWith({
+      createdBy: "user-1",
+      displayName: "shop · production",
+      externalId: "env-prod",
+      integrationAccountId: accountId,
+      organizationId,
+      provider: "railway",
+      state: {
+        environmentName: "production",
+        projectId: "project-1",
+        projectName: "shop",
+        services: {},
+        workspaceId: "workspace-1",
+      },
+      status: "pending",
+    });
+
+    const unshared = await post(app, "/railway", { environmentId: "env-other", integrationAccountId: accountId });
+    expect(unshared.status).toBe(404);
+    expect(dependencies.saveSource).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps an environment that is already read as it is", async () => {
+    const reading = {
+      createdAt: "",
+      displayName: "shop · production",
+      externalId: "env-prod",
+      id: sourceId,
+      integrationAccountId: accountId,
+      lastError: null,
+      lastReceivedAt: "2026-11-13T10:00:00.000Z",
+      provider: "railway" as const,
+      state: { logsCursor: "2026-11-13T09:59:40.000Z" },
+      status: "active" as const,
+    };
+    const { app, dependencies } = routes({ listSources: vi.fn(async () => [reading]) });
+    const response = await post(app, "/railway", { environmentId: "env-prod", integrationAccountId: accountId });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ sourceId });
+    expect(dependencies.saveSource).not.toHaveBeenCalled();
+
+    // Added from another connection, it moves there and keeps its cursor.
+    const moved = routes({ listSources: vi.fn(async () => [{ ...reading, integrationAccountId: "old-connection" }]) });
+    const response2 = await post(moved.app, "/railway", { environmentId: "env-prod", integrationAccountId: accountId });
+    expect(response2.status).toBe(200);
+    expect(moved.dependencies.saveSource).toHaveBeenCalledWith(expect.objectContaining({
+      integrationAccountId: accountId,
+      state: expect.objectContaining({ logsCursor: "2026-11-13T09:59:40.000Z", projectName: "shop" }),
+      status: "active",
+    }));
+  });
+
+  it("asks to connect or reconnect Railway when its environments cannot be read", async () => {
+    const missing = routes({ railwayEnvironments: vi.fn(async () => null) });
+    expect((await missing.app.request(`/railway/${accountId}`)).status).toBe(404);
+
+    const refused = routes({
+      railwayEnvironments: vi.fn(async () => { throw new McpOAuthRefreshError(true); }),
+    });
+    const response = await refused.app.request(`/railway/${accountId}`);
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: "Railway refused the connection's access. Reconnect Railway." });
+
+    const failing = routes({ railwayEnvironments: vi.fn(async () => { throw new Error("Railway API error: slow down"); }) });
+    expect((await post(failing.app, "/railway", { environmentId: "env-prod", integrationAccountId: accountId })).status).toBe(502);
+    expect(failing.dependencies.saveSource).not.toHaveBeenCalled();
   });
 
   it("serves the AWS template", async () => {

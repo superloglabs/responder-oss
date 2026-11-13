@@ -60,11 +60,16 @@ describe("integrationAccountDetails", () => {
     });
   });
 
-  it("shows the Sentry organization and PostHog access level", () => {
+  it("shows the Sentry organization and the PostHog and Railway access levels", () => {
     expect(integrationAccountDetails({ provider: "sentry", externalAccountId: "install-1", metadata: { organizationSlug: "acme" } }))
       .toEqual({ organizationSlug: "acme" });
     expect(integrationAccountDetails({ provider: "posthog", externalAccountId: "uuid", metadata: { accessLevel: "read_only" } }))
       .toEqual({ accessLevel: "read_only" });
+    expect(integrationAccountDetails({
+      provider: "railway",
+      externalAccountId: "user-1:redeploy",
+      metadata: { accessLevel: "redeploy", workspaces: [{ id: "w", name: "Acme" }] },
+    })).toEqual({ accessLevel: "redeploy" });
   });
 
   it("adds nothing for providers without details", () => {

@@ -107,6 +107,16 @@ export function manageView(provider: string, name: string, account: IntegrationA
         rows: [{ label: "Workspace", value: account.displayName, action: "Reconnect" }],
         disconnect: `Signal deletes its access and stops reading Linear. A connection with Linear ticket records can only be reconnected. To remove the app too, revoke it in Linear's workspace settings. ${pastFindings}`,
       };
+    case "railway":
+      return {
+        connectedTo: account.displayName.replace(/ · redeploy$/u, ""),
+        rows: [{
+          label: "Access",
+          value: details.accessLevel === "redeploy" ? "Read and redeploy" : "Read only",
+          action: "Reconnect",
+        }],
+        disconnect: `Signal deletes its access, stops reading Railway, and stops reading its environments' logs. To remove the authorization too, revoke Superlog in your Railway account settings. ${pastFindings}`,
+      };
     case "posthog":
       return {
         connectedTo: "PostHog",
