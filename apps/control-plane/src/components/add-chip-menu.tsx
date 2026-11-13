@@ -25,7 +25,12 @@ export function AddChipMenu({ disabled, label, menuClassName, menuLabel, onAdd, 
   useEffect(() => {
     if (!open) return;
     const close = (event: MouseEvent) => { if (event.target instanceof Node && !root.current?.contains(event.target)) setOpen(false); };
-    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") setOpen(false); };
+    // The focused option unmounts with the menu, so focus goes back to the button.
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setOpen(false);
+      trigger.current?.focus();
+    };
     document.addEventListener("mousedown", close);
     document.addEventListener("keydown", escape);
     return () => {

@@ -295,11 +295,14 @@ export function createSourceRoutes(dependencies: SourceRouteDependencies = defau
       if (!listed.ok) return context.json({ error: listed.error }, listed.status);
       const environment = listed.environments.find((item) => item.environmentId === body.data.environmentId);
       if (!environment) return context.json({ error: "Choose an environment this Railway connection shares" }, 404);
-      // An environment already read keeps its cursor, so no logs are sent twice.
+      // An environment already read keeps its cursor, so no logs are sent
+      // twice. Added from another connection, it moves to this one.
       const existing = (await dependencies.listSources(granted.organizationId)).find(
         (source) => source.provider === "railway" && source.externalId === environment.environmentId,
       );
-      if (existing) return context.json({ sourceId: existing.id }, 200);
+      if (existing?.integrationAccountId === body.data.integrationAccountId) {
+        return context.json({ sourceId: existing.id }, 200);
+      }
       // The worker reads with the connection's token, so no key is made.
       const saved = await dependencies.saveSource({
         createdBy: granted.userId,
@@ -309,15 +312,16 @@ export function createSourceRoutes(dependencies: SourceRouteDependencies = defau
         organizationId: granted.organizationId,
         provider: "railway",
         state: {
+          services: {},
+          ...existing?.state,
           environmentName: environment.environmentName,
           projectId: environment.projectId,
           projectName: environment.projectName,
-          services: {},
           workspaceId: environment.workspaceId,
         },
-        status: "pending",
+        status: existing?.status ?? "pending",
       });
-      return context.json({ sourceId: saved.id }, 201);
+      return context.json({ sourceId: saved.id }, existing ? 200 : 201);
     })
     .post("/vercel", async (context) => {
       const granted = await access(context.req.raw.headers);

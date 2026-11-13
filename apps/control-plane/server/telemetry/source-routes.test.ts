@@ -311,6 +311,16 @@ describe("telemetry source routes", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ sourceId });
     expect(dependencies.saveSource).not.toHaveBeenCalled();
+
+    // Added from another connection, it moves there and keeps its cursor.
+    const moved = routes({ listSources: vi.fn(async () => [{ ...reading, integrationAccountId: "old-connection" }]) });
+    const response2 = await post(moved.app, "/railway", { environmentId: "env-prod", integrationAccountId: accountId });
+    expect(response2.status).toBe(200);
+    expect(moved.dependencies.saveSource).toHaveBeenCalledWith(expect.objectContaining({
+      integrationAccountId: accountId,
+      state: expect.objectContaining({ logsCursor: "2026-11-13T09:59:40.000Z", projectName: "shop" }),
+      status: "active",
+    }));
   });
 
   it("asks to connect or reconnect Railway when its environments cannot be read", async () => {

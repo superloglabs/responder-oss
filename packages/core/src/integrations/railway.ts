@@ -634,10 +634,13 @@ type Page<T> = Connection<T> & { pageInfo?: { endCursor?: string | null; hasNext
 
 const environmentFields = "edges { node { id name } } pageInfo { hasNextPage endCursor }";
 
+// Pages stay well under the 500 KB response limit: a project page holds at
+// most 50 projects with their first 20 environments, and a project with more
+// reads the rest in its own pages.
 const projectPageQuery = `query ($workspaceId: String!, $after: String) {
   workspace(workspaceId: $workspaceId) {
-    projects(first: 100, after: $after) {
-      edges { node { id name environments(first: 100, isEphemeral: false) { ${environmentFields} } } }
+    projects(first: 50, after: $after) {
+      edges { node { id name environments(first: 20, isEphemeral: false) { ${environmentFields} } } }
       pageInfo { hasNextPage endCursor }
     }
   }
