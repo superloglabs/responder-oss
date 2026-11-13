@@ -102,11 +102,18 @@ function subscriptionRefusal(output: string, model: string): string | null {
     return `${model} is not available with the connected ChatGPT subscription. Choose another model for this automation.`;
   if (failure.includes("auth error code: deactivated_workspace"))
     return "The ChatGPT workspace of the connected subscription is deactivated. Reconnect a ChatGPT account with an active plan.";
+  const message = responseErrorMessage(failure);
   // The ChatGPT plan's Codex usage limit. Codex's message says how to add
   // credit and when the limit resets.
-  const usageLimit = /hit your usage limit\.\s*(.*)$/su.exec(responseErrorMessage(failure));
+  const usageLimit = /hit your usage limit\.\s*(.*)$/su.exec(message);
   if (usageLimit)
     return `The connected ChatGPT subscription has reached its usage limit.${usageLimit[1] ? ` ${usageLimit[1].trim()}` : ""}`;
+  // A ChatGPT Business or Enterprise workspace pays for Codex with credits,
+  // and its owner can cap what members spend.
+  if (message.includes("Your workspace is out of credits."))
+    return "The ChatGPT workspace of the connected subscription is out of credits. Add credits in ChatGPT, or ask the workspace owner to.";
+  if (/You hit your spend cap set (in your workspace|by the owner of your workspace)\./u.test(message))
+    return "The connected ChatGPT subscription has reached the spend cap of its ChatGPT workspace. Raise the cap in ChatGPT, or ask the workspace owner to.";
   return null;
 }
 

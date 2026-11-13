@@ -477,6 +477,25 @@ describe("when the ChatGPT subscription has hit its usage limit", () => {
     await expect(run).rejects.toHaveProperty("workStarted", false);
   });
 
+  const outOfCredits = "The ChatGPT workspace of the connected subscription is out of credits. Add credits in ChatGPT, or ask the workspace owner to.";
+  const spendCap = "The connected ChatGPT subscription has reached the spend cap of its ChatGPT workspace. Raise the cap in ChatGPT, or ask the workspace owner to.";
+  it.each([
+    ["Your workspace is out of credits. Add credits to continue.", outOfCredits],
+    ["Your workspace is out of credits. Ask your workspace owner to refill in order to continue.", outOfCredits],
+    ["You hit your spend cap set in your workspace. Increase your spend cap to continue.", spendCap],
+    ["You hit your spend cap set by the owner of your workspace. Ask an owner to increase your spend cap to continue.", spendCap],
+  ])("refuses the run when Codex reports %s", async (codexMessage, refusal) => {
+    const run = runWith([
+      JSON.stringify({ type: "turn.started" }),
+      JSON.stringify({ type: "error", message: codexMessage }),
+      JSON.stringify({ type: "turn.failed", error: { message: codexMessage } }),
+    ]);
+
+    await expect(run).rejects.toBeInstanceOf(AutomationSubscriptionRefusalError);
+    await expect(run).rejects.toHaveProperty("message", refusal);
+    await expect(run).rejects.toHaveProperty("workStarted", false);
+  });
+
   it("records that the turn had already done work when the limit came partway through", async () => {
     const run = runWith([
       JSON.stringify({ type: "turn.started" }),
