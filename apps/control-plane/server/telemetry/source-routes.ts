@@ -24,6 +24,7 @@ import {
 import { gcpConnectionCredentialsSchema } from "../../../../packages/core/src/integrations/gcp.js";
 import { vercelCredentialsSchema } from "../../../../packages/core/src/integrations/vercel.js";
 import { telemetryCollectorUrl } from "../../../../packages/core/src/telemetry/client.js";
+import { telemetryUnavailableCode } from "../../../../packages/core/src/telemetry/sources/availability.js";
 import {
   awsTelemetryCloudFormationTemplate,
   awsTelemetryDeployCommand,
@@ -123,6 +124,10 @@ function vercelDrainIds(state: unknown): string[] {
   return parsed.success ? [...Object.values(parsed.data.drains), ...parsed.data.staleDrains] : [];
 }
 
+function deniedBody(denied: { code?: string; error: string }) {
+  return denied.code ? { code: denied.code, error: denied.error } : { error: denied.error };
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -130,12 +135,12 @@ function errorMessage(error: unknown): string {
 export function createSourceRoutes(dependencies: SourceRouteDependencies = defaultDependencies) {
   async function access(headers: Headers): Promise<
     | { ok: true; organizationId: string; role: string; userId: string }
-    | { error: string; ok: false; status: 401 | 403 | 404 | 409 }
+    | { code?: typeof telemetryUnavailableCode; error: string; ok: false; status: 401 | 403 | 404 | 409 }
   > {
     const tenant = await dependencies.tenant(headers);
     if (tenant.ok === false) return { error: tenant.error, ok: false, status: tenant.status };
     if (!dependencies.collectorUrl() || !(await dependencies.receivesTelemetry(tenant.organizationId))) {
-      return { error: "Sending telemetry is not available", ok: false, status: 404 };
+      return { code: telemetryUnavailableCode, error: "Sending telemetry is not available", ok: false, status: 404 };
     }
     return { ok: true, organizationId: tenant.organizationId, role: tenant.role, userId: tenant.user.id };
   }
@@ -180,7 +185,7 @@ export function createSourceRoutes(dependencies: SourceRouteDependencies = defau
   return new Hono()
     .get("/", async (context) => {
       const granted = await access(context.req.raw.headers);
-      if (!granted.ok) return context.json({ error: granted.error }, granted.status);
+      if (!granted.ok) return context.json(deniedBody(granted), granted.status);
       const [sources, accounts] = await Promise.all([
         dependencies.listSources(granted.organizationId),
         dependencies.accounts(granted.organizationId),
@@ -203,7 +208,7 @@ export function createSourceRoutes(dependencies: SourceRouteDependencies = defau
     )
     .post("/aws", async (context) => {
       const granted = await access(context.req.raw.headers);
-      if (!granted.ok) return context.json({ error: granted.error }, granted.status);
+      if (!granted.ok) return context.json(deniedBody(granted), granted.status);
       const body = awsSchema.safeParse(await context.req.json().catch(() => null));
       if (!body.success) return context.json({ error: "Choose a commercial AWS region" }, 400);
       const resourcePrefix = createAwsTelemetryResourcePrefix();
@@ -239,7 +244,7 @@ export function createSourceRoutes(dependencies: SourceRouteDependencies = defau
     })
     .post("/gcp", async (context) => {
       const granted = await access(context.req.raw.headers);
-      if (!granted.ok) return context.json({ error: granted.error }, granted.status);
+      if (!granted.ok) return context.json(deniedBody(granted), granted.status);
       const body = accountSchema.safeParse(await context.req.json().catch(() => null));
       if (!body.success) return context.json({ error: "Choose a Google Cloud connection" }, 400);
       const account = await dependencies.getAccount({
@@ -266,7 +271,7 @@ export function createSourceRoutes(dependencies: SourceRouteDependencies = defau
     // Railway environments one connection shares, and those already read.
     .get("/railway/:integrationAccountId", async (context) => {
       const granted = await access(context.req.raw.headers);
-      if (!granted.ok) return context.json({ error: granted.error }, granted.status);
+      if (!granted.ok) return context.json(deniedBody(granted), granted.status);
       const integrationAccountId = z.uuid().safeParse(context.req.param("integrationAccountId"));
       if (!integrationAccountId.success) return context.json({ error: "Connect Railway first" }, 404);
       const [listed, sources] = await Promise.all([
@@ -283,13 +288,18 @@ export function createSourceRoutes(dependencies: SourceRouteDependencies = defau
     })
     .post("/railway", async (context) => {
       const granted = await access(context.req.raw.headers);
-      if (!granted.ok) return context.json({ error: granted.error }, granted.status);
+      if (!granted.ok) return context.json(deniedBody(granted), granted.status);
       const body = railwaySchema.safeParse(await context.req.json().catch(() => null));
       if (!body.success) return context.json({ error: "Choose a Railway environment" }, 400);
       const listed = await railwayEnvironmentsFor(granted.organizationId, body.data.integrationAccountId);
       if (!listed.ok) return context.json({ error: listed.error }, listed.status);
       const environment = listed.environments.find((item) => item.environmentId === body.data.environmentId);
       if (!environment) return context.json({ error: "Choose an environment this Railway connection shares" }, 404);
+      // An environment already read keeps its cursor, so no logs are sent twice.
+      const existing = (await dependencies.listSources(granted.organizationId)).find(
+        (source) => source.provider === "railway" && source.externalId === environment.environmentId,
+      );
+      if (existing) return context.json({ sourceId: existing.id }, 200);
       // The worker reads with the connection's token, so no key is made.
       const saved = await dependencies.saveSource({
         createdBy: granted.userId,
@@ -311,7 +321,7 @@ export function createSourceRoutes(dependencies: SourceRouteDependencies = defau
     })
     .post("/vercel", async (context) => {
       const granted = await access(context.req.raw.headers);
-      if (!granted.ok) return context.json({ error: granted.error }, granted.status);
+      if (!granted.ok) return context.json(deniedBody(granted), granted.status);
       const body = accountSchema.safeParse(await context.req.json().catch(() => null));
       if (!body.success) return context.json({ error: "Choose a Vercel connection" }, 400);
       const target = await vercelTarget(granted.organizationId, body.data.integrationAccountId);
@@ -371,7 +381,7 @@ export function createSourceRoutes(dependencies: SourceRouteDependencies = defau
     })
     .delete("/:sourceId", async (context) => {
       const granted = await access(context.req.raw.headers);
-      if (!granted.ok) return context.json({ error: granted.error }, granted.status);
+      if (!granted.ok) return context.json(deniedBody(granted), granted.status);
       const sourceId = z.uuid().safeParse(context.req.param("sourceId"));
       const source = sourceId.success
         ? await dependencies.getSource({ id: sourceId.data, organizationId: granted.organizationId })

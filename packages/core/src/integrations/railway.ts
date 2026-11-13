@@ -630,22 +630,77 @@ export interface RailwayEnvironment {
   workspaceName: string;
 }
 
-const environmentListQuery = `query ($workspaceId: String!) {
+type Page<T> = Connection<T> & { pageInfo?: { endCursor?: string | null; hasNextPage: boolean } | null };
+
+const environmentFields = "edges { node { id name } } pageInfo { hasNextPage endCursor }";
+
+const projectPageQuery = `query ($workspaceId: String!, $after: String) {
   workspace(workspaceId: $workspaceId) {
-    projects(first: 100) {
-      edges { node {
-        id
-        name
-        environments(first: 50, isEphemeral: false) { edges { node { id name } } }
-      } }
+    projects(first: 100, after: $after) {
+      edges { node { id name environments(first: 100, isEphemeral: false) { ${environmentFields} } } }
+      pageInfo { hasNextPage endCursor }
     }
   }
 }`;
 
+const environmentPageQuery = `query ($projectId: String!, $after: String) {
+  project(id: $projectId) { environments(first: 100, after: $after, isEphemeral: false) { ${environmentFields} } }
+}`;
+
+// Bounds the pages read for one workspace or project.
+const MAX_LIST_PAGES = 20;
+
+// Every node of a paged connection, reading pages until the last one.
+async function allPages<T>(read: (after: string | null) => Promise<Page<T>>, first?: Page<T>): Promise<T[]> {
+  const items: T[] = [];
+  let page = first ?? await read(null);
+  for (let count = 1; ; count += 1) {
+    items.push(...nodes(page));
+    const next = page.pageInfo?.hasNextPage ? page.pageInfo.endCursor : null;
+    if (!next || count >= MAX_LIST_PAGES) return items;
+    page = await read(next);
+  }
+}
+
+async function workspaceEnvironments(
+  accessToken: string,
+  workspace: RailwayWorkspace,
+  options: RailwayCallOptions,
+): Promise<RailwayEnvironment[]> {
+  type Project = { environments: Page<{ id: string; name: string }>; id: string; name: string };
+  const projects = await allPages<Project>(async (after) => (await railwayGraphql<{ workspace: { projects: Page<Project> } }>({
+    ...options,
+    accessToken,
+    query: projectPageQuery,
+    variables: { after, workspaceId: workspace.id },
+  })).workspace.projects);
+  const listed = await Promise.all(projects.map(async (project) => {
+    const environments = await allPages<{ id: string; name: string }>(
+      async (after) => (await railwayGraphql<{ project: { environments: Page<{ id: string; name: string }> } }>({
+        ...options,
+        accessToken,
+        query: environmentPageQuery,
+        variables: { after, projectId: project.id },
+      })).project.environments,
+      project.environments,
+    );
+    return environments.map((environment) => ({
+      environmentId: environment.id,
+      environmentName: environment.name,
+      projectId: project.id,
+      projectName: project.name,
+      workspaceId: workspace.id,
+      workspaceName: workspace.name,
+    }));
+  }));
+  return listed.flat();
+}
+
 /**
  * The persistent environments of every project the connection shares, by
  * workspace and project. Pull request environments are left out: they come
- * and go with each pull request.
+ * and go with each pull request. A workspace that cannot be read is left out
+ * so the others still list; when none can be read, the first error is thrown.
  */
 export async function railwayEnvironments(
   connection: Pick<RailwayToolConnection, "accessToken" | "workspaces">,
@@ -654,26 +709,12 @@ export async function railwayEnvironments(
   const workspaces = connection.workspaces.length > 0
     ? connection.workspaces
     : await railwaySharedWorkspaces({ ...options, accessToken: connection.accessToken });
-  const listed = await Promise.all(workspaces.map(async (workspace) => {
-    const data = await railwayGraphql<{
-      workspace: { projects: Connection<{ environments: Connection<{ id: string; name: string }>; id: string; name: string }> };
-    }>({
-      ...options,
-      accessToken: connection.accessToken,
-      query: environmentListQuery,
-      variables: { workspaceId: workspace.id },
-    });
-    return nodes(data.workspace.projects).flatMap((project) =>
-      nodes(project.environments).map((environment) => ({
-        environmentId: environment.id,
-        environmentName: environment.name,
-        projectId: project.id,
-        projectName: project.name,
-        workspaceId: workspace.id,
-        workspaceName: workspace.name,
-      })));
-  }));
-  return listed.flat();
+  const results = await Promise.allSettled(
+    workspaces.map((workspace) => workspaceEnvironments(connection.accessToken, workspace, options)),
+  );
+  const failure = results.find((result) => result.status === "rejected");
+  if (failure && results.every((result) => result.status === "rejected")) throw failure.reason;
+  return results.flatMap((result) => (result.status === "fulfilled" ? result.value : []));
 }
 
 /** The names of a project's services, by service ID. */

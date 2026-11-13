@@ -1203,8 +1203,9 @@ option needs a cell with a collector
   /api/telemetry/sources/railway` with `integrationAccountId` and
   `environmentId`). Pull request environments are not offered. The worker
   reads each environment's runtime logs every minute through Railway's
-  `environmentLogs` query with the connection's OAuth token, which read-only
-  access allows; it refreshes the token under the connection's credential
+  `environmentLogs` query with the connection's OAuth token. Read-only access
+  is enough; an environment chosen on a redeploy connection is read with that
+  connection's token, and the reader only reads. It refreshes the token under the connection's credential
   lease when it has less than five minutes left. Reads stop 20 seconds behind
   the present, start five minutes back for a new environment, and skip ahead
   when more than an hour behind. A window holds up to 10,000 logs a minute;

@@ -66,6 +66,43 @@ describe("readRailwayLogWindow", () => {
   });
 });
 
+describe("readRailwayLogWindow limits", () => {
+  it("keeps same-time lines from different services", async () => {
+    const api = railway([
+      { ...log("2026-11-13T09:58:00.000000000Z", "ready"), tags: { serviceId: "svc-api" } },
+      { ...log("2026-11-13T09:58:00.000000000Z", "ready"), tags: { serviceId: "svc-worker" } },
+    ]);
+    const result = await readRailwayLogWindow({
+      accessToken: "token",
+      end: "2026-11-13T09:59:40.000Z",
+      environmentId: "env-prod",
+      fetch: api.fetch,
+      start: "2026-11-13T09:55:00.000Z",
+    });
+    expect(result.lines).toHaveLength(2);
+  });
+
+  it("skips the oldest logs of a window with more than ten pages, and still moves the cursor", async () => {
+    const logs = Array.from({ length: 10_500 }, (_, index) =>
+      log(new Date(Date.parse("2026-11-13T09:55:00Z") + index * 10).toISOString().replace("Z", "000000Z"), `line ${index}`));
+    const api = railway(logs);
+
+    const result = await pullRailwaySource({
+      accessToken: "token",
+      environmentId: "env-prod",
+      fetch: api.fetch,
+      forward: async () => true,
+      now,
+      state: { logsCursor: "2026-11-13T09:55:00.000Z", services: { "svc-api": "api" }, servicesReadAt: now.toISOString() },
+    });
+
+    expect(api.calls).toHaveLength(10);
+    expect(result).toMatchObject({ error: null, truncated: true });
+    expect(result.logs).toBeLessThan(10_500);
+    expect(result.state.logsCursor).toBe("2026-11-13T09:59:40.000Z");
+  });
+});
+
 describe("pullRailwaySource", () => {
   it("starts five minutes back, names services, and moves the cursor", async () => {
     const api = railway([

@@ -1,5 +1,6 @@
 import { apiErrorMessage } from "./agents-api";
 import type { TelemetrySourceSummary } from "../../../packages/core/src/db/telemetry-sources";
+import { telemetryUnavailableCode } from "../../../packages/core/src/telemetry/sources/availability";
 
 export type { TelemetrySourceSummary };
 
@@ -65,8 +66,8 @@ export type RailwayLogReading = {
 
 export async function fetchRailwayLogReading(integrationAccountId: string): Promise<RailwayLogReading | null> {
   const response = await fetch(`${base}/railway/${encodeURIComponent(integrationAccountId)}`);
-  const body = (await response.json().catch(() => null)) as (RailwayLogReading & { error?: string }) | null;
-  if (response.status === 404 && body?.error === "Sending telemetry is not available") return null;
+  const body = (await response.json().catch(() => null)) as (RailwayLogReading & { code?: string; error?: string }) | null;
+  if (response.status === 404 && body?.code === telemetryUnavailableCode) return null;
   if (!response.ok || !body) throw new Error(apiErrorMessage(body, response.status));
   return { environments: body.environments ?? [], sources: body.sources ?? [] };
 }

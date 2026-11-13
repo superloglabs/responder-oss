@@ -59,6 +59,17 @@ describe("railwayAccessToken", () => {
     await expect(railwayAccessToken(target, writable.deps)).rejects.toBeInstanceOf(RailwayScopeError);
   });
 
+  it("does not store a refreshed grant with more access than chosen", async () => {
+    const { deps, saved } = dependencies(credentials(), {
+      now: () => issuedAt + 58 * 60_000,
+      refresh: vi.fn(async () => ({
+        tokens: { access_token: "new-token", expires_in: 3600, scope: "openid workspace:admin", token_type: "Bearer" },
+      })),
+    });
+    await expect(railwayAccessToken(target, deps)).rejects.toBeInstanceOf(RailwayScopeError);
+    expect(saved).toHaveLength(0);
+  });
+
   it("passes on Railway's refusal", async () => {
     const { deps } = dependencies(credentials(), {
       now: () => issuedAt + 2 * 3_600_000,

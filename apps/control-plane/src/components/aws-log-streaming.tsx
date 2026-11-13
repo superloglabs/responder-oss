@@ -1,5 +1,5 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
-import { IconExternalLink, IconPlus, IconX } from "@tabler/icons-react";
+import { useEffect, useId, useState, type ReactNode } from "react";
+import { IconExternalLink, IconX } from "@tabler/icons-react";
 import {
   awsLogSubscriptionStatusLabels,
   fetchAwsLogStreaming,
@@ -9,6 +9,7 @@ import {
   type AwsStackUpdate,
 } from "../aws-log-subscriptions-api";
 import { Alert, Button, CodeBlock } from "../design-system";
+import { AddChipMenu } from "./add-chip-menu";
 import "./aws-log-streaming.css";
 
 // The parts of a connected AWS account's log streaming (ADR 0015): `row` is
@@ -138,46 +139,15 @@ function RegionChips({ canManage, error, offered, onAdd, onRemove, saving, subsc
         </li>;
       })}
       {subscriptions.length === 0 && !canManage && <li className="awsLogStreaming__item awsLogStreaming__none">None</li>}
-      {canManage && addable.length > 0 && <li className="awsLogStreaming__item"><AddRegion disabled={saving} regions={addable} onAdd={onAdd} /></li>}
+      {canManage && addable.length > 0 && <li className="awsLogStreaming__item"><AddChipMenu
+        disabled={saving}
+        label="Add region"
+        menuLabel="Regions"
+        onAdd={onAdd}
+        options={addable.map((region) => ({ label: region, value: region }))} /></li>}
     </ul>
     {failures.map((row) => <p key={row.region} className="awsLogStreaming__error">{row.region}: {row.lastError}</p>)}
     {error && <p className="awsLogStreaming__error" role="alert">{error}</p>}
-  </div>;
-}
-
-function AddRegion({ disabled, regions, onAdd }: { disabled: boolean; regions: string[]; onAdd: (region: string) => void }) {
-  const [open, setOpen] = useState(false);
-  const root = useRef<HTMLDivElement>(null);
-  const trigger = useRef<HTMLButtonElement>(null);
-  // Choosing a region closes the menu; focus goes back to the button so
-  // keyboard users keep their place.
-  const choose = (region: string) => {
-    setOpen(false);
-    onAdd(region);
-    requestAnimationFrame(() => trigger.current?.focus());
-  };
-  useEffect(() => {
-    if (!open) return;
-    const close = (event: MouseEvent) => { if (event.target instanceof Node && !root.current?.contains(event.target)) setOpen(false); };
-    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") setOpen(false); };
-    document.addEventListener("mousedown", close);
-    document.addEventListener("keydown", escape);
-    return () => {
-      document.removeEventListener("mousedown", close);
-      document.removeEventListener("keydown", escape);
-    };
-  }, [open]);
-  return <div className="awsAddRegion" ref={root}>
-    <button aria-expanded={open} aria-haspopup="listbox" className="awsAddRegion__button" disabled={disabled} onClick={() => setOpen(!open)} ref={trigger} type="button">
-      <IconPlus aria-hidden="true" size={13} stroke={2} />Add region
-    </button>
-    {open && <ul aria-label="Regions" className="awsAddRegion__menu" role="listbox">
-      {regions.map((region) => <li key={region} aria-selected={false} role="option" tabIndex={0}
-        onClick={() => choose(region)}
-        onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); choose(region); } }}>
-        {region}
-      </li>)}
-    </ul>}
   </div>;
 }
 

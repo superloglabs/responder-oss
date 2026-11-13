@@ -62,6 +62,9 @@ describe("telemetry source routes", () => {
   });
 
   it("is not there for a workspace without telemetry or Signal", async () => {
+    const unavailable = await routes({ receivesTelemetry: vi.fn(async () => false) }).app.request(`/railway/${accountId}`);
+    expect(unavailable.status).toBe(404);
+    expect(await unavailable.json()).toEqual({ code: "telemetry_unavailable", error: "Sending telemetry is not available" });
     expect((await routes({ receivesTelemetry: vi.fn(async () => false) }).app.request("/")).status).toBe(404);
     expect((await routes({ collectorUrl: () => null }).app.request("/")).status).toBe(404);
   });
@@ -288,6 +291,26 @@ describe("telemetry source routes", () => {
     const unshared = await post(app, "/railway", { environmentId: "env-other", integrationAccountId: accountId });
     expect(unshared.status).toBe(404);
     expect(dependencies.saveSource).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps an environment that is already read as it is", async () => {
+    const reading = {
+      createdAt: "",
+      displayName: "shop · production",
+      externalId: "env-prod",
+      id: sourceId,
+      integrationAccountId: accountId,
+      lastError: null,
+      lastReceivedAt: "2026-11-13T10:00:00.000Z",
+      provider: "railway" as const,
+      state: { logsCursor: "2026-11-13T09:59:40.000Z" },
+      status: "active" as const,
+    };
+    const { app, dependencies } = routes({ listSources: vi.fn(async () => [reading]) });
+    const response = await post(app, "/railway", { environmentId: "env-prod", integrationAccountId: accountId });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ sourceId });
+    expect(dependencies.saveSource).not.toHaveBeenCalled();
   });
 
   it("asks to connect or reconnect Railway when its environments cannot be read", async () => {

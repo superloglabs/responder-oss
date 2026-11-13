@@ -344,6 +344,9 @@ function DatadogConnect({ integration, listPath, onBack }: PageProps) {
 
 // --- Providers approved on their own site -----------------------------------
 
+// What Signal does with Railway, shared by its connect and manage pages.
+export const railwaySignalReads = "Signal reads your Railway logs, deployments, and metrics.";
+
 const approvals: Record<"sentry" | "linear" | "posthog" | "railway", {
   name: string; description: string; allowed: string[]; denied: string;
   // Come back to this page rather than the list, to finish setup here.
@@ -369,7 +372,7 @@ const approvals: Record<"sentry" | "linear" | "posthog" | "railway", {
   },
   railway: {
     name: "Railway",
-    description: "Signal reads your Railway logs, deployments, and metrics. After you connect, choose the environments whose logs Superlog reads, so Signal sees new errors as they happen.",
+    description: `${railwaySignalReads} After you connect, choose the environments whose logs Superlog reads, so Signal sees new errors as they happen.`,
     allowed: ["Read projects, deployments, and runtime, build, and HTTP logs", "Read resource and HTTP metrics"],
     denied: "Read-only access. Never redeploys, restarts, or reads environment variables",
     returnHere: true,

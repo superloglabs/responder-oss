@@ -50,6 +50,8 @@ export async function railwayAccessToken(
         }),
       );
       if (oauth === current.oauth) return { value: current };
+      // A refreshed grant with more access than chosen is never stored.
+      assertRailwayGrant(oauth.tokens, current.accessLevel);
       const updated = { ...current, oauth, tokenIssuedAt: now };
       return { encryptedCredentials: encryptCredentials(updated), value: updated };
     },

@@ -82,8 +82,9 @@ types. `drizzle/` contains the ordered schema history.
   after every refresh. A redeploy connection holds member access, and its
   redeploy and restart tools are offered only to tag mode and automations.
   Railway has no log drains, so the worker reads the runtime logs of the
-  environments a workspace chooses every minute with the same token and sends
-  them to the collector as OTLP logs.
+  environments a workspace chooses every minute and sends them to the
+  collector as OTLP logs. It uses the token of the connection the
+  environment was chosen with, read-only or redeploy, and only reads.
 - Linear context uses its read-only MCP endpoint. Ticket creation goes through
   a separate controlled tool that records a stable request before writing and
   stores the resulting Linear identifier and link. Automations reach Linear

@@ -84,7 +84,13 @@ export async function readRailwayLogWindow(input: {
       const nanos = BigInt(rfc3339ToNanos(log.timestamp));
       if (nanos <= startNanos || nanos > endNanos) continue;
       // Pages overlap at their edges, where they share a millisecond.
-      const key = `${log.timestamp}\u0000${log.tags?.deploymentInstanceId ?? ""}\u0000${log.message}`;
+      const key = [
+        log.timestamp,
+        log.tags?.serviceId ?? "",
+        log.tags?.deploymentId ?? "",
+        log.tags?.deploymentInstanceId ?? "",
+        log.message,
+      ].join("\u0000");
       if (seen.has(key)) continue;
       seen.add(key);
       lines.push(log);

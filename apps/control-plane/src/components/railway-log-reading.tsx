@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { IconPlus, IconX } from "@tabler/icons-react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { IconX } from "@tabler/icons-react";
 import {
   fetchRailwayLogReading,
   readRailwayEnvironment,
@@ -9,6 +9,7 @@ import {
   type RailwayLogReading as RailwayLogReadingState,
   type TelemetrySourceSummary,
 } from "../telemetry-sources-api";
+import { AddChipMenu } from "./add-chip-menu";
 // The environment chips reuse the AWS region chips.
 import "./aws-log-streaming.css";
 
@@ -127,48 +128,16 @@ function EnvironmentChips({ environments, error, onAdd, onRemove, saving, source
           </button>
         </li>;
       })}
-      {addable.length > 0 && <li className="awsLogStreaming__item"><AddEnvironment disabled={saving} environments={addable} onAdd={onAdd} /></li>}
+      {addable.length > 0 && <li className="awsLogStreaming__item"><AddChipMenu
+        disabled={saving}
+        label="Add environment"
+        menuClassName="railwayEnvironmentMenu"
+        menuLabel="Railway environments"
+        onAdd={onAdd}
+        options={addable.map((environment) => ({ label: environmentLabel(environment), value: environment.environmentId }))} /></li>}
       {sources.length === 0 && addable.length === 0 && <li className="awsLogStreaming__item awsLogStreaming__none">This connection shares no environments</li>}
     </ul>
     {failures.map((source) => <p key={source.id} className="awsLogStreaming__error">{source.displayName}: {source.lastError}</p>)}
     {error && <p className="awsLogStreaming__error" role="alert">{error}</p>}
-  </div>;
-}
-
-function AddEnvironment({ disabled, environments, onAdd }: {
-  disabled: boolean;
-  environments: RailwayEnvironmentOption[];
-  onAdd: (environmentId: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const root = useRef<HTMLDivElement>(null);
-  const trigger = useRef<HTMLButtonElement>(null);
-  const choose = (environmentId: string) => {
-    setOpen(false);
-    onAdd(environmentId);
-    requestAnimationFrame(() => trigger.current?.focus());
-  };
-  useEffect(() => {
-    if (!open) return;
-    const close = (event: MouseEvent) => { if (event.target instanceof Node && !root.current?.contains(event.target)) setOpen(false); };
-    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") setOpen(false); };
-    document.addEventListener("mousedown", close);
-    document.addEventListener("keydown", escape);
-    return () => {
-      document.removeEventListener("mousedown", close);
-      document.removeEventListener("keydown", escape);
-    };
-  }, [open]);
-  return <div className="awsAddRegion" ref={root}>
-    <button aria-expanded={open} aria-haspopup="listbox" className="awsAddRegion__button" disabled={disabled} onClick={() => setOpen(!open)} ref={trigger} type="button">
-      <IconPlus aria-hidden="true" size={13} stroke={2} />Add environment
-    </button>
-    {open && <ul aria-label="Railway environments" className="awsAddRegion__menu railwayEnvironmentMenu" role="listbox">
-      {environments.map((environment) => <li key={environment.environmentId} aria-selected={false} role="option" tabIndex={0}
-        onClick={() => choose(environment.environmentId)}
-        onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); choose(environment.environmentId); } }}>
-        {environmentLabel(environment)}
-      </li>)}
-    </ul>}
   </div>;
 }
