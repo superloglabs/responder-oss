@@ -32,6 +32,7 @@ import {
   assertRailwayGrant,
   parseRailwayCredentials,
   RAILWAY_API_ORIGIN,
+  RAILWAY_RESOURCE_INDICATOR,
   railwayWorkspacesSchema,
   withRailwayGrantScope,
   type RailwayAccessLevel,
@@ -2468,6 +2469,7 @@ export async function getRuntimeRailwayConnections(
             credentials.oauth,
             await refreshCustomMcpOAuth({
               mcpUrl: RAILWAY_API_ORIGIN,
+              resourceIndicator: RAILWAY_RESOURCE_INDICATOR,
               oauth: credentials.oauth,
               redirectUrl: mcpOAuthRedirectUrl("railway"),
             }),

@@ -19,8 +19,10 @@ vi.mock("@modelcontextprotocol/sdk/client/auth.js", async (importOriginal) => ({
   auth: mocks.auth,
 }));
 
+import { selectResourceURL } from "@modelcontextprotocol/sdk/client/auth.js";
 import {
   beginCustomMcpOAuth,
+  CustomMcpOAuthProvider,
   McpOAuthRefreshError,
   oauthConnectionRefreshMessage,
   refreshCustomMcpOAuth,
@@ -72,6 +74,30 @@ describe("custom MCP OAuth discovery", () => {
         scope: "openid offline_access",
       }),
     );
+  });
+});
+
+describe("custom MCP OAuth resource indicator", () => {
+  const redirectUrl = "https://responder.example/api/integrations/railway/callback";
+  const metadata = {
+    authorization_servers: ["https://backboard.railway.com"],
+    resource: "https://backboard.railway.com",
+  };
+
+  it("names the advertised resource by default", async () => {
+    const provider = new CustomMcpOAuthProvider({ redirectUrl });
+
+    await expect(
+      selectResourceURL("https://backboard.railway.com", provider, metadata),
+    ).resolves.toEqual(new URL("https://backboard.railway.com"));
+  });
+
+  it("leaves the resource out when the server rejects it", async () => {
+    const provider = new CustomMcpOAuthProvider({ redirectUrl, resourceIndicator: false });
+
+    await expect(
+      selectResourceURL("https://backboard.railway.com", provider, metadata),
+    ).resolves.toBeUndefined();
   });
 });
 

@@ -75,6 +75,7 @@ import {
   assertRailwayGrant,
   parseRailwayCredentials,
   RAILWAY_API_ORIGIN,
+  RAILWAY_RESOURCE_INDICATOR,
   railwayAccessLevelSchema,
   railwayOAuthScope,
   RailwayScopeError,
@@ -1170,6 +1171,7 @@ export async function startIntegrationConnection(input: {
         clientMetadataUrl: railwayClientMetadataUrl(),
         connectionState,
         mcpUrl: RAILWAY_API_ORIGIN,
+        resourceIndicator: RAILWAY_RESOURCE_INDICATOR,
         redirectUrl: integrationCallbackUrl("railway"),
         scope: railwayOAuthScope(accessLevel),
       });
@@ -3111,6 +3113,7 @@ export const integrationRoutes = new Hono()
       const oauth = await finishCustomMcpOAuth({
         authorizationCode,
         mcpUrl: RAILWAY_API_ORIGIN,
+        resourceIndicator: RAILWAY_RESOURCE_INDICATOR,
         oauth: credentials.oauth,
         redirectUrl: integrationCallbackUrl("railway"),
       });
