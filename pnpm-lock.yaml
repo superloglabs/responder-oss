@@ -15,6 +15,7 @@ overrides:
   minimatch@10>brace-expansion: 5.0.9
 
 patchedDependencies:
+  '@openai/agents-openai@0.14.2': 585eddaa7cad4773dcc29112ba3ea7a848b8b8e72d01eaccf785d85001397105
   pg-boss@12.26.3: c252083db358e5890b1cea4a5308f5456499925e89dceb7b3075534fec088b7f
 
 importers:
@@ -6998,7 +6999,7 @@ snapshots:
       - '@smithy/signature-v4'
       - supports-color
 
-  '@openai/agents-openai@0.14.2(@aws-sdk/credential-provider-node@3.972.80)(@smithy/signature-v4@5.7.2)(supports-color@8.1.1)(ws@8.21.3)(zod@4.4.3)':
+  '@openai/agents-openai@0.14.2(patch_hash=585eddaa7cad4773dcc29112ba3ea7a848b8b8e72d01eaccf785d85001397105)(@aws-sdk/credential-provider-node@3.972.80)(@smithy/signature-v4@5.7.2)(supports-color@8.1.1)(ws@8.21.3)(zod@4.4.3)':
     dependencies:
       '@openai/agents-core': 0.14.2(@aws-sdk/credential-provider-node@3.972.80)(@smithy/signature-v4@5.7.2)(supports-color@8.1.1)(ws@8.21.3)(zod@4.4.3)
       debug: 4.4.3(supports-color@8.1.1)
@@ -7031,7 +7032,7 @@ snapshots:
   '@openai/agents@0.14.2(@aws-sdk/credential-provider-node@3.972.80)(@smithy/signature-v4@5.7.2)(supports-color@8.1.1)(ws@8.21.3)(zod@4.4.3)':
     dependencies:
       '@openai/agents-core': 0.14.2(@aws-sdk/credential-provider-node@3.972.80)(@smithy/signature-v4@5.7.2)(supports-color@8.1.1)(ws@8.21.3)(zod@4.4.3)
-      '@openai/agents-openai': 0.14.2(@aws-sdk/credential-provider-node@3.972.80)(@smithy/signature-v4@5.7.2)(supports-color@8.1.1)(ws@8.21.3)(zod@4.4.3)
+      '@openai/agents-openai': 0.14.2(patch_hash=585eddaa7cad4773dcc29112ba3ea7a848b8b8e72d01eaccf785d85001397105)(@aws-sdk/credential-provider-node@3.972.80)(@smithy/signature-v4@5.7.2)(supports-color@8.1.1)(ws@8.21.3)(zod@4.4.3)
       '@openai/agents-realtime': 0.14.2(@aws-sdk/credential-provider-node@3.972.80)(@smithy/signature-v4@5.7.2)(supports-color@8.1.1)(zod@4.4.3)
       debug: 4.4.3(supports-color@8.1.1)
       openai: 6.49.0(@aws-sdk/credential-provider-node@3.972.80)(@smithy/signature-v4@5.7.2)(ws@8.21.3)(zod@4.4.3)

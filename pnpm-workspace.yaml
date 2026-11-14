@@ -53,4 +53,5 @@ minimumReleaseAgeExclude:
   - better-call@1.4.5
 
 patchedDependencies:
+  '@openai/agents-openai@0.14.2': patches/@openai__agents-openai@0.14.2.patch
   pg-boss@12.26.3: patches/pg-boss@12.26.3.patch
