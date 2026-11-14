@@ -434,6 +434,9 @@ export const slackConnectChannels = pgTable(
     // The channel in the operator's Slack, set once it is created.
     channelId: text("channel_id"),
     channelName: text("channel_name"),
+    // The channel's ID in the workspace's Slack, returned when its Slack app
+    // accepts the invitation.
+    workspaceChannelId: text("workspace_channel_id"),
     // pending: the channel is being created or shared; accepted: the
     // workspace's Slack app joined it, and the member who connected Slack is
     // still to be added; joined: that member was added; invited: the member

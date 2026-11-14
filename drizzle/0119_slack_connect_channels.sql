@@ -2,6 +2,7 @@ CREATE TABLE "slack_connect_channels" (
 	"organization_id" uuid PRIMARY KEY NOT NULL,
 	"channel_id" text,
 	"channel_name" text,
+	"workspace_channel_id" text,
 	"status" text DEFAULT 'pending' NOT NULL,
 	"last_error" text,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,

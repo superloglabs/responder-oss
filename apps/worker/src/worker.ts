@@ -861,7 +861,7 @@ await boss.work(
     return { organizationId: payload.organizationId };
   }),
 );
-await boss.work(slackConnectQueue, { localConcurrency: 1 }, tracedJobHandler(slackConnectQueue, async ([job]) => {
+await boss.work(slackConnectQueue, { groupConcurrency: 1, localConcurrency: 2 }, tracedJobHandler(slackConnectQueue, async ([job]) => {
   const payload = slackConnectJobSchema.parse(job.data);
   const status = await connectSlackWorkspace(payload, slackConnectDeps());
   return { organizationId: payload.organizationId, status };

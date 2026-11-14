@@ -409,10 +409,10 @@ export async function queueGcpProjectSetup(job: GcpProjectSetupJob) {
 }
 
 export async function queueSlackConnect(job: SlackConnectJob) {
-  // One job per workspace at a time; the job continues from the stored
-  // channel, so a later connection does not need its own.
+  // The worker runs one job per workspace at a time, so two connections
+  // can't create two channels. Each job continues from the stored channel.
   return (await getBoss()).send(slackConnectQueue, job, {
-    singletonKey: job.organizationId,
+    group: { id: job.organizationId },
   });
 }
 

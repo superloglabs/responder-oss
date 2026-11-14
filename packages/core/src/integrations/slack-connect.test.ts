@@ -23,7 +23,10 @@ const fullInstallation: SlackConnectInstallation = {
   scopes: ["chat:write", "channels:write.invites", "conversations.connect:write"],
 };
 
-type Row = Pick<SlackConnectChannel, "channelId" | "channelName" | "lastError" | "status">;
+type Row = Pick<
+  SlackConnectChannel,
+  "channelId" | "channelName" | "lastError" | "status" | "workspaceChannelId"
+>;
 type Responses = Record<string, Array<Record<string, unknown> | string>>;
 
 // Answers each "<token> <method>" with the next queued response; a string is
@@ -38,13 +41,14 @@ function harness(options: {
     channelName: null,
     lastError: null,
     status: "pending",
+    workspaceChannelId: null,
     ...options.row,
   };
   const responses: Responses = {
     "xoxb-host conversations.create": [{ channel: { id: "C1", name: "acme-superlog" } }],
     "xoxb-host conversations.invite": [{}],
     "xoxb-host conversations.inviteShared": [{ invite_id: "I1" }],
-    "xoxb-customer conversations.acceptSharedInvite": [{ channel_id: "C1" }],
+    "xoxb-customer conversations.acceptSharedInvite": [{ channel_id: "C_WS" }],
     "xoxb-customer conversations.invite": [{}],
     ...options.responses,
   };
@@ -140,12 +144,12 @@ describe("connectSlackWorkspace", () => {
         token: "xoxb-customer",
       },
       {
-        body: { channel: "C1", users: "U_MEMBER" },
+        body: { channel: "C_WS", users: "U_MEMBER" },
         method: "conversations.invite",
         token: "xoxb-customer",
       },
     ]);
-    expect(row).toMatchObject({ channelId: "C1", status: "joined" });
+    expect(row).toMatchObject({ channelId: "C1", status: "joined", workspaceChannelId: "C_WS" });
   });
 
   it("emails the member when the workspace's app lacks the Slack Connect scopes", async () => {
@@ -240,7 +244,7 @@ describe("connectSlackWorkspace", () => {
     await expect(connectSlackWorkspace(input, deps)).resolves.toBe("joined");
     expect(calls().slice(before)).toEqual([
       {
-        body: { channel: "C1", users: "U_MEMBER" },
+        body: { channel: "C_WS", users: "U_MEMBER" },
         method: "conversations.invite",
         token: "xoxb-customer",
       },

@@ -179,8 +179,9 @@ When `SLACK_CONNECT_HOST_TOKEN` is set, connecting Slack shares a Slack
 Connect channel named `<workspace>-superlog` between the operator's Slack and
 the workspace's, once per workspace. A worker job does this:
 
-1. The operator's bot creates the channel and adds the members listed in
-   `SLACK_CONNECT_HOST_USER_IDS`.
+1. The operator's bot creates the channel and invites the members listed in
+   `SLACK_CONNECT_HOST_USER_IDS`. A failed invitation is logged and the
+   channel is still shared; add those members by hand.
 2. It invites the workspace's Slack app to the channel. The app accepts and
    adds the member who connected Slack. If the workspace requires an admin to
    approve Slack Connect channels, the job retries adding the member for about

@@ -380,6 +380,7 @@ describe("integration providers", () => {
 
     vi.stubEnv("SLACK_CONNECT_HOST_TOKEN", "");
     expect(scopes()).not.toContain("conversations.connect:write");
+    expect(scopes()).not.toContain("channels:write.invites");
 
     vi.stubEnv("SLACK_CONNECT_HOST_TOKEN", "xoxb-host");
     expect(scopes()).toContain("conversations.connect:write");

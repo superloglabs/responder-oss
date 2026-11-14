@@ -1,7 +1,9 @@
 import { eq } from "drizzle-orm";
-import { organization, user } from "./auth-schema.js";
+import { user } from "./auth-schema.js";
 import { getDatabase } from "./client.js";
 import { slackConnectChannels } from "./schema.js";
+
+export { getOrganizationName } from "./organizations.js";
 
 export type SlackConnectChannel = typeof slackConnectChannels.$inferSelect;
 export type SlackConnectChannelStatus = SlackConnectChannel["status"];
@@ -28,24 +30,16 @@ export async function claimSlackConnectChannel(
 export async function updateSlackConnectChannel(
   organizationId: string,
   patch: Partial<
-    Pick<SlackConnectChannel, "channelId" | "channelName" | "lastError" | "status">
+    Pick<
+      SlackConnectChannel,
+      "channelId" | "channelName" | "lastError" | "status" | "workspaceChannelId"
+    >
   >,
 ): Promise<void> {
   await getDatabase()
     .update(slackConnectChannels)
     .set({ ...patch, updatedAt: new Date() })
     .where(eq(slackConnectChannels.organizationId, organizationId));
-}
-
-export async function getOrganizationName(
-  organizationId: string,
-): Promise<string | null> {
-  const rows = await getDatabase()
-    .select({ name: organization.name })
-    .from(organization)
-    .where(eq(organization.id, organizationId))
-    .limit(1);
-  return rows[0]?.name ?? null;
 }
 
 export async function getUserEmail(userId: string): Promise<string | null> {

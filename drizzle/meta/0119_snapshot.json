@@ -1,5 +1,5 @@
 {
-  "id": "b62daf17-4778-4a65-ace6-269e064ac089",
+  "id": "c1e6722b-dc0d-4596-b9ec-e8413a9331dc",
   "prevId": "8cb7ec83-edfc-429b-8ebd-923c428daedd",
   "version": "7",
   "dialect": "postgresql",
@@ -10411,6 +10411,12 @@
         },
         "channel_name": {
           "name": "channel_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "workspace_channel_id": {
+          "name": "workspace_channel_id",
           "type": "text",
           "primaryKey": false,
           "notNull": false

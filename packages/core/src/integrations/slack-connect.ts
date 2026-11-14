@@ -30,7 +30,8 @@ export type SlackConnectConfig = {
   // channels:manage, channels:write.invites and conversations.connect:write
   // scopes.
   hostToken: string;
-  // Operator members added to every new channel.
+  // Operator members invited to every new channel. A failed invitation is
+  // logged and does not stop the channel from being shared.
   hostUserIds: string[];
 };
 
@@ -124,7 +125,7 @@ export type SlackConnectJobInput = {
 export type SlackConnectDeps = {
   call: SlackCall;
   claim: (organizationId: string) => Promise<
-    Pick<SlackConnectChannel, "channelId" | "channelName" | "status">
+    Pick<SlackConnectChannel, "channelId" | "channelName" | "status" | "workspaceChannelId">
   >;
   config: SlackConnectConfig | null;
   installation: (
@@ -135,7 +136,10 @@ export type SlackConnectDeps = {
   update: (
     organizationId: string,
     patch: Partial<
-      Pick<SlackConnectChannel, "channelId" | "channelName" | "lastError" | "status">
+      Pick<
+        SlackConnectChannel,
+        "channelId" | "channelName" | "lastError" | "status" | "workspaceChannelId"
+      >
     >,
   ) => Promise<void>;
   userEmail: (userId: string) => Promise<string | null>;
@@ -188,25 +192,30 @@ export async function connectSlackWorkspace(
     await addHostMembers(config, deps, channelId);
   }
 
+  let workspaceChannelId = row.workspaceChannelId ?? channelId;
   if (row.status === "pending") {
     const accepted =
       installation &&
       slackConnectCustomerScopes.every((scope) => installation.scopes.includes(scope))
-        ? await shareWithApp(config, deps, installation, channelId, channelName).then(
-            () => true,
+        ? await shareWithApp(config, deps, installation, channelId, channelName).catch(
             (error: unknown) => {
               deps.log("slack_connect_app_share_failed", {
                 error: errorMessage(error),
                 organizationId,
               });
-              return false;
+              return null;
             },
           )
-        : false;
+        : null;
     if (!accepted) {
       return inviteByEmail(config, deps, input, channelId);
     }
-    await deps.update(organizationId, { lastError: null, status: "accepted" });
+    workspaceChannelId = accepted.channelId ?? channelId;
+    await deps.update(organizationId, {
+      lastError: null,
+      status: "accepted",
+      workspaceChannelId,
+    });
   }
 
   // The workspace's app joined the channel; add the member who connected
@@ -215,7 +224,7 @@ export async function connectSlackWorkspace(
   if (!installation) return "accepted";
   try {
     await deps.call(installation.accessToken, "conversations.invite", {
-      channel: channelId,
+      channel: workspaceChannelId,
       users: input.slackUserId,
     });
   } catch (error) {
@@ -307,7 +316,7 @@ async function shareWithApp(
   installation: SlackConnectInstallation,
   channelId: string,
   channelName: string,
-): Promise<void> {
+): Promise<{ channelId: string | null }> {
   const invite = await inviteShared(config, deps.call, channelId, {
     user_ids: installation.botUserId,
   });
@@ -320,11 +329,14 @@ async function shareWithApp(
         ? channelName
         : `${channelName.slice(0, slackChannelNameLimit - 3)}-${attempt + 1}`;
     try {
-      await deps.call(installation.accessToken, "conversations.acceptSharedInvite", {
-        channel_name: name,
-        invite_id: invite.invite_id,
-      });
-      return;
+      const accepted = await deps.call(
+        installation.accessToken,
+        "conversations.acceptSharedInvite",
+        { channel_name: name, invite_id: invite.invite_id },
+      );
+      return {
+        channelId: typeof accepted.channel_id === "string" ? accepted.channel_id : null,
+      };
     } catch (error) {
       if (error instanceof SlackApiError && error.code === "name_taken") continue;
       throw error;
