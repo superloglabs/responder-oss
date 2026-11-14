@@ -1,0 +1,220 @@
+diff --git a/dist/experimental/hostedMultiAgent/model.js b/dist/experimental/hostedMultiAgent/model.js
+index 765fcb30d7b02bcb472c459c765fddd030a50522..2507c300374c908a3b9d15c2df6f3118dd8e7f4a 100644
+--- a/dist/experimental/hostedMultiAgent/model.js
++++ b/dist/experimental/hostedMultiAgent/model.js
+@@ -61,12 +61,8 @@ function mergeResponseUsages(usages) {
+         inputTokens: usages.reduce((total, usage) => total + (usage?.input_tokens ?? 0), 0),
+         outputTokens: usages.reduce((total, usage) => total + (usage?.output_tokens ?? 0), 0),
+         totalTokens: usages.reduce((total, usage) => total + (usage?.total_tokens ?? 0), 0),
+-        inputTokensDetails: usages.map((usage) => ({
+-            ...usage?.input_tokens_details,
+-        })),
+-        outputTokensDetails: usages.map((usage) => ({
+-            ...usage?.output_tokens_details,
+-        })),
++        inputTokensDetails: usages.map((usage) => (0, responsesUtils_1.numericTokenDetails)(usage?.input_tokens_details)),
++        outputTokensDetails: usages.map((usage) => (0, responsesUtils_1.numericTokenDetails)(usage?.output_tokens_details)),
+         requestUsageEntries: usages.map((usage) => (0, responsesUtils_1.toRequestUsageEntry)(usage, 'responses.create')),
+     });
+ }
+diff --git a/dist/experimental/hostedMultiAgent/model.mjs b/dist/experimental/hostedMultiAgent/model.mjs
+index 2974928d04ceade25ac1c055f099dece6c6ab5d6..afb3284f273ba4b4f65439863911f0f174aafeba 100644
+--- a/dist/experimental/hostedMultiAgent/model.mjs
++++ b/dist/experimental/hostedMultiAgent/model.mjs
+@@ -5,7 +5,7 @@ import { HEADERS } from "../../defaults.mjs";
+ import { OpenAIResponsesModel, convertToOutputItem, } from "../../openaiResponsesModel.mjs";
+ import { applyHeadersToAccumulator, createHeaderAccumulator, headerAccumulatorToRecord, mergeQueryParamsIntoURL, } from "../../responsesTransportUtils.mjs";
+ import { withAbortSignal, withTimeout, } from "../../responsesWebSocketConnection.mjs";
+-import { searchParamsToAuthHeaderQuery, toRequestUsageEntry, } from "../../responsesUtils.mjs";
++import { searchParamsToAuthHeaderQuery, toRequestUsageEntry, numericTokenDetails, } from "../../responsesUtils.mjs";
+ const ROOT_AGENT_NAME = '/root';
+ const MULTI_AGENT_BETA = 'responses_multi_agent=v1';
+ const HOSTED_COLLABORATION_ITEM_TYPES = new Set([
+@@ -55,12 +55,8 @@ function mergeResponseUsages(usages) {
+         inputTokens: usages.reduce((total, usage) => total + (usage?.input_tokens ?? 0), 0),
+         outputTokens: usages.reduce((total, usage) => total + (usage?.output_tokens ?? 0), 0),
+         totalTokens: usages.reduce((total, usage) => total + (usage?.total_tokens ?? 0), 0),
+-        inputTokensDetails: usages.map((usage) => ({
+-            ...usage?.input_tokens_details,
+-        })),
+-        outputTokensDetails: usages.map((usage) => ({
+-            ...usage?.output_tokens_details,
+-        })),
++        inputTokensDetails: usages.map((usage) => numericTokenDetails(usage?.input_tokens_details)),
++        outputTokensDetails: usages.map((usage) => numericTokenDetails(usage?.output_tokens_details)),
+         requestUsageEntries: usages.map((usage) => toRequestUsageEntry(usage, 'responses.create')),
+     });
+ }
+diff --git a/dist/memory/openaiResponsesCompactionSession.js b/dist/memory/openaiResponsesCompactionSession.js
+index 622b3c7bf700e7d89d45f77d1c3b86c936628908..33b4db91a00d0b840b99ac1c7474d556613623f1 100644
+--- a/dist/memory/openaiResponsesCompactionSession.js
++++ b/dist/memory/openaiResponsesCompactionSession.js
+@@ -9,6 +9,7 @@ const agents_core_1 = require("@openai/agents-core");
+ const internal_1 = require("@openai/agents-core/utils/internal");
+ const defaults_1 = require("../defaults.js");
+ const openaiResponsesModel_1 = require("../openaiResponsesModel.js");
++const responsesUtils_1 = require("../responsesUtils.js");
+ const openaiSessionApi_1 = require("./openaiSessionApi.js");
+ const DEFAULT_COMPACTION_THRESHOLD = 10;
+ const logger = (0, agents_core_1.getLogger)('openai-agents:openai:compaction');
+@@ -320,8 +321,8 @@ function toRequestUsage(usage) {
+         inputTokens: usage?.input_tokens ?? 0,
+         outputTokens: usage?.output_tokens ?? 0,
+         totalTokens: usage?.total_tokens ?? 0,
+-        inputTokensDetails: { ...usage?.input_tokens_details },
+-        outputTokensDetails: { ...usage?.output_tokens_details },
++        inputTokensDetails: (0, responsesUtils_1.numericTokenDetails)(usage?.input_tokens_details),
++        outputTokensDetails: (0, responsesUtils_1.numericTokenDetails)(usage?.output_tokens_details),
+         endpoint: 'responses.compact',
+     });
+ }
+diff --git a/dist/memory/openaiResponsesCompactionSession.mjs b/dist/memory/openaiResponsesCompactionSession.mjs
+index 8968f8b2d2506c86a8e646e55fc379a618f54b68..b502ffe78529445c8af116d5c06fdd416126b00f 100644
+--- a/dist/memory/openaiResponsesCompactionSession.mjs
++++ b/dist/memory/openaiResponsesCompactionSession.mjs
+@@ -3,6 +3,7 @@ import { getLogger, MemorySession, RequestUsage, UserError, } from '@openai/agen
+ import { logModelAndToolActionWarning } from '@openai/agents-core/utils/internal';
+ import { DEFAULT_OPENAI_MODEL, getDefaultOpenAIClient } from "../defaults.mjs";
+ import { getInputItems } from "../openaiResponsesModel.mjs";
++import { numericTokenDetails } from "../responsesUtils.mjs";
+ import { OPENAI_SESSION_API, } from "./openaiSessionApi.mjs";
+ const DEFAULT_COMPACTION_THRESHOLD = 10;
+ const logger = getLogger('openai-agents:openai:compaction');
+@@ -313,8 +314,8 @@ function toRequestUsage(usage) {
+         inputTokens: usage?.input_tokens ?? 0,
+         outputTokens: usage?.output_tokens ?? 0,
+         totalTokens: usage?.total_tokens ?? 0,
+-        inputTokensDetails: { ...usage?.input_tokens_details },
+-        outputTokensDetails: { ...usage?.output_tokens_details },
++        inputTokensDetails: numericTokenDetails(usage?.input_tokens_details),
++        outputTokensDetails: numericTokenDetails(usage?.output_tokens_details),
+         endpoint: 'responses.compact',
+     });
+ }
+diff --git a/dist/openaiResponsesModel.js b/dist/openaiResponsesModel.js
+index 4f170454aca4dfd6cea4bc8b38e646c21c7a167e..849f2ed0e3ce97d13be2b23ee6ff960a988c5de6 100644
+--- a/dist/openaiResponsesModel.js
++++ b/dist/openaiResponsesModel.js
+@@ -2362,8 +2362,8 @@ class OpenAIResponsesModel {
+             inputTokens: response.usage?.input_tokens ?? 0,
+             outputTokens: response.usage?.output_tokens ?? 0,
+             totalTokens: response.usage?.total_tokens ?? 0,
+-            inputTokensDetails: { ...response.usage?.input_tokens_details },
+-            outputTokensDetails: { ...response.usage?.output_tokens_details },
++            inputTokensDetails: (0, responsesUtils_1.numericTokenDetails)(response.usage?.input_tokens_details),
++            outputTokensDetails: (0, responsesUtils_1.numericTokenDetails)(response.usage?.output_tokens_details),
+             requestUsageEntries: [
+                 (0, responsesUtils_1.toRequestUsageEntry)(response.usage, 'responses.create'),
+             ],
+@@ -2377,8 +2377,8 @@ class OpenAIResponsesModel {
+             inputTokens: response.usage?.input_tokens ?? 0,
+             outputTokens: response.usage?.output_tokens ?? 0,
+             totalTokens: response.usage?.total_tokens ?? 0,
+-            inputTokensDetails: { ...response.usage?.input_tokens_details },
+-            outputTokensDetails: { ...response.usage?.output_tokens_details },
++            inputTokensDetails: (0, responsesUtils_1.numericTokenDetails)(response.usage?.input_tokens_details),
++            outputTokensDetails: (0, responsesUtils_1.numericTokenDetails)(response.usage?.output_tokens_details),
+             requestUsageEntries: [
+                 (0, responsesUtils_1.toRequestUsageEntry)(response.usage, 'responses.create'),
+             ],
+diff --git a/dist/openaiResponsesModel.mjs b/dist/openaiResponsesModel.mjs
+index d0e9fe77335d19a02c59656b3b26c0f5adf8b0b5..81aa06c6844df56b4bf08c3af1e8e38bbf27d2ab 100644
+--- a/dist/openaiResponsesModel.mjs
++++ b/dist/openaiResponsesModel.mjs
+@@ -10,7 +10,7 @@ import { applyHeadersToAccumulator, createHeaderAccumulator, ensureResponsesWebS
+ import { CodeInterpreterStatus, FileSearchStatus, ImageGenerationStatus, WebSearchStatus, } from "./tools.mjs";
+ import { camelOrSnakeToSnakeCase, getSnakeCasedProviderDataWithoutReservedKeys, } from "./utils/providerData.mjs";
+ import { normalizePromptCacheRetention } from "./utils/modelSettings.mjs";
+-import { normalizeInstructions, searchParamsToAuthHeaderQuery, toRequestUsageEntry, } from "./responsesUtils.mjs";
++import { normalizeInstructions, searchParamsToAuthHeaderQuery, toRequestUsageEntry, numericTokenDetails, } from "./responsesUtils.mjs";
+ import { encodeUint8ArrayToBase64, getToolSearchExecution, getToolSearchProviderCallId, normalizeHostedMcpRequireApproval, } from '@openai/agents-core/utils';
+ import { formatInlineData, getInlineMediaType, } from '@openai/agents-core/utils/internal';
+ function getModelTracingParent(request) {
+@@ -2353,8 +2353,8 @@ export class OpenAIResponsesModel {
+             inputTokens: response.usage?.input_tokens ?? 0,
+             outputTokens: response.usage?.output_tokens ?? 0,
+             totalTokens: response.usage?.total_tokens ?? 0,
+-            inputTokensDetails: { ...response.usage?.input_tokens_details },
+-            outputTokensDetails: { ...response.usage?.output_tokens_details },
++            inputTokensDetails: numericTokenDetails(response.usage?.input_tokens_details),
++            outputTokensDetails: numericTokenDetails(response.usage?.output_tokens_details),
+             requestUsageEntries: [
+                 toRequestUsageEntry(response.usage, 'responses.create'),
+             ],
+@@ -2368,8 +2368,8 @@ export class OpenAIResponsesModel {
+             inputTokens: response.usage?.input_tokens ?? 0,
+             outputTokens: response.usage?.output_tokens ?? 0,
+             totalTokens: response.usage?.total_tokens ?? 0,
+-            inputTokensDetails: { ...response.usage?.input_tokens_details },
+-            outputTokensDetails: { ...response.usage?.output_tokens_details },
++            inputTokensDetails: numericTokenDetails(response.usage?.input_tokens_details),
++            outputTokensDetails: numericTokenDetails(response.usage?.output_tokens_details),
+             requestUsageEntries: [
+                 toRequestUsageEntry(response.usage, 'responses.create'),
+             ],
+diff --git a/dist/responsesUtils.js b/dist/responsesUtils.js
+index df713d4dc50bb9f3f0ae80a19a75a25c13bc9019..776f47980e10a6382ce53aa6b4172b3f4860708d 100644
+--- a/dist/responsesUtils.js
++++ b/dist/responsesUtils.js
+@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
+ exports.normalizeInstructions = normalizeInstructions;
+ exports.searchParamsToAuthHeaderQuery = searchParamsToAuthHeaderQuery;
+ exports.toRequestUsageEntry = toRequestUsageEntry;
++exports.numericTokenDetails = numericTokenDetails;
+ const agents_core_1 = require("@openai/agents-core");
+ function normalizeInstructions(instructions) {
+     if (typeof instructions === 'string') {
+@@ -28,13 +29,22 @@ function searchParamsToAuthHeaderQuery(searchParams) {
+     }
+     return hasEntries ? query : undefined;
+ }
++// Keeps only the number counts in a usage details object. OpenAI also sends
++// nested objects there, such as cache_write_tokens_details, and the Usage
++// schema accepts only numbers.
++function numericTokenDetails(details) {
++    if (!details || typeof details !== 'object') {
++        return {};
++    }
++    return Object.fromEntries(Object.entries(details).filter(([, value]) => typeof value === 'number'));
++}
+ function toRequestUsageEntry(usage, endpoint) {
+     return new agents_core_1.RequestUsage({
+         inputTokens: usage?.input_tokens ?? 0,
+         outputTokens: usage?.output_tokens ?? 0,
+         totalTokens: usage?.total_tokens ?? 0,
+-        inputTokensDetails: { ...usage?.input_tokens_details },
+-        outputTokensDetails: { ...usage?.output_tokens_details },
++        inputTokensDetails: numericTokenDetails(usage?.input_tokens_details),
++        outputTokensDetails: numericTokenDetails(usage?.output_tokens_details),
+         endpoint,
+     });
+ }
+diff --git a/dist/responsesUtils.mjs b/dist/responsesUtils.mjs
+index be1ab5debc4b8e87ceb8afdc077bed55f72e50fe..d8ee50ba635d3699014ae8073f13f2df45a70fc4 100644
+--- a/dist/responsesUtils.mjs
++++ b/dist/responsesUtils.mjs
+@@ -23,13 +23,22 @@ export function searchParamsToAuthHeaderQuery(searchParams) {
+     }
+     return hasEntries ? query : undefined;
+ }
++export // Keeps only the number counts in a usage details object. OpenAI also sends
++// nested objects there, such as cache_write_tokens_details, and the Usage
++// schema accepts only numbers.
++function numericTokenDetails(details) {
++    if (!details || typeof details !== 'object') {
++        return {};
++    }
++    return Object.fromEntries(Object.entries(details).filter(([, value]) => typeof value === 'number'));
++}
+ export function toRequestUsageEntry(usage, endpoint) {
+     return new RequestUsage({
+         inputTokens: usage?.input_tokens ?? 0,
+         outputTokens: usage?.output_tokens ?? 0,
+         totalTokens: usage?.total_tokens ?? 0,
+-        inputTokensDetails: { ...usage?.input_tokens_details },
+-        outputTokensDetails: { ...usage?.output_tokens_details },
++        inputTokensDetails: numericTokenDetails(usage?.input_tokens_details),
++        outputTokensDetails: numericTokenDetails(usage?.output_tokens_details),
+         endpoint,
+     });
+ }
