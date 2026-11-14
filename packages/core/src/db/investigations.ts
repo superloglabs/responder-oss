@@ -63,6 +63,7 @@ import {
   type SupabaseAccessMode,
 } from "../integrations/supabase.js";
 import type { InvestigationReportSubmission } from "../investigations/report.js";
+import { stripNullBytes } from "../telemetry/fingerprint.js";
 import { getDatabase } from "./client.js";
 import {
   agentConfigVersions,
@@ -615,13 +616,30 @@ export async function recordInvestigationSlackTrace(
 
 const investigationTracePageSize = 500;
 
+// Postgres `jsonb` rejects the NUL character, and tool results can carry one
+// from customer data, such as a Sentry issue about a failed insert. Remove it
+// from every string, including object keys, before the event is stored.
+export function withoutNullBytes<T>(value: T): T {
+  if (typeof value === "string") return stripNullBytes(value) as T;
+  if (Array.isArray(value)) return value.map((item) => withoutNullBytes(item)) as T;
+  if (value && typeof value === "object" && !(value instanceof Date)) {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [
+        stripNullBytes(key),
+        withoutNullBytes(item),
+      ]),
+    ) as T;
+  }
+  return value;
+}
+
 export async function appendInvestigationTraceEvent(
   investigationId: string,
   event: InvestigationTraceEvent,
 ): Promise<void> {
   await getDatabase().insert(investigationTraceEvents).values({
     investigationId,
-    event,
+    event: withoutNullBytes(event),
   });
 }
 

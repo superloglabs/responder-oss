@@ -8,6 +8,7 @@ import {
   issues,
 } from "./schema.js";
 import {
+  appendInvestigationTraceEvent,
   customMcpCredentialUpdateFailureEvent,
   customMcpConnectionsLoadedEvent,
   customMcpRuntimeAccountSkippedEvent,
@@ -26,6 +27,7 @@ import {
   prepareInvestigationReplay,
   prepareInvestigationRetry,
   replayReportMarkdownUpdate,
+  withoutNullBytes,
 } from "./investigations.js";
 import { McpOAuthRefreshError } from "../integrations/custom-mcp.js";
 
@@ -749,5 +751,48 @@ describe("custom MCP runtime logging", () => {
       event: "custom_mcp_connections_loaded",
       investigationVersionId: "version-1",
     });
+  });
+});
+
+describe("appendInvestigationTraceEvent", () => {
+  const nul = String.fromCharCode(0);
+
+  it("removes NUL characters that Postgres jsonb rejects", async () => {
+    const values = vi.fn().mockResolvedValue(undefined);
+    const insert = vi.fn(() => ({ values }));
+    vi.mocked(getDatabase).mockReturnValue({ insert } as never);
+    const event = {
+      data: {
+        result: {
+          kind: "tool-result",
+          output: { type: "text", text: `params: a${nul}b` },
+        },
+      },
+      timestamp: "2026-11-14T19:00:00.000Z",
+      type: "action.result",
+    };
+
+    await appendInvestigationTraceEvent("investigation-1", event as never);
+
+    expect(insert).toHaveBeenCalledWith(investigationTraceEvents);
+    expect(values).toHaveBeenCalledWith({
+      investigationId: "investigation-1",
+      event: {
+        ...event,
+        data: {
+          result: {
+            kind: "tool-result",
+            output: { type: "text", text: "params: ab" },
+          },
+        },
+      },
+    });
+    expect(JSON.stringify(values.mock.calls[0])).not.toContain("\\u0000");
+  });
+
+  it("cleans arrays and keys and keeps other values", () => {
+    expect(
+      withoutNullBytes({ [`k${nul}`]: [`x${nul}`, 1, true, null] }),
+    ).toEqual({ k: ["x", 1, true, null] });
   });
 });
