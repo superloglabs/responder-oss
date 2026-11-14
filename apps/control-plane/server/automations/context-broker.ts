@@ -48,6 +48,7 @@ import {
   assertRailwayGrant,
   parseRailwayCredentials,
   RAILWAY_API_ORIGIN,
+  RAILWAY_RESOURCE_INDICATOR,
   railwayAccessTokenIsFresh,
   withRailwayGrantScope,
   type RailwayCredentials,
@@ -582,6 +583,7 @@ async function railwayCredentials(
         current.oauth,
         await dependencies.refreshCustomMcp({
           mcpUrl: RAILWAY_API_ORIGIN,
+          resourceIndicator: RAILWAY_RESOURCE_INDICATOR,
           oauth: current.oauth,
           redirectUrl: integrationCallbackUrl("railway"),
         }),

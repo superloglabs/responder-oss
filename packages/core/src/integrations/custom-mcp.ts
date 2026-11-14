@@ -131,6 +131,7 @@ export function parseCustomMcpCredentials(
 
 export class CustomMcpOAuthProvider implements OAuthClientProvider {
   authorizationUrl?: URL;
+  validateResourceURL?: OAuthClientProvider["validateResourceURL"];
 
   constructor(
     private readonly options: {
@@ -142,9 +143,19 @@ export class CustomMcpOAuthProvider implements OAuthClientProvider {
       clientMetadataUrl?: string;
       connectionState?: string;
       redirectUrl: string;
+      /**
+       * Whether OAuth requests name the protected resource (RFC 8707). On by
+       * default. Turn it off for servers whose token endpoint rejects the
+       * resource their own metadata advertises.
+       */
+      resourceIndicator?: boolean;
       stored?: StoredCustomMcpOAuthState;
     },
-  ) {}
+  ) {
+    if (options.resourceIndicator === false) {
+      this.validateResourceURL = async () => undefined;
+    }
+  }
 
   get clientMetadataUrl(): string | undefined {
     return this.options.clientMetadataUrl;
@@ -485,6 +496,7 @@ export async function beginCustomMcpOAuth(input: {
   connectionState: string;
   mcpUrl: string;
   redirectUrl: string;
+  resourceIndicator?: boolean;
   /** Overrides the scopes advertised by the server's challenge or metadata. */
   scope?: string;
 }): Promise<{
@@ -499,6 +511,7 @@ export async function beginCustomMcpOAuth(input: {
     ...(input.clientMetadataUrl ? { clientMetadataUrl: input.clientMetadataUrl } : {}),
     connectionState: input.connectionState,
     redirectUrl: input.redirectUrl,
+    resourceIndicator: input.resourceIndicator,
   });
   const result = await auth(provider, {
     fetchFn: safeCustomMcpFetch,
@@ -548,9 +561,11 @@ export async function finishCustomMcpOAuth(input: {
   mcpUrl: string;
   oauth: StoredCustomMcpOAuthState;
   redirectUrl: string;
+  resourceIndicator?: boolean;
 }): Promise<StoredCustomMcpOAuthState> {
   const provider = new CustomMcpOAuthProvider({
     redirectUrl: input.redirectUrl,
+    resourceIndicator: input.resourceIndicator,
     stored: input.oauth,
   });
   const result = await auth(provider, {
@@ -568,10 +583,12 @@ export async function refreshCustomMcpOAuth(input: {
   mcpUrl: string;
   oauth: StoredCustomMcpOAuthState;
   redirectUrl: string;
+  resourceIndicator?: boolean;
 }): Promise<StoredCustomMcpOAuthState> {
   if (!input.oauth.tokens?.refresh_token) return input.oauth;
   const provider = new CustomMcpOAuthProvider({
     redirectUrl: input.redirectUrl,
+    resourceIndicator: input.resourceIndicator,
     stored: input.oauth,
   });
   let result: Awaited<ReturnType<typeof auth>>;

@@ -4,6 +4,7 @@ import {
   assertRailwayGrant,
   parseRailwayCredentials,
   RAILWAY_API_ORIGIN,
+  RAILWAY_RESOURCE_INDICATOR,
   railwayAccessTokenIsFresh,
   withRailwayGrantScope,
 } from "../integrations/railway.js";
@@ -45,6 +46,7 @@ export async function railwayAccessToken(
         current.oauth,
         await dependencies.refresh({
           mcpUrl: RAILWAY_API_ORIGIN,
+          resourceIndicator: RAILWAY_RESOURCE_INDICATOR,
           oauth: current.oauth,
           redirectUrl: mcpOAuthRedirectUrl("railway"),
         }),

@@ -9,6 +9,11 @@ import type { StoredCustomMcpOAuthState } from "./custom-mcp.js";
 export const RAILWAY_API_ORIGIN = "https://backboard.railway.com";
 export const RAILWAY_GRAPHQL_URL = `${RAILWAY_API_ORIGIN}/graphql/v2`;
 
+// Railway's token endpoint answers invalid_target when the request names a
+// resource, even the one its protected resource metadata advertises. Its own
+// CLI sends none, so Railway OAuth requests leave the resource out.
+export const RAILWAY_RESOURCE_INDICATOR = false;
+
 export const railwayAccessLevels = ["read_only", "redeploy"] as const;
 export const railwayAccessLevelSchema = z.enum(railwayAccessLevels);
 export type RailwayAccessLevel = z.infer<typeof railwayAccessLevelSchema>;
