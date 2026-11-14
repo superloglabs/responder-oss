@@ -40,7 +40,10 @@ import {
   gcpAuthorizeUrl,
   listGcpProjects,
 } from "../../../../packages/core/src/integrations/gcp-setup.js";
-import { queueGcpProjectSetup } from "../investigations/queue.js";
+import {
+  queueGcpProjectSetup,
+  queueSlackConnect,
+} from "../investigations/queue.js";
 import {
   beginCustomMcpOAuth,
   callCustomMcpTool,
@@ -229,6 +232,7 @@ vi.mock("./aws-log-subscriptions.js", async (importOriginal) => ({
 }));
 vi.mock("../investigations/queue.js", () => ({
   queueGcpProjectSetup: vi.fn(),
+  queueSlackConnect: vi.fn(),
 }));
 
 vi.mock("../tenant.js", () => ({
@@ -736,6 +740,45 @@ describe("integration callback routing", () => {
       event: "integration_callback_failed",
       provider: "slack tag mode",
     }));
+  });
+
+  it("queues a Slack Connect channel when the operator's Slack is set up", async () => {
+    vi.stubEnv("SLACK_CONNECT_HOST_TOKEN", "xoxb-host");
+    vi.mocked(startDefaultSlackThreadMode).mockResolvedValue();
+    vi.mocked(queueSlackConnect).mockResolvedValue("job-id");
+
+    const response = await connectSlack();
+
+    expect(response.headers.get("location")).toContain("status=connected");
+    expect(queueSlackConnect).toHaveBeenCalledWith({
+      integrationAccountId: "30000000-0000-4000-8000-000000000000",
+      kind: "slack_connect",
+      organizationId: tenant.organizationId,
+      queuedAt: expect.any(String),
+      slackUserId: "U123",
+      userId: tenant.user.id,
+    });
+  });
+
+  it("does not queue a Slack Connect channel without the operator's Slack", async () => {
+    vi.stubEnv("SLACK_CONNECT_HOST_TOKEN", "");
+    vi.mocked(startDefaultSlackThreadMode).mockResolvedValue();
+
+    const response = await connectSlack();
+
+    expect(response.headers.get("location")).toContain("status=connected");
+    expect(queueSlackConnect).not.toHaveBeenCalled();
+  });
+
+  it("keeps Slack connected when the Slack Connect job can't be queued", async () => {
+    vi.stubEnv("SLACK_CONNECT_HOST_TOKEN", "xoxb-host");
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.mocked(startDefaultSlackThreadMode).mockResolvedValue();
+    vi.mocked(queueSlackConnect).mockRejectedValue(new Error("queue down"));
+
+    const response = await connectSlack();
+
+    expect(response.headers.get("location")).toContain("status=connected");
   });
 
   it("stores a Vercel installation and synchronizes its projects", async () => {

@@ -49,6 +49,9 @@ export const automationSuggestionRefillQueue = "responder-automation-suggestion-
 // change saved during a build queues one more, which builds the latest
 // settings when it starts.
 export const sandboxImageBuildQueue = "responder-sandbox-image-builds-v1";
+// Shares a Slack Connect channel with a workspace that connected Slack. A job
+// for a channel that waits on an admin's approval is retried for a few hours.
+export const slackConnectQueue = "responder-slack-connect-v1";
 
 export const investigationHeartbeatSeconds = 60;
 export const investigationLocalConcurrency = 2;
@@ -167,6 +170,16 @@ export const gcpProjectSetupJobSchema = z.object({
   userId: z.string().min(1),
 });
 export type GcpProjectSetupJob = z.infer<typeof gcpProjectSetupJobSchema>;
+
+export const slackConnectJobSchema = z.object({
+  kind: z.literal("slack_connect"),
+  integrationAccountId: z.uuid(),
+  organizationId: z.uuid(),
+  queuedAt: z.iso.datetime(),
+  slackUserId: z.string().min(1),
+  userId: z.string().min(1),
+});
+export type SlackConnectJob = z.infer<typeof slackConnectJobSchema>;
 
 export const automationSuggestionRefillJobSchema = z.object({
   generatedOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
@@ -376,6 +389,16 @@ export async function prepareWorkerQueues(boss: PgBoss): Promise<void> {
       policy: "stately",
       // A failed build is shown in settings, where an admin can retry it.
       retryLimit: 0,
+    }),
+    boss.createQueue(slackConnectQueue, {
+      deleteAfterSeconds: 604_800,
+      expireInSeconds: 300,
+      notify: true,
+      // Doubling from one minute, the last attempt runs about four hours
+      // after the first.
+      retryBackoff: true,
+      retryDelay: 60,
+      retryLimit: 8,
     }),
     boss.createQueue(legacyAutomationRunQueue, {
       deleteAfterSeconds: 604_800,

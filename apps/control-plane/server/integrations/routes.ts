@@ -263,7 +263,11 @@ import {
   gcpSetupStateSchema,
   startGcpProjectSetup,
 } from "../../../../packages/core/src/integrations/gcp-setup-job.js";
-import { queueGcpProjectSetup } from "../investigations/queue.js";
+import {
+  queueGcpProjectSetup,
+  queueSlackConnect,
+} from "../investigations/queue.js";
+import { slackConnectConfig } from "../../../../packages/core/src/integrations/slack-connect.js";
 import {
   hasRequiredSupabaseTools,
   parseSupabaseProjects,
@@ -4610,6 +4614,20 @@ export const integrationRoutes = new Hono()
       }).catch((error: unknown) => {
         logCallbackError("Slack tag mode", error);
       });
+      // Shares a Slack Connect channel with the operator's Slack. Slack stays
+      // connected when the job can't be queued.
+      if (slackConnectConfig()) {
+        await queueSlackConnect({
+          integrationAccountId: accountId,
+          kind: "slack_connect",
+          organizationId: connectionState.organizationId,
+          queuedAt: new Date().toISOString(),
+          slackUserId: installation.authed_user.id,
+          userId: connectionState.userId,
+        }).catch((error: unknown) => {
+          logCallbackError("Slack Connect", error);
+        });
+      }
       await captureAnalyticsEvent({
         distinctId: connectionState.userId,
         event: "integration connected",
