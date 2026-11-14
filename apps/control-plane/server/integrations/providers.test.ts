@@ -371,6 +371,22 @@ describe("integration providers", () => {
     expect(userScopes).toEqual(["search:read"]);
   });
 
+  it("asks for the Slack Connect scopes only when the operator's Slack is set up", () => {
+    vi.stubEnv("SLACK_CLIENT_ID", "slack-client");
+    vi.stubEnv("SLACK_CLIENT_SECRET", "slack-secret");
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    const scopes = () =>
+      new URL(slackAuthorizeUrl("state-token")).searchParams.get("scope")?.split(",") ?? [];
+
+    vi.stubEnv("SLACK_CONNECT_HOST_TOKEN", "");
+    expect(scopes()).not.toContain("conversations.connect:write");
+    expect(scopes()).not.toContain("channels:write.invites");
+
+    vi.stubEnv("SLACK_CONNECT_HOST_TOKEN", "xoxb-host");
+    expect(scopes()).toContain("conversations.connect:write");
+    expect(scopes()).toContain("channels:write.invites");
+  });
+
   it("joins a selected public Slack channel", async () => {
     const fetchMock = vi.fn().mockResolvedValue(Response.json({ ok: true }));
     vi.stubGlobal("fetch", fetchMock);

@@ -25,6 +25,8 @@ import {
   type LinearTicketJob,
   type RemediationJob,
   responderJobSchema,
+  slackConnectJobSchema,
+  slackConnectQueue,
   slackThreadInvestigationJobSchema,
   slackThreadInvestigationQueue,
   workerHealthJobSchema,
@@ -99,6 +101,10 @@ import {
   processAutomationRun,
 } from "./automation-run.js";
 import { processGcpProjectSetupJob } from "@responder/core/integrations/gcp-setup-job";
+import {
+  connectSlackWorkspace,
+  slackConnectDeps,
+} from "@responder/core/integrations/slack-connect";
 import { purgeAutomationModelBrokerGrants } from "@responder/core/db/automation-model-broker";
 import { requireDaytonaClientConfig } from "@responder/core/daytona-config";
 import { deleteExpiredArchivedSandboxes } from "./sandbox.js";
@@ -855,6 +861,11 @@ await boss.work(
     return { organizationId: payload.organizationId };
   }),
 );
+await boss.work(slackConnectQueue, { groupConcurrency: 1, localConcurrency: 2 }, tracedJobHandler(slackConnectQueue, async ([job]) => {
+  const payload = slackConnectJobSchema.parse(job.data);
+  const status = await connectSlackWorkspace(payload, slackConnectDeps());
+  return { organizationId: payload.organizationId, status };
+}));
 await boss.work(gcpProjectSetupQueue, { localConcurrency: 2 }, tracedJobHandler(gcpProjectSetupQueue, async ([job]) => {
   const payload = gcpProjectSetupJobSchema.parse(job.data);
   const status = await processGcpProjectSetupJob(payload, {

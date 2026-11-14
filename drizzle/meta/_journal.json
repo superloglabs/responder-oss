@@ -834,6 +834,13 @@
       "when": 1794249870024,
       "tag": "0118_aws_log_subscriptions",
       "breakpoints": true
+    },
+    {
+      "idx": 119,
+      "version": "7",
+      "when": 1794652053460,
+      "tag": "0119_slack_connect_channels",
+      "breakpoints": true
     }
   ]
 }

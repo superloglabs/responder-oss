@@ -25,6 +25,8 @@ import {
 import {
   createJobBoss,
   gcpProjectSetupQueue,
+  slackConnectQueue,
+  type SlackConnectJob,
   type GcpProjectSetupJob,
   investigationQueue,
   prepareWorkerQueues,
@@ -404,6 +406,14 @@ export async function queueGcpProjectSetup(job: GcpProjectSetupJob) {
   const jobId = await (await getBoss()).send(gcpProjectSetupQueue, job);
   if (!jobId) throw new Error("The Google Cloud setup job was not created");
   return jobId;
+}
+
+export async function queueSlackConnect(job: SlackConnectJob) {
+  // The worker runs one job per workspace at a time, so two connections
+  // can't create two channels. Each job continues from the stored channel.
+  return (await getBoss()).send(slackConnectQueue, job, {
+    group: { id: job.organizationId },
+  });
 }
 
 export async function queueIssueRemediation(requestId: string) {

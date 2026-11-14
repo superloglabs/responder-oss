@@ -1,4 +1,8 @@
 import { z } from "zod";
+import {
+  slackConnectConfig,
+  slackConnectCustomerScopes,
+} from "../../../../packages/core/src/integrations/slack-connect.js";
 import { integrationCallbackUrl } from "./urls.js";
 
 export { listSlackChannels } from "../../../../packages/core/src/integrations/slack-channels.js";
@@ -41,7 +45,16 @@ const SLACK_BOT_SCOPES = [
   "groups:read",
   "im:history",
   "reactions:write",
-].join(",");
+];
+
+// The Slack Connect scopes are asked for only when the operator's Slack is
+// set up to share channels with workspaces.
+function slackBotScopes(): string {
+  return (slackConnectConfig()
+    ? [...SLACK_BOT_SCOPES, ...slackConnectCustomerScopes]
+    : SLACK_BOT_SCOPES
+  ).join(",");
+}
 
 const SLACK_USER_SCOPES = "search:read";
 
@@ -70,7 +83,7 @@ export function slackAuthorizeUrl(state: string): string {
   const { clientId } = slackEnvironment();
   const url = new URL("https://slack.com/oauth/v2/authorize");
   url.searchParams.set("client_id", clientId);
-  url.searchParams.set("scope", SLACK_BOT_SCOPES);
+  url.searchParams.set("scope", slackBotScopes());
   url.searchParams.set("user_scope", SLACK_USER_SCOPES);
   url.searchParams.set("redirect_uri", integrationCallbackUrl("slack"));
   url.searchParams.set("state", state);

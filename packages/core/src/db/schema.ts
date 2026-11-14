@@ -423,6 +423,40 @@ export const awsLogSubscriptions = pgTable(
   ],
 );
 
+// The Slack Connect channel shared between a workspace's Slack and the
+// operator's Slack, made once per workspace when it first connects Slack.
+export const slackConnectChannels = pgTable(
+  "slack_connect_channels",
+  {
+    organizationId: uuid("organization_id")
+      .primaryKey()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    // The channel in the operator's Slack, set once it is created.
+    channelId: text("channel_id"),
+    channelName: text("channel_name"),
+    // The channel's ID in the workspace's Slack, returned when its Slack app
+    // accepts the invitation.
+    workspaceChannelId: text("workspace_channel_id"),
+    // pending: the channel is being created or shared; accepted: the
+    // workspace's Slack app joined it, and the member who connected Slack is
+    // still to be added; joined: that member was added; invited: the member
+    // was sent an email invitation; failed: neither way worked.
+    status: text("status")
+      .$type<"accepted" | "failed" | "invited" | "joined" | "pending">()
+      .notNull()
+      .default("pending"),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check(
+      "slack_connect_channels_status_check",
+      sql`${table.status} IN ('pending', 'accepted', 'joined', 'invited', 'failed')`,
+    ),
+  ],
+);
+
 export const integrationConnectionStates = pgTable(
   "integration_connection_states",
   {

@@ -173,6 +173,31 @@ telemetry notifications are not paused holds the Slack workspace.
 Connecting Slack turns tag mode on with its starting settings, unless the
 workspace has already saved tag mode settings.
 
+### Slack Connect channel
+
+When `SLACK_CONNECT_HOST_TOKEN` is set, connecting Slack shares a Slack
+Connect channel named `<workspace>-superlog` between the operator's Slack and
+the workspace's, once per workspace. A worker job does this:
+
+1. The operator's bot creates the channel and invites the members listed in
+   `SLACK_CONNECT_HOST_USER_IDS`. A failed invitation is logged and the
+   channel is still shared; add those members by hand.
+2. It invites the workspace's Slack app to the channel. The app accepts and
+   adds the member who connected Slack. If the workspace requires an admin to
+   approve Slack Connect channels, the job retries adding the member for about
+   four hours.
+3. If the app can't accept, for example because the connection predates the
+   Slack Connect scopes or the workspace's plan doesn't allow it, the member
+   who connected Slack gets a Slack Connect invitation by email instead.
+
+The host token is a bot token from a Slack app installed in the operator's
+Slack, with `channels:manage`, `channels:write.invites`, and
+`conversations.connect:write`. The operator's Slack must be on a paid plan.
+While the token is set, Slack connections also ask for
+`channels:write.invites` and `conversations.connect:write`, so add both to
+the Slack app's bot scopes before setting it. The table
+`slack_connect_channels` records each workspace's channel and its status.
+
 A mention in a thread reads the thread's earlier messages with the bot token,
 so a request such as "look at this" refers to the alert above it. The turn
 gets at most 50 of those messages and 30,000 characters: the thread's first
