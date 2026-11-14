@@ -51,6 +51,11 @@ describe("railwayAccessToken", () => {
     const { deps, saved } = dependencies(credentials(), { now: () => issuedAt + 58 * 60_000 });
     expect(await railwayAccessToken(target, deps)).toBe("new-token");
     expect(saved).toHaveLength(1);
+    // Railway's token endpoint rejects any resource indicator.
+    expect(deps.refresh).toHaveBeenCalledWith(expect.objectContaining({
+      mcpUrl: "https://backboard.railway.com",
+      resourceIndicator: false,
+    }));
   });
 
   it("returns null for a connection that is gone and refuses a write grant", async () => {

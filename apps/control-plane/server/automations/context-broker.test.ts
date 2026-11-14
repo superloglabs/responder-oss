@@ -601,6 +601,7 @@ describe("automation context broker", () => {
         expect(dependencies.refreshCustomMcp).toHaveBeenCalledWith(expect.objectContaining({
           mcpUrl: "https://backboard.railway.com",
           redirectUrl: expect.stringMatching(/\/api\/integrations\/railway\/callback$/u),
+          resourceIndicator: false,
         }));
       } finally {
         vi.unstubAllGlobals();
