@@ -26,6 +26,7 @@ const {
   creditUsageCharge,
   organizationUsesMachineHours,
   summarizeAutomationBillingCustomer,
+  summarizeRunBilling,
   trackAutomationInferenceUsage,
   trackBilledRun,
   trackMachineHours,
@@ -559,6 +560,79 @@ describe("automation billing", () => {
         includesTeammates: true,
         machineHours: { unlimited: true },
         runBilling: { modelName: "Plan model" },
+      });
+    });
+
+    it("summarizes the per-run account's plan and each metered feature", () => {
+      const grant = (planId: string, includedGrant: number, usage: number, price: number | null, billingUnits = 1) => ({
+        includedGrant,
+        planId,
+        prepaidGrant: 0,
+        price: price === null ? null : { amount: price, billingUnits },
+        unlimited: false,
+        usage,
+      });
+      const runCustomer = customer(
+        [
+          { plan: { autoEnable: true, name: "Free", price: null }, planId: "free", status: "active" },
+          {
+            plan: { autoEnable: false, name: "Max", price: { amount: 150, interval: "month" } },
+            planId: "max",
+            status: "active",
+          },
+          { plan: { autoEnable: false, name: "Old", price: { amount: 500, interval: "month" } }, planId: "old", status: "expired" },
+        ],
+        {
+          logs: balance({
+            breakdown: [grant("free", 5_000_000, 2_000_000, null)],
+            feature: { display: { plural: "logs" }, name: "Logs" },
+            granted: 5_000_000,
+            usage: 2_000_000,
+          }),
+          investigations: balance({
+            breakdown: [grant("free", 50, 50, null), grant("max", 300, 9, 1)],
+            granted: 350,
+            nextResetAt: 30,
+            usage: 59,
+          }),
+          spans: balance({
+            breakdown: [grant("free", 1_000_000, 1_000_000, null), grant("max", 1_000_000, 87_000_000, 0.5, 1_000_000)],
+            feature: { display: { plural: "spans" }, name: "Spans" },
+            granted: 2_000_000,
+            usage: 88_000_000,
+          }),
+        },
+      );
+
+      expect(summarizeRunBilling(account, runCustomer)).toEqual({
+        modelName: "Plan model",
+        planName: "Max",
+        planPrice: 150,
+        runFeatureId: "investigations",
+        usage: [
+          expect.objectContaining({ featureId: "investigations", included: 350, overageCost: 0, price: 1, usage: 59 }),
+          expect.objectContaining({
+            featureId: "spans",
+            included: 2_000_000,
+            name: "Spans",
+            overageCost: 43,
+            price: 0.5,
+            priceUnits: 1_000_000,
+            unit: "spans",
+            usage: 88_000_000,
+          }),
+          expect.objectContaining({ featureId: "logs", overageCost: 0, price: null, unit: "logs" }),
+        ],
+      });
+    });
+
+    it("summarizes per-run billing without the account's plan when Autumn cannot report it", () => {
+      expect(summarizeRunBilling(account, null)).toEqual({
+        modelName: "Plan model",
+        planName: null,
+        planPrice: null,
+        runFeatureId: "investigations",
+        usage: [],
       });
     });
   });
