@@ -25,6 +25,8 @@ vi.mock("@responder/core/db/investigations", () => {
 });
 
 const { datadogObservationUrl, isObservationTool, ObservationMcpServer, openWorkspaceContext } = await import("./context-servers.js");
+const { awsReadOnlyToolFilter } = await import("./aws.js");
+const { isAwsSessionLimitedMcpTool } = await import("@responder/core/integrations/aws-mcp");
 
 const tool = (name: string, annotations?: Record<string, unknown>) =>
   ({ name, description: name, inputSchema: { type: "object", properties: {} }, ...(annotations ? { annotations } : {}) }) as never;
@@ -61,6 +63,40 @@ describe("observation tools", () => {
     await expect(observed.callTool("create_alert_rule", {})).rejects.toThrow("not available");
     await observed.callTool("query_loki_logs", { query: "{app=\"x\"}" });
     expect(callTool).toHaveBeenCalledWith("query_loki_logs", { query: "{app=\"x\"}" });
+  });
+
+  it("keeps AWS's script runner, which the read-only role session limits", async () => {
+    const callTool = vi.fn().mockResolvedValue([{ type: "text", text: "ok" }]);
+    // The tools AWS's managed server lists, with the annotations it gives them.
+    const listed = [
+      tool("aws___get_presigned_url", { readOnlyHint: false, destructiveHint: false }),
+      tool("aws___get_tasks", { readOnlyHint: true, destructiveHint: false }),
+      tool("aws___run_script", { readOnlyHint: false, destructiveHint: true }),
+      tool("aws___list_regions", { readOnlyHint: true, destructiveHint: false }),
+      tool("aws___search_documentation", { readOnlyHint: true, destructiveHint: false }),
+    ];
+    const server = (name: string) => ({
+      name,
+      connect: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn().mockResolvedValue(undefined),
+      listTools: vi.fn().mockResolvedValue(listed),
+      callTool,
+      toolFilter: awsReadOnlyToolFilter,
+    }) as unknown as MCPServer;
+
+    const aws = new ObservationMcpServer(server("aws-1"), String, isAwsSessionLimitedMcpTool);
+    await aws.connect();
+    expect((await aws.listTools()).map((candidate) => candidate.name)).toEqual([
+      "aws___get_tasks", "aws___run_script", "aws___list_regions", "aws___search_documentation",
+    ]);
+    await aws.callTool("aws___run_script", { code: "result = 1" });
+    expect(callTool).toHaveBeenCalledWith("aws___run_script", { code: "result = 1" });
+    await expect(aws.callTool("aws___get_presigned_url", {})).rejects.toThrow("not available");
+
+    // Another provider's tool marked as able to write is still left out.
+    const other = new ObservationMcpServer(server("other"), String);
+    await other.connect();
+    expect((await other.listTools()).map((candidate) => candidate.name)).not.toContain("aws___run_script");
   });
 
   it("reports a server it could not reach instead of failing", async () => {
