@@ -271,7 +271,9 @@ export function errorIssueTitle(fp: Pick<Fingerprint, "exceptionType" | "topFram
   return shortTitle(title);
 }
 
-function shortTitle(title: string): string {
+// One line, cut to the length a list shows.
+function shortTitle(text: string): string {
+  const title = text.split("\n").find((line) => line.trim())?.trim() ?? "";
   return title.length > maximumTitleLength ? `${title.slice(0, maximumTitleLength - 1)}…` : title;
 }
 
