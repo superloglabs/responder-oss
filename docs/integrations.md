@@ -788,6 +788,10 @@ server, `https://mcp.honeycomb.io/mcp` or `https://mcp.eu1.honeycomb.io/mcp`,
 with `Authorization: Bearer <key ID>:<secret>`. The key never enters the
 sandbox. The key's scopes limit what the tools can do.
 
+Investigations and Signal open the same server from the worker for every
+connected Honeycomb team, named `honeycomb-<connection>`. They offer only the
+tools that declare themselves read-only or whose names do not say they write.
+
 As a trigger, a Honeycomb trigger or SLO burn alert starts the automation.
 Each Honeycomb connection has its own webhook:
 
