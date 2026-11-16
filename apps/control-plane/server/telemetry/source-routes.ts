@@ -22,7 +22,6 @@ import {
   type RailwayEnvironment,
 } from "../../../../packages/core/src/integrations/railway.js";
 import { gcpConnectionCredentialsSchema } from "../../../../packages/core/src/integrations/gcp.js";
-import { vercelCredentialsSchema } from "../../../../packages/core/src/integrations/vercel.js";
 import { telemetryCollectorUrl } from "../../../../packages/core/src/telemetry/client.js";
 import { telemetryUnavailableCode } from "../../../../packages/core/src/telemetry/sources/availability.js";
 import {
@@ -41,6 +40,7 @@ import {
 } from "../../../../packages/core/src/telemetry/sources/vercel-drains.js";
 import { getIntegrationDefinition, integrationIsConfigured } from "../integrations/catalog.js";
 import { cellOrigin } from "../integrations/urls.js";
+import { deleteDrains, vercelDrainIds, vercelTarget } from "./vercel-source-removal.js";
 import { getActiveTenant } from "../tenant.js";
 
 // Cloud providers that send telemetry to the workspace: Vercel drains, an AWS
@@ -112,18 +112,6 @@ const defaultDependencies: SourceRouteDependencies = {
 const accountSchema = z.object({ integrationAccountId: z.uuid() });
 const railwaySchema = z.object({ environmentId: z.string().trim().min(1).max(100), integrationAccountId: z.uuid() });
 const awsSchema = z.object({ region: z.string().refine(isAwsCommercialRegion) });
-// Stale drains are earlier drains that Vercel did not delete; removing the
-// source or reconnecting tries them again.
-const vercelStateSchema = z.object({
-  drains: z.record(z.string(), z.string()).default({}),
-  staleDrains: z.array(z.string()).default([]),
-});
-
-function vercelDrainIds(state: unknown): string[] {
-  const parsed = vercelStateSchema.safeParse(state ?? {});
-  return parsed.success ? [...Object.values(parsed.data.drains), ...parsed.data.staleDrains] : [];
-}
-
 function deniedBody(denied: { code?: string; error: string }) {
   return denied.code ? { code: denied.code, error: denied.error } : { error: denied.error };
 }
@@ -147,22 +135,6 @@ export function createSourceRoutes(dependencies: SourceRouteDependencies = defau
 
   async function sourceKey(input: { name: string; organizationId: string; userId: string }) {
     return dependencies.createKey({ createdBy: input.userId, name: input.name, organizationId: input.organizationId });
-  }
-
-  // Deletes drains and returns the IDs Vercel did not delete.
-  async function deleteDrains(target: { accessToken: string; teamId: string | null }, ids: string[]) {
-    const results = await Promise.allSettled(ids.map((id) => dependencies.deleteVercelDrain(target, id)));
-    return {
-      failed: ids.filter((_id, index) => results[index]?.status === "rejected"),
-      reason: results.find((result) => result.status === "rejected")?.reason as unknown,
-    };
-  }
-
-  async function vercelTarget(organizationId: string, integrationAccountId: string) {
-    const account = await dependencies.getAccount({ integrationAccountId, organizationId, provider: "vercel" });
-    if (!account?.encryptedCredentials || account.status !== "connected") return null;
-    const credentials = vercelCredentialsSchema.parse(dependencies.decrypt(account.encryptedCredentials));
-    return { account, credentials };
   }
 
   // The connection's environments, or a response that says why they could
@@ -328,7 +300,7 @@ export function createSourceRoutes(dependencies: SourceRouteDependencies = defau
       if (!granted.ok) return context.json(deniedBody(granted), granted.status);
       const body = accountSchema.safeParse(await context.req.json().catch(() => null));
       if (!body.success) return context.json({ error: "Choose a Vercel connection" }, 400);
-      const target = await vercelTarget(granted.organizationId, body.data.integrationAccountId);
+      const target = await vercelTarget(dependencies, granted.organizationId, body.data.integrationAccountId);
       if (!target) return context.json({ error: "Connect Vercel first" }, 404);
       const created = await sourceKey({ ...granted, name: `Vercel ${target.credentials.configurationId}` });
       const projectIds = target.account.metadata.projectSelection === "selected"
@@ -358,6 +330,7 @@ export function createSourceRoutes(dependencies: SourceRouteDependencies = defau
         (source) => source.provider === "vercel" && source.externalId === target.credentials.configurationId,
       );
       const { failed } = await deleteDrains(
+        dependencies,
         drainTarget,
         vercelDrainIds(previous?.state).filter((id) => !Object.values(drains).includes(id)),
       );
@@ -376,7 +349,7 @@ export function createSourceRoutes(dependencies: SourceRouteDependencies = defau
         });
       } catch (error) {
         // Unsaved drains could not be removed later, so remove them now.
-        await deleteDrains(drainTarget, Object.values(drains));
+        await deleteDrains(dependencies, drainTarget, Object.values(drains));
         await dependencies.revokeKey(created.key.id).catch(() => undefined);
         throw error;
       }
@@ -398,9 +371,10 @@ export function createSourceRoutes(dependencies: SourceRouteDependencies = defau
         return context.json({ error: "Only the source's creator, a workspace owner, or an admin can remove it" }, 403);
       }
       if (source.provider === "vercel" && source.integrationAccountId) {
-        const target = await vercelTarget(granted.organizationId, source.integrationAccountId).catch(() => null);
+        const target = await vercelTarget(dependencies, granted.organizationId, source.integrationAccountId).catch(() => null);
         if (target) {
           const { failed, reason } = await deleteDrains(
+            dependencies,
             { accessToken: target.credentials.accessToken, teamId: target.credentials.teamId },
             vercelDrainIds(source.state),
           );

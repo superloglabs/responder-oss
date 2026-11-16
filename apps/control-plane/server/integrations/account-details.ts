@@ -15,6 +15,7 @@ export interface IntegrationAccountDetails {
   serviceAccountEmail?: string;
   roles?: string[];
   accessLevel?: string;
+  scope?: string;
 }
 
 const text = (value: unknown) => typeof value === "string" && value.trim() ? value : undefined;
@@ -71,6 +72,8 @@ export function integrationAccountDetails(account: {
     case "posthog":
     case "railway":
       return withoutEmpty({ accessLevel: text(metadata.accessLevel) });
+    case "vercel":
+      return withoutEmpty({ scope: text(metadata.scope) });
     default:
       return undefined;
   }

@@ -70,6 +70,11 @@ describe("integrationAccountDetails", () => {
       externalAccountId: "user-1:redeploy",
       metadata: { accessLevel: "redeploy", workspaces: [{ id: "w", name: "Acme" }] },
     })).toEqual({ accessLevel: "redeploy" });
+    expect(integrationAccountDetails({
+      provider: "vercel",
+      externalAccountId: "icfg_1",
+      metadata: { scope: "team", teamId: "team_1", configurationId: "icfg_1" },
+    })).toEqual({ scope: "team" });
   });
 
   it("adds nothing for providers without details", () => {

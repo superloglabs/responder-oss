@@ -117,6 +117,17 @@ export function manageView(provider: string, name: string, account: IntegrationA
         }],
         disconnect: `Signal deletes its access, stops reading Railway, and stops reading its environments' logs. To remove the authorization too, revoke Superlog in your Railway account settings. ${pastFindings}`,
       };
+    case "vercel":
+      return {
+        connectedTo: account.displayName,
+        rows: [
+          { label: details.scope === "personal" ? "Account" : "Team", value: account.displayName, action: "Reconnect" },
+          ...(account.resourceCount > 0
+            ? [{ label: "Projects", value: `${account.resourceCount} ${account.resourceCount === 1 ? "project" : "projects"}` }]
+            : []),
+        ],
+        disconnect: `Signal removes the drains Superlog created, deletes its access, and stops reading Vercel. To remove the integration too, uninstall Superlog in your Vercel settings. ${pastFindings}`,
+      };
     case "posthog":
       return {
         connectedTo: "PostHog",
@@ -153,6 +164,7 @@ export function accountSummary(provider: string, account: IntegrationAccount) {
     case "grafana":
       return details.url?.replace(/^https?:\/\//u, "") ?? account.displayName;
     case "sentry":
+    case "vercel":
       return [details.organizationSlug ?? account.displayName, projects].filter(Boolean).join(" · ");
     case "aws":
       return details.awsAccountId ? `Account ${details.awsAccountId}` : account.displayName;
