@@ -13,9 +13,16 @@ import {
   revokeTelemetrySourceIngestKey,
   saveTelemetrySource,
 } from "../../../../packages/core/src/db/telemetry-sources.js";
+import { postHogAccessToken } from "../../../../packages/core/src/db/posthog-access.js";
 import { railwayAccessToken } from "../../../../packages/core/src/db/railway-access.js";
 import { isAwsCommercialRegion } from "../../../../packages/core/src/integrations/aws.js";
 import { McpOAuthRefreshError } from "../../../../packages/core/src/integrations/custom-mcp.js";
+import {
+  PostHogApiError,
+  type PostHogApiHost,
+  type PostHogProject,
+  postHogProjects,
+} from "../../../../packages/core/src/integrations/posthog-api.js";
 import {
   railwayEnvironments,
   railwayWorkspacesSchema,
@@ -44,10 +51,10 @@ import { deleteDrains, vercelDrainIds, vercelTarget } from "./vercel-source-remo
 import { getActiveTenant } from "../tenant.js";
 
 // Cloud providers that send telemetry to the workspace: Vercel drains, an AWS
-// stack that streams CloudWatch through Firehose, and Google Cloud projects
-// and Railway environments the worker reads. Available where applications can send telemetry, to
-// workspaces with telemetry or Signal: Signal finds problems in the data
-// these sources send.
+// stack that streams CloudWatch through Firehose, and Google Cloud projects,
+// Railway environments, and PostHog projects the worker reads. Available
+// where applications can send telemetry, to workspaces with telemetry or
+// Signal: Signal finds problems in the data these sources send.
 export type SourceRouteDependencies = {
   accounts: typeof listTelemetrySourceAccounts;
   awsTemplateUrl: () => Promise<string | null>;
@@ -62,7 +69,10 @@ export type SourceRouteDependencies = {
   receivesTelemetry: (organizationId: string) => Promise<boolean>;
   ingestOrigin: () => string;
   listSources: typeof listTelemetrySources;
-  providerConfigured: (provider: "gcp" | "railway" | "vercel") => boolean;
+  // The PostHog projects a connection reads and the region that serves them;
+  // null when the connection is gone or not connected.
+  postHogProjects: (input: { integrationAccountId: string; organizationId: string }) => Promise<{ host: PostHogApiHost; projects: PostHogProject[] } | null>;
+  providerConfigured: (provider: "gcp" | "posthog" | "railway" | "vercel") => boolean;
   // The Railway environments a connection shares; null when the connection
   // is gone or not connected.
   railwayEnvironments: (input: { integrationAccountId: string; organizationId: string }) => Promise<RailwayEnvironment[] | null>;
@@ -91,6 +101,10 @@ const defaultDependencies: SourceRouteDependencies = {
   receivesTelemetry: organizationReceivesTelemetry,
   ingestOrigin: cellOrigin,
   listSources: listTelemetrySources,
+  postHogProjects: async (input) => {
+    const accessToken = await postHogAccessToken(input);
+    return accessToken ? postHogProjects({ accessToken }) : null;
+  },
   providerConfigured: (provider) => {
     const definition = getIntegrationDefinition(provider);
     return Boolean(definition && integrationIsConfigured(definition));
@@ -111,6 +125,7 @@ const defaultDependencies: SourceRouteDependencies = {
 
 const accountSchema = z.object({ integrationAccountId: z.uuid() });
 const railwaySchema = z.object({ environmentId: z.string().trim().min(1).max(100), integrationAccountId: z.uuid() });
+const postHogSchema = z.object({ integrationAccountId: z.uuid(), projectId: z.string().trim().regex(/^\d{1,20}$/u) });
 const awsSchema = z.object({ region: z.string().refine(isAwsCommercialRegion) });
 function deniedBody(denied: { code?: string; error: string }) {
   return denied.code ? { code: denied.code, error: denied.error } : { error: denied.error };
@@ -154,6 +169,26 @@ export function createSourceRoutes(dependencies: SourceRouteDependencies = defau
     }
   }
 
+  // The connection's projects, or a response that says why they could not be
+  // read.
+  async function postHogProjectsFor(organizationId: string, integrationAccountId: string): Promise<
+    | { host: PostHogApiHost; ok: true; projects: PostHogProject[] }
+    | { error: string; ok: false; status: 404 | 409 | 502 }
+  > {
+    try {
+      const listed = await dependencies.postHogProjects({ integrationAccountId, organizationId });
+      return listed ? { ...listed, ok: true } : { error: "Connect PostHog first", ok: false, status: 404 };
+    } catch (error) {
+      if (
+        (error instanceof McpOAuthRefreshError && error.reconnectRequired) ||
+        (error instanceof PostHogApiError && (error.status === 401 || error.status === 403))
+      ) {
+        return { error: "PostHog refused the connection's access. Reconnect PostHog.", ok: false, status: 409 };
+      }
+      return { error: `PostHog could not list the projects: ${errorMessage(error)}`, ok: false, status: 502 };
+    }
+  }
+
   return new Hono()
     .get("/", async (context) => {
       const granted = await access(context.req.raw.headers);
@@ -166,6 +201,7 @@ export function createSourceRoutes(dependencies: SourceRouteDependencies = defau
         accounts,
         providers: {
           gcp: dependencies.providerConfigured("gcp"),
+          posthog: dependencies.providerConfigured("posthog"),
           railway: dependencies.providerConfigured("railway"),
           vercel: dependencies.providerConfigured("vercel"),
         },
@@ -290,6 +326,60 @@ export function createSourceRoutes(dependencies: SourceRouteDependencies = defau
           projectId: environment.projectId,
           projectName: environment.projectName,
           workspaceId: environment.workspaceId,
+        },
+        status: existing?.status ?? "pending",
+      });
+      return context.json({ sourceId: saved.id }, existing ? 200 : 201);
+    })
+    // PostHog projects one connection reads, and those whose logs Superlog
+    // reads.
+    .get("/posthog/:integrationAccountId", async (context) => {
+      const granted = await access(context.req.raw.headers);
+      if (!granted.ok) return context.json(deniedBody(granted), granted.status);
+      const integrationAccountId = z.uuid().safeParse(context.req.param("integrationAccountId"));
+      if (!integrationAccountId.success) return context.json({ error: "Connect PostHog first" }, 404);
+      const [listed, sources] = await Promise.all([
+        postHogProjectsFor(granted.organizationId, integrationAccountId.data),
+        dependencies.listSources(granted.organizationId),
+      ]);
+      if (!listed.ok) return context.json({ error: listed.error }, listed.status);
+      return context.json({
+        projects: listed.projects,
+        sources: sources.filter(
+          (source) => source.provider === "posthog" && source.integrationAccountId === integrationAccountId.data,
+        ),
+      });
+    })
+    .post("/posthog", async (context) => {
+      const granted = await access(context.req.raw.headers);
+      if (!granted.ok) return context.json(deniedBody(granted), granted.status);
+      const body = postHogSchema.safeParse(await context.req.json().catch(() => null));
+      if (!body.success) return context.json({ error: "Choose a PostHog project" }, 400);
+      const listed = await postHogProjectsFor(granted.organizationId, body.data.integrationAccountId);
+      if (!listed.ok) return context.json({ error: listed.error }, listed.status);
+      const project = listed.projects.find((item) => item.id === body.data.projectId);
+      if (!project) return context.json({ error: "Choose a project this PostHog connection reads" }, 404);
+      // A project already read keeps its cursor, so no line is sent twice.
+      // Added from another connection, it moves to this one.
+      const existing = (await dependencies.listSources(granted.organizationId)).find(
+        (source) => source.provider === "posthog" && source.externalId === project.id,
+      );
+      if (existing?.integrationAccountId === body.data.integrationAccountId) {
+        return context.json({ sourceId: existing.id }, 200);
+      }
+      // The worker reads with the connection's token, so no key is made.
+      const saved = await dependencies.saveSource({
+        createdBy: granted.userId,
+        displayName: project.organizationName ? `${project.organizationName} · ${project.name}` : project.name,
+        externalId: project.id,
+        integrationAccountId: body.data.integrationAccountId,
+        organizationId: granted.organizationId,
+        provider: "posthog",
+        state: {
+          ...existing?.state,
+          host: listed.host,
+          organizationName: project.organizationName,
+          projectName: project.name,
         },
         status: existing?.status ?? "pending",
       });

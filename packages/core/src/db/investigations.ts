@@ -2310,6 +2310,7 @@ export async function getRuntimePostHogConnections(
           const credentials = parsePostHogCredentials(
             decryptCredentials<Record<string, unknown>>(encryptedCredentials),
           );
+          const tokenIssuedAt = Date.now();
           const oauth = await refreshCustomMcpOAuth({
             mcpUrl: credentials.mcpUrl,
             oauth: credentials.oauth,
@@ -2324,6 +2325,7 @@ export async function getRuntimePostHogConnections(
                   encryptedCredentials: encryptCredentials({
                     ...credentials,
                     oauth,
+                    tokenIssuedAt,
                   }),
                 }),
             // Investigations only read, even on a read-write connection.

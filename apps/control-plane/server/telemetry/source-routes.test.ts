@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { McpOAuthRefreshError } from "../../../../packages/core/src/integrations/custom-mcp.js";
+import { PostHogApiError } from "../../../../packages/core/src/integrations/posthog-api.js";
 import { VercelDrainError } from "../../../../packages/core/src/telemetry/sources/vercel-drains.js";
 import { createSourceRoutes, type SourceRouteDependencies } from "./source-routes.js";
 import { removeVercelSourcesBeforeDisconnect } from "./vercel-source-removal.js";
@@ -16,6 +17,8 @@ const railwayEnvironment = {
   workspaceId: "workspace-1",
   workspaceName: "Acme",
 };
+
+const postHogProject = { id: "12345", name: "Web app", organizationName: "Acme" };
 
 function routes(overrides: Partial<SourceRouteDependencies> = {}) {
   const dependencies: SourceRouteDependencies = {
@@ -35,6 +38,7 @@ function routes(overrides: Partial<SourceRouteDependencies> = {}) {
     receivesTelemetry: vi.fn(async () => true),
     ingestOrigin: () => "https://eu.superlog.sh",
     listSources: vi.fn(async () => []),
+    postHogProjects: vi.fn(async () => ({ host: "https://eu.posthog.com" as const, projects: [postHogProject] })),
     providerConfigured: () => true,
     railwayEnvironments: vi.fn(async () => [railwayEnvironment]),
     revokeKey: vi.fn(async () => undefined),
@@ -57,7 +61,7 @@ describe("telemetry source routes", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
       accounts: [{ displayName: "Acme", id: accountId, provider: "vercel" }],
-      providers: { gcp: true, railway: true, vercel: true },
+      providers: { gcp: true, posthog: true, railway: true, vercel: true },
       sources: [],
     });
   });
@@ -398,6 +402,64 @@ describe("telemetry source routes", () => {
 
     const failing = routes({ railwayEnvironments: vi.fn(async () => { throw new Error("Railway API error: slow down"); }) });
     expect((await post(failing.app, "/railway", { environmentId: "env-prod", integrationAccountId: accountId })).status).toBe(502);
+    expect(failing.dependencies.saveSource).not.toHaveBeenCalled();
+  });
+
+  it("lists a PostHog connection's projects and the ones it reads", async () => {
+    const reading = {
+      createdAt: "",
+      displayName: "Acme · Web app",
+      externalId: "12345",
+      id: sourceId,
+      integrationAccountId: accountId,
+      lastError: null,
+      lastReceivedAt: null,
+      provider: "posthog" as const,
+      state: {},
+      status: "pending" as const,
+    };
+    const railway = { ...reading, id: "railway", provider: "railway" as const };
+    const { app, dependencies } = routes({ listSources: vi.fn(async () => [reading, railway]) });
+    const response = await app.request(`/posthog/${accountId}`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ projects: [postHogProject], sources: [reading] });
+    expect(dependencies.postHogProjects).toHaveBeenCalledWith({ integrationAccountId: accountId, organizationId });
+  });
+
+  it("reads a PostHog project the connection reaches, in its region and without a key", async () => {
+    const { app, dependencies } = routes();
+    const response = await post(app, "/posthog", { integrationAccountId: accountId, projectId: "12345" });
+    expect(response.status).toBe(201);
+    expect(dependencies.createKey).not.toHaveBeenCalled();
+    expect(dependencies.saveSource).toHaveBeenCalledWith({
+      createdBy: "user-1",
+      displayName: "Acme · Web app",
+      externalId: "12345",
+      integrationAccountId: accountId,
+      organizationId,
+      provider: "posthog",
+      state: { host: "https://eu.posthog.com", organizationName: "Acme", projectName: "Web app" },
+      status: "pending",
+    });
+
+    expect((await post(app, "/posthog", { integrationAccountId: accountId, projectId: "999" })).status).toBe(404);
+    expect((await post(app, "/posthog", { integrationAccountId: accountId, projectId: "../users" })).status).toBe(400);
+    expect(dependencies.saveSource).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks to connect or reconnect PostHog when its projects cannot be read", async () => {
+    const missing = routes({ postHogProjects: vi.fn(async () => null) });
+    expect((await missing.app.request(`/posthog/${accountId}`)).status).toBe(404);
+
+    for (const error of [new McpOAuthRefreshError(true), new PostHogApiError(401, "PostHog API request failed (HTTP 401)")]) {
+      const refused = routes({ postHogProjects: vi.fn(async () => { throw error; }) });
+      const response = await refused.app.request(`/posthog/${accountId}`);
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({ error: "PostHog refused the connection's access. Reconnect PostHog." });
+    }
+
+    const failing = routes({ postHogProjects: vi.fn(async () => { throw new Error("socket hang up"); }) });
+    expect((await post(failing.app, "/posthog", { integrationAccountId: accountId, projectId: "12345" })).status).toBe(502);
     expect(failing.dependencies.saveSource).not.toHaveBeenCalled();
   });
 

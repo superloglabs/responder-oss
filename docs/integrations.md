@@ -42,6 +42,7 @@ the regions whose CloudWatch error lines Superlog receives (see CloudWatch Logs
 subscriptions), or, where the deployment has no log destinations, adds the
 CloudWatch telemetry source. The Google Cloud page adds the project's
 telemetry source, the Railway page chooses the environments whose logs
+Superlog reads, the PostHog page chooses the projects whose error logs
 Superlog reads, and the Vercel page creates or removes the installation's
 drains (see Telemetry sources). Either way Signal reads new errors as
 they arrive rather than only during an investigation.
@@ -1275,6 +1276,26 @@ option needs a cell with a collector
   `level=`). Logs carry the Railway service name as `service.name` and the
   environment as `deployment.environment.name`. Removing the Railway
   connection removes its sources.
+- **PostHog**: choose projects of a connected PostHog account on its Signal
+  manage page (`GET /api/telemetry/sources/posthog/<connection>`; `POST
+  /api/telemetry/sources/posthog` with `integrationAccountId` and
+  `projectId`). The list holds the projects of the account's current
+  organization and of its other organizations the token can read. Every
+  minute the worker reads the project's `error` and `fatal` lines through
+  PostHog's logs API (`POST /api/projects/<id>/logs/query/`) with the
+  connection's OAuth token, which needs `logs:read`. Lines below error level
+  stay in PostHog, where investigations read them with the PostHog tools. The
+  token works only in the account's home region, so the source keeps the
+  host (`us.posthog.com` or `eu.posthog.com`) that answered `/api/users/@me/`.
+  The worker refreshes the token under the connection's credential lease when
+  it has less than five minutes left. Reads stop one minute behind the
+  present, start five minutes back for a new project, and skip ahead when
+  more than an hour behind. A window holds up to 10,000 error lines; beyond
+  that its oldest are skipped and the worker logs `posthog_telemetry_pulled`
+  with `truncated`. Lines keep their attributes and resource; PostHog's
+  base64 trace and span IDs become hex. A project without error lines still
+  counts as receiving while it has any log line in the last hour, checked
+  once an hour. Removing the PostHog connection removes its sources.
 - **Vercel**: choose a connected installation. Responder creates a trace drain
   that sends OTLP to `<cell>/api/ingest/v1/traces` and a log drain that sends
   NDJSON to `<cell>/api/ingest/vercel/logs`, both for the projects the
