@@ -348,12 +348,20 @@ function DatadogConnect({ integration, listPath, onBack }: PageProps) {
 export const railwaySignalReads = "Signal reads your Railway logs, deployments, and metrics.";
 // What Signal does with Vercel, shared by its connect and manage pages.
 export const vercelSignalReads = "Signal reads your Vercel projects, deployments, and logs.";
+// What Signal does with Axiom, shared by its connect and manage pages.
+export const axiomSignalReads = "Signal queries your datasets, metrics, and monitors. It never changes anything in Axiom.";
 
-const approvals: Record<"sentry" | "linear" | "posthog" | "railway" | "vercel", {
+const approvals: Record<"axiom" | "sentry" | "linear" | "posthog" | "railway" | "vercel", {
   name: string; description: string; allowed: string[]; denied: string;
   // Come back to this page rather than the list, to finish setup here.
   returnHere?: boolean;
 }> = {
+  axiom: {
+    name: "Axiom",
+    description: axiomSignalReads,
+    allowed: ["Query logs and traces in your datasets", "Read metrics, monitors, monitor history, and dashboards"],
+    denied: "Never changes datasets, monitors, dashboards, or notifiers",
+  },
   sentry: {
     name: "Sentry",
     description: "Signal reads your errors and issues to find what broke and who it affects.",

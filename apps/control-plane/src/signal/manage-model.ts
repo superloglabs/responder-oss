@@ -61,6 +61,12 @@ export function manageView(provider: string, name: string, account: IntegrationA
           : `Signal deletes the stored token and stops reading Grafana. Delete the token in Grafana to revoke it. ${pastFindings}`,
       };
     }
+    case "axiom":
+      return {
+        connectedTo: "Axiom",
+        rows: [{ label: "Signal's access", value: "Read only", action: "Reconnect" }],
+        disconnect: `Signal deletes its access and stops reading Axiom. To remove the authorization too, revoke it in Axiom. ${pastFindings}`,
+      };
     case "sentry": {
       const slug = details.organizationSlug ?? account.displayName;
       return {

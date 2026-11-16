@@ -14,6 +14,7 @@ export const telemetrySources: Source[] = [
   { provider: "sentry", name: providerDisplayName("sentry"), description: "Errors and issues" },
   { provider: "datadog", name: providerDisplayName("datadog"), description: "Monitors, logs, traces, and metrics" },
   { provider: "grafana", name: providerDisplayName("grafana"), description: "Dashboards, alerts, and queries" },
+  { provider: "axiom", name: providerDisplayName("axiom"), description: "Logs, traces, metrics, and monitors" },
   { provider: "aws", name: `${providerDisplayName("aws")} CloudWatch`, description: "Logs, metrics, and resources" },
   { provider: "gcp", name: providerDisplayName("gcp"), description: "Logs, metrics, and resources" },
   { provider: "railway", name: providerDisplayName("railway"), description: "Logs, deployments, and metrics" },

@@ -2277,6 +2277,22 @@ describe("integration callback routing", () => {
     });
   });
 
+  it("removes an Axiom connection from Signal setup", async () => {
+    vi.mocked(deleteIntegrationAccount).mockResolvedValue({ status: "removed" });
+
+    const response = await app.request(
+      "/api/integrations/axiom/accounts/30000000-0000-4000-8000-000000000000",
+      { method: "DELETE" },
+    );
+
+    expect(response.status).toBe(200);
+    expect(deleteIntegrationAccount).toHaveBeenCalledWith({
+      integrationAccountId: "30000000-0000-4000-8000-000000000000",
+      organizationId: tenant.organizationId,
+      provider: "axiom",
+    });
+  });
+
   it("explains which automations keep a connection from being removed", async () => {
     vi.mocked(deleteIntegrationAccount).mockResolvedValue({
       automationNames: ["Nightly triage", "Sentry follow-up"],
