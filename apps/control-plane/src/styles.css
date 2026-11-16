@@ -11732,6 +11732,44 @@ body:has(.appShell--scans) {
   line-height: 20px;
 }
 
+.appShell--settings .billingRunUsage__list {
+  display: grid;
+  gap: 20px;
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.appShell--settings .billingRunUsage__row,
+.appShell--settings .billingRunUsage__detail {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 13px;
+  line-height: 20px;
+  font-variant-numeric: tabular-nums;
+}
+
+.appShell--settings .billingRunUsage__row span,
+.appShell--settings .billingRunUsage__row strong {
+  color: var(--ds-text-primary);
+  font-weight: 500;
+}
+
+.appShell--settings .billingRunUsage .billingProgress {
+  margin-top: 8px;
+}
+
+.appShell--settings .billingRunUsage__detail {
+  margin-top: 6px;
+  color: var(--ds-text-muted);
+}
+
+.appShell--settings .billingRunUsage__detail span:last-child:not(:first-child) {
+  color: var(--ds-text-primary);
+}
+
 .appShell--settings .billingPlanActions {
   margin-top: 12px;
   display: flex;
