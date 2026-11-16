@@ -157,8 +157,11 @@ describe("pullPostHogSource", () => {
     expect(result.state.host).toBe("https://us.posthog.com");
   });
 
-  it("counts a project without errors as sending logs, checked once an hour", async () => {
-    const api = posthog([line("2026-11-16T09:30:00.000Z", "request handled", "info")]);
+  it("counts a project without errors as sending logs, checked every ten minutes", async () => {
+    const api = posthog([
+      line("2026-11-16T09:55:00.000Z", "request handled", "info"),
+      line("2026-11-16T10:08:00.000Z", "request handled", "info"),
+    ]);
     const pull = (state: Record<string, unknown>, at: Date) => pullPostHogSource({
       accessToken: "token",
       fetch: api.fetch,
@@ -176,8 +179,11 @@ describe("pullPostHogSource", () => {
     const queries = api.queries.length;
     const second = await pull(first.state, new Date(now.getTime() + 60_000));
     expect(second.received).toBe(false);
-    // Only the error read; activity waits for the hour.
+    // Only the error read; activity waits ten minutes.
     expect(api.queries.length).toBe(queries + 1);
+
+    const third = await pull(second.state, new Date(now.getTime() + 10 * 60_000));
+    expect(third.received).toBe(true);
   });
 
   it("keeps the cursor when ingest refuses the lines, and reports the error", async () => {

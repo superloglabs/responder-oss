@@ -1294,8 +1294,8 @@ option needs a cell with a collector
   that its oldest are skipped and the worker logs `posthog_telemetry_pulled`
   with `truncated`. Lines keep their attributes and resource; PostHog's
   base64 trace and span IDs become hex. A project without error lines still
-  counts as receiving while it has any log line in the last hour, checked
-  once an hour. Removing the PostHog connection removes its sources.
+  counts as receiving while it has any log line in the last ten minutes,
+  checked every ten minutes. Removing the PostHog connection removes its sources.
 - **Vercel**: choose a connected installation. Responder creates a trace drain
   that sends OTLP to `<cell>/api/ingest/v1/traces` and a log drain that sends
   NDJSON to `<cell>/api/ingest/vercel/logs`, both for the projects the

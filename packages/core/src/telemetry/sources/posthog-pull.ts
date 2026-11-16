@@ -29,8 +29,10 @@ const PAGE_SIZE = 1_000;
 const MAX_PAGES = 10;
 const ERROR_LEVELS = ["error", "fatal"];
 // A project whose error lines stop still sends logs. Whether it does is read
-// this often, so Signal knows the project's telemetry reaches Superlog.
-const ACTIVITY_EVERY_MS = 60 * 60_000;
+// this often, so Signal knows the project's telemetry reaches Superlog. It
+// is shorter than the 15 minutes after which the dashboard calls a source's
+// data stale.
+const ACTIVITY_EVERY_MS = 10 * 60_000;
 
 export const postHogSourceStateSchema = z.object({
   activityReadAt: z.string().optional(),
