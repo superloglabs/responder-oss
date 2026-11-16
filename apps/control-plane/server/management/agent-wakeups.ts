@@ -13,6 +13,7 @@ export function wakingTools(events: AgentEvents) {
     watch_alert: [events.alertChanged],
     watch_error_issues: [events.errorIssueOpened],
     watch_logs: [events.logsMatched],
+    watch_signal_findings: [events.signalFindingPosted],
     watch_synthetic_check: [events.syntheticCheckChanged],
   };
 }
@@ -112,6 +113,9 @@ export async function subscribeCaller(input: {
       }
       return;
     }
+    case "watch_signal_findings":
+      watching(await call.subscribe(events.signalFindingPosted, { workspace: context.organizationId }, { once }));
+      return;
     case "watch_synthetic_check":
       watching(await call.subscribe(events.syntheticCheckChanged, { check: String(nested(body, "check").id) }, { once }));
       return;
