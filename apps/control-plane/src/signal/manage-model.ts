@@ -142,7 +142,7 @@ export function manageView(provider: string, name: string, account: IntegrationA
           value: details.accessLevel === "read_write" ? "Read and write" : "Read only",
           action: "Reconnect",
         }],
-        disconnect: `Signal deletes its access and stops reading PostHog. To remove the authorization too, revoke it in PostHog. ${pastFindings}`,
+        disconnect: `Signal deletes its access, stops reading PostHog, and stops reading its projects' logs. To remove the authorization too, revoke it in PostHog. ${pastFindings}`,
       };
     default:
       return {

@@ -970,10 +970,11 @@ export const telemetryIngestKeys = pgTable(
 
 // A cloud provider that sends telemetry to the workspace:
 // Vercel drains, an AWS CloudFormation stack that streams through Firehose,
-// or a Google Cloud project or Railway environment that the worker reads. The
-// external ID is the Vercel installation, the AWS stack's resource prefix, the
-// Google Cloud project ID, or the Railway environment ID. State holds what the provider needs, such as drain IDs or read
-// cursors.
+// or a Google Cloud project, Railway environment, or PostHog project that the
+// worker reads. The external ID is the Vercel installation, the AWS stack's
+// resource prefix, the Google Cloud project ID, the Railway environment ID,
+// or the PostHog project ID. State holds what the provider needs, such as
+// drain IDs or read cursors.
 export const telemetrySources = pgTable(
   "telemetry_sources",
   {
@@ -981,7 +982,7 @@ export const telemetrySources = pgTable(
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organization.id, { onDelete: "cascade" }),
-    provider: text("provider").$type<"aws" | "gcp" | "railway" | "vercel">().notNull(),
+    provider: text("provider").$type<"aws" | "gcp" | "posthog" | "railway" | "vercel">().notNull(),
     externalId: text("external_id").notNull(),
     displayName: text("display_name").notNull(),
     integrationAccountId: uuid("integration_account_id").references(() => integrationAccounts.id, {

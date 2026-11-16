@@ -517,13 +517,16 @@ async function postHogAccessToken(
       const current = parsePostHogCredentials(
         decryptCredentials<Record<string, unknown>>(encryptedCredentials),
       );
+      const tokenIssuedAt = dependencies.posthog.now();
       const oauth = await dependencies.refreshCustomMcp({
         mcpUrl: current.mcpUrl,
         oauth: current.oauth,
         redirectUrl: integrationCallbackUrl("posthog"),
       });
       if (oauth === current.oauth) return { value: current };
-      const updated = { ...current, oauth };
+      // The log reader refreshes only a token about to expire, so it needs
+      // to know when this one was issued.
+      const updated = { ...current, oauth, tokenIssuedAt };
       return {
         encryptedCredentials: encryptCredentials(updated),
         value: updated,

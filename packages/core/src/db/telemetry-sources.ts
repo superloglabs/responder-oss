@@ -2,7 +2,7 @@ import { and, asc, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { getDatabase } from "./client.js";
 import { integrationAccounts, integrationResources, telemetryIngestKeys, telemetrySources } from "./schema.js";
 
-export type TelemetrySourceProvider = "aws" | "gcp" | "railway" | "vercel";
+export type TelemetrySourceProvider = "aws" | "gcp" | "posthog" | "railway" | "vercel";
 export type TelemetrySourceStatus = "active" | "failed" | "pending";
 
 export type TelemetrySourceSummary = {
@@ -181,9 +181,12 @@ export async function revokeTelemetrySourceIngestKey(keyId: string): Promise<voi
     .where(and(eq(telemetryIngestKeys.id, keyId), isNull(telemetryIngestKeys.revokedAt)));
 }
 
+const telemetrySourceAccountProviders = ["gcp", "posthog", "railway", "vercel"] as const;
+export type TelemetrySourceAccountProvider = (typeof telemetrySourceAccountProviders)[number];
+
 // Connected accounts a source can use, by provider.
 export async function listTelemetrySourceAccounts(organizationId: string): Promise<
-  Array<{ displayName: string; id: string; provider: "gcp" | "railway" | "vercel" }>
+  Array<{ displayName: string; id: string; provider: TelemetrySourceAccountProvider }>
 > {
   const rows = await getDatabase()
     .select({
@@ -195,13 +198,13 @@ export async function listTelemetrySourceAccounts(organizationId: string): Promi
     .where(
       and(
         eq(integrationAccounts.organizationId, organizationId),
-        inArray(integrationAccounts.provider, ["gcp", "railway", "vercel"]),
+        inArray(integrationAccounts.provider, [...telemetrySourceAccountProviders]),
         eq(integrationAccounts.status, "connected"),
         isNotNull(integrationAccounts.encryptedCredentials),
       ),
     )
     .orderBy(asc(integrationAccounts.displayName));
-  return rows as Array<{ displayName: string; id: string; provider: "gcp" | "railway" | "vercel" }>;
+  return rows as Array<{ displayName: string; id: string; provider: TelemetrySourceAccountProvider }>;
 }
 
 // Google Cloud sources the worker reads, with their connection's credentials.
@@ -256,6 +259,32 @@ export async function listRailwayTelemetrySources(): Promise<
     .from(telemetrySources)
     .innerJoin(integrationAccounts, eq(integrationAccounts.id, telemetrySources.integrationAccountId))
     .where(and(eq(telemetrySources.provider, "railway"), eq(integrationAccounts.status, "connected")));
+  return rows.flatMap((row) => (row.integrationAccountId ? [{ ...row, integrationAccountId: row.integrationAccountId }] : []));
+}
+
+// PostHog projects the worker reads, each with its connection. The external
+// ID is the PostHog project ID. Failed sources are read again, so a passing
+// error does not stop them.
+export async function listPostHogTelemetrySources(): Promise<
+  Array<{
+    id: string;
+    integrationAccountId: string;
+    organizationId: string;
+    projectId: string;
+    state: Record<string, unknown>;
+  }>
+> {
+  const rows = await getDatabase()
+    .select({
+      id: telemetrySources.id,
+      integrationAccountId: telemetrySources.integrationAccountId,
+      organizationId: telemetrySources.organizationId,
+      projectId: telemetrySources.externalId,
+      state: telemetrySources.state,
+    })
+    .from(telemetrySources)
+    .innerJoin(integrationAccounts, eq(integrationAccounts.id, telemetrySources.integrationAccountId))
+    .where(and(eq(telemetrySources.provider, "posthog"), eq(integrationAccounts.status, "connected")));
   return rows.flatMap((row) => (row.integrationAccountId ? [{ ...row, integrationAccountId: row.integrationAccountId }] : []));
 }
 

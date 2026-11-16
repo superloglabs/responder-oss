@@ -67,7 +67,7 @@ export function SettingsSources({ data, organizationId, reload, save, status, pr
         onSave={(repositoryIds) => save({ repositoryIds })} />
     </SettingsGroup>
     <SettingsGroup title="Context" action={<Button onClick={() => navigate(`${listPath}/context`)}><IconPlus aria-hidden="true" size={14} stroke={2} />Add context</Button>}>
-      {rows(contextSources, "No context is connected. Linear and PostHog help Signal skip known problems and count who is affected.")}
+      {rows(contextSources, "No context is connected. Linear helps Signal skip problems your team already tracks.")}
     </SettingsGroup>
   </SettingsPage>;
 }
