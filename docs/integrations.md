@@ -1289,7 +1289,10 @@ error issue too when it has a status from 500 to 599 in
 route and error text, not its body: the route in lower case without origin,
 query or the segments that identify a record, and the error text from
 `error.message`, `error`, `message`, `msg`, `response` or `response.body`,
-with IDs and numbers replaced. The issue's title is the status, that route and
+with IDs and numbers replaced. A field that holds a JSON body gives the text
+of its `message`, `error`, `detail` or `title` key, in that order; any other
+field gives its first line. A page of HTML and a field that is only `true`,
+`false` or `null` are passed over. The issue's title is the status, that route and
 the newest occurrence's error text as it was logged, such as
 `HTTP 500 /orders/<id>: upstream timed out after 30000ms`.
 ClickHouse's view over the logs must let these lines into
