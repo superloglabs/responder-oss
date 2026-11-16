@@ -995,10 +995,16 @@ the automation editor. The run-scoped context broker at
 one MCP server per connection, so the installation token stays in the control
 plane. A run reaches every project the installation shares with Responder.
 
-Signal setup lists Vercel with the other telemetry sources. Its manage page
-creates the installation's drains (see Telemetry sources), so the error lines
-in your deployments' logs and traces become error issues that start Signal.
-Signal investigations read the installation through the same two tools.
+Signal setup lists Vercel with the other telemetry sources. Connecting from
+there (`/api/integrations/vercel/start?mode=drains`) creates the
+installation's drains in the callback (see Telemetry sources), where the
+workspace can receive telemetry and the installation has none yet, so the
+error lines in your deployments' logs and traces become error issues that
+start Signal. If Vercel refuses, for example on a Hobby team or before the
+team accepts the Drains permission, the connection still completes and the
+manage page offers **Create drains**, which shows Vercel's reason. The
+callback logs `vercel_drains_after_connect` with the outcome. Signal
+investigations read the installation through the same two tools.
 
 ## AWS
 
