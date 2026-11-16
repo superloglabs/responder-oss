@@ -230,6 +230,31 @@ describe("Slack actions", () => {
     );
   });
 
+  it("shows a notification's handoff prompt as a code block only the presser sees", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const prompt = "Investigate this alert.\n\nSource: https://us.superlog.sh/alerts/a\n\n<!channel> latency";
+    const response = await signedActionRequest({
+      type: "block_actions",
+      team: { id: "T123" },
+      channel: { id: "C123" },
+      user: { id: "U123" },
+      response_url: "https://hooks.slack.com/actions/T123/B123/response-token",
+      message: {},
+      actions: [{ action_id: "copy_handoff_prompt", value: prompt }],
+    });
+    expect(response.status).toBe(200);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("https://hooks.slack.com/actions/T123/B123/response-token");
+    const body = JSON.parse(init.body as string);
+    expect(body).toMatchObject({ response_type: "ephemeral", replace_original: false });
+    expect(body.blocks[1]).toEqual({ type: "rich_text", elements: [{ type: "rich_text_preformatted", elements: [{ type: "text", text: prompt }] }] });
+    expect(body.blocks[2].elements[0].action_id).toBe("dismiss_copy_prompt");
+    expect(mocks.postSlackEphemeralMessage).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
   it("shows an issue prompt in the thread containing the button", async () => {
     const response = await signedActionRequest({
       type: "block_actions",

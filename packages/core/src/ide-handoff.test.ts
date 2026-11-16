@@ -46,7 +46,7 @@ describe("notification handoffs", () => {
   it.each([
     ["claude", "claude-cli://open?q=", "Fix in Claude Code"],
     ["codex", "codex://new?prompt=", "Fix in Codex"],
-    ["t3", "https://app.t3.codes/new?prompt=", "Fix in T3 Code"],
+    ["t3", "t3code://new?prompt=", "Fix in T3 Code"],
     ["capy", "https://capy.ai/new?prompt=", "Fix in Capy"],
   ] as const)("opens %s with the bounded prompt", (target, prefix, label) => {
     const context = "Check `mx` & \"unknown\"\n日本語 🚀 #1";
@@ -61,20 +61,21 @@ describe("notification handoffs", () => {
     ]);
   });
 
-  it("links Copy prompt to the copy page with the prompt in the fragment", () => {
-    const [button] = handoffButtons({ kind: "continue", sourceUrl, context: "Report", targets: ["prompt"] });
-    expect(button).toMatchObject({ action_id: "prompt_continue", text: { text: "Copy prompt" } });
-    const url = new URL(button!.url);
-    expect(url.origin + url.pathname).toBe("https://responder.example/api/ide/prompt");
-    expect(url.search).toBe("");
-    expect(promptOf(url.href)).toContain("Report");
-    expect(promptOf(url.href)).toContain(sourceUrl);
+  it.each(["Report 🚀", "x".repeat(20_000)])("carries the bounded prompt in the Copy prompt button's value", (context) => {
+    const [button] = handoffButtons({ kind: "continue", sourceUrl, context, targets: ["prompt"] });
+    expect(button).toMatchObject({ type: "button", action_id: "copy_handoff_prompt", text: { text: "Copy prompt" } });
+    expect(button).not.toHaveProperty("url");
+    const value = (button as { value: string }).value;
+    expect(value.length).toBeLessThanOrEqual(2_000);
+    expect(value).toContain(sourceUrl);
+    expect(value).toContain("Continue the work");
+    expect(value).toContain(context.slice(0, 10));
   });
 
   it("orders buttons the same way whatever order the targets come in", () => {
     const buttons = handoffButtons({ kind: "continue", sourceUrl, context: "Report", targets: ["prompt", "capy", "codex", "t3", "conductor", "claude"] });
     expect(buttons.map((button) => button.action_id)).toEqual([
-      "conductor_continue", "claude_continue", "codex_continue", "t3_continue", "capy_continue", "prompt_continue",
+      "conductor_continue", "claude_continue", "codex_continue", "t3_continue", "capy_continue", "copy_handoff_prompt",
     ]);
     expect(handoffButtons({ kind: "continue", sourceUrl, context: "Report", targets: [] })).toEqual([]);
   });

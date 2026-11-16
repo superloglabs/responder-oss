@@ -1,4 +1,5 @@
 import { pressErrorNotificationButton } from "./slack-error-notifications.js";
+import { copyHandoffPromptActionId } from "../../../../packages/core/src/ide-handoff.js";
 import { extensionConfig, forwardExtensionSlackAction, isExtensionSlackAction } from "../extensions.js";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { Hono } from "hono";
@@ -912,6 +913,24 @@ export function slackCopyPromptResponse(prompt: string | null) {
   };
 }
 
+// The "Copy prompt" button's prompt, as a code block only the person who
+// pressed it sees. Rich text keeps the notification's text literal.
+export function slackHandoffPromptResponse(prompt: string) {
+  return {
+    response_type: "ephemeral" as const,
+    replace_original: false,
+    text: "Paste this prompt into your coding agent.",
+    blocks: [
+      { type: "section" as const, text: { type: "plain_text" as const, text: "Paste this prompt into your coding agent." } },
+      { type: "rich_text" as const, elements: [{ type: "rich_text_preformatted" as const, elements: [{ type: "text" as const, text: prompt }] }] },
+      {
+        type: "actions" as const,
+        elements: [{ type: "button" as const, action_id: "dismiss_copy_prompt", text: { type: "plain_text" as const, text: "Dismiss" } }],
+      },
+    ],
+  };
+}
+
 export function slackPullRequestQueuedResponse(
   card: SlackIssuePullRequestCard,
 ) {
@@ -1721,6 +1740,18 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
         }));
       });
     }
+    return context.json({ ok: true });
+  }
+
+  const handoffPrompt = action.data.actions.find((item) => item.action_id === copyHandoffPromptActionId);
+  if (handoffPrompt) {
+    const prompt = handoffPrompt.value?.trim();
+    void sendSlackActionResponse(
+      action.data.response_url,
+      prompt ? slackHandoffPromptResponse(prompt) : slackEphemeralResponse("This button has no prompt. Open the notification's link instead."),
+    ).catch(() => {
+      console.error(JSON.stringify({ event: "slack_handoff_prompt_response_failed" }));
+    });
     return context.json({ ok: true });
   }
 
