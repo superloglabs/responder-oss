@@ -60,6 +60,7 @@ const connectionSecretFields = new Set([
   "apiKey",
   "applicationKey",
   "externalId",
+  "keySecret",
   "publicKey",
   "secretKey",
   "serviceAccountToken",

@@ -55,6 +55,7 @@ import {
   refreshLinearOAuthCredentials,
 } from "../integrations/linear.js";
 import { parseUpstashCredentials } from "../integrations/upstash.js";
+import { parseHoneycombCredentials } from "../integrations/honeycomb.js";
 import { parseLangfuseCredentials } from "../integrations/langfuse.js";
 import { requestSentryTokenRefresh } from "../integrations/sentry-authorization.js";
 import { vercelCredentialsSchema } from "../integrations/vercel.js";
@@ -1412,6 +1413,14 @@ export interface RuntimeUpstashConnection {
   apiKey: string;
   displayName: string;
   email: string;
+}
+
+export interface RuntimeHoneycombConnection {
+  accountId: string;
+  displayName: string;
+  keyId: string;
+  keySecret: string;
+  mcpUrl: string;
 }
 
 export interface RuntimeLangfuseConnection {
@@ -3112,6 +3121,46 @@ export async function getRuntimeGrafanaConnections(
       }),
     );
     if (connection) connections.push(connection);
+  }
+  return connections;
+}
+
+// Honeycomb teams in scope, read through each team's regional MCP server
+// with its management API key.
+export async function getRuntimeHoneycombConnections(
+  scope: ContextScope,
+): Promise<RuntimeHoneycombConnection[]> {
+  const config = await contextConfig(scope);
+  if (!config?.contextAccountIds.length) return [];
+
+  const accountRows = await getDatabase()
+    .select({
+      id: integrationAccounts.id,
+      displayName: integrationAccounts.displayName,
+      encryptedCredentials: integrationAccounts.encryptedCredentials,
+    })
+    .from(integrationAccounts)
+    .where(
+      and(
+        eq(integrationAccounts.organizationId, config.organizationId),
+        eq(integrationAccounts.provider, "honeycomb"),
+        eq(integrationAccounts.status, "connected"),
+        inArray(integrationAccounts.id, config.contextAccountIds),
+      ),
+    );
+  const connections: RuntimeHoneycombConnection[] = [];
+  for (const account of accountRows) {
+    if (!account.encryptedCredentials) continue;
+    const credentials = parseHoneycombCredentials(
+      decryptCredentials<Record<string, unknown>>(account.encryptedCredentials),
+    );
+    connections.push({
+      accountId: account.id,
+      displayName: account.displayName,
+      keyId: credentials.keyId,
+      keySecret: credentials.keySecret,
+      mcpUrl: credentials.mcpUrl,
+    });
   }
   return connections;
 }

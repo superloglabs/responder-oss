@@ -13,6 +13,7 @@ vi.mock("@responder/core/db/investigations", () => {
     getRuntimeDatadogConnection: vi.fn().mockRejectedValue(new Error("Datadog grant could not be refreshed")),
     getRuntimeGcpConnections: empty,
     getRuntimeGrafanaConnections: empty,
+    getRuntimeHoneycombConnections: empty,
     getRuntimeLangfuseConnections: empty,
     getRuntimeLinearConnection: none,
     getRuntimePostHogConnections: empty,
