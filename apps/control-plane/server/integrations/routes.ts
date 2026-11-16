@@ -2,7 +2,7 @@ import { integrationAccountDetails } from "./account-details.js";
 import { chatConnectionRoutes } from "./chat-connection.js";
 import { customMcpToolRoutes } from "./custom-mcp-tools.js";
 import { awsLogSubscriptionRoutes, removeAwsLogSubscriptionsBeforeDisconnect, restoreAwsLogSubscriptions } from "./aws-log-subscriptions.js";
-import { removeVercelSourcesBeforeDisconnect } from "../telemetry/vercel-source-removal.js";
+import { createVercelSourceAfterConnect, removeVercelSourcesBeforeDisconnect } from "../telemetry/vercel-sources.js";
 import { awsLogSubscriptionPrincipalArnForStacks } from "../../../../packages/core/src/integrations/aws-log-subscriptions.js";
 import {
   AWS_REGISTRATION_UNAVAILABLE_ERROR,
@@ -1200,6 +1200,9 @@ export async function startIntegrationConnection(input: {
     organizationId: tenant.organizationId,
     userId: tenant.user.id,
     provider: parsedProvider.data,
+    // `mode=drains` (Signal setup) creates a Vercel connection's drains as
+    // soon as it connects.
+    ...(parsedProvider.data === "vercel" && input.mode === "drains" ? { metadata: { createDrains: true } } : {}),
     returnTo: input.returnTo,
     routingUrl: cellCallbackUrl(parsedProvider.data),
   });
@@ -4409,6 +4412,19 @@ export const integrationRoutes = new Hono()
         },
       });
       await replaceIntegrationResources(accountId, "vercel_project", projects);
+      if (connectionState.metadata.createDrains === true) {
+        // The connection stands either way; its manage page offers the
+        // drains again with the reason they failed.
+        const drains = await createVercelSourceAfterConnect({
+          integrationAccountId: accountId,
+          organizationId: connectionState.organizationId,
+          userId: connectionState.userId,
+        }).catch((error: unknown) => {
+          logCallbackError("Vercel drains", error, { accountId, organizationId: connectionState.organizationId });
+          return "failed" as const;
+        });
+        console.info(JSON.stringify({ event: "vercel_drains_after_connect", integrationAccountId: accountId, organizationId: connectionState.organizationId, outcome: drains }));
+      }
       await captureAnalyticsEvent({
         distinctId: connectionState.userId,
         event: "integration connected",
