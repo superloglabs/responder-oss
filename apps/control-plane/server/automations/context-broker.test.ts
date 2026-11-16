@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { encryptCredentials } from "../../../../packages/core/src/credentials/encryption.js";
+import { decryptCredentials, encryptCredentials } from "../../../../packages/core/src/credentials/encryption.js";
 import { McpOAuthRefreshError } from "../../../../packages/core/src/integrations/custom-mcp.js";
 import {
   POSTHOG_MCP_URL,
@@ -975,6 +975,30 @@ describe("automation context broker", () => {
         mcpUrl: POSTHOG_MCP_URL,
         redirectUrl: expect.stringMatching(/\/api\/integrations\/posthog\/callback$/u),
       }));
+    });
+
+    it("records when a refreshed token was issued", async () => {
+      const { app, dependencies } = appFor(postHogClaim());
+      dependencies.providerFetch.mockImplementation(fakePostHogMcp());
+      dependencies.posthog.now = () => 1_794_823_200_000;
+      const stored: string[] = [];
+      const lease = dependencies.withCredentialLease.getMockImplementation()!;
+      dependencies.withCredentialLease.mockImplementation(async (input: Parameters<typeof lease>[0]) => lease({
+        ...input,
+        operation: async (encrypted: string) => {
+          const result = await input.operation(encrypted);
+          if (result.encryptedCredentials) stored.push(result.encryptedCredentials);
+          return result;
+        },
+      }));
+
+      expect((await callTool(app, "query-run")).status).toBe(200);
+      expect(dependencies.refreshCustomMcp).toHaveBeenCalled();
+      expect(dependencies.withCredentialLease).toHaveBeenCalled();
+      expect(stored).not.toHaveLength(0);
+      expect(decryptCredentials<Record<string, unknown>>(stored.at(-1)!)).toEqual(
+        expect.objectContaining({ tokenIssuedAt: 1_794_823_200_000 }),
+      );
     });
 
     it("serves every tool on a read-write connection", async () => {
