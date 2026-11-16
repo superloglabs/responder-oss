@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { McpOAuthRefreshError } from "../../../../packages/core/src/integrations/custom-mcp.js";
 import { VercelDrainError } from "../../../../packages/core/src/telemetry/sources/vercel-drains.js";
 import { createSourceRoutes, type SourceRouteDependencies } from "./source-routes.js";
+import { removeVercelSourcesBeforeDisconnect } from "./vercel-source-removal.js";
 
 const organizationId = "b925b1df-5b78-43c8-a816-6f00afb174af";
 const accountId = "3f1f2a1e-8d47-4a5e-9c55-0b0c3ad3b0aa";
@@ -217,6 +218,67 @@ describe("telemetry source routes", () => {
     expect(dependencies.revokeKey).toHaveBeenCalledWith("key-1");
     expect(dependencies.deleteSource).toHaveBeenCalledWith({ id: sourceId, organizationId });
     expect((await routes().app.request(`/${sourceId}`, { method: "DELETE" })).status).toBe(404);
+  });
+
+  describe("before a Vercel connection is removed", () => {
+    const vercelSource = {
+      createdAt: "",
+      displayName: "Vercel",
+      externalId: "icfg_1",
+      id: sourceId,
+      integrationAccountId: accountId,
+      lastError: null,
+      lastReceivedAt: null,
+      provider: "vercel" as const,
+      state: { drains: { logs: "drn_logs", traces: "drn_traces" }, staleDrains: [] },
+      status: "active" as const,
+    };
+    const withSource = (overrides: Partial<SourceRouteDependencies> = {}) => routes({
+      getSource: vi.fn(async () => ({ ...vercelSource, createdBy: "user-1", ingestKeyId: "key-1" })),
+      listSources: vi.fn(async () => [
+        vercelSource,
+        { ...vercelSource, id: "other-source", integrationAccountId: "other-connection" },
+      ]),
+      ...overrides,
+    }).dependencies;
+    const input = { integrationAccountId: accountId, organizationId };
+
+    it("deletes the connection's drains, revokes their key, and removes its source", async () => {
+      const dependencies = withSource();
+      expect(await removeVercelSourcesBeforeDisconnect(input, dependencies)).toEqual({ ok: true });
+      expect(dependencies.deleteVercelDrain).toHaveBeenCalledTimes(2);
+      expect(dependencies.deleteVercelDrain).toHaveBeenCalledWith({ accessToken: "vercel-token", teamId: "team_1" }, "drn_logs");
+      expect(dependencies.revokeKey).toHaveBeenCalledWith("key-1");
+      expect(dependencies.deleteSource).toHaveBeenCalledTimes(1);
+      expect(dependencies.deleteSource).toHaveBeenCalledWith({ id: sourceId, organizationId });
+    });
+
+    it("keeps the source while Vercel keeps a drain", async () => {
+      const dependencies = withSource({
+        deleteVercelDrain: vi.fn(async () => { throw new VercelDrainError("Vercel is down", 500); }),
+      });
+      expect(await removeVercelSourcesBeforeDisconnect(input, dependencies)).toEqual({
+        error: "Vercel could not remove the drains: Vercel is down",
+        ok: false,
+      });
+      expect(dependencies.revokeKey).not.toHaveBeenCalled();
+      expect(dependencies.deleteSource).not.toHaveBeenCalled();
+    });
+
+    it("removes the source when Vercel no longer accepts the token", async () => {
+      const dependencies = withSource({
+        deleteVercelDrain: vi.fn(async () => { throw new VercelDrainError("Not authorized", 403); }),
+      });
+      expect(await removeVercelSourcesBeforeDisconnect(input, dependencies)).toEqual({ ok: true });
+      expect(dependencies.revokeKey).toHaveBeenCalledWith("key-1");
+      expect(dependencies.deleteSource).toHaveBeenCalled();
+    });
+
+    it("does nothing for a connection without drains", async () => {
+      const dependencies = routes().dependencies;
+      expect(await removeVercelSourcesBeforeDisconnect(input, dependencies)).toEqual({ ok: true });
+      expect(dependencies.deleteVercelDrain).not.toHaveBeenCalled();
+    });
   });
 
   it("lets only the creator, owners and admins remove a source", async () => {

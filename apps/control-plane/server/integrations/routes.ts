@@ -2,6 +2,7 @@ import { integrationAccountDetails } from "./account-details.js";
 import { chatConnectionRoutes } from "./chat-connection.js";
 import { customMcpToolRoutes } from "./custom-mcp-tools.js";
 import { awsLogSubscriptionRoutes, removeAwsLogSubscriptionsBeforeDisconnect, restoreAwsLogSubscriptions } from "./aws-log-subscriptions.js";
+import { removeVercelSourcesBeforeDisconnect } from "../telemetry/vercel-source-removal.js";
 import { awsLogSubscriptionPrincipalArnForStacks } from "../../../../packages/core/src/integrations/aws-log-subscriptions.js";
 import {
   AWS_REGISTRATION_UNAVAILABLE_ERROR,
@@ -1227,7 +1228,7 @@ export async function startIntegrationConnection(input: {
 
 // Connections Signal setup can remove. Removing one deletes the stored
 // credentials; it does not revoke access on the provider's side.
-const removableProviderSchema = z.enum(["aws", "datadog", "gcp", "grafana", "linear", "posthog", "railway", "sentry"]);
+const removableProviderSchema = z.enum(["aws", "datadog", "gcp", "grafana", "linear", "posthog", "railway", "sentry", "vercel"]);
 
 async function removeIntegrationAccount(input: {
   headers: Headers;
@@ -1294,6 +1295,25 @@ async function removeIntegrationAccount(input: {
     }
     if (!cleanup.ok) return Response.json({ error: cleanup.error }, { status: 409 });
     restoreRegions = cleanup.removed;
+  }
+  // A Vercel connection's drains are deleted first, for the same reason.
+  // Drains cannot be put back without a new key, so a removal blocked after
+  // this leaves the connection without them; its manage page creates them
+  // again.
+  if (input.provider === "vercel") {
+    const check = blocked(await deleteIntegrationAccount({ ...target, dryRun: true }));
+    if (check) return check;
+    let cleanup: Awaited<ReturnType<typeof removeVercelSourcesBeforeDisconnect>>;
+    try {
+      cleanup = await removeVercelSourcesBeforeDisconnect({
+        integrationAccountId: accountId.data,
+        organizationId: tenant.organizationId,
+      });
+    } catch (error) {
+      logCallbackError("Vercel", error, { accountId: accountId.data, organizationId: tenant.organizationId, stage: "drain_cleanup" });
+      return Response.json({ error: "Superlog could not remove this connection's drains. Try again." }, { status: 502 });
+    }
+    if (!cleanup.ok) return Response.json({ error: cleanup.error }, { status: 502 });
   }
   const removal = blocked(await deleteIntegrationAccount(target));
   if (removal) {

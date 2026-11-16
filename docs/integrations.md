@@ -41,14 +41,19 @@ the connect form again to replace keys or sign in again. The AWS page chooses
 the regions whose CloudWatch error lines Superlog receives (see CloudWatch Logs
 subscriptions), or, where the deployment has no log destinations, adds the
 CloudWatch telemetry source. The Google Cloud page adds the project's
-telemetry source, and the Railway page chooses the environments whose logs
-Superlog reads (see Telemetry sources). Either way Signal reads new errors as
+telemetry source, the Railway page chooses the environments whose logs
+Superlog reads, and the Vercel page creates or removes the installation's
+drains (see Telemetry sources). Either way Signal reads new errors as
 they arrive rather than only during an investigation.
 
 **Disconnect** calls `DELETE /api/integrations/<provider>/accounts/<id>`, where
 `<provider>` is `aws`, `datadog`, `gcp`, `grafana`, `linear`, `posthog`,
-`railway`, or `sentry`. It deletes the stored credentials but does not revoke access on the
-provider's side; each manage page says what to revoke there. Responder refuses
+`railway`, `sentry`, or `vercel`. It deletes the stored credentials but does not revoke access on the
+provider's side; each manage page says what to revoke there. A Vercel
+connection's drains are deleted and their ingest key revoked first; while
+Vercel refuses to delete a drain, the connection stays and the request fails
+with `502`. A drain Vercel answers with `401` or `403` counts as gone, since
+uninstalling the integration removes its drains. Responder refuses
 with `409` while an active automation still uses the connection, or while
 records of Linear tickets created with it remain. OpenTelemetry has no connection to
 remove: services send data with ingest keys, managed in **Settings → Ingest
@@ -979,6 +984,11 @@ the automation editor. The run-scoped context broker at
 `/api/automation-context-broker/v1/<connection>` serves the same two tools as
 one MCP server per connection, so the installation token stays in the control
 plane. A run reaches every project the installation shares with Responder.
+
+Signal setup lists Vercel with the other telemetry sources. Its manage page
+creates the installation's drains (see Telemetry sources), so the error lines
+in your deployments' logs and traces become error issues that start Signal.
+Signal investigations read the installation through the same two tools.
 
 ## AWS
 
