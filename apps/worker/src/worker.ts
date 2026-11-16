@@ -130,7 +130,7 @@ import {
   defaultSyntheticCheckDependencies,
   purgeSyntheticCheckRuns,
 } from "./synthetic-checks.js";
-import { pullGcpTelemetrySources, pullRailwayTelemetrySources } from "./telemetry-sources.js";
+import { pullGcpTelemetrySources, pullPostHogTelemetrySources, pullRailwayTelemetrySources } from "./telemetry-sources.js";
 import { sendUsageNotices } from "@responder/core/billing/usage-notices";
 import {
   creditWaivedUsage,
@@ -177,6 +177,7 @@ const pollers: {
   archivedSandboxCleanup?: NodeJS.Timeout;
   errorIssues?: NodeJS.Timeout;
   gcpTelemetry?: NodeJS.Timeout;
+  posthogTelemetry?: NodeJS.Timeout;
   railwayTelemetry?: NodeJS.Timeout;
   linearTicket?: NodeJS.Timeout;
   remediationRecovery?: NodeJS.Timeout;
@@ -208,6 +209,7 @@ const startChannelAutomations = (input: Parameters<typeof startAlertAutomations>
   });
 let gcpTelemetryPass: Promise<void> | undefined;
 let railwayTelemetryPass: Promise<void> | undefined;
+let postHogTelemetryPass: Promise<void> | undefined;
 const telemetryAlertDependencies = {
   ...defaultTelemetryAlertDependencies,
   startAutomations: startChannelAutomations,
@@ -323,6 +325,19 @@ function pullRailwayTelemetry(): Promise<void> {
       railwayTelemetryPass = undefined;
     });
   return railwayTelemetryPass;
+}
+
+// Runs at most one PostHog telemetry pass at a time.
+function pullPostHogTelemetry(): Promise<void> {
+  postHogTelemetryPass ??= pullPostHogTelemetrySources()
+    .then(() => undefined)
+    .catch((error: unknown) => {
+      void reportWorkerException(error, { operation: "posthog_telemetry_pull" });
+    })
+    .finally(() => {
+      postHogTelemetryPass = undefined;
+    });
+  return postHogTelemetryPass;
 }
 
 async function purgeExpiredAutomationBrokerGrants(): Promise<void> {
@@ -733,6 +748,7 @@ async function shutdown(signal: string): Promise<void> {
   if (pollers.automationSuggestions) clearInterval(pollers.automationSuggestions);
   if (pollers.gcpTelemetry) clearInterval(pollers.gcpTelemetry);
   if (pollers.railwayTelemetry) clearInterval(pollers.railwayTelemetry);
+  if (pollers.posthogTelemetry) clearInterval(pollers.posthogTelemetry);
   if (pollers.syntheticChecks) clearInterval(pollers.syntheticChecks);
   if (pollers.syntheticCheckPurge) clearInterval(pollers.syntheticCheckPurge);
   if (pollers.linearTicket) clearInterval(pollers.linearTicket);
@@ -747,6 +763,7 @@ async function shutdown(signal: string): Promise<void> {
   // A pass that sent data saves its cursors before the worker exits.
   await gcpTelemetryPass;
   await railwayTelemetryPass;
+  await postHogTelemetryPass;
   await syntheticChecks.stop();
   console.log(JSON.stringify({ event: "worker_stopping", signal }));
   try {
@@ -1392,6 +1409,8 @@ pollers.gcpTelemetry = setInterval(() => void pullGcpTelemetry(), 60_000);
 pollers.gcpTelemetry.unref();
 pollers.railwayTelemetry = setInterval(() => void pullRailwayTelemetry(), 60_000);
 pollers.railwayTelemetry.unref();
+pollers.posthogTelemetry = setInterval(() => void pullPostHogTelemetry(), 60_000);
+pollers.posthogTelemetry.unref();
 void generateDueAutomationSuggestions();
 pollers.automationSuggestions = setInterval(() => void generateDueAutomationSuggestions(), 10 * 60 * 1_000);
 pollers.automationSuggestions.unref();

@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import { McpOAuthRefreshError } from "@responder/core/integrations/custom-mcp";
 import {
   type GcpTelemetryPullDependencies,
+  type PostHogTelemetryPullDependencies,
   pullGcpTelemetrySources,
+  pullPostHogTelemetrySources,
   pullRailwayTelemetrySources,
   type RailwayTelemetryPullDependencies,
 } from "./telemetry-sources.js";
@@ -159,5 +161,57 @@ describe("pullRailwayTelemetrySources", () => {
     const noCollector = railwayDependencies({ collectorUrl: () => null });
     expect(await pullRailwayTelemetrySources(noCollector)).toEqual({ failed: 0, sources: 0 });
     expect(noCollector.list).not.toHaveBeenCalled();
+  });
+});
+
+function postHogDependencies(overrides: Partial<PostHogTelemetryPullDependencies> = {}): PostHogTelemetryPullDependencies {
+  return {
+    accessToken: vi.fn(async () => "posthog-token"),
+    collectorUrl: () => "http://collector:4318",
+    forward: vi.fn(async () => new Response(null, { status: 200 })),
+    list: vi.fn(async () => [{
+      id: "source-1",
+      integrationAccountId: "account-1",
+      organizationId: "org-1",
+      projectId: "12345",
+      state: { host: "https://eu.posthog.com" },
+    }]),
+    now: () => new Date("2026-11-16T10:00:00Z"),
+    pull: vi.fn(async (input) => {
+      await input.forward({ resourceLogs: [] });
+      return { error: null, logs: 2, received: true, state: { host: "https://eu.posthog.com" as const, logsCursor: "2026-11-16T09:59:00.000Z" }, truncated: false };
+    }),
+    update: vi.fn(async () => undefined),
+    ...overrides,
+  };
+}
+
+describe("pullPostHogTelemetrySources", () => {
+  it("reads each project with its connection's token and saves the cursor", async () => {
+    const deps = postHogDependencies();
+
+    expect(await pullPostHogTelemetrySources(deps)).toEqual({ failed: 0, sources: 1 });
+    expect(deps.pull).toHaveBeenCalledWith(expect.objectContaining({
+      accessToken: "posthog-token",
+      projectId: "12345",
+      state: { host: "https://eu.posthog.com" },
+    }));
+    expect(deps.forward).toHaveBeenCalledWith(expect.objectContaining({ organizationId: "org-1", signal: "logs" }));
+    expect(deps.update).toHaveBeenCalledWith("source-1", {
+      lastError: null,
+      lastReceivedAt: new Date("2026-11-16T10:00:00Z"),
+      state: { host: "https://eu.posthog.com", logsCursor: "2026-11-16T09:59:00.000Z" },
+      status: "active",
+    });
+  });
+
+  it("asks for a reconnect when PostHog refuses the refresh", async () => {
+    const deps = postHogDependencies({ accessToken: vi.fn(async () => { throw new McpOAuthRefreshError(true); }) });
+
+    expect(await pullPostHogTelemetrySources(deps)).toEqual({ failed: 1, sources: 1 });
+    expect(deps.update).toHaveBeenCalledWith("source-1", {
+      lastError: "PostHog refused the connection's access. Reconnect PostHog.",
+      status: "failed",
+    });
   });
 });

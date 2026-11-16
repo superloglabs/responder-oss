@@ -27,6 +27,8 @@ export interface PostHogCredentials {
   authType: "oauth";
   mcpUrl: string;
   oauth: StoredCustomMcpOAuthState;
+  /** When PostHog issued the current access token, in epoch milliseconds. */
+  tokenIssuedAt?: number;
 }
 
 const oauthSchema = z.object({
@@ -44,15 +46,31 @@ const postHogCredentialsSchema = z.union([
     authType: z.literal("oauth"),
     mcpUrl: z.literal(POSTHOG_MCP_URL),
     oauth: oauthSchema,
+    tokenIssuedAt: z.number().int().nonnegative().optional(),
   }),
   z.object({
     accessLevel: z.literal("read_write"),
     authType: z.literal("oauth"),
     mcpUrl: z.literal(POSTHOG_READ_WRITE_MCP_URL),
     oauth: oauthSchema,
+    tokenIssuedAt: z.number().int().nonnegative().optional(),
   }),
 ]);
 
 export function parsePostHogCredentials(input: unknown): PostHogCredentials {
   return postHogCredentialsSchema.parse(input) as PostHogCredentials;
+}
+
+// An access token with less than five minutes left is refreshed before use.
+const TOKEN_REFRESH_MARGIN_MS = 5 * 60_000;
+
+/**
+ * Whether the stored access token can be used without a refresh. A token
+ * whose issue time or lifetime is unknown is refreshed.
+ */
+export function postHogAccessTokenIsFresh(credentials: PostHogCredentials, now: number): boolean {
+  const expiresIn = credentials.oauth.tokens?.expires_in;
+  if (!credentials.oauth.tokens?.access_token || credentials.tokenIssuedAt === undefined) return false;
+  if (typeof expiresIn !== "number") return false;
+  return now < credentials.tokenIssuedAt + expiresIn * 1000 - TOKEN_REFRESH_MARGIN_MS;
 }

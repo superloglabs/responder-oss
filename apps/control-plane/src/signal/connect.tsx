@@ -348,6 +348,8 @@ function DatadogConnect({ integration, listPath, onBack }: PageProps) {
 export const railwaySignalReads = "Signal reads your Railway logs, deployments, and metrics.";
 // What Signal does with Vercel, shared by its connect and manage pages.
 export const vercelSignalReads = "Signal reads your Vercel projects, deployments, and logs.";
+// What Signal does with PostHog, shared by its connect and manage pages.
+export const postHogSignalReads = "Signal reads your PostHog logs and errors, and uses product usage to tell how many customers a problem affects.";
 // What Signal does with Axiom, shared by its connect and manage pages.
 export const axiomSignalReads = "Signal queries your datasets, metrics, and monitors. It never changes anything in Axiom.";
 
@@ -376,9 +378,10 @@ const approvals: Record<"axiom" | "sentry" | "linear" | "posthog" | "railway" | 
   },
   posthog: {
     name: "PostHog",
-    description: "Signal uses product usage to tell how many customers a problem affects.",
-    allowed: ["Read insights, dashboards, and events", "Read logs, errors, and session replays"],
+    description: `${postHogSignalReads} After you connect, choose the projects whose error logs Superlog reads, so Signal sees new errors as they happen.`,
+    allowed: ["Read logs, errors, and session replays", "Read insights, dashboards, and events"],
     denied: "Read-only access. Nothing in PostHog can be changed",
+    returnHere: true,
   },
   railway: {
     name: "Railway",

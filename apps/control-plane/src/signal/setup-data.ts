@@ -19,12 +19,12 @@ export const telemetrySources: Source[] = [
   { provider: "gcp", name: providerDisplayName("gcp"), description: "Logs, metrics, and resources" },
   { provider: "railway", name: providerDisplayName("railway"), description: "Logs, deployments, and metrics" },
   { provider: "vercel", name: providerDisplayName("vercel"), description: "Logs, traces, and deployments" },
+  { provider: "posthog", name: providerDisplayName("posthog"), description: "Logs, errors, and product usage" },
 ];
 
 export const contextSources: Source[] = [
   { provider: "linear", name: providerDisplayName("linear"), description: "Issues, priorities, and work already in progress" },
   { provider: "jira", name: "Jira", description: "Tickets, project history, and known issues" },
-  { provider: "posthog", name: providerDisplayName("posthog"), description: "Product usage and customer impact" },
 ];
 
 export function sourceName(provider: string) {
