@@ -1,4 +1,4 @@
-import { EnvelopeIcon } from "@phosphor-icons/react";
+import { CopyIcon, EnvelopeIcon } from "@phosphor-icons/react";
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { authErrorCode } from "../auth-error-code";
@@ -10,7 +10,7 @@ import { SelectField, Switch, TextAreaField, type SelectOption } from "../design
 import { useDocumentTitle } from "../use-document-title";
 import { useOrganizationCapabilities } from "../organization-capabilities";
 import { startSignalCheckout } from "../signal/model";
-import { handoffTargetNames, handoffTargets, type HandoffTarget } from "@responder/core/ide-handoff";
+import { handoffLabel, handoffTargets, type HandoffTarget } from "@responder/core/ide-handoff";
 import {
   extensionTeamPlanDescription,
   teamPlanDescription,
@@ -585,13 +585,13 @@ export function WorkspaceSettingsPage() {
   );
 }
 
-const handoffTargetDescriptions: Record<HandoffTarget, string> = {
-  capy: "Opens a new Capy thread with the prompt.",
-  claude: "Opens Claude Code in a new terminal with the prompt. Needs Claude Code installed.",
-  codex: "Opens a new thread in the Codex app with the prompt. Needs the Codex app installed.",
-  conductor: "Opens a new Conductor workspace with the prompt. Needs Conductor installed.",
-  prompt: "Opens a page with the prompt and a button to copy it.",
-  t3: "Opens T3 Code with the prompt, on the desktop, on the web, or on a phone.",
+const handoffTargetDetails: Record<HandoffTarget, { description: string; logo: string | null; name: string }> = {
+  conductor: { description: "Opens a new workspace. Needs the Conductor app.", logo: "/coding-agents/conductor.png", name: "Conductor" },
+  claude: { description: "Opens a new terminal session. Needs Claude Code.", logo: "/coding-agents/claude.svg", name: "Claude Code" },
+  codex: { description: "Opens a new thread. Needs the Codex app.", logo: "/coding-agents/codex.svg", name: "Codex" },
+  t3: { description: "Opens a new thread. Needs the T3 Code app.", logo: "/coding-agents/t3.png", name: "T3 Code" },
+  capy: { description: "Opens a new thread in Capy.", logo: "/coding-agents/capy.svg", name: "Capy" },
+  prompt: { description: "Shows the prompt in a code block only you can see.", logo: null, name: "Copy prompt" },
 };
 
 // Chooses the buttons under alerts, synthetic checks, error notifications and
@@ -614,9 +614,10 @@ function HandoffButtonsSection() {
     return () => { active = false; };
   }, []);
 
-  async function toggle(target: HandoffTarget, enabled: boolean) {
+  async function toggle(target: HandoffTarget) {
     if (!state) return;
     const previous = state;
+    const enabled = !state.targets.includes(target);
     const targets = handoffTargets.filter((value) => value === target ? enabled : state.targets.includes(value));
     setState({ ...state, targets });
     setError(null);
@@ -627,7 +628,7 @@ function HandoffButtonsSection() {
         headers: { "content-type": "application/json" },
         method: "PUT",
       });
-      const body = (await response.json().catch(() => null)) as { error?: string; canEdit?: boolean; targets?: HandoffTarget[] } | null;
+      const body = (await response.json().catch(() => null)) as { error?: string; targets?: HandoffTarget[] } | null;
       if (!response.ok || !body?.targets) throw new Error(body?.error ?? "Could not save the Slack buttons");
       setState({ canEdit: true, targets: body.targets });
     } catch (cause) {
@@ -639,29 +640,55 @@ function HandoffButtonsSection() {
   }
 
   return (
-    <div className="memberSection">
-      <div className="memberSection__heading">
+    <div className="memberSection handoffSettings">
+      <div className="memberSection__heading handoffSettings__heading">
         <h3>Slack buttons</h3>
+        <p>
+          Buttons under alerts, error notifications, synthetic checks and
+          automation results. Each opens the app with a prompt that links back
+          to Superlog. Nothing runs until you send it.
+          {state && !state.canEdit ? " Admins can change these." : null}
+        </p>
       </div>
-      <p className="memberAccessNote">
-        Buttons under alerts, synthetic checks, error notifications and
-        automation results in Slack. Each one opens a coding agent with a
-        prompt that links back here. Nothing runs until you send the prompt.
-        {state && !state.canEdit ? " Admins can change this." : null}
-      </p>
       {error ? <p className="settingsNotice settingsNotice--error">{error}</p> : null}
       {state ? (
-        <div className="handoffButtonSettings">
-          {handoffTargets.map((target) => (
-            <Switch
-              checked={state.targets.includes(target)}
-              description={handoffTargetDescriptions[target]}
-              disabled={!state.canEdit || saving}
-              key={target}
-              label={target === "prompt" ? handoffTargetNames[target] : `Fix in ${handoffTargetNames[target]}`}
-              onCheckedChange={(checked) => void toggle(target, checked)}
-            />
-          ))}
+        <div className="memberList">
+          {handoffTargets.map((target) => {
+            const details = handoffTargetDetails[target];
+            const checked = state.targets.includes(target);
+            return (
+              <div className="memberRow handoffRow" key={target}>
+                <span className="memberAvatar handoffRow__logo">
+                  {details.logo ? <img alt="" src={details.logo} /> : <CopyIcon aria-hidden="true" size={16} />}
+                </span>
+                <span className="memberIdentity">
+                  <strong>{details.name}</strong>
+                  <span>{details.description}</span>
+                </span>
+                <button
+                  aria-checked={checked}
+                  aria-label={handoffLabel(target, "fix")}
+                  className="dsSwitch handoffRow__switch"
+                  disabled={!state.canEdit || saving}
+                  onClick={() => void toggle(target)}
+                  role="switch"
+                  type="button"
+                >
+                  <span aria-hidden="true" className="dsSwitch__track"><span /></span>
+                </button>
+              </div>
+            );
+          })}
+          <div className="handoffPreview">
+            <span className="handoffPreview__label">In Slack</span>
+            <div className="handoffPreview__buttons">
+              {state.targets.length > 0
+                ? state.targets.map((target) => (
+                    <span className="handoffPreview__button" key={target}>{handoffLabel(target, "fix")}</span>
+                  ))
+                : <span className="handoffPreview__empty">No buttons</span>}
+            </div>
+          </div>
         </div>
       ) : null}
     </div>

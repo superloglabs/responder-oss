@@ -3,7 +3,7 @@ import { z } from "zod";
 export type HandoffKind = "fix" | "continue";
 
 // Where a notification can hand its context, in button order: coding agents,
-// then a page to copy the prompt from.
+// then a button that shows the prompt to copy.
 export const handoffTargets = ["conductor", "claude", "codex", "t3", "capy", "prompt"] as const;
 export type HandoffTarget = (typeof handoffTargets)[number];
 export const handoffTargetsSchema = z.array(z.enum(handoffTargets)).max(handoffTargets.length)
@@ -37,7 +37,7 @@ type HandoffInput = {
 
 // Slack URL buttons accept at most 3,000 characters. Keep the source link
 // intact and fit a Unicode-safe excerpt around it.
-function fitHandoffPrompt(input: HandoffInput, toUrl: (encodedPrompt: string) => string): string {
+function fitHandoffPrompt(input: HandoffInput, toUrl: (encodedPrompt: string) => string, limit = 3_000): string {
   const source = new URL(input.sourceUrl);
   if (source.protocol !== "https:" && source.protocol !== "http:") throw new Error("Handoffs require an HTTP source URL");
   const prefix = input.kind === "fix"
@@ -48,32 +48,29 @@ function fitHandoffPrompt(input: HandoffInput, toUrl: (encodedPrompt: string) =>
   const encode = (value: string) => encodeURIComponent(value).replace(/[!'()*]/gu, (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
   const build = (length: number) => toUrl(encode(instructions + characters.slice(0, length).join("") + (length < characters.length ? "\n[Excerpt; see source for full details.]" : "")));
   let low = 0;
-  let high = Math.min(characters.length, 3_000);
+  let high = Math.min(characters.length, limit);
   while (low < high) {
     const middle = Math.ceil((low + high) / 2);
-    if (build(middle).length <= 3_000) low = middle;
+    if (build(middle).length <= limit) low = middle;
     else high = middle - 1;
   }
   const result = build(low);
-  if (result.length > 3_000) throw new Error("Handoff source URL is too long");
+  if (result.length > limit) throw new Error("Handoff source URL is too long");
   return result;
 }
 
 // Each app opens with the prompt prefilled and waits for the person to send
-// it. Claude Code opens a new terminal session and Codex a new local thread.
-// T3 Code's web link asks which app to open; Capy opens a new cloud thread.
+// it. Claude Code opens a new terminal session, Codex and T3 Code a new
+// thread, and Capy a new cloud thread.
 const deepLinkPrefixes: Record<Exclude<HandoffTarget, "prompt">, string> = {
   capy: "https://capy.ai/new?prompt=",
   claude: "claude-cli://open?q=",
   codex: "codex://new?prompt=",
   conductor: "conductor://prompt=",
-  t3: "https://app.t3.codes/new?prompt=",
+  t3: "t3code://new?prompt=",
 };
 
-// Slack buttons cannot write to the clipboard, so "Copy prompt" opens a page
-// that shows the prompt with a copy button.
-export function handoffDeepLink(target: HandoffTarget, input: HandoffInput): string {
-  if (target === "prompt") return handoffPageUrl("prompt", input);
+export function handoffDeepLink(target: Exclude<HandoffTarget, "prompt">, input: HandoffInput): string {
   return fitHandoffPrompt(input, (prompt) => `${deepLinkPrefixes[target]}${prompt}`);
 }
 
@@ -85,18 +82,29 @@ export function conductorDeepLink(input: HandoffInput): string {
 // that only render web links. The fragment is never sent to our server or
 // included in HTTP referrers.
 export function conductorHandoffUrl(input: HandoffInput): string {
-  return handoffPageUrl("conductor", input);
-}
-
-function handoffPageUrl(page: "conductor" | "prompt", input: HandoffInput): string {
   const url = new URL(input.sourceUrl);
-  url.pathname = `/api/ide/${page}`;
+  url.pathname = "/api/ide/conductor";
   url.search = "";
   url.hash = "";
   return fitHandoffPrompt(input, (prompt) => `${url}#prompt=${prompt}`);
 }
 
+export const copyHandoffPromptActionId = "copy_handoff_prompt";
+
+// Slack buttons cannot write to the clipboard. "Copy prompt" carries the
+// prompt in its value, which holds at most 2,000 characters, and pressing it
+// shows the prompt in a code block that only the person who pressed it sees.
+export function copyHandoffPromptButton(input: HandoffInput) {
+  return {
+    type: "button",
+    action_id: copyHandoffPromptActionId,
+    text: { type: "plain_text", text: handoffLabel("prompt", input.kind) },
+    value: fitHandoffPrompt(input, decodeURIComponent, 2_000),
+  };
+}
+
 export function handoffButton(target: HandoffTarget, input: HandoffInput) {
+  if (target === "prompt") return copyHandoffPromptButton(input);
   return {
     type: "button",
     action_id: `${target}_${input.kind}`,

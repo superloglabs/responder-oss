@@ -499,12 +499,6 @@ body:has(.appShell--investigation) {
   color: var(--ds-warning);
 }
 
-.appShell--settings .handoffButtonSettings {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
 .appShell--settings .sandboxSettings__code textarea {
   font-family: var(--ds-font-mono, ui-monospace, "SFMono-Regular", Menlo, monospace);
   font-size: 12px;
