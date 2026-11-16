@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   extensionConfig,
   extensionProxy,
+  extensionSeats,
   forwardExtensionSlackAction,
   isExtensionSlackAction,
   type ExtensionConfig,
@@ -158,5 +159,33 @@ describe("extension Slack actions", () => {
       else await forwarded;
       expect(cancel).toHaveBeenCalled();
     }
+  });
+});
+
+describe("extension seats", () => {
+  const offer = { planId: "team", name: "Team", price: 200, included: 100 };
+  const answer = (body: unknown, status = 200) =>
+    vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status }));
+
+  it("asks the extension's internal route for the workspace with the token", async () => {
+    const fetch = answer({ includesTeammates: false, offer });
+    expect(await extensionSeats(member.organizationId, config, fetch)).toEqual({ includesTeammates: false, offer });
+    expect(fetch).toHaveBeenCalledWith(
+      `http://extension.internal:3100/api/example/internal/seats?organizationId=${member.organizationId}`,
+      expect.objectContaining({ headers: { authorization: "Bearer extension-token" } }),
+    );
+  });
+
+  it("has no answer without an extension, or from one without the route", async () => {
+    const none = { includesTeammates: null, offer: null };
+    expect(await extensionSeats(member.organizationId, null, vi.fn())).toEqual(none);
+    expect(await extensionSeats(member.organizationId, config, answer({ error: "Not found" }, 404))).toEqual(none);
+  });
+
+  it("throws when the extension fails or answers something else", async () => {
+    await expect(extensionSeats(member.organizationId, config, answer({}, 500))).rejects.toThrow("500");
+    await expect(extensionSeats(member.organizationId, config, answer({ includesTeammates: "yes" }))).rejects.toThrow("invalid");
+    await expect(extensionSeats(member.organizationId, config, answer({ includesTeammates: false, offer: { planId: 1 } })))
+      .rejects.toThrow("invalid");
   });
 });

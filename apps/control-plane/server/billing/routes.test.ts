@@ -75,6 +75,34 @@ describe("billing routes", () => {
     mocks.organizationUsesUsageBilling.mockResolvedValue(false);
   });
 
+  it("reports whether the workspace needs Team to invite", async () => {
+    signIn();
+    mocks.organizationUsesUsageBilling.mockResolvedValue(true);
+    mocks.getAutomationBillingSummary.mockResolvedValue({ includesTeammates: false });
+    expect(await (await app.request("/api/billing/seats")).json()).toEqual({
+      needsTeamPlan: true,
+      extensionOffer: null,
+    });
+
+    signIn();
+    mocks.organizationHasCapability.mockResolvedValue(true);
+    expect(await (await app.request("/api/billing/seats")).json()).toEqual({
+      needsTeamPlan: false,
+      extensionOffer: null,
+    });
+  });
+
+  it("shows the invite form when seats cannot be read", async () => {
+    signIn();
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mocks.organizationUsesUsageBilling.mockResolvedValue(true);
+    mocks.getAutomationBillingSummary.mockRejectedValue(new Error("Autumn unavailable"));
+    expect(await (await app.request("/api/billing/seats")).json()).toEqual({
+      needsTeamPlan: false,
+      extensionOffer: null,
+    });
+  });
+
   it("loads the summary once for concurrent requests from a workspace", async () => {
     signIn();
     mocks.getBillingSummary.mockResolvedValue(summary);

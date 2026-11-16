@@ -79,8 +79,16 @@ function billing(invitationsNeedTeamPlan: boolean) {
 
 async function mockWorkspace(
   page: Page,
-  options: { billing: ReturnType<typeof billing>; invitation?: { body: unknown; status: number } },
+  options: {
+    billing: ReturnType<typeof billing>;
+    capabilities?: string[];
+    invitation?: { body: unknown; status: number };
+    seats?: Array<{ needsTeamPlan: boolean; extensionOffer: unknown }>;
+  },
 ) {
+  // Each read of the seats takes the next answer, then keeps the last.
+  const seats = options.seats ?? [{ needsTeamPlan: options.billing.invitationsNeedTeamPlan, extensionOffer: null }];
+  let seatReads = 0;
   await page.route("**/api/auth/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
     if (path.endsWith("/get-session")) {
@@ -111,12 +119,17 @@ async function mockWorkspace(
     }
   });
   await page.route("**/api/context", (route) =>
-    route.fulfill({ json: { capabilities: ["automations", "simplified_navigation"] } }));
+    route.fulfill({ json: { capabilities: options.capabilities ?? ["automations", "simplified_navigation"] } }));
   await page.route("**/api/legacy-account-redirect", (route) =>
     route.fulfill({ json: { redirect: false } }));
   await page.route("**/api/integrations/github/pull-request-author", (route) =>
     route.fulfill({ json: { author: null, canRemove: false } }));
   await page.route("**/api/billing", (route) => route.fulfill({ json: options.billing }));
+  await page.route("**/api/billing/seats", (route) => {
+    const answer = seats[Math.min(seatReads, seats.length - 1)];
+    seatReads += 1;
+    return route.fulfill({ json: answer });
+  });
   await page.route("**/api/billing/usage?**", (route) =>
     route.fulfill({ json: { days: [], points: [], sources: {} } }));
 }
@@ -146,6 +159,36 @@ test("keeps the invite form on a plan with teammates", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Invite a teammate" })).toBeVisible();
   await expect(page.getByLabel("Email address")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Invite teammates on the Team plan" })).toHaveCount(0);
+});
+
+test("offers Signal's Team, with checkout, to a Signal workspace on Pro", async ({ page }) => {
+  const team = { planId: "signal_max", name: "Team", price: 200, included: 100 };
+  await mockWorkspace(page, {
+    billing: billing(false),
+    capabilities: ["signal"],
+    seats: [
+      { needsTeamPlan: true, extensionOffer: team },
+      { needsTeamPlan: false, extensionOffer: null },
+    ],
+  });
+  let checkout: unknown = null;
+  await page.route("**/api/signal/billing/checkout", async (route) => {
+    checkout = route.request().postDataJSON();
+    await route.fulfill({ json: { url: null } });
+  });
+  await page.goto("/settings/workspace");
+
+  await expect(page.getByRole("heading", { name: "Invite teammates on the Team plan" })).toBeVisible();
+  await expect(page.getByText(
+    "Your plan includes one seat. Team includes unlimited seats and up to 100 investigated findings each month, for $200 / month.",
+  )).toBeVisible();
+  await expect(page.getByLabel("Email address")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Upgrade to Team" }).click();
+
+  expect(checkout).toEqual({ planId: "signal_max", returnTo: "/settings/workspace" });
+  await expect(page.getByLabel("Email address")).toBeVisible();
+  await expect(page.getByText("You're on Team. Invite your teammates.")).toBeVisible();
 });
 
 test("offers Team when the server refuses an invitation for the plan", async ({ page }) => {

@@ -876,6 +876,9 @@ export const organizationCapabilityValues = [
   "telemetry",
   "dashboards",
   "alerts",
+  // Lets a workspace invite teammates whatever its plan, for a deal agreed
+  // by hand.
+  "unlimited_seats",
 ] as const;
 
 export type OrganizationCapability = (typeof organizationCapabilityValues)[number];
