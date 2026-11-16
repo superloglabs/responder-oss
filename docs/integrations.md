@@ -47,7 +47,7 @@ drains (see Telemetry sources). Either way Signal reads new errors as
 they arrive rather than only during an investigation.
 
 **Disconnect** calls `DELETE /api/integrations/<provider>/accounts/<id>`, where
-`<provider>` is `aws`, `datadog`, `gcp`, `grafana`, `linear`, `posthog`,
+`<provider>` is `aws`, `axiom`, `datadog`, `gcp`, `grafana`, `linear`, `posthog`,
 `railway`, `sentry`, or `vercel`. It deletes the stored credentials but does not revoke access on the
 provider's side; each manage page says what to revoke there. A Vercel
 connection's drains are deleted and their ingest key revoked first; while
@@ -698,6 +698,10 @@ Axiom tool, including writes and deletes for datasets, dashboards, monitors,
 and notifiers. Alert investigations and scans get only an allowlist of
 read-only query, dataset, metrics, dashboard, monitor, notifier, and service
 map tools.
+
+Signal setup lists Axiom with the other telemetry sources. Its connect page
+starts the same OAuth flow and returns to setup; its manage page reconnects or
+disconnects. Signal reads Axiom with the read-only allowlist above.
 
 Agents use Axiom as investigation context. Use a watched Slack channel as the
 agent input, then add Axiom under Context so the investigation can query
