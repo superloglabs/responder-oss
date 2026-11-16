@@ -30,6 +30,30 @@ interface UsageBalance {
   usage: number;
 }
 
+// One metered feature of the per-run account.
+interface RunBillingUsage {
+  featureId: string;
+  included: number;
+  name: string;
+  nextResetAt: number | null;
+  overageCost: number;
+  price: number | null;
+  priceUnits: number;
+  unit: string;
+  unlimited: boolean;
+  usage: number;
+}
+
+// The plan the workspace pays per run on. Plan fields are null and usage is
+// empty when billing could not read it.
+interface RunBilling {
+  modelName: string;
+  planName: string | null;
+  planPrice: number | null;
+  runFeatureId: string;
+  usage: RunBillingUsage[];
+}
+
 interface AutomationBillingSummary {
   allowance: number;
   // Charged this period, in dollars. Null when it could not be loaded.
@@ -56,7 +80,7 @@ interface AutomationBillingSummary {
   remaining: number;
   // Set when the workspace pays per run on one model instead of from the
   // usage credit.
-  runBilling?: { modelName: string } | null;
+  runBilling?: RunBilling | null;
   // The usage credit also pays for sandbox time.
   sandboxTimeBilled: boolean;
   scheduledPlanId: AutomationPlanId | null;
@@ -171,6 +195,96 @@ function PlanUsage({
   );
 }
 
+function count(value: number): string {
+  return new Intl.NumberFormat(undefined, {
+    maximumFractionDigits: 1,
+    notation: value >= 100_000 ? "compact" : "standard",
+  }).format(value);
+}
+
+function unitPrice(item: RunBillingUsage, unit: string): string {
+  const per = item.priceUnits === 1 ? unit.replace(/s$/, "") : `${count(item.priceUnits)} ${unit}`;
+  return `${dollars(item.price!)} per ${per}`;
+}
+
+// Each metered feature of the per-run plan: used, included, and what usage
+// past it has cost this period.
+function RunBillingUsageCard({ runBilling }: { runBilling: RunBilling }) {
+  const nextResetAt = runBilling.usage.reduce<number | null>(
+    (soonest, item) =>
+      item.nextResetAt && (!soonest || item.nextResetAt < soonest) ? item.nextResetAt : soonest,
+    null,
+  );
+  return (
+    <article className="billingUsageCard billingRunUsage">
+      <header>
+        <span>{nextResetAt ? "This billing period" : "Usage so far"}</span>
+      </header>
+      {runBilling.usage.length > 0 ? (
+        <ul className="billingRunUsage__list">
+          {runBilling.usage.map((item) => {
+            const isRuns = item.featureId === runBilling.runFeatureId;
+            const label = isRuns ? "Runs" : item.name;
+            const unit = isRuns ? "runs" : item.unit;
+            const used = Math.min(item.usage, item.included);
+            const percent = item.included > 0 ? (used / item.included) * 100 : 0;
+            return (
+              <li key={item.featureId}>
+                <div className="billingRunUsage__row">
+                  <span>{label}</span>
+                  <strong>
+                    {item.unlimited
+                      ? `${count(item.usage)} · unlimited`
+                      : `${count(item.usage)} / ${count(item.included)}`}
+                  </strong>
+                </div>
+                {item.unlimited ? null : (
+                  <div
+                    aria-label={`${count(item.usage)} of ${count(item.included)} included ${unit} used`}
+                    className="billingProgress"
+                    role="progressbar"
+                    aria-valuemax={item.included}
+                    aria-valuemin={0}
+                    aria-valuenow={used}
+                  >
+                    <span style={{ width: `${percent}%` }} />
+                  </div>
+                )}
+                <div className="billingRunUsage__detail">
+                  <span>
+                    {item.unlimited
+                      ? "Included in your plan"
+                      : item.price !== null
+                        ? `${unitPrice(item, unit)} past included`
+                        : "Usage past included is not billed"}
+                  </span>
+                  {item.price !== null && !item.unlimited ? <span>{dollars(item.overageCost)}</span> : null}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
+      <p>
+        {nextResetAt ? `Resets ${resetLabel(nextResetAt)}. ` : ""}
+        {`Automations run on the ${runBilling.modelName} model, with model usage and sandbox time included. To use other models, move to Pro or Team.`}
+      </p>
+    </article>
+  );
+}
+
+function runPlanDescription(runBilling: RunBilling): string {
+  const overage = runBilling.usage.reduce((total, item) => total + item.overageCost, 0);
+  const soFar = overage > 0 ? ` ${dollars(overage)} of usage past what is included so far this period.` : "";
+  const billsOverage = runBilling.usage.some((item) => item.price !== null && !item.unlimited);
+  if (runBilling.planPrice === null) return "Billed for each successful run.";
+  if (runBilling.planPrice > 0) {
+    const extra = billsOverage ? ", plus usage past what is included" : "";
+    return `${dollars(runBilling.planPrice)} per month${extra}.${soFar}`;
+  }
+  return `Billed for usage past what is included.${soFar}`;
+}
+
 function planIncludes(plan: AutomationBillingSummary["plans"][number]): string {
   const usage = `${dollars(plan.included)} of usage credit and ${plan.machineHours} machine hours each month`;
   return plan.includesTeammates ? `unlimited seats, ${usage}` : usage;
@@ -238,14 +352,7 @@ function AutomationBilling({
       <h2 className="billingSectionTitle">{usageBased ? "Usage" : "Automations"}</h2>
       <section className="billingGrid">
         {runBilling ? (
-          <article className="billingUsageCard">
-            <header>
-              <span>Price per run</span>
-            </header>
-            <p>
-              {`Automations run on the ${runBilling.modelName} model. Each successful run is billed at your plan's price per run, with model usage and sandbox time included. To use other models, move to Pro or Team.`}
-            </p>
-          </article>
+          <RunBillingUsageCard runBilling={runBilling} />
         ) : summary.machineHours ? (
           <PlanUsage machineHours={summary.machineHours} summary={summary} />
         ) : (
@@ -315,12 +422,12 @@ function AutomationBilling({
 
         <article className="billingPlanCard">
           <span className="billingPlanCard__eyebrow">
-            {usageBased ? "Current plan" : "Automation plan"}
+            {usageBased || runBilling ? "Current plan" : "Automation plan"}
           </span>
-          <h2>{runBilling ? "Pay per run" : summary.planName}</h2>
+          <h2>{runBilling ? runBilling.planName ?? "Pay per run" : summary.planName}</h2>
           <p>
             {runBilling
-              ? "Billed for each successful run."
+              ? runPlanDescription(runBilling)
               : currentPlan
               ? `Includes ${planIncludes(currentPlan)}.`
               : summary.machineHours
@@ -344,7 +451,7 @@ function AutomationBilling({
               ref={plansButton}
               type="button"
             >
-              {canUpgrade(planCatalog, summary) ? "Upgrade plan" : "Change plan"}
+              {canUpgrade(planCatalog, summary) && !runBilling?.planPrice ? "Upgrade plan" : "Change plan"}
             </button>
             {paid && !summary.cancelsAtPeriodEnd ? (
               <button
