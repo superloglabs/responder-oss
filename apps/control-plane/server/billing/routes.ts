@@ -20,7 +20,7 @@ import {
 import { sandboxTimeIsBilled } from "../../../../packages/core/src/billing/usage-charges.js";
 import { organizationHasCapability } from "../../../../packages/core/src/db/organization-capabilities.js";
 import { Hono } from "hono";
-import { invitationsNeedTeamPlan } from "./invitations.js";
+import { invitationsNeedTeamPlan, workspaceSeats } from "./invitations.js";
 import { createRateLimiter } from "../rate-limit.js";
 import { getActiveTenant, type ActiveTenantResult } from "../tenant.js";
 
@@ -164,6 +164,23 @@ export const billingRoutes = new Hono<{ Variables: { tenant: ActiveTenant } }>()
     } catch (error) {
       console.error("Unable to load billing summary", error);
       return context.json({ error: "Unable to load billing" }, 502);
+    }
+  })
+  // Whether the workspace needs Team to invite teammates, and the plan to
+  // offer. Read when the members page opens, so the offer shows before an
+  // invitation is refused. A failure shows the invite form, as the
+  // invitation check then allows it.
+  .get("/seats", async (context) => {
+    const { organizationId } = context.get("tenant");
+    try {
+      return context.json(await workspaceSeats(organizationId));
+    } catch (error) {
+      console.error(JSON.stringify({
+        errorCode: error instanceof Error ? error.constructor.name : "unknown",
+        event: "workspace_seats_failed",
+        organizationId,
+      }));
+      return context.json({ needsTeamPlan: false, extensionOffer: null });
     }
   })
   .get("/usage", async (context) => {

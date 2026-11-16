@@ -9,11 +9,15 @@ import { MemberListSkeleton } from "../components/screen-skeletons";
 import { SelectField, Switch, TextAreaField, type SelectOption } from "../design-system";
 import { useDocumentTitle } from "../use-document-title";
 import { useOrganizationCapabilities } from "../organization-capabilities";
+import { startSignalCheckout } from "../signal/model";
 import {
+  extensionTeamPlanDescription,
   teamPlanDescription,
   teamPlanRequiredCode,
   teammatePlan,
+  type ExtensionTeamPlan,
   type TeamPlan,
+  type WorkspaceSeats,
 } from "./workspace-settings-presentation";
 
 type WorkspaceRole = "admin" | "member";
@@ -73,7 +77,11 @@ function invitationUrl(invitationId: string): string {
 
 interface WorkspaceBilling {
   automations: { plans: TeamPlan[] } | null;
-  invitationsNeedTeamPlan?: boolean;
+}
+
+async function fetchWorkspaceSeats(): Promise<WorkspaceSeats | null> {
+  const response = await fetch("/api/billing/seats");
+  return response.ok ? ((await response.json()) as WorkspaceSeats) : null;
 }
 
 export function WorkspaceSettingsPage() {
@@ -93,29 +101,81 @@ export function WorkspaceSettingsPage() {
     useState<WorkspaceRole>("member");
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  // Back from checkout for Team, with the plan that lets it invite.
+  const [returningFromCheckout] = useState(
+    () => new URLSearchParams(window.location.search).get("checkout") === "success",
+  );
+  const [notice, setNotice] = useState<string | null>(() =>
+    returningFromCheckout ? "Thanks for upgrading. You can invite your teammates now." : null,
+  );
   const [latestInvitation, setLatestInvitation] = useState<string | null>(null);
   const [needsTeamPlan, setNeedsTeamPlan] = useState(false);
   const [teamPlan, setTeamPlan] = useState<TeamPlan | null>(null);
+  const [extensionTeamPlan, setExtensionTeamPlan] = useState<ExtensionTeamPlan | null>(null);
+  const [upgrading, setUpgrading] = useState(false);
+
+  function showSeats(seats: WorkspaceSeats) {
+    setNeedsTeamPlan(seats.needsTeamPlan);
+    setExtensionTeamPlan(seats.extensionOffer);
+  }
 
   useEffect(() => {
-    if (signal || !isAdmin || !organizationId) return;
+    if (!isAdmin || !organizationId) return;
     let active = true;
-    // Without the billing summary the form stays, and a refused invitation
-    // still offers Team.
-    void fetch("/api/billing")
-      .then(async (response) =>
-        response.ok ? ((await response.json()) as WorkspaceBilling) : null)
-      .then((billing) => {
-        if (!active || !billing) return;
-        setNeedsTeamPlan(billing.invitationsNeedTeamPlan === true);
-        setTeamPlan(teammatePlan(billing));
-      })
-      .catch(() => undefined);
+    // Back from checkout, the new plan can take a few seconds to reach
+    // billing, so seats are read again until it does.
+    const returning = returningFromCheckout;
+    if (returning) window.history.replaceState(null, "", window.location.pathname);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    // Without an answer the form stays, and a refused invitation still
+    // offers Team.
+    const readSeats = (attemptsLeft: number) => {
+      void fetchWorkspaceSeats()
+        .then((seats) => {
+          if (!active || !seats) return;
+          showSeats(seats);
+          if (returning && seats.needsTeamPlan && attemptsLeft > 0) {
+            timer = setTimeout(() => readSeats(attemptsLeft - 1), 2_000);
+          }
+        })
+        .catch(() => undefined);
+    };
+    readSeats(returning ? 5 : 0);
+    // Signal workspaces have no automation plans to offer.
+    if (!signal) {
+      void fetch("/api/billing")
+        .then(async (response) =>
+          response.ok ? ((await response.json()) as WorkspaceBilling) : null)
+        .then((billing) => {
+          if (active && billing) setTeamPlan(teammatePlan(billing));
+        })
+        .catch(() => undefined);
+    }
     return () => {
       active = false;
+      clearTimeout(timer);
     };
-  }, [signal, isAdmin, organizationId]);
+  }, [signal, isAdmin, organizationId, returningFromCheckout]);
+
+  // Starts checkout for the extension's Team plan, which returns here.
+  async function upgradeToExtensionTeam(plan: ExtensionTeamPlan) {
+    setError(null);
+    setUpgrading(true);
+    try {
+      const { url } = await startSignalCheckout(plan.planId, "/settings/workspace");
+      if (url) {
+        window.location.assign(url);
+        return;
+      }
+      // The plan changed without a payment page.
+      const seats = await fetchWorkspaceSeats();
+      if (seats) showSeats(seats);
+      setNotice(`You're on ${plan.name}. Invite your teammates.`);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not start checkout.");
+    }
+    setUpgrading(false);
+  }
 
   async function invite(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -147,6 +207,12 @@ export function WorkspaceSettingsPage() {
       );
       if (result.error?.code === teamPlanRequiredCode) {
         setNeedsTeamPlan(true);
+        // Reads which plan to offer.
+        void fetchWorkspaceSeats()
+          .then((seats) => {
+            if (seats?.needsTeamPlan) setExtensionTeamPlan(seats.extensionOffer);
+          })
+          .catch(() => undefined);
         return;
       }
       setError(result.error?.message ?? "Could not create the invitation");
@@ -325,12 +391,27 @@ export function WorkspaceSettingsPage() {
           <section aria-labelledby="team-plan-offer" className="inviteForm teamPlanOffer">
             <div>
               <h3 id="team-plan-offer">Invite teammates on the Team plan</h3>
-              <p>{teamPlanDescription(teamPlan)}</p>
+              <p>
+                {extensionTeamPlan
+                  ? extensionTeamPlanDescription(extensionTeamPlan)
+                  : teamPlanDescription(teamPlan)}
+              </p>
             </div>
             <div className="inviteForm__controls">
-              <Link className="button button--primary" to="/settings/billing#plans">
-                {teamPlan ? `Upgrade to ${teamPlan.name}` : "See plans"}
-              </Link>
+              {extensionTeamPlan ? (
+                <button
+                  className="button button--primary"
+                  disabled={upgrading}
+                  onClick={() => void upgradeToExtensionTeam(extensionTeamPlan)}
+                  type="button"
+                >
+                  {upgrading ? "Opening checkout…" : `Upgrade to ${extensionTeamPlan.name}`}
+                </button>
+              ) : (
+                <Link className="button button--primary" to="/settings/billing#plans">
+                  {teamPlan ? `Upgrade to ${teamPlan.name}` : "See plans"}
+                </Link>
+              )}
             </div>
           </section>
         ) : isAdmin ? (

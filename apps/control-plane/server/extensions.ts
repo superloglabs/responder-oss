@@ -26,6 +26,8 @@ export const extensionRoleHeader = "x-responder-member-role";
 const forwardedRequestHeaders = ["accept", "content-type", "user-agent"];
 const forwardedResponseHeaders = ["cache-control", "content-type"];
 const requestTimeoutMs = 30_000;
+// An invitation waits for this answer, so it is short.
+const seatsTimeoutMs = 5_000;
 
 export function extensionConfig(environment: NodeJS.ProcessEnv = process.env): ExtensionConfig | null {
   const url = environment.RESPONDER_EXTENSION_URL?.trim();
@@ -178,4 +180,68 @@ export async function forwardExtensionSlackAction(
   // Only the status matters; the body is released so the connection is reused.
   await response.body?.cancel().catch(() => undefined);
   if (!response.ok) throw new Error(`The extension answered ${response.status}`);
+}
+
+// A plan the extension offers so a workspace can invite teammates.
+export interface ExtensionTeamPlanOffer {
+  planId: string;
+  name: string;
+  price: number;
+  included: number;
+}
+
+// Whether the extension's plan lets a workspace invite teammates. Null when
+// the extension has no answer for the workspace, such as one that does not
+// use it, so the workspace's other plans decide.
+export interface ExtensionSeats {
+  includesTeammates: boolean | null;
+  offer: ExtensionTeamPlanOffer | null;
+}
+
+const noExtensionSeats: ExtensionSeats = { includesTeammates: null, offer: null };
+
+function parseExtensionSeats(value: unknown): ExtensionSeats | null {
+  if (typeof value !== "object" || value === null) return null;
+  const { includesTeammates, offer } = value as Record<string, unknown>;
+  if (includesTeammates !== null && typeof includesTeammates !== "boolean") return null;
+  if (offer === null || offer === undefined) return { includesTeammates, offer: null };
+  if (typeof offer !== "object") return null;
+  const { planId, name, price, included } = offer as Record<string, unknown>;
+  if (
+    typeof planId !== "string" || typeof name !== "string" ||
+    typeof price !== "number" || typeof included !== "number"
+  ) {
+    return null;
+  }
+  return { includesTeammates, offer: { planId, name, price, included } };
+}
+
+// Asks the extension about a workspace's seats. Throws when it cannot
+// answer, so the caller decides what an unknown answer means.
+export async function extensionSeats(
+  organizationId: string,
+  config: ExtensionConfig | null = extensionConfig(),
+  fetchImpl: typeof fetch = fetch,
+): Promise<ExtensionSeats> {
+  if (!config) return noExtensionSeats;
+  const target = new URL(`${config.pathPrefix}/internal/seats`, config.origin);
+  if (target.origin !== config.origin) throw new Error("The extension path is invalid");
+  target.searchParams.set("organizationId", organizationId);
+  const response = await fetchImpl(target.toString(), {
+    headers: { authorization: `Bearer ${config.token}` },
+    redirect: "manual",
+    signal: AbortSignal.timeout(seatsTimeoutMs),
+  });
+  // An extension without the route has no answer.
+  if (response.status === 404) {
+    await response.body?.cancel().catch(() => undefined);
+    return noExtensionSeats;
+  }
+  if (!response.ok) {
+    await response.body?.cancel().catch(() => undefined);
+    throw new Error(`The extension answered ${response.status}`);
+  }
+  const seats = parseExtensionSeats(await response.json());
+  if (!seats) throw new Error("The extension's seats answer is invalid");
+  return seats;
 }

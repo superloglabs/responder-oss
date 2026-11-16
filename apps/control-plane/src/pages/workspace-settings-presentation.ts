@@ -25,3 +25,20 @@ export function teamPlanDescription(plan: TeamPlan | null): string {
   if (!plan) return "Your plan includes one seat. Choose a plan with unlimited seats to invite teammates.";
   return `Your plan includes one seat. ${plan.name} includes unlimited seats, ${formatPlanPrice(plan.included)} of usage credit and ${plan.machineHours} machine hours each month, for ${formatPlanPrice(plan.price)} / month.`;
 }
+
+// A Team plan sold by the extension, such as Signal's.
+export interface ExtensionTeamPlan {
+  planId: string;
+  name: string;
+  price: number;
+  included: number;
+}
+
+export interface WorkspaceSeats {
+  needsTeamPlan: boolean;
+  extensionOffer: ExtensionTeamPlan | null;
+}
+
+export function extensionTeamPlanDescription(plan: ExtensionTeamPlan): string {
+  return `Your plan includes one seat. ${plan.name} includes unlimited seats and up to ${plan.included} investigated findings each month, for ${formatPlanPrice(plan.price)} / month.`;
+}

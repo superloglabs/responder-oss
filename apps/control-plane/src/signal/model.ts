@@ -155,8 +155,10 @@ export function fetchSignalBilling() {
 }
 
 // Returns the checkout page, or no URL when the plan changed without one.
-export function startSignalCheckout(planId: string) {
-  return signalJson<{ url: string | null }>("/billing/checkout", jsonBody("POST", { planId }));
+// Checkout returns to Signal's plan, or to the workspace's members after an
+// upgrade to invite teammates.
+export function startSignalCheckout(planId: string, returnTo?: "/settings/workspace") {
+  return signalJson<{ url: string | null }>("/billing/checkout", jsonBody("POST", { planId, returnTo }));
 }
 
 export function openSignalBillingPortal() {
