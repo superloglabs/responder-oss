@@ -1005,11 +1005,23 @@ deployment broker ARN and a unique external ID. It attaches AWS-managed
 regions. An explicit deny prevents the role from retrieving Secrets Manager
 values, SSM parameters, or decrypting KMS ciphertext. Responder obtains and
 automatically refreshes temporary credentials through STS; it never asks for or
-stores customer access keys. The managed AWS MCP client exposes tools explicitly
-annotated read-only, plus AWS's sandboxed script runner and task polling tools.
-The role's read-only policy and explicit secret-value denies remain the
-authorization boundary for script-runner API calls. This integration currently
-supports the commercial AWS partition (`arn:aws`) only.
+stores customer access keys.
+
+Every session Responder opens on the role carries session policies: the same
+`AIOpsAssistantPolicy` and an inline policy with the same secret-value denies.
+AWS gives a session only what both the role and its session policies allow, so
+a session stays read-only even when the role was later given more permissions.
+The inline policy holds only denies, because session policies add up and an
+allow in it would widen what the managed policy allows. Read permissions added
+to the role beyond `AIOpsAssistantPolicy` are not used.
+
+The managed AWS MCP client exposes tools explicitly annotated read-only, plus
+AWS's sandboxed script runner and task polling tools. AWS marks the script
+runner as able to write, because it can call any AWS API; the session policies
+are the authorization boundary for its API calls. Automation runs and readers
+of a workspace's provider context, which otherwise leave out tools that can
+write, both get it. This integration currently supports the commercial AWS
+partition (`arn:aws`) only.
 
 ### CloudWatch Logs subscriptions
 

@@ -22,16 +22,24 @@ const AWS_MCP_IAM_GUARDED_TOOLS = new Set([
 ]);
 
 /**
+ * Whether a managed AWS MCP tool is the script runner or its task polling.
+ * AWS marks the script runner as able to write, because it calls any AWS
+ * API. The role session it runs in allows only read-only actions.
+ */
+export function isAwsSessionLimitedMcpTool(tool: { name?: string }): boolean {
+  return tool.name !== undefined && AWS_MCP_IAM_GUARDED_TOOLS.has(tool.name);
+}
+
+/**
  * Whether a managed AWS MCP tool may be exposed: tools annotated read-only,
- * plus the script runner and its task polling, which the read-only customer
- * role limits.
+ * plus the script runner and its task polling, which the read-only role
+ * session limits.
  */
 export function isAwsReadOnlyMcpTool(tool: {
   annotations?: { readOnlyHint?: boolean };
   name?: string;
 }): boolean {
-  return tool.annotations?.readOnlyHint === true ||
-    (tool.name !== undefined && AWS_MCP_IAM_GUARDED_TOOLS.has(tool.name));
+  return tool.annotations?.readOnlyHint === true || isAwsSessionLimitedMcpTool(tool);
 }
 
 // accountId is the Responder integration account. It names the role session.
