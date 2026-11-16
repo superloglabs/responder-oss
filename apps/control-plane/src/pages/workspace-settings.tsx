@@ -1,4 +1,4 @@
-import { EnvelopeIcon } from "@phosphor-icons/react";
+import { CopyIcon, EnvelopeIcon } from "@phosphor-icons/react";
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { authErrorCode } from "../auth-error-code";
@@ -10,6 +10,7 @@ import { SelectField, Switch, TextAreaField, type SelectOption } from "../design
 import { useDocumentTitle } from "../use-document-title";
 import { useOrganizationCapabilities } from "../organization-capabilities";
 import { startSignalCheckout } from "../signal/model";
+import { handoffLabel, handoffTargets, type HandoffTarget } from "@responder/core/ide-handoff";
 import {
   extensionTeamPlanDescription,
   teamPlanDescription,
@@ -574,12 +575,123 @@ export function WorkspaceSettingsPage() {
         ) : null}
 
         {!signal && <>
+          <HandoffButtonsSection />
           <PullRequestAuthorSection currentUserId={session.data?.user.id} />
           <SandboxImageSection />
           <SandboxNetworkSection />
         </>}
       </section>
     </AppShell>
+  );
+}
+
+const handoffTargetDetails: Record<HandoffTarget, { description: string; logo: string | null; name: string }> = {
+  conductor: { description: "Opens a new workspace. Needs the Conductor app.", logo: "/coding-agents/conductor.png", name: "Conductor" },
+  claude: { description: "Opens a new terminal session. Needs Claude Code.", logo: "/coding-agents/claude.svg", name: "Claude Code" },
+  codex: { description: "Opens a new thread. Needs the Codex app.", logo: "/coding-agents/codex.svg", name: "Codex" },
+  t3: { description: "Opens a new thread. Needs the T3 Code app.", logo: "/coding-agents/t3.png", name: "T3 Code" },
+  capy: { description: "Opens a new thread in Capy.", logo: "/coding-agents/capy.svg", name: "Capy" },
+  prompt: { description: "Shows the prompt in a code block only you can see.", logo: null, name: "Copy prompt" },
+};
+
+// Chooses the buttons under alerts, synthetic checks, error notifications and
+// automation results in Slack that hand the context to a coding agent. Each
+// one prefills a prompt; nothing runs until the person sends it.
+function HandoffButtonsSection() {
+  const [state, setState] = useState<{ canEdit: boolean; targets: HandoffTarget[] } | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void fetch("/api/handoff-settings")
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Could not load the Slack buttons");
+        return (await response.json()) as { canEdit: boolean; targets: HandoffTarget[] };
+      })
+      .then((next) => { if (active) setState(next); })
+      .catch((cause: unknown) => { if (active) setError(cause instanceof Error ? cause.message : "Could not load the Slack buttons"); });
+    return () => { active = false; };
+  }, []);
+
+  async function toggle(target: HandoffTarget) {
+    if (!state) return;
+    const previous = state;
+    const enabled = !state.targets.includes(target);
+    const targets = handoffTargets.filter((value) => value === target ? enabled : state.targets.includes(value));
+    setState({ ...state, targets });
+    setError(null);
+    setSaving(true);
+    try {
+      const response = await fetch("/api/handoff-settings", {
+        body: JSON.stringify({ targets }),
+        headers: { "content-type": "application/json" },
+        method: "PUT",
+      });
+      const body = (await response.json().catch(() => null)) as { error?: string; targets?: HandoffTarget[] } | null;
+      if (!response.ok || !body?.targets) throw new Error(body?.error ?? "Could not save the Slack buttons");
+      setState({ canEdit: true, targets: body.targets });
+    } catch (cause) {
+      setState(previous);
+      setError(cause instanceof Error ? cause.message : "Could not save the Slack buttons");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="memberSection handoffSettings">
+      <div className="memberSection__heading handoffSettings__heading">
+        <h3>Slack buttons</h3>
+        <p>
+          Buttons under alerts, error notifications, synthetic checks and
+          automation results. Each opens the app with a prompt that links back
+          to Superlog. Nothing runs until you send it.
+          {state && !state.canEdit ? " Admins can change these." : null}
+        </p>
+      </div>
+      {error ? <p className="settingsNotice settingsNotice--error">{error}</p> : null}
+      {state ? (
+        <div className="memberList">
+          {handoffTargets.map((target) => {
+            const details = handoffTargetDetails[target];
+            const checked = state.targets.includes(target);
+            return (
+              <div className="memberRow handoffRow" key={target}>
+                <span className="memberAvatar handoffRow__logo">
+                  {details.logo ? <img alt="" src={details.logo} /> : <CopyIcon aria-hidden="true" size={16} />}
+                </span>
+                <span className="memberIdentity">
+                  <strong>{details.name}</strong>
+                  <span>{details.description}</span>
+                </span>
+                <button
+                  aria-checked={checked}
+                  aria-label={handoffLabel(target, "fix")}
+                  className="dsSwitch handoffRow__switch"
+                  disabled={!state.canEdit || saving}
+                  onClick={() => void toggle(target)}
+                  role="switch"
+                  type="button"
+                >
+                  <span aria-hidden="true" className="dsSwitch__track"><span /></span>
+                </button>
+              </div>
+            );
+          })}
+          <div className="handoffPreview">
+            <span className="handoffPreview__label">In Slack</span>
+            <div className="handoffPreview__buttons">
+              {state.targets.length > 0
+                ? state.targets.map((target) => (
+                    <span className="handoffPreview__button" key={target}>{handoffLabel(target, "fix")}</span>
+                  ))
+                : <span className="handoffPreview__empty">No buttons</span>}
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }
 

@@ -841,6 +841,13 @@
       "when": 1794652053460,
       "tag": "0119_slack_connect_channels",
       "breakpoints": true
+    },
+    {
+      "idx": 120,
+      "version": "7",
+      "when": 1794854807871,
+      "tag": "0120_handoff_settings",
+      "breakpoints": true
     }
   ]
 }

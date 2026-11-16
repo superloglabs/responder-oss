@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { conductorButton, conductorDeepLink, conductorHandoffUrl } from "./ide-handoff.js";
+import { conductorButton, conductorDeepLink, conductorHandoffUrl, handoffButtons, handoffDeepLink, handoffTargetsSchema } from "./ide-handoff.js";
 
 const sourceUrl = "https://responder.example/automations/a/runs/r?organization_id=org";
 const promptOf = (url: string) => new URLSearchParams(new URL(url).hash.slice(1)).get("prompt")!;
@@ -41,6 +41,48 @@ describe("notification handoffs", () => {
     expect(prompt).toContain(sourceUrl);
     expect(prompt).toContain("Investigate this alert");
     expect(prompt).toContain(context.slice(0, 10));
+  });
+
+  it.each([
+    ["claude", "claude-cli://open?q=", "Fix in Claude Code"],
+    ["codex", "codex://new?prompt=", "Fix in Codex"],
+    ["t3", "t3code://new?prompt=", "Fix in T3 Code"],
+    ["capy", "https://capy.ai/new?prompt=", "Fix in Capy"],
+  ] as const)("opens %s with the bounded prompt", (target, prefix, label) => {
+    const context = "Check `mx` & \"unknown\"\n日本語 🚀 #1";
+    const url = handoffDeepLink(target, { kind: "fix", sourceUrl, context });
+    expect(url.startsWith(prefix)).toBe(true);
+    expect(url.length).toBeLessThanOrEqual(3_000);
+    const prompt = decodeURIComponent(url.slice(prefix.length));
+    expect(prompt).toContain(sourceUrl);
+    expect(prompt).toContain(context);
+    expect(handoffButtons({ kind: "fix", sourceUrl, context, targets: [target] })).toEqual([
+      expect.objectContaining({ action_id: `${target}_fix`, text: { type: "plain_text", text: label }, url }),
+    ]);
+  });
+
+  it.each(["Report 🚀", "x".repeat(20_000)])("carries the bounded prompt in the Copy prompt button's value", (context) => {
+    const [button] = handoffButtons({ kind: "continue", sourceUrl, context, targets: ["prompt"] });
+    expect(button).toMatchObject({ type: "button", action_id: "copy_handoff_prompt", text: { text: "Copy prompt" } });
+    expect(button).not.toHaveProperty("url");
+    const value = (button as { value: string }).value;
+    expect(value.length).toBeLessThanOrEqual(2_000);
+    expect(value).toContain(sourceUrl);
+    expect(value).toContain("Continue the work");
+    expect(value).toContain(context.slice(0, 10));
+  });
+
+  it("orders buttons the same way whatever order the targets come in", () => {
+    const buttons = handoffButtons({ kind: "continue", sourceUrl, context: "Report", targets: ["prompt", "capy", "codex", "t3", "conductor", "claude"] });
+    expect(buttons.map((button) => button.action_id)).toEqual([
+      "conductor_continue", "claude_continue", "codex_continue", "t3_continue", "capy_continue", "copy_handoff_prompt",
+    ]);
+    expect(handoffButtons({ kind: "continue", sourceUrl, context: "Report", targets: [] })).toEqual([]);
+  });
+
+  it("accepts only known targets, without duplicates", () => {
+    expect(handoffTargetsSchema.parse(["codex", "claude", "codex"])).toEqual(["claude", "codex"]);
+    expect(handoffTargetsSchema.safeParse(["cursor"]).success).toBe(false);
   });
 
   it("rejects non-web sources", () => {
