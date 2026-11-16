@@ -1,18 +1,27 @@
-import { describe, expect, it } from "vitest";
+import { AssumeRoleCommand, STSClient } from "@aws-sdk/client-sts";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  AWS_INVESTIGATION_DENIED_ACTIONS,
+  AWS_INVESTIGATION_POLICY_ARN,
   AWS_INVESTIGATION_ROLE_NAME,
+  assumeAwsInvestigationRole,
   awsAccountIdSchema,
   awsCloudFormationQuickCreateUrl,
   awsCloudFormationTemplate,
   awsParameterizedCloudFormationTemplate,
   awsIntegrationPrincipalArn,
   awsInvestigationRoleArn,
+  awsInvestigationSessionPolicies,
   isAwsCommercialRegion,
   parseSnsTopicArn,
 } from "./aws.js";
 
 const registrationTopicArn =
   "arn:aws:sns:eu-west-3:111122223333:ResponderAwsRegistration";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("AWS integration", () => {
   it("builds the fixed customer role ARN", () => {
@@ -44,6 +53,54 @@ describe("AWS integration", () => {
     expect(template).toContain("ssm:GetParametersByPath");
     expect(template).toContain("kms:Decrypt");
     expect(template).not.toContain("Action: '*'");
+  });
+
+  it("limits a role session to the stack's read-only policy and secret denies", () => {
+    const { Policy, PolicyArns } = awsInvestigationSessionPolicies();
+    expect(PolicyArns).toEqual([{ arn: AWS_INVESTIGATION_POLICY_ARN }]);
+    const statements = (JSON.parse(Policy) as { Statement: Array<{ Action: string[]; Effect: string; Resource: string }> }).Statement;
+    // An allow in the inline policy would add to what the managed policy allows.
+    expect(statements.map((statement) => statement.Effect)).toEqual(["Deny"]);
+    expect(statements[0]).toMatchObject({ Action: [...AWS_INVESTIGATION_DENIED_ACTIONS], Resource: "*" });
+
+    // The session is limited to what the stack itself grants and denies.
+    const template = awsCloudFormationTemplate();
+    const role = template.slice(template.indexOf("  InvestigationRole:"), template.indexOf("  LogSubscriptionRole:"));
+    expect(role).toContain(`- ${AWS_INVESTIGATION_POLICY_ARN}`);
+    const denied = [...role.matchAll(/^ {18}- ([a-z-]+:[A-Za-z]+)$/gmu)].map((match) => match[1]);
+    expect(denied.sort()).toEqual([...AWS_INVESTIGATION_DENIED_ACTIONS].sort());
+  });
+
+  it("assumes the customer role with the session policies", async () => {
+    const credentials = {
+      AccessKeyId: "AKIATESTACCESSKEY",
+      Expiration: new Date("2026-01-01T01:00:00Z"),
+      SecretAccessKey: "secret",
+      SessionToken: "session-token",
+    };
+    const send = vi.spyOn(STSClient.prototype, "send").mockResolvedValue({ Credentials: credentials } as never);
+
+    await assumeAwsInvestigationRole({
+      accountId: "123456789012",
+      externalId: "responder_abcdefghijklmnopqrstuvwxyz1234567890",
+      roleArn: "arn:aws:iam::123456789012:role/ResponderInvestigationRole",
+    }, {
+      environment: { AWS_INTEGRATION_PRINCIPAL_ARN: "arn:aws:iam::111122223333:role/ResponderAwsIntegrationBroker" },
+      sessionName: "account-1",
+    });
+
+    const commands = send.mock.calls.map(([command]) => command as AssumeRoleCommand);
+    expect(commands.map((command) => command.input.RoleArn)).toEqual([
+      "arn:aws:iam::111122223333:role/ResponderAwsIntegrationBroker",
+      "arn:aws:iam::123456789012:role/ResponderInvestigationRole",
+    ]);
+    // Only the session on the customer's role carries them.
+    expect(commands[0]?.input.PolicyArns).toBeUndefined();
+    expect(commands[1]?.input).toMatchObject({
+      ExternalId: "responder_abcdefghijklmnopqrstuvwxyz1234567890",
+      RoleSessionName: "responder-investigation-account-1",
+      ...awsInvestigationSessionPolicies(),
+    });
   });
 
   it("pre-fills setup values in the downloadable template", () => {
