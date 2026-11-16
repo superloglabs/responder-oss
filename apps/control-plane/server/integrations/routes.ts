@@ -2950,6 +2950,7 @@ export const integrationRoutes = new Hono()
       const credentials = parsePostHogCredentials(
         decryptCredentials<Record<string, unknown>>(encryptedCredentials),
       );
+      const tokenIssuedAt = Date.now();
       const oauth = await finishCustomMcpOAuth({
         authorizationCode,
         mcpUrl: credentials.mcpUrl,
@@ -2967,7 +2968,7 @@ export const integrationRoutes = new Hono()
         provider: "posthog",
         externalAccountId: callbackState.externalAccountId,
         displayName: credentials.accessLevel === "read_write" ? "PostHog · read-write" : "PostHog",
-        encryptedCredentials: encryptCredentials({ ...credentials, oauth }),
+        encryptedCredentials: encryptCredentials({ ...credentials, oauth, tokenIssuedAt }),
         credentialKeyVersion: 1,
         metadata: {
           accessLevel: credentials.accessLevel,

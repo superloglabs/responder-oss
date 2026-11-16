@@ -1,8 +1,10 @@
 import { decryptCredentials } from "@responder/core/credentials/encryption";
+import { postHogAccessToken } from "@responder/core/db/posthog-access";
 import { railwayAccessToken } from "@responder/core/db/railway-access";
 import {
   listGcpSharedReaderSources,
   listGcpTelemetrySources,
+  listPostHogTelemetrySources,
   listRailwayTelemetrySources,
   updateTelemetrySource,
 } from "@responder/core/db/telemetry-sources";
@@ -18,6 +20,7 @@ import { McpOAuthRefreshError } from "@responder/core/integrations/custom-mcp";
 import { telemetryCollectorUrl } from "@responder/core/telemetry/client";
 import { forwardToCollector } from "@responder/core/telemetry/forward";
 import { type GcpRequest, pullGcpSource } from "@responder/core/telemetry/sources/gcp-pull";
+import { pullPostHogSource } from "@responder/core/telemetry/sources/posthog-pull";
 import { pullRailwaySource } from "@responder/core/telemetry/sources/railway-pull";
 
 // Reads every Google Cloud telemetry source once. Sources are read a few at a
@@ -201,41 +204,105 @@ export const defaultRailwayTelemetryPullDependencies: RailwayTelemetryPullDepend
 export async function pullRailwayTelemetrySources(
   dependencies: RailwayTelemetryPullDependencies = defaultRailwayTelemetryPullDependencies,
 ): Promise<{ failed: number; sources: number }> {
-  const collector = dependencies.collectorUrl();
+  return pullOAuthLogSources({
+    ...dependencies,
+    event: "railway_telemetry_pulled",
+    pull: (source, accessToken, forward, now) => dependencies.pull({
+      accessToken,
+      environmentId: source.environmentId,
+      forward,
+      now,
+      state: source.state,
+    }),
+    refused: "Railway refused the connection's access. Reconnect Railway.",
+  });
+}
+
+export interface PostHogTelemetryPullDependencies {
+  accessToken: typeof postHogAccessToken;
+  collectorUrl: () => string | null;
+  forward: typeof forwardToCollector;
+  list: typeof listPostHogTelemetrySources;
+  now: () => Date;
+  pull: typeof pullPostHogSource;
+  update: typeof updateTelemetrySource;
+}
+
+export const defaultPostHogTelemetryPullDependencies: PostHogTelemetryPullDependencies = {
+  accessToken: postHogAccessToken,
+  collectorUrl: telemetryCollectorUrl,
+  forward: forwardToCollector,
+  list: listPostHogTelemetrySources,
+  now: () => new Date(),
+  pull: pullPostHogSource,
+  update: updateTelemetrySource,
+};
+
+// Reads the error lines of every PostHog project a workspace chose, once.
+export async function pullPostHogTelemetrySources(
+  dependencies: PostHogTelemetryPullDependencies = defaultPostHogTelemetryPullDependencies,
+): Promise<{ failed: number; sources: number }> {
+  return pullOAuthLogSources({
+    ...dependencies,
+    event: "posthog_telemetry_pulled",
+    pull: (source, accessToken, forward, now) => dependencies.pull({
+      accessToken,
+      forward,
+      now,
+      projectId: source.projectId,
+      state: source.state,
+    }),
+    refused: "PostHog refused the connection's access. Reconnect PostHog.",
+  });
+}
+
+// Reads every log source of one OAuth provider once, a few at a time, with
+// each source's connection token, and records how each read went.
+async function pullOAuthLogSources<Source extends { id: string; integrationAccountId: string; organizationId: string }>(config: {
+  accessToken: (input: { integrationAccountId: string; organizationId: string }) => Promise<string | null>;
+  collectorUrl: () => string | null;
+  event: string;
+  forward: typeof forwardToCollector;
+  list: () => Promise<Source[]>;
+  now: () => Date;
+  pull: (
+    source: Source,
+    accessToken: string,
+    forward: (payload: unknown) => Promise<boolean>,
+    now: Date,
+  ) => Promise<{ error: string | null; logs: number; received: boolean; state: Record<string, unknown>; truncated: boolean }>;
+  refused: string;
+  update: typeof updateTelemetrySource;
+}): Promise<{ failed: number; sources: number }> {
+  const collector = config.collectorUrl();
   if (!collector) return { failed: 0, sources: 0 };
   const collectorUrl: string = collector;
-  const queue = await dependencies.list();
+  const queue = await config.list();
   const total = queue.length;
   let failed = 0;
   async function next(): Promise<void> {
     for (let source = queue.shift(); source; source = queue.shift()) {
       try {
-        const accessToken = await dependencies.accessToken({
+        const accessToken = await config.accessToken({
           integrationAccountId: source.integrationAccountId,
           organizationId: source.organizationId,
         });
         // The connection was removed or lost access since it was listed.
         if (!accessToken) continue;
         const organizationId = source.organizationId;
-        const now = dependencies.now();
-        const result = await dependencies.pull({
-          accessToken,
-          environmentId: source.environmentId,
-          forward: async (payload) => {
-            const response = await dependencies.forward({
-              body: JSON.stringify(payload),
-              collectorUrl,
-              contentType: "application/json",
-              organizationId,
-              signal: "logs",
-            });
-            return response.ok;
-          },
-          now,
-          state: source.state,
-        });
+        const now = config.now();
+        const result = await config.pull(source, accessToken, async (payload) => {
+          const response = await config.forward({
+            body: JSON.stringify(payload),
+            collectorUrl,
+            contentType: "application/json",
+            organizationId,
+            signal: "logs",
+          });
+          return response.ok;
+        }, now);
         if (result.error) failed += 1;
-        await dependencies.update(source.id, {
+        await config.update(source.id, {
           lastError: result.error,
           state: result.state,
           status: result.error && !result.received ? "failed" : "active",
@@ -244,7 +311,7 @@ export async function pullRailwayTelemetrySources(
         if (result.received || result.error || result.truncated) {
           console.log(JSON.stringify({
             error: result.error,
-            event: "railway_telemetry_pulled",
+            event: config.event,
             logs: result.logs,
             organizationId,
             sourceId: source.id,
@@ -254,9 +321,9 @@ export async function pullRailwayTelemetrySources(
       } catch (error) {
         failed += 1;
         const message = error instanceof McpOAuthRefreshError && error.reconnectRequired
-          ? "Railway refused the connection's access. Reconnect Railway."
+          ? config.refused
           : error instanceof Error ? error.message : String(error);
-        await dependencies
+        await config
           .update(source.id, { lastError: message, status: "failed" })
           .catch(() => undefined);
       }

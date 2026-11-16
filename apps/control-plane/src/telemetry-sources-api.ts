@@ -1,5 +1,6 @@
 import { apiErrorMessage } from "./agents-api";
-import type { TelemetrySourceSummary } from "../../../packages/core/src/db/telemetry-sources";
+import type { TelemetrySourceAccountProvider, TelemetrySourceSummary } from "../../../packages/core/src/db/telemetry-sources";
+import type { PostHogProject } from "../../../packages/core/src/integrations/posthog-api";
 import { telemetryUnavailableCode } from "../../../packages/core/src/telemetry/sources/availability";
 
 export type { TelemetrySourceSummary };
@@ -7,9 +8,9 @@ export type { TelemetrySourceSummary };
 const base = "/api/telemetry/sources";
 
 export type TelemetrySourceOverview = {
-  accounts: Array<{ displayName: string; id: string; provider: "gcp" | "railway" | "vercel" }>;
+  accounts: Array<{ displayName: string; id: string; provider: TelemetrySourceAccountProvider }>;
   // Whether this installation can connect each provider.
-  providers: { gcp: boolean; railway?: boolean; vercel: boolean };
+  providers: { gcp: boolean; posthog?: boolean; railway?: boolean; vercel: boolean };
   sources: TelemetrySourceSummary[];
 };
 
@@ -74,6 +75,25 @@ export async function fetchRailwayLogReading(integrationAccountId: string): Prom
 
 export function readRailwayEnvironment(integrationAccountId: string, environmentId: string): Promise<{ sourceId: string }> {
   return request("/railway", { body: JSON.stringify({ environmentId, integrationAccountId }), method: "POST" });
+}
+
+// The projects one PostHog connection reads, and the ones whose error logs
+// Superlog reads. Null when this workspace or cell cannot receive telemetry.
+export type PostHogLogReading = {
+  projects: PostHogProject[];
+  sources: TelemetrySourceSummary[];
+};
+
+export async function fetchPostHogLogReading(integrationAccountId: string): Promise<PostHogLogReading | null> {
+  const response = await fetch(`${base}/posthog/${encodeURIComponent(integrationAccountId)}`);
+  const body = (await response.json().catch(() => null)) as (PostHogLogReading & { code?: string; error?: string }) | null;
+  if (response.status === 404 && body?.code === telemetryUnavailableCode) return null;
+  if (!response.ok || !body) throw new Error(apiErrorMessage(body, response.status));
+  return { projects: body.projects ?? [], sources: body.sources ?? [] };
+}
+
+export function readPostHogProject(integrationAccountId: string, projectId: string): Promise<{ sourceId: string }> {
+  return request("/posthog", { body: JSON.stringify({ integrationAccountId, projectId }), method: "POST" });
 }
 
 export function createAwsStack(region: string): Promise<AwsStackLaunch> {

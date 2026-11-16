@@ -2,12 +2,13 @@ import { useEffect, useState, type ReactNode } from "react";
 import { IconCheck, IconExclamationMark } from "@tabler/icons-react";
 import { removeIntegrationAccount, type IntegrationAccount, type IntegrationSummary } from "../agents-api";
 import { AwsLogStreaming } from "../components/aws-log-streaming";
+import { PostHogLogReading } from "../components/posthog-log-reading";
 import { RailwayLogReading } from "../components/railway-log-reading";
 import { VercelDrains } from "../components/vercel-drains";
 import { Button } from "../design-system";
 import { CloudSourceSetup } from "../pages/telemetry-source";
 import { fetchServices } from "../telemetry-api";
-import { Actions, axiomSignalReads, Intro, railwaySignalReads, vercelSignalReads } from "./connect";
+import { Actions, axiomSignalReads, Intro, postHogSignalReads, railwaySignalReads, vercelSignalReads } from "./connect";
 import type { ConnectPage } from "./connect-pages";
 import { manageableAccounts, manageView, type ManageRow } from "./manage-model";
 import { foundLabel } from "./model";
@@ -35,7 +36,7 @@ const descriptions: Record<ConnectPage, string> = {
   railway: `${railwaySignalReads} Superlog reads the logs of the environments you choose every minute, so Signal sees each new error as it happens.`,
   vercel: `${vercelSignalReads} Drains send your deployments' traces and logs to Superlog, so Signal sees each new error as it happens.`,
   linear: "Signal checks Linear before posting, so it skips problems your team already tracks.",
-  posthog: "Signal uses product usage to tell how many customers a problem affects.",
+  posthog: `${postHogSignalReads} Superlog reads the error logs of the projects you choose every minute, so Signal sees each new error as it happens.`,
 };
 
 export function SignalManage(props: ManageProps) {
@@ -122,7 +123,8 @@ function ManagedAccount({ provider, name, account, several, awsStreaming, stream
       </Status>
       : <Status title={`Connected to ${view.connectedTo}`}>{updatedLabel(account.updatedAt)}</Status>}
     {/* A Railway connection lists the environments whose logs Superlog
-        reads, and a Vercel connection its drains. An AWS account that lost
+        reads, a PostHog connection its projects, and a Vercel connection its
+        drains. An AWS account that lost
         access cannot change regions; it keeps the CloudWatch stream
         fallback. */}
     {provider === "vercel" && account.status === "connected"
@@ -141,6 +143,14 @@ function ManagedAccount({ provider, name, account, several, awsStreaming, stream
             {row}
           </div>} />}
       </RailwayLogReading>
+      : provider === "posthog" && account.status === "connected"
+      ? <PostHogLogReading integrationAccountId={account.id}>
+        {({ row }) => <Rows rows={view.rows.map((row) => ({ ...row, onAction: onReconnect }))}
+          extra={row && <div className="signalManageRows__regions">
+            <span className="signalManageRows__label">Telemetry from</span>
+            {row}
+          </div>} />}
+      </PostHogLogReading>
       : awsStreaming && account.status !== "connected"
       ? <><Rows rows={view.rows.map((row) => ({ ...row, onAction: onReconnect }))} />{awsStreaming.fallback}</>
       : awsStreaming

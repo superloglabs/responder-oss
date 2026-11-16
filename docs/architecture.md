@@ -61,6 +61,9 @@ types. `drizzle/` contains the ordered schema history.
   The endpoint is fixed to read-only tools and a bounded set of observability and
   analytics features, and the worker additionally requires the MCP read-only annotation.
   PostHog alerts enter through watched Slack channels rather than a second webhook path.
+  For the projects a workspace chooses, the worker reads error and fatal log
+  lines every minute through PostHog's REST logs API with the connection's
+  token and sends them to the collector as OTLP logs.
 - Grafana Cloud uses dynamic OAuth client registration against Grafana's hosted
   MCP endpoint for one stack and requests only the read and query scopes.
   Self-hosted Grafana runs the pinned `mcp-grafana` binary with a service

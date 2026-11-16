@@ -24,9 +24,9 @@
 .awsAddRegion__menu li { padding: 5px 8px; border-radius: 4px; font: 400 12px/18px ui-monospace, "SFMono-Regular", Consolas, monospace; cursor: pointer; }
 .awsAddRegion__menu li:hover, .awsAddRegion__menu li:focus-visible { background: var(--ds-surface-hover); }
 .awsAddRegion__menu li:focus-visible, .awsAddRegion__button:focus-visible, .awsRegionChip__remove:focus-visible, .awsStackUpdate__cli:focus-visible { outline: 2px solid var(--ds-text-primary); outline-offset: 2px; }
-/* Railway environments use the same chips; their names are longer. */
-.railwayEnvironmentMenu { width: 280px; }
-.railwayEnvironmentMenu li { font: 400 12px/18px var(--ds-font-sans); }
+/* Railway environments and PostHog projects use the same chips; their names are longer. */
+.logSourceMenu { width: 280px; }
+.logSourceMenu li { font: 400 12px/18px var(--ds-font-sans); }
 
 /* Asks for the one stack update that adds the subscription role. */
 .awsStackUpdate { display: flex; align-items: center; gap: 16px; padding: 14px 20px; border: .5px solid #00000014; border-radius: 6px; background: #fafafa; }
