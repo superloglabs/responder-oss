@@ -174,6 +174,54 @@ function fingerprintLogWith(input: LogFingerprintInput, algorithm: Algorithm): F
   };
 }
 
+// A request that failed with a server error and left no exception: only a
+// request log line with its status, route, and sometimes an error text. Its
+// fingerprint is made of those fields: the service and status as they are,
+// the route in lower case without the parts that identify one record, and
+// the error text with its per-occurrence values replaced. The line itself is
+// not read like a message: a request log is mostly identifiers and quoted
+// values, which message normalization would flatten, and a route such as
+// `/query` is not a path to redact.
+export function fingerprintFailedRequest(input: {
+  service: string;
+  status: number;
+  route: string;
+  message: string | null;
+}): Fingerprint {
+  const canonical = `request::${input.service || "unknown"}::${input.status}::${failedRequestRoute(input.route).toLowerCase()}::${messageBucketFor(input.message)}`;
+  return {
+    hash: hashCanonical(canonical, fingerprintVersion),
+    exceptionType: `HTTP ${input.status}`,
+    topFrame: null,
+    normalizedFrames: [],
+  };
+}
+
+const MAXIMUM_ROUTE_LENGTH = 200;
+
+// The route without its origin, query, or trailing slash, and with the path
+// segments that identify one record replaced, so `/users/4812` and
+// `/users/77` are one route. A route template such as `/users/:id` and a
+// route name such as `data` stay as they are.
+export function failedRequestRoute(route: string): string {
+  const path = stripNullBytes(route).trim()
+    .replace(/^[a-z][a-z0-9+.-]*:\/\/[^/?#]*/iu, "")
+    .replace(/[?#].*$/u, "");
+  const segments = path.split("/").map((segment) => (isRecordSegment(segment) ? "<id>" : segment));
+  const joined = segments.join("/");
+  const trimmed = joined.length > 1 ? joined.replace(/\/+$/u, "") : joined;
+  return (trimmed || "/").slice(0, MAXIMUM_ROUTE_LENGTH);
+}
+
+// A path segment that names one record: a number, a UUID, a generated ID, or
+// a code with a long number in it such as `ORD-12345`. A short number inside
+// a name, as in `v2` or `oauth2`, is part of the name.
+function isRecordSegment(segment: string): boolean {
+  if (/^\d+$/u.test(segment) || /\d{4,}/u.test(segment)) return true;
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(segment)) return true;
+  return segment.split(/[-_.~]/u).some((part) => part !== "" && redactGeneratedId(part) !== part);
+}
+
 // The exception a Python traceback ends with: its last line that is not
 // indented, as "Type: message" or a bare type.
 export function pythonTracebackException(body: string): { message: string; type: string } | null {
