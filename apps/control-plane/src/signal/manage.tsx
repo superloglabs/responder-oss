@@ -7,7 +7,7 @@ import { VercelDrains } from "../components/vercel-drains";
 import { Button } from "../design-system";
 import { CloudSourceSetup } from "../pages/telemetry-source";
 import { fetchServices } from "../telemetry-api";
-import { Actions, Intro, railwaySignalReads, vercelSignalReads } from "./connect";
+import { Actions, axiomSignalReads, Intro, railwaySignalReads, vercelSignalReads } from "./connect";
 import type { ConnectPage } from "./connect-pages";
 import { manageableAccounts, manageView, type ManageRow } from "./manage-model";
 import { foundLabel } from "./model";
@@ -28,6 +28,7 @@ const descriptions: Record<ConnectPage, string> = {
   otel: "Your services send logs, traces, and metrics to Superlog. Signal reads them from there.",
   datadog: "Signal reads your monitors, logs, traces, and metrics. It never changes anything in Datadog.",
   grafana: "Signal reads your dashboards, alerts, and datasources. It never changes anything in Grafana.",
+  axiom: axiomSignalReads,
   sentry: "Signal reads your errors and issues to find what broke and who it affects.",
   aws: "Signal reads CloudWatch logs, metrics, and alarms through a read-only role.",
   gcp: "Signal reads logs and metrics in your project through a read-only service account.",

@@ -85,6 +85,13 @@ describe("Signal manage pages", () => {
     expect(accountSummary("vercel", account({ resourceCount: 1 }))).toBe("Acme · 1 project");
   });
 
+  it("shows that Signal only reads Axiom and what disconnecting stops", () => {
+    const view = manageView("axiom", "Axiom", account({ displayName: "Axiom" }));
+    expect(view.connectedTo).toBe("Axiom");
+    expect(view.rows).toEqual([{ label: "Signal's access", value: "Read only", action: "Reconnect" }]);
+    expect(view.disconnect).toContain("stops reading Axiom");
+  });
+
   it("leaves accounts that are still connecting off the page", () => {
     expect(manageableAccounts([
       account({ id: "a", status: "connected" }),
