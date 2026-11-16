@@ -273,3 +273,95 @@ describe("groupErrorCandidates with a Python traceback as the log body", () => {
     expect(issue?.sample.stacktrace).toBe(body);
   });
 });
+
+describe("groupErrorCandidates with a failed request log", () => {
+  // A request log line below error level whose fields say the request
+  // failed with a server error.
+  function request(attrs: Record<string, string>, overrides: Partial<ErrorCandidate> = {}): ErrorCandidate {
+    return candidate({
+      attrs,
+      body: JSON.stringify({ type: "rest", timestamp: "2026-11-16T10:13:10.536Z", token: "test-token-0001", ...attrs }),
+      exception_message: "",
+      exception_stacktrace: "",
+      exception_type: "",
+      kind: "log",
+      severity: "",
+      severity_number: 0,
+      span_name: "",
+      ...overrides,
+    });
+  }
+  const bigquery = '{"type":{"code":500,"description":"Internal Server Error"},"message":"Error connecting to bigquery source","label":undefined}';
+
+  it("makes one issue of requests that failed the same way, whatever the rest of the line says", () => {
+    const groups = groupErrorCandidates([
+      request({ code: "500", endpoint: "data", response: bigquery, qid: "q-0001", ip: "203.0.113.7" }),
+      request({ code: "500", endpoint: "data", response: bigquery, qid: "q-0002", key: "00000000-0000-4000-8000-000000000001" }),
+    ]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toMatchObject({
+      eventCount: 2,
+      exceptionType: "HTTP 500",
+      frames: [],
+      kind: "log",
+      message: "HTTP 500 data: Error connecting to bigquery source",
+      previousFingerprints: [],
+      title: "HTTP 500 data: Error connecting to bigquery source",
+      topFrame: null,
+    });
+    expect(groups[0]!.sample.attributes).toMatchObject({ endpoint: "data", qid: "q-0002" });
+  });
+
+  it("keeps routes, statuses, services, and error texts apart", () => {
+    const fingerprints = groupErrorCandidates([
+      request({ code: "500", endpoint: "data", response: bigquery }),
+      request({ code: "500", endpoint: "data", response: "Internal Server Error" }),
+      request({ code: "502", endpoint: "data", response: bigquery }),
+      request({ code: "500", endpoint: "aichart", response: bigquery }),
+      // Routes that are paths stay distinct.
+      request({ code: "500", endpoint: "/query", response: bigquery }),
+      request({ code: "500", endpoint: "/export", response: bigquery }),
+      request({ code: "500", endpoint: "data", response: bigquery }, { service: "plugins" }),
+    ]).map((group) => group.fingerprint);
+    expect(new Set(fingerprints).size).toBe(7);
+  });
+
+  it("reads the standard attribute names and ignores the identifiers in a path", () => {
+    const groups = groupErrorCandidates([
+      request({ "http.response.status_code": "503", "url.path": "/users/4812/orders/550e8400-e29b-41d4-a716-446655440000?page=2", "error.message": "upstream timed out after 30000ms" }),
+      request({ "http.status_code": "503", "http.target": "/users/77/orders/0b3a7c11-1111-4222-8333-944455556666", error: "upstream timed out after 12ms" }),
+    ]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.title).toBe("HTTP 503 /users/<id>/orders/<id>: upstream timed out after 12ms");
+  });
+
+  it("finds the error text in a response body, or goes without one", () => {
+    const title = (attrs: Record<string, string>) => groupErrorCandidates([request({ code: "500", endpoint: "data", ...attrs })])[0]!.title;
+    expect(title({ response: '{\n  "type": {\n    "code": 500\n  },\n  "message": "An unexpected error occurred."\n}' })).toBe("HTTP 500 data: An unexpected error occurred.");
+    expect(title({ response: '{"error":"Member was not in project"}' })).toBe("HTTP 500 data: Member was not in project");
+    expect(title({ response: "Internal Server Error\nat handler" })).toBe("HTTP 500 data: Internal Server Error");
+    expect(title({ response: '{\r\n  "type": "https://tools.ietf.org/html/rfc9110#section-15.6.1",\r\n  "title": "An error occurred while processing your request.",\r\n  "status": 500,\r\n  "detail": null\r\n}' }))
+      .toBe("HTTP 500 data: An error occurred while processing your request.");
+    expect(title({ response: '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN"><html><body>504 Gateway Time-out</body></html>' })).toBe("HTTP 500 data");
+    expect(title({ response: '{"error":null}' })).toBe("HTTP 500 data");
+    expect(title({})).toBe("HTTP 500 data");
+  });
+
+  it("leaves a line at error level to its own message", () => {
+    const [group] = groupErrorCandidates([
+      request({ code: "500", endpoint: "data" }, { body: "Query failed: connection reset", severity: "ERROR", severity_number: 17 }),
+    ]);
+    expect(group).toMatchObject({ exceptionType: "ERROR", title: "ERROR: Query failed: connection reset" });
+    expect(group!.previousFingerprints).toHaveLength(2);
+  });
+
+  it("drops a line below error level that is not a failed request", () => {
+    expect(groupErrorCandidates([
+      // A client error, a status without a route, and a number that is not a status.
+      request({ code: "404", endpoint: "data" }),
+      request({ code: "500" }),
+      request({ duration: "512", endpoint: "data" }),
+      request({ code: "5000", endpoint: "data" }),
+    ])).toEqual([]);
+  });
+});

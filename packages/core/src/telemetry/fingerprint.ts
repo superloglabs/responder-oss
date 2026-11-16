@@ -174,6 +174,46 @@ function fingerprintLogWith(input: LogFingerprintInput, algorithm: Algorithm): F
   };
 }
 
+// A request that failed with a server error and left no exception: only a
+// request log line with its status, route, and sometimes an error text. Its
+// fingerprint is those fields as they are. The line itself is not read like
+// a message: a request log is mostly identifiers and quoted values, which
+// message normalization would flatten, and a route such as `/query` is not a
+// path to redact.
+export function fingerprintFailedRequest(input: {
+  service: string;
+  status: number;
+  route: string;
+  message: string | null;
+}): Fingerprint {
+  const canonical = `request::${input.service || "unknown"}::${input.status}::${failedRequestRoute(input.route).toLowerCase()}::${messageBucketFor(input.message)}`;
+  return {
+    hash: hashCanonical(canonical, fingerprintVersion),
+    exceptionType: `HTTP ${input.status}`,
+    topFrame: null,
+    normalizedFrames: [],
+  };
+}
+
+const MAXIMUM_ROUTE_LENGTH = 200;
+
+// The route without its origin, query, or trailing slash, and with the path
+// segments that identify one record replaced, so `/users/4812` and
+// `/users/77` are one route. A route template such as `/users/:id` and a
+// route name such as `data` stay as they are.
+export function failedRequestRoute(route: string): string {
+  const path = stripNullBytes(route).trim()
+    .replace(/^[a-z][a-z0-9+.-]*:\/\/[^/?#]*/iu, "")
+    .replace(/[?#].*$/u, "");
+  const segments = path.split("/").map((segment) =>
+    /^\d+$/u.test(segment) || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(segment) || redactGeneratedId(segment) !== segment
+      ? "<id>"
+      : segment);
+  const joined = segments.join("/");
+  const trimmed = joined.length > 1 ? joined.replace(/\/+$/u, "") : joined;
+  return (trimmed || "/").slice(0, MAXIMUM_ROUTE_LENGTH);
+}
+
 // The exception a Python traceback ends with: its last line that is not
 // indented, as "Type: message" or a bare type.
 export function pythonTracebackException(body: string): { message: string; type: string } | null {

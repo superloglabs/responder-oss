@@ -1279,6 +1279,20 @@ normalized body. Fingerprints start with the algorithm version
 `v2:` or `v1:` fingerprint named, so the change of algorithm opens no known error again
 as new.
 
+A request that fails with a server error often leaves no exception: only a
+request log line with the status among its fields. A log below ERROR is an
+error issue too when it has a status from 500 to 599 in
+`http.response.status_code`, `http.status_code`, `status_code`, `statusCode`,
+`status` or `code`, and a route in `http.route`, `url.path`, `http.target`,
+`route`, `endpoint`, `path` or `url`. Its fingerprint is its service, status,
+route and error text, not its body: the route without origin, query or the
+segments that identify a record, and the error text from `error.message`,
+`error`, `message`, `msg`, `response` or `response.body`, with IDs and numbers
+replaced. The issue is titled `HTTP 500 /orders/<id>: upstream timed out`.
+ClickHouse's view over the logs must let these lines into
+`otel_issue_candidates`; with a view that passes only ERROR and above, nothing
+changes.
+
 ### Source maps
 
 Browser errors group by their original source once a build uploads its
