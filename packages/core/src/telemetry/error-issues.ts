@@ -154,8 +154,10 @@ export const zeroCandidateId = "00000000-0000-0000-0000-000000000000";
 export const errorCandidateWindowMs = 5 * 60_000;
 export const errorCandidateSettleMs = 30_000;
 
-// The lowest severity number OpenTelemetry gives ERROR.
+// A log is at error level by its severity number, 17 and above, or by its
+// severity text when a source sets only that.
 const errorSeverityNumber = 17;
+const errorSeverityTexts = new Set(["ERROR", "FATAL", "CRITICAL", "ALERT", "EMERGENCY"]);
 const maximumMessageLength = 4_000;
 const maximumStacktraceLength = 16_000;
 const maximumTitleLength = 200;
@@ -305,7 +307,8 @@ export function groupErrorCandidates(candidates: ErrorCandidate[]): ErrorOccurre
     // the request's status, route, and error text; the line around them is
     // not an error message. Without those fields the line is not an error.
     const belowError = candidate.kind === "log" && candidate.severity_number !== undefined &&
-      Number(candidate.severity_number) < errorSeverityNumber;
+      Number(candidate.severity_number) < errorSeverityNumber &&
+      !errorSeverityTexts.has(candidate.severity.trim().toUpperCase());
     const failedRequest = belowError ? failedRequestOf(candidate.attrs) : null;
     if (belowError && !failedRequest) continue;
     // A log whose body is a Python traceback has its stack there.

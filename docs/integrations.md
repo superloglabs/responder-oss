@@ -1262,8 +1262,9 @@ value once, with the OpenTelemetry SDK settings for it.
 ## Error issues
 
 The worker groups a telemetry workspace's exceptions into error issues by
-fingerprint. An exception is a span event named `exception` or a log at ERROR
-severity or above. The fingerprint is the exception type, without its module, and the top five
+fingerprint. An exception is a span event named `exception`, a log at ERROR
+severity or above, or a request log line that records a server error (see
+below). The fingerprint is the exception type, without its module, and the top five
 frames of the application's own code. When the stack has none of the
 application's code, the message takes the frames' place, with URLs, paths,
 IDs, generated codes, numbers and timestamps replaced. A frame is its function
@@ -1285,10 +1286,12 @@ error issue too when it has a status from 500 to 599 in
 `http.response.status_code`, `http.status_code`, `status_code`, `statusCode`,
 `status` or `code`, and a route in `http.route`, `url.path`, `http.target`,
 `route`, `endpoint`, `path` or `url`. Its fingerprint is its service, status,
-route and error text, not its body: the route without origin, query or the
-segments that identify a record, and the error text from `error.message`,
-`error`, `message`, `msg`, `response` or `response.body`, with IDs and numbers
-replaced. The issue is titled `HTTP 500 /orders/<id>: upstream timed out`.
+route and error text, not its body: the route in lower case without origin,
+query or the segments that identify a record, and the error text from
+`error.message`, `error`, `message`, `msg`, `response` or `response.body`,
+with IDs and numbers replaced. The issue's title is the status, that route and
+the newest occurrence's error text as it was logged, such as
+`HTTP 500 /orders/<id>: upstream timed out after 30000ms`.
 ClickHouse's view over the logs must let these lines into
 `otel_issue_candidates`; with a view that passes only ERROR and above, nothing
 changes.

@@ -349,6 +349,12 @@ describe("groupErrorCandidates with a failed request log", () => {
       .toBe("HTTP 500 data: An error occurred while processing your request.");
     expect(title({ response: '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN"><html><body>504 Gateway Time-out</body></html>' })).toBe("HTTP 500 data");
     expect(title({ response: '{"error":null}' })).toBe("HTTP 500 data");
+    // A plain message may start with a bracket.
+    expect(title({ message: "[worker] upstream timed out" })).toBe("HTTP 500 data: [worker] upstream timed out");
+    // A field that only says there was an error is passed over.
+    expect(title({ error: "true", message: "upstream timed out" })).toBe("HTTP 500 data: upstream timed out");
+    // Escapes in a JSON string are read, and only its first line is the text.
+    expect(title({ response: '{"message":"caf\\u00e9 \\"closed\\"\\n    at handler (/app/routes.js:12:3)"}' })).toBe('HTTP 500 data: café "closed"');
     expect(title({})).toBe("HTTP 500 data");
   });
 
@@ -358,6 +364,13 @@ describe("groupErrorCandidates with a failed request log", () => {
     ]);
     expect(group).toMatchObject({ exceptionType: "ERROR", title: "ERROR: Query failed: connection reset" });
     expect(group!.previousFingerprints).toHaveLength(2);
+  });
+
+  it("keeps a log that says it is an error only in its severity text", () => {
+    const [group] = groupErrorCandidates([
+      request({ code: "200", endpoint: "data" }, { body: "Query failed: connection reset", severity: "error", severity_number: 0 }),
+    ]);
+    expect(group).toMatchObject({ exceptionType: "error", title: "error: Query failed: connection reset" });
   });
 
   it("drops a line below error level that is not a failed request", () => {
