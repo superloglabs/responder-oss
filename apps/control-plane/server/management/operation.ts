@@ -39,6 +39,7 @@ export type ManagementTag =
   | "Models"
   | "Runs"
   | "Secrets"
+  | "Signal"
   | "Synthetics"
   | "Tag mode"
   | "Telemetry"
