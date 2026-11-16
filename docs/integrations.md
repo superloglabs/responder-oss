@@ -959,11 +959,13 @@ Create a Vercel Integration with:
 - External installation URL initiated by Responder:
   `https://vercel.com/integrations/<VERCEL_INTEGRATION_SLUG>/new`
 - Redirect URL: `<public>/api/integrations/vercel/callback`
-- Read access for Projects, Deployments, Deployment Checks, Domains, Teams,
-  Logs, Security, and any other non-secret platform areas the investigation
-  agent should inspect
-- No write access except to Drains, which telemetry sources use, and no
-  environment-variable, token, secret, credential, or API-key scopes
+- Read access for Integration Configuration, Deployments, Projects, Teams,
+  and Domains. Deployments read covers runtime logs; Vercel has no separate
+  logs scope. Deployment Checks read is optional.
+- Read/Write access to Drains, which telemetry sources use. Leave the
+  deprecated Log Drains scope at None.
+- No other write access, and no environment-variable, protection-bypass,
+  token, secret, credential, or API-key scopes
 - Environment: `VERCEL_INTEGRATION_SLUG`, `VERCEL_CLIENT_ID`, and
   `VERCEL_CLIENT_SECRET`
 
