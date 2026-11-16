@@ -73,8 +73,10 @@ function errorText(value: string): string | null {
 // not describe one.
 export function failedRequestOf(attributes: Record<string, string> | null | undefined): FailedRequest | null {
   if (!attributes) return null;
-  const status = firstValue(attributes, failedRequestStatusAttributes);
-  if (!status || !/^5\d\d$/u.test(status)) return null;
+  // Any of the names may hold it: a line can have a `status` of "error"
+  // beside a `code` of 500.
+  const status = failedRequestStatusAttributes.map((name) => attributes[name]?.trim()).find((value) => value && /^5\d\d$/u.test(value));
+  if (!status) return null;
   const route = firstValue(attributes, failedRequestRouteAttributes);
   if (!route) return null;
   let message: string | null = null;

@@ -335,6 +335,11 @@ describe("groupErrorCandidates with a failed request log", () => {
     expect(groups[0]!.title).toBe("HTTP 503 /users/<id>/orders/<id>: upstream timed out after 12ms");
   });
 
+  it("finds the status among several fields that could hold it", () => {
+    const [group] = groupErrorCandidates([request({ status: "error", code: "502", endpoint: "data" })]);
+    expect(group?.title).toBe("HTTP 502 data");
+  });
+
   it("finds the error text in a response body, or goes without one", () => {
     const title = (attrs: Record<string, string>) => groupErrorCandidates([request({ code: "500", endpoint: "data", ...attrs })])[0]!.title;
     expect(title({ response: '{\n  "type": {\n    "code": 500\n  },\n  "message": "An unexpected error occurred."\n}' })).toBe("HTTP 500 data: An unexpected error occurred.");
