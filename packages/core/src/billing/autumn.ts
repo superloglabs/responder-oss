@@ -399,10 +399,41 @@ export interface AutomationBillingSummary {
   remaining: number;
   // Set when the workspace pays per run on one model instead of from the
   // usage credit.
-  runBilling: { modelName: string } | null;
+  runBilling: RunBillingSummary | null;
   scheduledPlanId: AutomationPlanId | null;
   scheduledPlanName: string | null;
   usage: number;
+}
+
+// One metered feature of the per-run account, as Autumn bills it.
+export interface RunBillingUsage {
+  featureId: string;
+  // Included this period, summed over the account's plans.
+  included: number;
+  name: string;
+  nextResetAt: number | null;
+  // Charged so far this period for usage past what is included, in dollars.
+  overageCost: number;
+  // Price of `priceUnits` past what is included, in dollars. Null when usage
+  // past it is not billed.
+  price: number | null;
+  priceUnits: number;
+  // What is counted, in the plural, such as "spans".
+  unit: string;
+  unlimited: boolean;
+  usage: number;
+}
+
+// The per-run account's plan and usage. The plan fields are null and usage
+// is empty when Autumn could not report that account.
+export interface RunBillingSummary {
+  modelName: string;
+  planName: string | null;
+  // Monthly base price in dollars; 0 when the plan bills only usage.
+  planPrice: number | null;
+  // The billed feature: one per successful run.
+  runFeatureId: string;
+  usage: RunBillingUsage[];
 }
 
 export interface AutomationInferenceAccess {
@@ -518,9 +549,70 @@ function balanceSummary(balance: NonNullable<Customer["balances"][string]>): Usa
   };
 }
 
+// The per-run account's plan with the highest base price, so a free plan
+// stacked under a paid one does not name it.
+function runBillingPlan(customer: Customer) {
+  const plans = customer.subscriptions
+    .filter((subscription) => subscription.status === "active")
+    .flatMap((subscription) => (subscription.plan ? [subscription.plan] : []));
+  return plans.sort((a, b) =>
+    (b.price?.amount ?? 0) - (a.price?.amount ?? 0) || Number(a.autoEnable) - Number(b.autoEnable)
+  )[0] ?? null;
+}
+
+// Runs first, then the rest in a fixed order.
+const runBillingFeatureOrder = ["spans", "logs", "metric_points"];
+
+function runBillingUsage(featureId: string, balance: NonNullable<Customer["balances"][string]>): RunBillingUsage {
+  const entries = balance.breakdown ?? [];
+  const priced = entries.find((entry) => entry.price?.amount != null)?.price ?? null;
+  // Each plan's grant is used up on its own, so overage is charged per grant.
+  const overageCost = entries.reduce((total, entry) => {
+    const amount = entry.price?.amount;
+    if (amount == null || entry.unlimited) return total;
+    const over = Math.max(0, entry.usage - entry.includedGrant - entry.prepaidGrant);
+    return total + (over / (entry.price!.billingUnits || 1)) * amount;
+  }, 0);
+  return {
+    featureId,
+    included: balance.unlimited ? 0 : Math.max(0, balance.granted),
+    name: balance.feature?.name ?? featureId,
+    nextResetAt: balance.nextResetAt ?? null,
+    overageCost,
+    price: priced?.amount ?? null,
+    priceUnits: priced?.billingUnits || 1,
+    unit: balance.feature?.display?.plural ?? featureId,
+    unlimited: balance.unlimited,
+    usage: Math.max(0, balance.usage),
+  };
+}
+
+export function summarizeRunBilling(
+  account: RunBillingAccount,
+  runCustomer: Customer | null,
+): RunBillingSummary {
+  const plan = runCustomer ? runBillingPlan(runCustomer) : null;
+  const rank = (featureId: string) => {
+    if (featureId === account.featureId) return -1;
+    const index = runBillingFeatureOrder.indexOf(featureId);
+    return index === -1 ? runBillingFeatureOrder.length : index;
+  };
+  const usage = Object.entries(runCustomer?.balances ?? {})
+    .flatMap(([featureId, balance]) => (balance ? [runBillingUsage(featureId, balance)] : []))
+    .sort((a, b) => rank(a.featureId) - rank(b.featureId) || a.featureId.localeCompare(b.featureId));
+  return {
+    modelName: account.modelName,
+    planName: plan?.name ?? null,
+    planPrice: !plan ? null : !plan.price ? 0 : plan.price.interval === "month" ? plan.price.amount : null,
+    runFeatureId: account.featureId,
+    usage,
+  };
+}
+
 export function summarizeAutomationBillingCustomer(
   customer: Customer,
   runBillingAccount: RunBillingAccount | null = null,
+  runCustomer: Customer | null = null,
 ): AutomationBillingSummary {
   const balance = customer.balances[AUTOMATION_INFERENCE_FEATURE_ID];
   const machineHours = customer.balances[MACHINE_HOURS_FEATURE_ID];
@@ -552,7 +644,7 @@ export function summarizeAutomationBillingCustomer(
     planPrice: current.price,
     plans: paidPlanSummaries(),
     remaining: Math.max(0, balance?.remaining ?? allowance),
-    runBilling: runBilling && { modelName: runBilling.modelName },
+    runBilling: runBilling && summarizeRunBilling(runBilling, runCustomer),
     scheduledPlanId: plan.scheduled,
     scheduledPlanName: plan.scheduled ? automationPlan(plan.scheduled).name : null,
     usage: Math.max(0, balance?.usage ?? 0),
@@ -570,7 +662,20 @@ export async function getAutomationBillingSummary(
     ensureAutomationPlan(client, organizationId, data),
     getRunBillingAccount(organizationId),
   ]);
-  return summarizeAutomationBillingCustomer(customer, runBillingAccount);
+  const runBilling = activeRunBilling(runBillingAccount, customer);
+  const runCustomer = runBilling ? await getRunBillingCustomer(client, runBilling.customerId) : null;
+  return summarizeAutomationBillingCustomer(customer, runBillingAccount, runCustomer);
+}
+
+// The per-run account with its plans. Null when Autumn cannot report it, so
+// the summary still loads without the plan's details.
+async function getRunBillingCustomer(client: Autumn, customerId: string): Promise<Customer | null> {
+  try {
+    return await client.customers.get({ customerId, expand: ["subscriptions.plan", "balances.feature"] });
+  } catch (error) {
+    console.warn("Unable to load the per-run billing account", { customerId, error });
+    return null;
+  }
 }
 
 function getAutomationClientOrNull(): Autumn | null {
