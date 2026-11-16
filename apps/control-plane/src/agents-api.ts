@@ -177,6 +177,8 @@ export interface IntegrationAccount {
     serviceAccountEmail?: string;
     roles?: string[];
     accessLevel?: string;
+    // A Vercel installation on a team or a personal account.
+    scope?: string;
   };
 }
 

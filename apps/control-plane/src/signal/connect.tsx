@@ -346,8 +346,10 @@ function DatadogConnect({ integration, listPath, onBack }: PageProps) {
 
 // What Signal does with Railway, shared by its connect and manage pages.
 export const railwaySignalReads = "Signal reads your Railway logs, deployments, and metrics.";
+// What Signal does with Vercel, shared by its connect and manage pages.
+export const vercelSignalReads = "Signal reads your Vercel projects, deployments, and logs.";
 
-const approvals: Record<"sentry" | "linear" | "posthog" | "railway", {
+const approvals: Record<"sentry" | "linear" | "posthog" | "railway" | "vercel", {
   name: string; description: string; allowed: string[]; denied: string;
   // Come back to this page rather than the list, to finish setup here.
   returnHere?: boolean;
@@ -375,6 +377,13 @@ const approvals: Record<"sentry" | "linear" | "posthog" | "railway", {
     description: `${railwaySignalReads} After you connect, choose the environments whose logs Superlog reads, so Signal sees new errors as they happen.`,
     allowed: ["Read projects, deployments, and runtime, build, and HTTP logs", "Read resource and HTTP metrics"],
     denied: "Read-only access. Never redeploys, restarts, or reads environment variables",
+    returnHere: true,
+  },
+  vercel: {
+    name: "Vercel",
+    description: `${vercelSignalReads} After you connect, create drains that send your deployments' traces and logs to Superlog, so Signal sees new errors as they happen.`,
+    allowed: ["Read projects, deployments, domains, and logs", "Create drains that send traces and logs to Superlog"],
+    denied: "Never changes deployments or reads environment variables",
     returnHere: true,
   },
 };

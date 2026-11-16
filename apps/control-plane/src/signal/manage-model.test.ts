@@ -71,6 +71,20 @@ describe("Signal manage pages", () => {
     expect(manageView("railway", "Railway", account({ details: { accessLevel: "read_only" } })).rows[0]?.value).toBe("Read only");
   });
 
+  it("shows a Vercel team, its projects, and that disconnecting removes the drains", () => {
+    const view = manageView("vercel", "Vercel", account({ displayName: "Acme", resourceCount: 3, details: { scope: "team" } }));
+    expect(view.connectedTo).toBe("Acme");
+    expect(view.rows).toEqual([
+      { label: "Team", value: "Acme", action: "Reconnect" },
+      { label: "Projects", value: "3 projects" },
+    ]);
+    expect(view.disconnect).toContain("removes the drains");
+    expect(manageView("vercel", "Vercel", account({ details: { scope: "personal" } })).rows).toEqual([
+      { label: "Account", value: "Acme", action: "Reconnect" },
+    ]);
+    expect(accountSummary("vercel", account({ resourceCount: 1 }))).toBe("Acme · 1 project");
+  });
+
   it("leaves accounts that are still connecting off the page", () => {
     expect(manageableAccounts([
       account({ id: "a", status: "connected" }),
