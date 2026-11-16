@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { fingerprint, fingerprintLog, messageBucketFor, previousFingerprint, previousFingerprintLog, stripNullBytes } from "./fingerprint.js";
+import { fingerprint, fingerprintFailedRequest, fingerprintLog, messageBucketFor, previousFingerprint, previousFingerprintLog, stripNullBytes } from "./fingerprint.js";
 
 test("fingerprint groups equivalent Next.js stacks whose generated chunk hashes differ", () => {
   const stackFor = (chunkHash: string) =>
@@ -761,4 +761,21 @@ test("fingerprint reads V8 stacks whose message has an asterisk", () => {
   });
 
   expect(fp.normalizedFrames).toEqual(["glob@apps/api/src/glob.ts"]);
+});
+
+const failedRequest = { message: "Error connecting to bigquery source", route: "data", service: "api", status: 500 };
+
+test("a failed request has one fingerprint per service, status, route, and error text", () => {
+  expect(fingerprintFailedRequest(failedRequest)).toEqual(fingerprintFailedRequest({ ...failedRequest }));
+  expect(fingerprintFailedRequest(failedRequest)).toMatchObject({ exceptionType: "HTTP 500", normalizedFrames: [], topFrame: null });
+  expect(fingerprintFailedRequest(failedRequest).hash).toMatch(/^v3:[0-9a-f]{16}$/u);
+});
+
+test("a failed request's fingerprint leaves out the values in its error text and the identifiers in its route", () => {
+  const hash = (route: string, message: string | null) => fingerprintFailedRequest({ ...failedRequest, message, route }).hash;
+  expect(hash("/users/4812/orders", "timed out after 30000ms")).toBe(hash("/users/77/orders/", "timed out after 12ms"));
+  expect(hash("https://api.example.com/users/4812?page=2", null)).toBe(hash("/users/9", null));
+  expect(hash("/Query", null)).toBe(hash("/query", null));
+  expect(hash("/query", null)).not.toBe(hash("/export", null));
+  expect(hash("data", "Error connecting to bigquery source")).not.toBe(hash("data", "Error connecting to Snowflake source"));
 });

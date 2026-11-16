@@ -2,19 +2,22 @@ import type { TelemetryClient } from "./client.js";
 import {
   type Fingerprint,
   fingerprint,
+  fingerprintFailedRequest,
   fingerprintLog,
   pythonTracebackException,
   stripNullBytes,
   previousFingerprint,
   previousFingerprintLog,
 } from "./fingerprint.js";
+import { failedRequestMessage, failedRequestOf } from "./failed-requests.js";
 import { fingerprintLogV1, fingerprintV1 } from "./fingerprint-v1.js";
 import { decodeReactError, minifiedMessageAttribute } from "./react-errors.js";
 
 // Error issues group a workspace's exceptions by fingerprint. Exceptions are
-// span events named "exception" and logs at ERROR severity or above. The
-// worker reads them from ClickHouse in arrival order and keeps one issue per
-// fingerprint in Postgres.
+// span events named "exception", logs at ERROR severity or above, and request
+// log lines at any level that record a server error status. The worker reads
+// them from ClickHouse in arrival order and keeps one issue per fingerprint
+// in Postgres.
 
 export const errorIssueKinds = ["span", "log"] as const;
 export type ErrorIssueKind = (typeof errorIssueKinds)[number];
@@ -108,6 +111,8 @@ export type ErrorCandidate = {
   seen_ms: number | string;
   service: string;
   severity: string;
+  // The log's severity number, 17 and above for ERROR. Absent on a span.
+  severity_number?: number | string;
   span_id: string;
   span_name: string;
   trace_id: string;
@@ -149,6 +154,8 @@ export const zeroCandidateId = "00000000-0000-0000-0000-000000000000";
 export const errorCandidateWindowMs = 5 * 60_000;
 export const errorCandidateSettleMs = 30_000;
 
+// The lowest severity number OpenTelemetry gives ERROR.
+const errorSeverityNumber = 17;
 const maximumMessageLength = 4_000;
 const maximumStacktraceLength = 16_000;
 const maximumTitleLength = 200;
@@ -218,7 +225,7 @@ export async function errorCandidates(
         toUnixTimestamp64Milli(Timestamp) AS seen_ms,
         kind, project_id, service, span_name, trace_id, span_id,
         exception_type, exception_message, exception_stacktrace,
-        attrs, resource_attrs, body, severity
+        attrs, resource_attrs, body, severity, severity_number
       FROM otel_issue_candidates
       WHERE kind = {kind:String}
         AND project_id IN {organizationIds:Array(String)}
@@ -259,6 +266,10 @@ export function errorIssueTitle(fp: Pick<Fingerprint, "exceptionType" | "topFram
     : fp.topFrame
       ? `${fp.exceptionType} in ${fp.topFrame}`
       : fp.exceptionType;
+  return shortTitle(title);
+}
+
+function shortTitle(title: string): string {
   return title.length > maximumTitleLength ? `${title.slice(0, maximumTitleLength - 1)}…` : title;
 }
 
@@ -290,6 +301,13 @@ export function groupErrorCandidates(candidates: ErrorCandidate[]): ErrorOccurre
   const groups = new Map<string, ErrorOccurrences>();
   for (const received of candidates) {
     const candidate = withReactMessage(received);
+    // A log below error level is here only as a failed request. Its issue is
+    // the request's status, route, and error text; the line around them is
+    // not an error message. Without those fields the line is not an error.
+    const belowError = candidate.kind === "log" && candidate.severity_number !== undefined &&
+      Number(candidate.severity_number) < errorSeverityNumber;
+    const failedRequest = belowError ? failedRequestOf(candidate.attrs) : null;
+    if (belowError && !failedRequest) continue;
     // A log whose body is a Python traceback has its stack there.
     const bodyTraceback = candidate.kind === "log" && !candidate.exception_stacktrace
       ? pythonTracebackException(candidate.body)
@@ -306,15 +324,24 @@ export function groupErrorCandidates(candidates: ErrorCandidate[]): ErrorOccurre
       severity: candidate.severity,
       stacktrace: bodyTraceback ? null : stacktrace,
     };
-    const fp = candidate.kind === "span" ? fingerprint(spanInput) : fingerprintLog(logInput);
-    const previousFingerprints = candidate.kind === "span"
-      ? [previousFingerprint(spanInput), fingerprintV1(spanInput)]
-      : [previousFingerprintLog(logInput), fingerprintLogV1(logInput)];
+    const fp = failedRequest
+      ? fingerprintFailedRequest({ ...failedRequest, service: candidate.service })
+      : candidate.kind === "span" ? fingerprint(spanInput) : fingerprintLog(logInput);
+    // A failed request has no earlier fingerprint to take an issue over from.
+    const previousFingerprints = failedRequest
+      ? []
+      : candidate.kind === "span"
+        ? [previousFingerprint(spanInput), fingerprintV1(spanInput)]
+        : [previousFingerprintLog(logInput), fingerprintLogV1(logInput)];
     const message = stripNullBytes(
-      candidate.kind === "span"
-        ? candidate.exception_message
-        : candidate.exception_message || (bodyTraceback ? bodyTraceback.message : candidate.body),
+      failedRequest
+        ? failedRequestMessage(failedRequest)
+        : candidate.kind === "span"
+          ? candidate.exception_message
+          : candidate.exception_message || (bodyTraceback ? bodyTraceback.message : candidate.body),
     ) || null;
+    // A failed request's message already starts with its status.
+    const title = failedRequest ? shortTitle(message ?? fp.exceptionType) : errorIssueTitle(fp, message);
     const seenAt = new Date(Number(candidate.seen_ms));
     const key = `${candidate.project_id}:${fp.hash}`;
     const sample: ErrorIssueSample = {
@@ -349,7 +376,7 @@ export function groupErrorCandidates(candidates: ErrorCandidate[]): ErrorOccurre
         previousFingerprints,
         sample,
         service,
-        title: errorIssueTitle(fp, message),
+        title,
         topFrame: fp.topFrame,
       });
       continue;
@@ -366,7 +393,7 @@ export function groupErrorCandidates(candidates: ErrorCandidate[]): ErrorOccurre
       existing.message = sample.message;
       existing.sample = sample;
       existing.service = service ?? existing.service;
-      existing.title = errorIssueTitle(fp, message);
+      existing.title = title;
     }
   }
   return [...groups.values()];
