@@ -778,4 +778,15 @@ test("a failed request's fingerprint leaves out the values in its error text and
   expect(hash("/Query", null)).toBe(hash("/query", null));
   expect(hash("/query", null)).not.toBe(hash("/export", null));
   expect(hash("data", "Error connecting to bigquery source")).not.toBe(hash("data", "Error connecting to Snowflake source"));
+  // A code with a long number in it names a record; a short number in a name does not.
+  expect(hash("/orders/ORD-12345", null)).toBe(hash("/orders/ORD-67890", null));
+  expect(hash("/files/report_20261116.pdf", null)).toBe(hash("/files/report_20251001.pdf", null));
+  expect(hash("/api/v2/oauth2/token", null)).not.toBe(hash("/api/v3/oauth2/token", null));
+});
+
+test("a failed request's fingerprint changes with its service and its status", () => {
+  const hash = (overrides: Partial<typeof failedRequest>) => fingerprintFailedRequest({ ...failedRequest, ...overrides }).hash;
+  expect(hash({ service: "plugins" })).not.toBe(hash({}));
+  expect(hash({ status: 502 })).not.toBe(hash({}));
+  expect(fingerprintFailedRequest({ ...failedRequest, status: 502 }).exceptionType).toBe("HTTP 502");
 });

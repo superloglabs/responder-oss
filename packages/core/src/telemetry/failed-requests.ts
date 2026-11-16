@@ -51,22 +51,40 @@ function firstValue(attributes: Record<string, string>, names: readonly string[]
 // first. `detail` and `title` are those of a problem details body (RFC 9457).
 const bodyTextKeys = ["message", "error", "detail", "title"] as const;
 
+// A JSON string's text. The body it came from is not always valid JSON, so
+// a string that does not parse keeps its quotes and backslashes unescaped.
+function jsonStringText(raw: string): string {
+  try {
+    const parsed: unknown = JSON.parse(`"${raw}"`);
+    if (typeof parsed === "string") return parsed;
+  } catch {
+    // Fall through.
+  }
+  return raw.replace(/\\(["\\/])/gu, "$1");
+}
+
+function firstLine(text: string): string | null {
+  const line = text.split(/\r?\n/u).find((part) => part.trim())?.trim() ?? "";
+  return line.slice(0, maximumTextLength) || null;
+}
+
 // The error text of a field. A response body is often JSON, sometimes
 // printed over several lines and not always valid, so its text is found by
-// key instead of by parsing. A page of HTML says nothing worth grouping by.
+// key instead of by parsing. A page of HTML, and a field that only says
+// whether there was an error, say nothing worth grouping by.
 function errorText(value: string): string | null {
   const text = stripNullBytes(value).trim();
-  if (text.startsWith("<")) return null;
-  if (text.startsWith("{") || text.startsWith("[")) {
+  if (text.startsWith("<") || /^(?:true|false|null|undefined)$/iu.test(text)) return null;
+  // `{"` or `[{` opens JSON; `[worker] timed out` is a plain message.
+  if (/^(?:\{\s*["}]|\[\s*[{["\]])/u.test(text)) {
     for (const key of bodyTextKeys) {
       const field = text.match(new RegExp(`"${key}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"`, "u"))?.[1];
-      const found = field?.replace(/\\(["\\/])/gu, "$1").trim().slice(0, maximumTextLength);
+      const found = field ? firstLine(jsonStringText(field)) : null;
       if (found) return found;
     }
     return null;
   }
-  const line = text.split("\n").find((part) => part.trim())?.trim() ?? "";
-  return line.slice(0, maximumTextLength) || null;
+  return firstLine(text);
 }
 
 // The failed request a log record's fields describe, or null when they do
