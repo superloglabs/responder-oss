@@ -1,4 +1,5 @@
-import { conductorButton, type HandoffKind } from "@responder/core/ide-handoff";
+import { defaultHandoffTargets, handoffButtons, type HandoffKind, type HandoffTarget } from "@responder/core/ide-handoff";
+import { getHandoffTargets } from "@responder/core/db/handoff-settings";
 import { setTimeout as delay } from "node:timers/promises";
 import { createHash } from "node:crypto";
 import type { AutomationNotification } from "@responder/core/automations/config";
@@ -17,6 +18,8 @@ export type AutomationRunOutcome =
 
 export interface AutomationNotificationDependencies {
   getAccount: typeof getAutomationNotificationAccount;
+  // The workspace's coding agent buttons. Without it, the default shows.
+  handoffTargets?: (organizationId: string) => Promise<HandoffTarget[]>;
   post: typeof postSlackMessage;
   uploadImage?: typeof uploadSlackImage;
   wait?: (milliseconds: number) => Promise<unknown>;
@@ -24,6 +27,7 @@ export interface AutomationNotificationDependencies {
 
 const defaultDependencies: AutomationNotificationDependencies = {
   getAccount: getAutomationNotificationAccount,
+  handoffTargets: getHandoffTargets,
   post: postSlackMessage,
   uploadImage: uploadSlackImage,
 };
@@ -117,10 +121,13 @@ export async function postAutomationNotification(input: {
   // Posts a reply in this thread instead of a new message.
   threadTimestamp?: string;
 }, dependencies: AutomationNotificationDependencies = defaultDependencies): Promise<AutomationNotificationDelivery[]> {
-  const handoffBlocks = input.handoff?.sourceUrl ? [{
-    type: "actions",
-    elements: [conductorButton({ ...input.handoff, sourceUrl: input.handoff.sourceUrl, context: input.markdown })],
-  }] : [];
+  const handoffElements = input.handoff?.sourceUrl ? handoffButtons({
+    ...input.handoff,
+    sourceUrl: input.handoff.sourceUrl,
+    context: input.markdown,
+    targets: dependencies.handoffTargets ? await dependencies.handoffTargets(input.organizationId) : defaultHandoffTargets,
+  }) : [];
+  const handoffBlocks = handoffElements.length > 0 ? [{ type: "actions", elements: handoffElements }] : [];
   const deliveries: AutomationNotificationDelivery[] = [];
   for (const notification of input.notifications) {
     try {

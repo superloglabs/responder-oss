@@ -1,7 +1,32 @@
+import { z } from "zod";
+
 export type HandoffKind = "fix" | "continue";
 
+// Where a notification can hand its context, in button order: coding agents,
+// then a page to copy the prompt from.
+export const handoffTargets = ["conductor", "claude", "codex", "t3", "capy", "prompt"] as const;
+export type HandoffTarget = (typeof handoffTargets)[number];
+export const handoffTargetsSchema = z.array(z.enum(handoffTargets)).max(handoffTargets.length)
+  .transform((targets) => handoffTargets.filter((target) => targets.includes(target)));
+// Workspaces that never chose keep the Conductor button they had.
+export const defaultHandoffTargets: HandoffTarget[] = ["conductor"];
+
+export const handoffTargetNames: Record<HandoffTarget, string> = {
+  capy: "Capy",
+  claude: "Claude Code",
+  codex: "Codex",
+  conductor: "Conductor",
+  t3: "T3 Code",
+  prompt: "Copy prompt",
+};
+
+export function handoffLabel(target: HandoffTarget, kind: HandoffKind): string {
+  if (target === "prompt") return "Copy prompt";
+  return `${kind === "fix" ? "Fix" : "Continue"} in ${handoffTargetNames[target]}`;
+}
+
 export function conductorLabel(kind: HandoffKind): string {
-  return kind === "fix" ? "Fix in Conductor" : "Continue in Conductor";
+  return handoffLabel("conductor", kind);
 }
 
 type HandoffInput = {
@@ -34,27 +59,57 @@ function fitHandoffPrompt(input: HandoffInput, toUrl: (encodedPrompt: string) =>
   return result;
 }
 
-// Opens Conductor directly with the prompt prefilled.
+// Each app opens with the prompt prefilled and waits for the person to send
+// it. Claude Code opens a new terminal session and Codex a new local thread.
+// T3 Code's web link asks which app to open; Capy opens a new cloud thread.
+const deepLinkPrefixes: Record<Exclude<HandoffTarget, "prompt">, string> = {
+  capy: "https://capy.ai/new?prompt=",
+  claude: "claude-cli://open?q=",
+  codex: "codex://new?prompt=",
+  conductor: "conductor://prompt=",
+  t3: "https://app.t3.codes/new?prompt=",
+};
+
+// Slack buttons cannot write to the clipboard, so "Copy prompt" opens a page
+// that shows the prompt with a copy button.
+export function handoffDeepLink(target: HandoffTarget, input: HandoffInput): string {
+  if (target === "prompt") return handoffPageUrl("prompt", input);
+  return fitHandoffPrompt(input, (prompt) => `${deepLinkPrefixes[target]}${prompt}`);
+}
+
 export function conductorDeepLink(input: HandoffInput): string {
-  return fitHandoffPrompt(input, (prompt) => `conductor://prompt=${prompt}`);
+  return handoffDeepLink("conductor", input);
 }
 
 // A web page that previews the prompt and links to Conductor, for surfaces
 // that only render web links. The fragment is never sent to our server or
 // included in HTTP referrers.
 export function conductorHandoffUrl(input: HandoffInput): string {
+  return handoffPageUrl("conductor", input);
+}
+
+function handoffPageUrl(page: "conductor" | "prompt", input: HandoffInput): string {
   const url = new URL(input.sourceUrl);
-  url.pathname = "/api/ide/conductor";
+  url.pathname = `/api/ide/${page}`;
   url.search = "";
   url.hash = "";
   return fitHandoffPrompt(input, (prompt) => `${url}#prompt=${prompt}`);
 }
 
-export function conductorButton(input: HandoffInput) {
+export function handoffButton(target: HandoffTarget, input: HandoffInput) {
   return {
     type: "button",
-    action_id: `conductor_${input.kind}`,
-    text: { type: "plain_text", text: conductorLabel(input.kind) },
-    url: conductorDeepLink(input),
+    action_id: `${target}_${input.kind}`,
+    text: { type: "plain_text", text: handoffLabel(target, input.kind) },
+    url: handoffDeepLink(target, input),
   };
+}
+
+// One button for each target the workspace shows, in a fixed order.
+export function handoffButtons(input: HandoffInput & { targets: readonly HandoffTarget[] }) {
+  return handoffTargets.filter((target) => input.targets.includes(target)).map((target) => handoffButton(target, input));
+}
+
+export function conductorButton(input: HandoffInput) {
+  return handoffButton("conductor", input);
 }

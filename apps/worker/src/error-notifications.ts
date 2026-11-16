@@ -7,6 +7,7 @@ import type { errorNotificationDeliveries } from "@responder/core/db/schema";
 import { pausedTelemetryNotificationOrganizations } from "@responder/core/db/telemetry-notification-pauses";
 import { listTelemetryAlertSlackChannels } from "@responder/core/db/telemetry-alerts";
 import { organizationHasCapability } from "@responder/core/db/organization-capabilities";
+import { getHandoffTargets } from "@responder/core/db/handoff-settings";
 import { responderErrorIssueUrl } from "@responder/core/responder-urls";
 import { errorNotificationTargetKey, matchesErrorNotification, type ErrorNotificationSnapshot } from "@responder/core/telemetry/error-notifications";
 import {
@@ -126,6 +127,7 @@ const defaults = {
   channels: listTelemetryAlertSlackChannels,
   settings: getErrorNotificationSettings, paused: pausedTelemetryNotificationOrganizations,
   hasCapability: organizationHasCapability,
+  handoffTargets: getHandoffTargets,
   origin: () => process.env.RESPONDER_APP_URL ?? process.env.BETTER_AUTH_URL,
 };
 // Whether the workspace still sends to a delivery's destination.
@@ -152,7 +154,9 @@ export async function deliverErrorNotification(delivery: Delivery, deps = defaul
     notifications: [{ kind: "slack", integrationAccountId: target.integrationAccountId, channelId: target.channelId }],
     seed: `error-notice/${delivery.id}`, text: message.subject,
     markdown: message.text, blocks: errorNotificationBlocks(delivery.snapshot, url),
-    buttonsBlock: errorNotificationActions({ deliveryId: delivery.id, url, context: message.text }),
+    buttonsBlock: errorNotificationActions({
+      deliveryId: delivery.id, url, context: message.text, handoffTargets: await deps.handoffTargets(delivery.organizationId),
+    }),
     unfurlLinks: false,
   });
   if (!result || "error" in result || !result.timestamp) throw new Error("Slack notification failed");
@@ -182,7 +186,9 @@ export async function deliverErrorNotificationFollowup(
       timestamp: delivery.messageTimestamp, text: message.subject,
       blocks: [
         ...errorNotificationBlocks(delivery.snapshot, url, issue),
-        ...(issue.status === "open" ? [errorNotificationActions({ deliveryId: delivery.id, url, context: message.text })] : []),
+        ...(issue.status === "open" ? [errorNotificationActions({
+          deliveryId: delivery.id, url, context: message.text, handoffTargets: await deps.handoffTargets(delivery.organizationId),
+        })] : []),
       ],
     });
   } catch (error) {

@@ -6,6 +6,7 @@ import {
 } from "./error-notifications.js";
 import { errorNotificationRetryAt } from "@responder/core/db/error-notifications";
 import { defaultErrorNotificationSettings } from "@responder/core/telemetry/error-notifications";
+import type { HandoffTarget } from "@responder/core/ide-handoff";
 
 type Delivery = Parameters<typeof deliverErrorNotification>[0];
 const delivery: Delivery = {
@@ -19,6 +20,7 @@ function dependencies() {
     channels: vi.fn(async () => [{ integrationAccountId: "account", channelId: "C123", name: "errors", accountName: "Team", private: false }]),
     settings: vi.fn(async () => ({ ...defaultErrorNotificationSettings, enabled: true, targets: [delivery.target] })),
     paused: vi.fn(async () => new Set<string>()), hasCapability: vi.fn(async () => true), origin: () => "https://example.com",
+    handoffTargets: vi.fn(async (): Promise<HandoffTarget[]> => ["conductor"]),
   };
 }
 describe("error notification delivery", () => {
@@ -63,6 +65,19 @@ describe("error notification delivery", () => {
     const handoff = (block as { elements: Array<{ url?: string }> }).elements[2]!.url!;
     expect(decodeURIComponent(handoff)).toContain("https://example.com/errors/issue");
     expect(decodeURIComponent(handoff)).toContain(delivery.snapshot.title);
+  });
+  it("shows the coding agent buttons the workspace chose", async () => {
+    const deps = dependencies();
+    deps.handoffTargets.mockResolvedValue(["claude", "codex"]);
+    await deliverErrorNotification(delivery, deps);
+    expect(deps.handoffTargets).toHaveBeenCalledWith("workspace");
+    const elements = (deps.post.mock.calls[0]![0].buttonsBlock as { elements: Array<{ action_id: string; url?: string }> }).elements;
+    expect(elements.map((element) => element.action_id)).toEqual(["error_notification_resolve", "error_notification_silence", "claude_fix", "codex_fix"]);
+    expect(elements[2]!.url).toMatch(/^claude-cli:\/\/open\?q=/u);
+    expect(elements[3]!.url).toMatch(/^codex:\/\/new\?prompt=/u);
+    deps.handoffTargets.mockResolvedValue([]);
+    await deliverErrorNotification(delivery, deps);
+    expect((deps.post.mock.calls[1]![0].buttonsBlock as { elements: unknown[] }).elements).toHaveLength(2);
   });
   it("distinguishes regressions from first occurrences", () => {
     expect(errorNotificationMessage({ ...delivery.snapshot, transition: "regressed" }, "https://example.com").text).toContain("was resolved and has occurred again");

@@ -10,6 +10,7 @@ import { SelectField, Switch, TextAreaField, type SelectOption } from "../design
 import { useDocumentTitle } from "../use-document-title";
 import { useOrganizationCapabilities } from "../organization-capabilities";
 import { startSignalCheckout } from "../signal/model";
+import { handoffTargetNames, handoffTargets, type HandoffTarget } from "@responder/core/ide-handoff";
 import {
   extensionTeamPlanDescription,
   teamPlanDescription,
@@ -574,12 +575,96 @@ export function WorkspaceSettingsPage() {
         ) : null}
 
         {!signal && <>
+          <HandoffButtonsSection />
           <PullRequestAuthorSection currentUserId={session.data?.user.id} />
           <SandboxImageSection />
           <SandboxNetworkSection />
         </>}
       </section>
     </AppShell>
+  );
+}
+
+const handoffTargetDescriptions: Record<HandoffTarget, string> = {
+  capy: "Opens a new Capy thread with the prompt.",
+  claude: "Opens Claude Code in a new terminal with the prompt. Needs Claude Code installed.",
+  codex: "Opens a new thread in the Codex app with the prompt. Needs the Codex app installed.",
+  conductor: "Opens a new Conductor workspace with the prompt. Needs Conductor installed.",
+  prompt: "Opens a page with the prompt and a button to copy it.",
+  t3: "Opens T3 Code with the prompt, on the desktop, on the web, or on a phone.",
+};
+
+// Chooses the buttons under alerts, synthetic checks, error notifications and
+// automation results in Slack that hand the context to a coding agent. Each
+// one prefills a prompt; nothing runs until the person sends it.
+function HandoffButtonsSection() {
+  const [state, setState] = useState<{ canEdit: boolean; targets: HandoffTarget[] } | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void fetch("/api/handoff-settings")
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Could not load the Slack buttons");
+        return (await response.json()) as { canEdit: boolean; targets: HandoffTarget[] };
+      })
+      .then((next) => { if (active) setState(next); })
+      .catch((cause: unknown) => { if (active) setError(cause instanceof Error ? cause.message : "Could not load the Slack buttons"); });
+    return () => { active = false; };
+  }, []);
+
+  async function toggle(target: HandoffTarget, enabled: boolean) {
+    if (!state) return;
+    const previous = state;
+    const targets = handoffTargets.filter((value) => value === target ? enabled : state.targets.includes(value));
+    setState({ ...state, targets });
+    setError(null);
+    setSaving(true);
+    try {
+      const response = await fetch("/api/handoff-settings", {
+        body: JSON.stringify({ targets }),
+        headers: { "content-type": "application/json" },
+        method: "PUT",
+      });
+      const body = (await response.json().catch(() => null)) as { error?: string; canEdit?: boolean; targets?: HandoffTarget[] } | null;
+      if (!response.ok || !body?.targets) throw new Error(body?.error ?? "Could not save the Slack buttons");
+      setState({ canEdit: true, targets: body.targets });
+    } catch (cause) {
+      setState(previous);
+      setError(cause instanceof Error ? cause.message : "Could not save the Slack buttons");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="memberSection">
+      <div className="memberSection__heading">
+        <h3>Slack buttons</h3>
+      </div>
+      <p className="memberAccessNote">
+        Buttons under alerts, synthetic checks, error notifications and
+        automation results in Slack. Each one opens a coding agent with a
+        prompt that links back here. Nothing runs until you send the prompt.
+        {state && !state.canEdit ? " Admins can change this." : null}
+      </p>
+      {error ? <p className="settingsNotice settingsNotice--error">{error}</p> : null}
+      {state ? (
+        <div className="handoffButtonSettings">
+          {handoffTargets.map((target) => (
+            <Switch
+              checked={state.targets.includes(target)}
+              description={handoffTargetDescriptions[target]}
+              disabled={!state.canEdit || saving}
+              key={target}
+              label={target === "prompt" ? handoffTargetNames[target] : `Fix in ${handoffTargetNames[target]}`}
+              onCheckedChange={(checked) => void toggle(target, checked)}
+            />
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
