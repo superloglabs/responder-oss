@@ -355,6 +355,8 @@ const approvals: Record<"axiom" | "sentry" | "linear" | "posthog" | "railway" | 
   name: string; description: string; allowed: string[]; denied: string;
   // Come back to this page rather than the list, to finish setup here.
   returnHere?: boolean;
+  // Sent as the start URL's `mode`.
+  mode?: string;
 }> = {
   axiom: {
     name: "Axiom",
@@ -389,10 +391,11 @@ const approvals: Record<"axiom" | "sentry" | "linear" | "posthog" | "railway" | 
   },
   vercel: {
     name: "Vercel",
-    description: `${vercelSignalReads} After you connect, create drains that send your deployments' traces and logs to Superlog, so Signal sees new errors as they happen.`,
+    description: `${vercelSignalReads} When you connect, Superlog creates drains that send your deployments' traces and logs to it, so Signal sees new errors as they happen.`,
     allowed: ["Read projects, deployments, domains, and logs", "Create drains that send traces and logs to Superlog"],
     denied: "Never changes deployments or reads environment variables",
     returnHere: true,
+    mode: "drains",
   },
 };
 
@@ -407,7 +410,9 @@ function OAuthApproval({ page, integration, listPath, onBack }: PageProps & { pa
       {/* PostHog and Railway start read-only when no access mode is given. */}
       <Button variant="primary" loading={leaving} disabled={!integration?.connectUrl} onClick={() => {
         setLeaving(true);
-        window.location.assign(connectionStartUrl(integration!.connectUrl!, approval.returnHere ? `${listPath}/${page}` : listPath));
+        const start = new URL(integration!.connectUrl!, window.location.origin);
+        if (approval.mode) start.searchParams.set("mode", approval.mode);
+        window.location.assign(connectionStartUrl(`${start.pathname}${start.search}`, approval.returnHere ? `${listPath}/${page}` : listPath));
       }}><External>Continue to {approval.name}</External></Button>
     </Actions>
   </>;

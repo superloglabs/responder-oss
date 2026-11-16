@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { McpOAuthRefreshError } from "../../../../packages/core/src/integrations/custom-mcp.js";
 import { VercelDrainError } from "../../../../packages/core/src/telemetry/sources/vercel-drains.js";
 import { createSourceRoutes, type SourceRouteDependencies } from "./source-routes.js";
-import { removeVercelSourcesBeforeDisconnect } from "./vercel-source-removal.js";
+import { createVercelSourceAfterConnect, removeVercelSourcesBeforeDisconnect } from "./vercel-sources.js";
 
 const organizationId = "b925b1df-5b78-43c8-a816-6f00afb174af";
 const accountId = "3f1f2a1e-8d47-4a5e-9c55-0b0c3ad3b0aa";
@@ -218,6 +218,53 @@ describe("telemetry source routes", () => {
     expect(dependencies.revokeKey).toHaveBeenCalledWith("key-1");
     expect(dependencies.deleteSource).toHaveBeenCalledWith({ id: sourceId, organizationId });
     expect((await routes().app.request(`/${sourceId}`, { method: "DELETE" })).status).toBe(404);
+  });
+
+  describe("after Vercel connects from Signal setup", () => {
+    const input = { integrationAccountId: accountId, organizationId, userId: "user-1" };
+
+    it("creates the drains", async () => {
+      const { dependencies } = routes();
+      expect(await createVercelSourceAfterConnect(input, dependencies)).toBe("created");
+      expect(dependencies.createVercelDrains).toHaveBeenCalledWith(expect.objectContaining({
+        accessToken: "vercel-token",
+        ingestKey: token,
+        ingestOrigin: "https://eu.superlog.sh",
+        projectIds: null,
+        teamId: "team_1",
+      }));
+      expect(dependencies.saveSource).toHaveBeenCalledWith(expect.objectContaining({
+        integrationAccountId: accountId,
+        provider: "vercel",
+        state: { drains: { logs: "drn_logs", traces: "drn_traces" }, staleDrains: [] },
+      }));
+    });
+
+    it("leaves drains the connection already has", async () => {
+      const { dependencies } = routes({
+        listSources: vi.fn(async () => [{
+          createdAt: "", displayName: "Vercel", externalId: "icfg_1", id: sourceId, integrationAccountId: accountId,
+          lastError: null, lastReceivedAt: null, provider: "vercel" as const, state: {}, status: "active" as const,
+        }]),
+      });
+      expect(await createVercelSourceAfterConnect(input, dependencies)).toBe("exists");
+      expect(dependencies.createVercelDrains).not.toHaveBeenCalled();
+    });
+
+    it("creates nothing where the workspace cannot receive telemetry", async () => {
+      const { dependencies } = routes({ receivesTelemetry: vi.fn(async () => false) });
+      expect(await createVercelSourceAfterConnect(input, dependencies)).toBe("unavailable");
+      expect(dependencies.createKey).not.toHaveBeenCalled();
+    });
+
+    it("reports a refusal and revokes the unused key", async () => {
+      const { dependencies } = routes({
+        createVercelDrains: vi.fn(async () => { throw new VercelDrainError("Forbidden", 403); }),
+      });
+      expect(await createVercelSourceAfterConnect(input, dependencies)).toBe("failed");
+      expect(dependencies.revokeKey).toHaveBeenCalledWith("key-1");
+      expect(dependencies.saveSource).not.toHaveBeenCalled();
+    });
   });
 
   describe("before a Vercel connection is removed", () => {

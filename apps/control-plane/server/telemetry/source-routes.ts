@@ -36,11 +36,10 @@ import {
 import {
   createVercelDrains,
   deleteVercelDrain,
-  VercelDrainError,
 } from "../../../../packages/core/src/telemetry/sources/vercel-drains.js";
 import { getIntegrationDefinition, integrationIsConfigured } from "../integrations/catalog.js";
 import { cellOrigin } from "../integrations/urls.js";
-import { deleteDrains, vercelDrainIds, vercelTarget } from "./vercel-source-removal.js";
+import { createVercelSource, deleteDrains, vercelDrainIds, vercelTarget } from "./vercel-sources.js";
 import { getActiveTenant } from "../tenant.js";
 
 // Cloud providers that send telemetry to the workspace: Vercel drains, an AWS
@@ -300,61 +299,9 @@ export function createSourceRoutes(dependencies: SourceRouteDependencies = defau
       if (!granted.ok) return context.json(deniedBody(granted), granted.status);
       const body = accountSchema.safeParse(await context.req.json().catch(() => null));
       if (!body.success) return context.json({ error: "Choose a Vercel connection" }, 400);
-      const target = await vercelTarget(dependencies, granted.organizationId, body.data.integrationAccountId);
-      if (!target) return context.json({ error: "Connect Vercel first" }, 404);
-      const created = await sourceKey({ ...granted, name: `Vercel ${target.credentials.configurationId}` });
-      const projectIds = target.account.metadata.projectSelection === "selected"
-        ? await dependencies.vercelProjectIds(body.data.integrationAccountId)
-        : null;
-      const drainTarget = { accessToken: target.credentials.accessToken, teamId: target.credentials.teamId };
-      let drains: Record<string, string>;
-      try {
-        drains = await dependencies.createVercelDrains({
-          ...drainTarget,
-          ingestKey: created.token,
-          ingestOrigin: dependencies.ingestOrigin(),
-          name: `superlog-${granted.organizationId.slice(0, 8)}`,
-          projectIds,
-        });
-      } catch (error) {
-        await dependencies.revokeKey(created.key.id);
-        const status = error instanceof VercelDrainError ? error.status : 502;
-        const message = status === 403
-          ? "Vercel did not allow Superlog to create drains. Drains need a Pro or Enterprise team, and the Superlog integration needs the Drains permission. Reconnect Vercel to grant it."
-          : `Vercel could not create the drains: ${errorMessage(error)}`;
-        return context.json({ error: message }, 502);
-      }
-      // Reconnecting replaces the earlier drains and key. Drains Vercel does
-      // not delete now are kept and tried again later.
-      const previous = (await dependencies.listSources(granted.organizationId)).find(
-        (source) => source.provider === "vercel" && source.externalId === target.credentials.configurationId,
-      );
-      const { failed } = await deleteDrains(
-        dependencies,
-        drainTarget,
-        vercelDrainIds(previous?.state).filter((id) => !Object.values(drains).includes(id)),
-      );
-      let saved: Awaited<ReturnType<typeof dependencies.saveSource>>;
-      try {
-        saved = await dependencies.saveSource({
-          createdBy: granted.userId,
-          displayName: target.credentials.teamId ? `Vercel team ${target.credentials.teamId}` : "Vercel",
-          externalId: target.credentials.configurationId,
-          ingestKeyId: created.key.id,
-          integrationAccountId: body.data.integrationAccountId,
-          organizationId: granted.organizationId,
-          provider: "vercel",
-          state: { drains, staleDrains: failed },
-          status: "active",
-        });
-      } catch (error) {
-        // Unsaved drains could not be removed later, so remove them now.
-        await deleteDrains(dependencies, drainTarget, Object.values(drains));
-        await dependencies.revokeKey(created.key.id).catch(() => undefined);
-        throw error;
-      }
-      if (saved.previousIngestKeyId) await dependencies.revokeKey(saved.previousIngestKeyId);
-      return context.json({ sourceId: saved.id }, 201);
+      const created = await createVercelSource({ ...body.data, organizationId: granted.organizationId, userId: granted.userId }, dependencies);
+      if (!created.ok) return context.json({ error: created.error }, created.status);
+      return context.json({ sourceId: created.sourceId }, 201);
     })
     .delete("/:sourceId", async (context) => {
       const granted = await access(context.req.raw.headers);
