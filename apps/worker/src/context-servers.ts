@@ -8,6 +8,7 @@ import {
   getRuntimeDatadogConnection,
   getRuntimeGcpConnections,
   getRuntimeGrafanaConnections,
+  getRuntimeHoneycombConnections,
   getRuntimeLangfuseConnections,
   getRuntimeLinearConnection,
   getRuntimePostHogConnections,
@@ -30,6 +31,7 @@ import { createDash0McpServer } from "./dash0.js";
 import { createDatadogMcpServer } from "./datadog.js";
 import { createGcpMcpServers } from "./gcp.js";
 import { createGrafanaMcpServer } from "./grafana.js";
+import { createHoneycombMcpServer } from "./honeycomb.js";
 import { createLangfuseMcpServer } from "./langfuse.js";
 import { createPostHogMcpServer } from "./posthog.js";
 import { createRailwayTools } from "./railway.js";
@@ -190,7 +192,7 @@ export async function openWorkspaceContext(input: {
     });
   const [
     aws, gcp, axiom, datadog, dash0, postHog, grafana, cloudflare, railway,
-    sentry, clickStack, linear, vercel, upstash, langfuse, supabase,
+    sentry, clickStack, linear, vercel, upstash, langfuse, supabase, honeycomb,
   ] = await Promise.all([
     load("aws", getRuntimeAwsConnections(scope), []),
     load("gcp", getRuntimeGcpConnections(scope), []),
@@ -208,10 +210,11 @@ export async function openWorkspaceContext(input: {
     load("upstash", getRuntimeUpstashConnection(scope), null),
     load("langfuse", getRuntimeLangfuseConnections(scope), []),
     load("supabase", getRuntimeSupabaseConnections(scope, options), []),
+    load("honeycomb", getRuntimeHoneycombConnections(scope), []),
   ]);
   const secrets = connectionSecrets([
     ...aws, axiom, datadog, ...dash0, ...postHog, ...grafana, ...cloudflare, ...railway,
-    sentry, clickStack, linear, ...vercel, upstash, ...langfuse, ...supabase,
+    sentry, clickStack, linear, ...vercel, upstash, ...langfuse, ...supabase, ...honeycomb,
   ]);
   const describeError = (error: unknown) =>
     redactSecrets(error instanceof Error ? error.message : String(error), secrets).slice(0, 1_000);
@@ -230,6 +233,7 @@ export async function openWorkspaceContext(input: {
     ...(linear ? [createLinearMcpServer(linear)] : []),
     ...(upstash ? [createUpstashMcpServer(upstash)] : []),
     ...langfuse.map(createLangfuseMcpServer),
+    ...honeycomb.map(createHoneycombMcpServer),
     // Supabase connections that may write are opened read-only.
     ...supabase.map((connection) => createSupabaseMcpServer(
       connection.accessMode === "read_write"
