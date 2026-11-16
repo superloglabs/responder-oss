@@ -14,6 +14,19 @@ export const AWS_INVESTIGATION_ROLE_NAME = "ResponderInvestigationRole";
 export const AWS_MANAGED_MCP_ENDPOINT =
   "https://aws-mcp.us-east-1.api.aws/mcp";
 export const AWS_MCP_SIGNING_REGION = "us-east-1";
+// The AWS-managed read-only policy the stack attaches to the customer's role.
+export const AWS_INVESTIGATION_POLICY_ARN =
+  "arn:aws:iam::aws:policy/AIOpsAssistantPolicy";
+// Secret values the role may not read. The stack denies the same actions.
+export const AWS_INVESTIGATION_DENIED_ACTIONS = [
+  "kms:Decrypt",
+  "secretsmanager:BatchGetSecretValue",
+  "secretsmanager:GetSecretValue",
+  "ssm:GetParameter",
+  "ssm:GetParameters",
+  "ssm:GetParametersByPath",
+  "ssm:GetParameterHistory",
+] as const;
 const AWS_COMMERCIAL_REGION_PATTERN =
   /^(?:af|ap|ca|eu|il|me|mx|sa|us)-(?!gov-|iso)[a-z]+(?:-[a-z]+)?-\d$/;
 
@@ -250,6 +263,31 @@ export interface AwsTemporaryCredentials {
   sessionToken: string;
 }
 
+/**
+ * Session policies for every session on a customer's role. AWS gives a
+ * session only what both the role and its session policies allow, so the
+ * session stays read-only even when the role was given more than the stack
+ * grants. The inline policy holds only denies: session policies add up, and
+ * an allow in it would widen what the managed policy allows.
+ */
+export function awsInvestigationSessionPolicies(): {
+  Policy: string;
+  PolicyArns: Array<{ arn: string }>;
+} {
+  return {
+    Policy: JSON.stringify({
+      Version: "2012-10-17",
+      Statement: [{
+        Sid: "DenySecretValueAccess",
+        Effect: "Deny",
+        Action: AWS_INVESTIGATION_DENIED_ACTIONS,
+        Resource: "*",
+      }],
+    }),
+    PolicyArns: [{ arn: AWS_INVESTIGATION_POLICY_ARN }],
+  };
+}
+
 export async function assumeAwsInvestigationRole(
   connection: AwsConnectionCredentials,
   options: {
@@ -278,6 +316,7 @@ export async function assumeAwsInvestigationRole(
       ExternalId: parsed.externalId,
       RoleArn: parsed.roleArn,
       RoleSessionName: `responder-investigation-${sessionSuffix}`,
+      ...awsInvestigationSessionPolicies(),
     }),
   );
   const customer = temporaryCredentials(customerResult.Credentials, "investigation");

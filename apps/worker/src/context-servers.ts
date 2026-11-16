@@ -18,6 +18,7 @@ import {
   getRuntimeVercelConnections,
   type ContextConnectionLoadOptions,
 } from "@responder/core/db/investigations";
+import { isAwsSessionLimitedMcpTool } from "@responder/core/integrations/aws-mcp";
 import { supabaseMcpUrl } from "@responder/core/integrations/supabase";
 import { createAwsMcpServer } from "./aws.js";
 import { createAwsInspectionTools } from "./aws-inspection-tools.js";
@@ -82,6 +83,9 @@ export class ObservationMcpServer {
   constructor(
     readonly server: MCPServer,
     private readonly describeError: (error: unknown) => string,
+    // Tools kept although they do not pass as observation tools, because the
+    // provider's own authorization stops them from writing.
+    private readonly limitedByProvider: (tool: ContextMcpTool) => boolean = () => false,
   ) {}
 
   get name(): string {
@@ -103,7 +107,8 @@ export class ObservationMcpServer {
       const listed = await this.server.listTools();
       const kept: ContextMcpTool[] = [];
       for (const tool of listed) {
-        if (await passesFilter(this.server.toolFilter, this.server.name, tool) && isObservationTool(tool)) kept.push(tool);
+        if (!(await passesFilter(this.server.toolFilter, this.server.name, tool))) continue;
+        if (isObservationTool(tool) || this.limitedByProvider(tool)) kept.push(tool);
       }
       this.tools = kept;
       return kept;
@@ -211,8 +216,8 @@ export async function openWorkspaceContext(input: {
   const describeError = (error: unknown) =>
     redactSecrets(error instanceof Error ? error.message : String(error), secrets).slice(0, 1_000);
 
+  const awsServers = await Promise.all(aws.map((connection) => createAwsMcpServer(connection, environment)));
   const servers: MCPServer[] = [
-    ...(await Promise.all(aws.map((connection) => createAwsMcpServer(connection, environment)))),
     ...gcp.flatMap((connection) => createGcpMcpServers(connection, environment)),
     ...(axiom ? [createAxiomMcpServer(axiom, { readOnly: true })] : []),
     ...(datadog ? [createDatadogMcpServer({ ...datadog, mcpUrl: datadogObservationUrl(datadog.mcpUrl) })] : []),
@@ -232,7 +237,12 @@ export async function openWorkspaceContext(input: {
         : connection,
     )),
   ];
-  const observed = servers.map((server) => new ObservationMcpServer(server, describeError));
+  const observed = [
+    // AWS marks its script runner as able to write. It stays, because the
+    // role session it runs in allows only read-only actions.
+    ...awsServers.map((server) => new ObservationMcpServer(server, describeError, isAwsSessionLimitedMcpTool)),
+    ...servers.map((server) => new ObservationMcpServer(server, describeError)),
+  ];
   await Promise.all(observed.map((server) => server.connect()));
 
   const tools = [
