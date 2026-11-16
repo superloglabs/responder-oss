@@ -94,7 +94,16 @@ async function readFinding(
     console.error(JSON.stringify({ event: "signal_finding_read_failed", status: response.status }));
     throw new ManagementError(502, "Signal is unavailable. Try again shortly.", "signal_error");
   }
-  return response.json();
+  // A body that breaks off or is not JSON is Signal failing too.
+  try {
+    return await response.json();
+  } catch (error) {
+    console.error(JSON.stringify({
+      errorName: error instanceof Error ? error.name : typeof error,
+      event: "signal_finding_read_failed",
+    }));
+    throw new ManagementError(502, "Signal is unavailable. Try again shortly.", "signal_error");
+  }
 }
 
 export const signalOperations = [

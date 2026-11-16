@@ -123,6 +123,9 @@ describe("Signal operations", () => {
 
     mocks.fetch.mockResolvedValueOnce(new Response("upstream", { status: 500 }));
     expect((await callTool("get_signal_finding", { findingId: "SIG-012" })).body).toMatchObject({ code: "signal_error" });
+
+    mocks.fetch.mockResolvedValueOnce(new Response("<html>", { headers: { "content-type": "application/json" } }));
+    expect((await callTool("get_signal_finding", { findingId: "SIG-012" })).body).toMatchObject({ code: "signal_error" });
     error.mockRestore();
   });
 
