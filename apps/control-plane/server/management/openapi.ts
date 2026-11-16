@@ -15,6 +15,7 @@ const tagDescriptions: Record<ManagementTag, string> = {
   Models: "Model API keys, subscriptions, and available models.",
   Runs: "Start, follow, and cancel automation runs.",
   Secrets: "Credentials agents can use without seeing them.",
+  Signal: "Problems Signal investigated and confirmed in the workspace.",
   Synthetics: "HTTP checks that request a URL on a schedule and post failures to Slack.",
   "Tag mode": "What Superlog can use and change when someone mentions it in Slack.",
   Telemetry: "Read the workspace's logs, traces, and metrics.",

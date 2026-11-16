@@ -65,6 +65,21 @@ export function defineAgentEvents(wake: Wakeshift) {
       text: ({ name, reason, state }) =>
         state === "failing" ? `Synthetic check "${name}" is failing: ${reason ?? "the run failed"}.` : `Synthetic check "${name}" recovered.`,
     }),
+    signalFindingPosted: wake.defineEvent("signal_finding.posted", {
+      description: "Signal posted a new finding in the workspace: a problem it investigated and confirmed.",
+      args: z.object({ workspace: z.string() }),
+      payload: z.object({
+        finding: z.string().describe("The finding's ID, such as SIG-012. Read it with get_signal_finding."),
+        service: z.string().nullable(),
+        severity: z.string(),
+        title: z.string(),
+        url: z.string(),
+      }),
+      // Titles are written by a model from the workspace's telemetry, so they
+      // stay in the payload, out of the line the agent reads first.
+      text: ({ finding, service, severity }) =>
+        `Signal posted ${finding} (${severity})${service ? ` in ${service}` : ""}. Read it with get_signal_finding.`,
+    }),
     logsMatched: wake.defineEvent("logs.matched", {
       description: "New logs matched a log watch: their count, the time window they are in, and the newest line.",
       args: z.object({ watch: z.string() }),
@@ -201,6 +216,30 @@ export function notifySyntheticCheckChanged(input: {
     { check: input.checkId },
     { name: short(input.name), reason: input.reason ? short(input.reason) : null, state: input.state },
     { id: `synthetic-check-episode-${input.episodeId}-${input.state}` },
+  ));
+}
+
+// Signal runs as a separate service and emits this once it has posted the
+// finding to the workspace's Slack channel.
+export function notifySignalFindingPosted(input: {
+  findingId: string;
+  label: string;
+  organizationId: string;
+  service: string | null;
+  severity: string;
+  title: string;
+  url: string;
+}): Promise<void> {
+  return send("signal_finding.posted", (events) => events.signalFindingPosted.emit(
+    { workspace: input.organizationId },
+    {
+      finding: input.label,
+      service: input.service ? short(input.service) : null,
+      severity: input.severity.slice(0, 20),
+      title: short(input.title),
+      url: input.url,
+    },
+    { id: `signal-finding-${input.findingId}` },
   ));
 }
 

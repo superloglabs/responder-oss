@@ -5,6 +5,7 @@ import { errorIssueOperations } from "./error-issue-operations.js";
 import { errorNotificationOperations } from "./error-notification-operations.js";
 import { ingestKeyOperations } from "./ingest-key-operations.js";
 import { memoryOperations } from "./memory-operations.js";
+import { signalOperations } from "./signal-operations.js";
 import { syntheticOperations } from "./synthetic-operations.js";
 import { terraformOperations } from "./terraform-operations.js";
 import { telemetryOperations } from "./telemetry-operations.js";
@@ -1085,4 +1086,5 @@ export const managementOperations: ManagementOperation[] = [
   ...syntheticOperations,
   ...terraformOperations,
   ...memoryOperations,
+  ...signalOperations,
 ];
