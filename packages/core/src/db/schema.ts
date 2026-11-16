@@ -3002,6 +3002,13 @@ export const smsConsents = pgTable(
   (table) => [index("sms_consents_phone_idx").on(table.phoneE164)],
 );
 
+// Coding agents whose buttons workspace notifications show. A workspace
+// without a row shows the default.
+export const handoffSettings = pgTable("handoff_settings", {
+  organizationId: uuid("organization_id").primaryKey().references(() => organization.id, { onDelete: "cascade" }),
+  targets: text("targets").array().$type<import("../ide-handoff.js").HandoffTarget[]>().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
 // Notification preferences are opt-in. Deliveries are inserted with the error
 // transition so advancing the ingestion cursor cannot lose an alert.
 export const errorNotificationSettings = pgTable("error_notification_settings", {

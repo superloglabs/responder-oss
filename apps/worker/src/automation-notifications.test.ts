@@ -273,4 +273,18 @@ describe("handoff delivery", () => {
       }));
     }
   });
+  it("shows the workspace's coding agent buttons, and none when it chose none", async () => {
+    const post = vi.fn().mockResolvedValue("123");
+    const send = (targets: Array<"claude" | "codex" | "conductor">) => postAutomationNotification({
+      handoff: { kind: "fix", sourceUrl: "https://responder.example/alerts/a" },
+      markdown: "Alert is firing.", text: "Alert", notifications: [notification], organizationId, seed: "alert",
+    }, { getAccount: vi.fn().mockResolvedValue({ encryptedCredentials: "encrypted" }), post, handoffTargets: vi.fn().mockResolvedValue(targets) });
+    await send(["claude", "codex"]);
+    expect(post.mock.calls[0]![0].blocks).toContainEqual({ type: "actions", elements: [
+      expect.objectContaining({ action_id: "claude_fix", text: { type: "plain_text", text: "Fix in Claude Code" } }),
+      expect.objectContaining({ action_id: "codex_fix", text: { type: "plain_text", text: "Fix in Codex" } }),
+    ] });
+    await send([]);
+    expect(post.mock.calls[1]![0].blocks).not.toContainEqual(expect.objectContaining({ type: "actions" }));
+  });
 });
