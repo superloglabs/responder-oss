@@ -144,6 +144,18 @@ export function manageView(provider: string, name: string, account: IntegrationA
         }],
         disconnect: `Signal deletes its access, stops reading PostHog, and stops reading its projects' logs. To remove the authorization too, revoke it in PostHog. ${pastFindings}`,
       };
+    case "langfuse": {
+      const project = details.projectName ?? account.displayName;
+      return {
+        connectedTo: details.organizationName ? `${details.organizationName} / ${project}` : project,
+        rows: [
+          { label: "Project", value: project, note: details.organizationName },
+          ...(details.url ? [{ label: "Deployment", value: details.url.replace(/^https?:\/\//u, "") }] : []),
+          { label: "Keys", value: "Stored encrypted", action: "Replace keys" },
+        ],
+        disconnect: `Signal deletes the stored keys and stops reading Langfuse. To stop the keys working, delete them in the project's settings in Langfuse. ${pastFindings}`,
+      };
+    }
     default:
       return {
         connectedTo: account.displayName,
