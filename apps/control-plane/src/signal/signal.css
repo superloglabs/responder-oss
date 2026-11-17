@@ -71,6 +71,9 @@
 .signalRepoCheckbox svg { display: none; position: absolute; inset: 1px; color: #fff; pointer-events: none; }
 .signalRepoCheckbox input:checked + svg { display: block; }
 .signalRepoCheckbox input:disabled { opacity: .45; cursor: not-allowed; }
+.signalGcpProjects { padding: 0; }
+.signalGcpProjects .signalRepoRow { padding-inline: 12px; }
+.signalGcpProjects__name { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #666; font-size: 12px; }
 .signalSlack .signalConnection { border-bottom: .5px solid #00000014; }
 .signalSlack .signalConnection__label { gap: 2px; min-height: 44px; font-weight: 600; }
 .signalSlackFields { padding: 0 20px; }
@@ -264,7 +267,7 @@
 .signal .signalTitleLogo .signalAws { font-size: 10px; line-height: 11px; }
 .signal .signalTitleLogo .signalAws > svg { width: 16px; height: 5px; }
 .signalAccess { display: flex; flex-direction: column; gap: 8px; max-width: 640px; }
-.signal .signalAccess h3, .signalFieldset legend, .signalInput > label, .signalChoice > span { font-size: 12px; font-weight: 500; line-height: 20px; color: #444; }
+.signal .signalAccess h3, .signalFieldset legend, .signalInput > label, .signalInput > .signalInput__label, .signalChoice > span { font-size: 12px; font-weight: 500; line-height: 20px; color: #444; }
 .signalAccess ul, .signalSteps, .signalInstructions { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; font-size: 12px; line-height: 20px; color: #202020; }
 .signalAccess li { display: flex; align-items: center; gap: 8px; }
 .signalAccess__yes { color: #168255; flex-shrink: 0; }

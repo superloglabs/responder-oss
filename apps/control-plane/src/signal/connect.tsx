@@ -8,13 +8,15 @@ import {
   IconCopy,
   IconEye,
   IconEyeOff,
+  IconSearch,
   IconX,
 } from "@tabler/icons-react";
 import type { IntegrationSummary } from "../agents-api";
 import { DATADOG_SITES, type DatadogSiteId } from "../components/datadog-sites";
 import { AwsLogStreaming } from "../components/aws-log-streaming";
+import { ScrollArea } from "../components/ui/scroll-area";
 import { Button } from "../design-system";
-import { GCP_SETUP_STEPS, useGcpSetupStatus, type GcpSetupStatus } from "../gcp-setup-status";
+import { gcpSetupProgressLabel, useGcpSetupStatuses, type GcpAccountSetup } from "../gcp-setup-status";
 import { createIngestKey, existingOpenTelemetryPrompt, openTelemetryPrompt } from "../ingest-keys-api";
 import { currentProjectSelectionState } from "../project-selection";
 import { fetchServices } from "../telemetry-api";
@@ -577,9 +579,9 @@ function gcpEndpoint(connectUrl: string, endpoint: string) {
 function GcpConnect({ integration, listPath, onBack, onDone }: PageProps) {
   const [selectionState] = useState(() => currentProjectSelectionState("gcp"));
   const [projects, setProjects] = useState<GcpProject[] | null>(null);
-  const [projectId, setProjectId] = useState("");
-  const [started, setStarted] = useState<{ accountId: string; setup: GcpSetupStatus } | null>(null);
-  const setup = useGcpSetupStatus(started?.accountId ?? null, started?.setup ?? null);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [started, setStarted] = useState<GcpAccountSetup[] | null>(null);
+  const accounts = useGcpSetupStatuses(started);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const connectUrl = integration?.connectUrl;
@@ -598,7 +600,7 @@ function GcpConnect({ integration, listPath, onBack, onDone }: PageProps) {
         if (!response.ok || !body?.projects) throw new Error(body?.error ?? "Unable to load Google Cloud projects");
         if (ignore) return;
         setProjects(body.projects);
-        setProjectId(body.projects[0]?.projectId ?? "");
+        if (body.projects.length === 1) setSelected([body.projects[0]!.projectId]);
       })
       .catch((failure: unknown) => { if (!ignore) setError(errorMessage(failure, "Unable to load Google Cloud projects")); });
     return () => { ignore = true; };
@@ -606,13 +608,13 @@ function GcpConnect({ integration, listPath, onBack, onDone }: PageProps) {
 
   async function start(event: FormEvent) {
     event.preventDefault();
-    if (!connectUrl || !projectId || submitting) return;
+    if (!connectUrl || selected.length === 0 || submitting) return;
     setError("");
     setSubmitting(true);
     try {
-      const body = await postJson(gcpEndpoint(connectUrl, "select-project"), { projectId, selectionState }, "Unable to start Google Cloud setup");
-      if (typeof body.accountId !== "string" || !body.setup) throw new Error("Unable to start Google Cloud setup");
-      setStarted({ accountId: body.accountId, setup: body.setup as GcpSetupStatus });
+      const body = await postJson(gcpEndpoint(connectUrl, "select-project"), { projectIds: selected, selectionState }, "Unable to start Google Cloud setup");
+      if (!Array.isArray(body.accounts) || body.accounts.length === 0) throw new Error("Unable to start Google Cloud setup");
+      setStarted(body.accounts as GcpAccountSetup[]);
     } catch (failure) {
       setError(errorMessage(failure, "Unable to start Google Cloud setup"));
     } finally {
@@ -620,20 +622,25 @@ function GcpConnect({ integration, listPath, onBack, onDone }: PageProps) {
     }
   }
 
-  if (started && setup) {
-    const current = GCP_SETUP_STEPS.findIndex((step) => step.id === setup.step);
-    const done = setup.status === "succeeded";
+  if (accounts) {
+    const running = accounts.some((account) => account.setup.status === "running");
+    const succeeded = accounts.filter((account) => account.setup.status === "succeeded");
+    const done = !running && succeeded.length > 0;
     return <>
-      <Intro provider="gcp" title="Connect Google Cloud">{done
-        ? `Signal can now read logs and metrics in ${projectId}.`
-        : `Setting up ${projectId}. You can leave this page; setup continues and Settings shows its progress.`}</Intro>
-      {setup.status === "failed" && <p className="signalError" role="alert">{setup.message ?? "Setup failed."}</p>}
+      <Intro provider="gcp" title="Connect Google Cloud">{running
+        ? "Setting up your projects. You can leave this page; setup continues and Settings shows its progress."
+        : succeeded.length === accounts.length
+          ? "Signal can now read logs and metrics in these projects."
+          : "Some projects could not be set up. Signal reads the ones that connected."}</Intro>
       <ol className="signalCard signalStepCard">
-        {GCP_SETUP_STEPS.map((step, index) => {
-          const state = done || index < current ? "done" : index === current ? (setup.status === "failed" ? "failed" : "current") : "pending";
-          return <li key={step.id} className={state === "pending" ? "isPending" : undefined}>
+        {accounts.map((account, index) => {
+          const state = account.setup.status === "succeeded" ? "done" : account.setup.status === "failed" ? "failed" : "current";
+          return <li key={account.accountId}>
             <StepMarker state={state} number={index + 1} />
-            <div><h3>{state === "current" ? step.progress : step.label}</h3></div>
+            <div>
+              <h3>{account.projectId}</h3>
+              <p role={state === "failed" ? "alert" : undefined}>{gcpSetupProgressLabel(account.setup)}</p>
+            </div>
           </li>;
         })}
       </ol>
@@ -643,18 +650,18 @@ function GcpConnect({ integration, listPath, onBack, onDone }: PageProps) {
 
   if (selectionState) {
     return <form className="signalConnectForm" onSubmit={(event) => void start(event)}>
-      <Intro provider="gcp" title="Connect Google Cloud">Choose the project Signal should read.</Intro>
+      <Intro provider="gcp" title="Connect Google Cloud">Choose the projects Signal should read.</Intro>
       <div className={`signalInput${error ? " signalInput--error" : ""}`}>
-        <label htmlFor="signal-gcp-project">Google Cloud project</label>
-        <select id="signal-gcp-project" disabled={!projects?.length} value={projectId} onChange={(e) => setProjectId(e.target.value)}>
-          {!projects && <option value="">Loading projects…</option>}
-          {projects?.length === 0 && <option value="">No projects found</option>}
-          {projects?.map((project) => <option key={project.projectId} value={project.projectId}>{project.projectId}{project.name && project.name !== project.projectId ? ` · ${project.name}` : ""}</option>)}
-        </select>
+        <span className="signalInput__label" id="signal-gcp-projects">Google Cloud projects</span>
+        <GcpProjectPicker projects={projects} selected={selected} onChange={setSelected} />
         {error ? <p className="signalFieldError" role="alert"><IconAlertCircle size={14} />{error}</p>
-          : <p>Signal creates a read-only service account in {projectId || "the project"} with Logs Viewer, Monitoring Viewer, and Cloud Asset Viewer roles. Your Google sign-in is revoked when setup finishes.</p>}
+          : <p>Signal creates a read-only service account in each project with Logs Viewer, Monitoring Viewer, and Cloud Asset Viewer roles. Your Google sign-in is revoked when setup finishes.</p>}
       </div>
-      <Actions onBack={onBack}><Button type="submit" variant="primary" loading={submitting} disabled={!projectId}>Set up project</Button></Actions>
+      <Actions onBack={onBack}>
+        <Button type="submit" variant="primary" loading={submitting} disabled={selected.length === 0}>
+          {selected.length > 1 ? `Set up ${selected.length} projects` : "Set up project"}
+        </Button>
+      </Actions>
     </form>;
   }
 
@@ -667,4 +674,40 @@ function GcpConnect({ integration, listPath, onBack, onDone }: PageProps) {
       <Button variant="primary" disabled={!connectUrl} onClick={() => window.location.assign(connectionStartUrl(connectUrl!, returnTo))}><External>Continue with Google</External></Button>
     </Actions>
   </>;
+}
+
+// Above this many projects the list gets a search box.
+const GCP_PROJECT_SEARCH_THRESHOLD = 8;
+
+function GcpProjectPicker({ projects, selected, onChange }: {
+  projects: GcpProject[] | null;
+  selected: string[];
+  onChange: (selected: string[]) => void;
+}) {
+  const [search, setSearch] = useState("");
+  const query = search.trim().toLowerCase();
+  const matches = (projects ?? []).filter((project) =>
+    project.projectId.toLowerCase().includes(query) || project.name.toLowerCase().includes(query));
+  const searchable = (projects?.length ?? 0) > GCP_PROJECT_SEARCH_THRESHOLD;
+  return <div className="signalRepositories signalGcpProjects" role="group" aria-labelledby="signal-gcp-projects">
+    {searchable && <div className="signalRepoSearch">
+      <label className="signalSearch"><IconSearch size={14} /><input aria-label="Search projects" placeholder="Search projects…" value={search} onChange={(e) => setSearch(e.target.value)} /></label>
+      <span>{selected.length} selected</span>
+    </div>}
+    <ScrollArea className="signalRepoList">
+      {matches.map((project) => <label className="signalRepoRow" key={project.projectId}>
+        <span className="signalRepoCheckbox">
+          <input type="checkbox" checked={selected.includes(project.projectId)} onChange={(e) => onChange(e.target.checked
+            ? [...selected, project.projectId]
+            : selected.filter((id) => id !== project.projectId))} />
+          <IconCheck aria-hidden="true" size={12} />
+        </span>
+        <span>{project.projectId}</span>
+        {project.name && project.name !== project.projectId && <span className="signalGcpProjects__name">{project.name}</span>}
+      </label>)}
+      {!projects && <p className="signalEmpty">Loading projects…</p>}
+      {projects?.length === 0 && <p className="signalEmpty">No projects found.</p>}
+      {searchable && matches.length === 0 && <p className="signalEmpty">No projects match “{search}”.</p>}
+    </ScrollArea>
+  </div>;
 }
