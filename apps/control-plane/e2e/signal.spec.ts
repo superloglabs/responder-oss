@@ -461,18 +461,30 @@ test("manages sources from settings", async ({ page }) => {
   await expect(page.getByRole("group", { name: "GitHub" })).toContainText("2 of 2 repositories");
   await expect.poll(() => signal.settings.repositoryIds).toEqual(["repo-api", "repo-web"]);
 
-  const slack = page.getByRole("group", { name: "Slack" });
-  await expect(slack).toContainText("Off. Signal does not search Slack for known problems.");
-  await page.getByRole("button", { name: "Edit Slack search" }).click();
-  await slack.getByRole("switch", { name: /Scan Slack to exclude known issues/u }).click();
-  await expect(slack.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
-  await slack.getByLabel("Search channels").fill("#inc");
-  await slack.getByRole("checkbox", { name: "#incidents" }).check();
-  await slack.getByRole("button", { name: "Save", exact: true }).click();
-  await expect(slack).toContainText("1 of 2 channels");
-  await expect(slack).toContainText("#incidents");
-  await expect.poll(() => signal.settings.slackScan).toEqual({ enabled: true, channels: [{ integrationAccountId: "slack-account", channelId: "C01" }] });
-  await page.screenshot({ path: "test-results/signal-sources-slack.png" });
+  const context = page.getByRole("region", { name: "Context" });
+  const scan = context.getByRole("switch", { name: "Scan Slack to exclude known issues" });
+  await expect(scan).toHaveAttribute("aria-checked", "false");
+  // On with no channels, it asks for channels before saving anything.
+  await scan.click();
+  await expect(scan).toHaveAttribute("aria-checked", "true");
+  await expect(context.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+  await context.getByRole("button", { name: "Cancel" }).click();
+  await expect(scan).toHaveAttribute("aria-checked", "false");
+  await scan.click();
+  await context.getByLabel("Search channels").fill("#inc");
+  await context.getByRole("checkbox", { name: "#incidents" }).check();
+  await context.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(context).toContainText("1 of 2 channels");
+  await expect(context.locator(".signalChip")).toHaveText(["#incidents"]);
+  const incidents = [{ integrationAccountId: "slack-account", channelId: "C01" }];
+  await expect.poll(() => signal.settings.slackScan).toEqual({ enabled: true, channels: incidents });
+  await page.screenshot({ path: "test-results/signal-sources-slack.png", animations: "disabled" });
+  // With channels chosen, the switch saves at once and keeps them.
+  await scan.click();
+  await expect.poll(() => signal.settings.slackScan).toEqual({ enabled: false, channels: incidents });
+  await expect(context.getByRole("button", { name: "Edit channels" })).toHaveCount(0);
+  await scan.click();
+  await expect.poll(() => signal.settings.slackScan).toEqual({ enabled: true, channels: incidents });
 
   await page.getByRole("button", { name: "Manage Sentry" }).click();
   await expect(page).toHaveURL(/\/signal\/setup\/sources\/sentry$/u);

@@ -9,7 +9,7 @@ import { SignalConnect } from "./connect";
 import type { ConnectPage } from "./connect-pages";
 import { SignalManage } from "./manage";
 import type { SignalSettings } from "./model";
-import { slackChannels, sourceName, type Source, type SourceActions } from "./setup-data";
+import { isChosenChannel, slackChannelLabel, slackChannels, sourceName, type Source, type SourceActions } from "./setup-data";
 import { ConnectionRow } from "./shared";
 
 export function SourceRows({ sources, actions, otelServices }: {
@@ -118,33 +118,30 @@ export function RepositoryPicker({ repositories, selected, onChange, empty }: {
     items={repositories.map((repository) => ({ id: repository.id, label: repository.fullName.replace("/", " / ") }))} />;
 }
 
-type SlackScan = SignalSettings["slackScan"];
+type SlackChannel = SignalSettings["slackScan"]["channels"][number];
 
-// The toggle for searching Slack for known problems, and the channels to
-// search while it is on.
-export function SlackScanFields({ options, value, onChange }: {
+export const slackScanLabel = "Scan Slack to exclude known issues";
+
+// The compact On/Off toggle for the Slack search.
+export function SlackScanSwitch({ checked, onChange }: { checked: boolean; onChange: (checked: boolean) => void }) {
+  return <Switch className="signalSwitch" aria-label={slackScanLabel} checked={checked}
+    label={checked ? "On" : "Off"} onCheckedChange={onChange} />;
+}
+
+// The workspace's Slack channels to check, keyed by account and channel ID.
+export function SlackChannelChecklist({ options, value, onChange }: {
   options: AgentOptions;
-  value: SlackScan;
-  onChange: (value: SlackScan) => void;
+  value: SlackChannel[];
+  onChange: (value: SlackChannel[]) => void;
 }) {
   const channels = slackChannels(options);
-  const isChosen = (channel: (typeof channels)[number]) => value.channels.some((chosen) =>
-    chosen.integrationAccountId === channel.integrationAccountId && chosen.channelId === channel.externalId);
   const slack = options.accounts.some((account) => account.provider === "slack");
-  return <div className="signalSlackScan">
-    <Switch label="Scan Slack to exclude known issues"
-      description="Signal searches these channels and skips problems your team already discussed there."
-      checked={value.enabled} onCheckedChange={(enabled) => onChange({ ...value, enabled })} />
-    {value.enabled && <Checklist noun="channels"
-      items={channels.map((channel) => ({ id: channel.id, label: `#${channelName(channel.displayName)}` }))}
-      selected={channels.filter(isChosen).map((channel) => channel.id)}
-      onChange={(ids) => onChange({
-        ...value,
-        channels: channels.filter((channel) => ids.includes(channel.id))
-          .map((channel) => ({ integrationAccountId: channel.integrationAccountId, channelId: channel.externalId })),
-      })}
-      empty={slack ? "Slack has no channels for Signal to search. Invite Responder to a channel, then reload this page." : "Connect Slack to choose channels."} />}
-  </div>;
+  return <Checklist noun="channels"
+    items={channels.map((channel) => ({ id: channel.id, label: slackChannelLabel(channel.displayName) }))}
+    selected={channels.filter((channel) => isChosenChannel(channel, value)).map((channel) => channel.id)}
+    onChange={(ids) => onChange(channels.filter((channel) => ids.includes(channel.id))
+      .map((channel) => ({ integrationAccountId: channel.integrationAccountId, channelId: channel.externalId })))}
+    empty={slack ? "Slack has no channels for Signal to search. Invite Responder to a channel, then reload this page." : "Connect Slack to choose channels."} />;
 }
 
 // A searchable list of the workspace's Slack channels. Typing filters them;
