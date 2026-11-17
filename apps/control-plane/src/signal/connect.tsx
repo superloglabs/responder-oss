@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import {
   IconAlertCircle,
   IconArrowUpRight,
@@ -651,12 +651,9 @@ function GcpConnect({ integration, listPath, onBack, onDone }: PageProps) {
   if (selectionState) {
     return <form className="signalConnectForm" onSubmit={(event) => void start(event)}>
       <Intro provider="gcp" title="Connect Google Cloud">Choose the projects Signal should read.</Intro>
-      <div className={`signalInput${error ? " signalInput--error" : ""}`}>
-        <span className="signalInput__label" id="signal-gcp-projects">Google Cloud projects</span>
-        <GcpProjectPicker projects={projects} selected={selected} onChange={setSelected} />
-        {error ? <p className="signalFieldError" role="alert"><IconAlertCircle size={14} />{error}</p>
-          : <p>Signal creates a read-only service account in each project with Logs Viewer, Monitoring Viewer, and Cloud Asset Viewer roles. Your Google sign-in is revoked when setup finishes.</p>}
-      </div>
+      <GcpProjectPicker projects={projects} selected={selected} onChange={setSelected} />
+      {error ? <p className="signalFieldError" role="alert"><IconAlertCircle size={14} />{error}</p>
+        : <p className="signalGcpNote">Signal creates a read-only service account in each project with Logs Viewer, Monitoring Viewer, and Cloud Asset Viewer roles. Your Google sign-in is revoked when setup finishes.</p>}
       <Actions onBack={onBack}>
         <Button type="submit" variant="primary" loading={submitting} disabled={selected.length === 0}>
           {selected.length > 1 ? `Set up ${selected.length} projects` : "Set up project"}
@@ -676,25 +673,29 @@ function GcpConnect({ integration, listPath, onBack, onDone }: PageProps) {
   </>;
 }
 
-// Above this many projects the list gets a search box.
-const GCP_PROJECT_SEARCH_THRESHOLD = 8;
-
 function GcpProjectPicker({ projects, selected, onChange }: {
   projects: GcpProject[] | null;
   selected: string[];
   onChange: (selected: string[]) => void;
 }) {
   const [search, setSearch] = useState("");
+  // True while rows are hidden below the visible part of the list.
+  const [more, setMore] = useState(false);
+  const pickerRef = useRef<HTMLDivElement>(null);
   const query = search.trim().toLowerCase();
   const matches = (projects ?? []).filter((project) =>
     project.projectId.toLowerCase().includes(query) || project.name.toLowerCase().includes(query));
-  const searchable = (projects?.length ?? 0) > GCP_PROJECT_SEARCH_THRESHOLD;
-  return <div className="signalRepositories signalGcpProjects" role="group" aria-labelledby="signal-gcp-projects">
-    {searchable && <div className="signalRepoSearch">
+  const updateMore = useCallback(() => {
+    const viewport = pickerRef.current?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]');
+    setMore(Boolean(viewport && viewport.scrollTop + viewport.clientHeight < viewport.scrollHeight - 1));
+  }, []);
+  useEffect(updateMore, [updateMore, matches.length]);
+  return <div className="signalRepositories" ref={pickerRef}>
+    <div className="signalRepoSearch">
       <label className="signalSearch"><IconSearch size={14} /><input aria-label="Search projects" placeholder="Search projects…" value={search} onChange={(e) => setSearch(e.target.value)} /></label>
-      <span>{selected.length} selected</span>
-    </div>}
-    <ScrollArea className="signalRepoList">
+      {projects && <span>{selected.length} of {projects.length} selected</span>}
+    </div>
+    <ScrollArea type="auto" className={`signalRepoList${more ? " signalRepoList--more" : ""}`} aria-label="Google Cloud projects" onScrollCapture={updateMore}>
       {matches.map((project) => <label className="signalRepoRow" key={project.projectId}>
         <span className="signalRepoCheckbox">
           <input type="checkbox" checked={selected.includes(project.projectId)} onChange={(e) => onChange(e.target.checked
@@ -703,11 +704,11 @@ function GcpProjectPicker({ projects, selected, onChange }: {
           <IconCheck aria-hidden="true" size={12} />
         </span>
         <span>{project.projectId}</span>
-        {project.name && project.name !== project.projectId && <span className="signalGcpProjects__name">{project.name}</span>}
+        {project.name && project.name !== project.projectId && <span className="signalGcpProjectName">{project.name}</span>}
       </label>)}
       {!projects && <p className="signalEmpty">Loading projects…</p>}
       {projects?.length === 0 && <p className="signalEmpty">No projects found.</p>}
-      {searchable && matches.length === 0 && <p className="signalEmpty">No projects match “{search}”.</p>}
+      {projects && projects.length > 0 && matches.length === 0 && <p className="signalEmpty">No projects match “{search}”.</p>}
     </ScrollArea>
   </div>;
 }
