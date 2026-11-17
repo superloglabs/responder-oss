@@ -2036,7 +2036,7 @@ describe("integration callback routing", () => {
     vi.mocked(queueGcpProjectSetup).mockResolvedValue("job-id");
 
     const unauthorized = await app.request("/api/integrations/gcp/select-project", {
-      body: JSON.stringify({ projectId: "someone-else", selectionState: "selection-state" }),
+      body: JSON.stringify({ projectIds: ["konex-prod", "someone-else"], selectionState: "selection-state" }),
       headers: { "content-type": "application/json" },
       method: "POST",
     });
@@ -2045,15 +2045,18 @@ describe("integration callback routing", () => {
     expect(queueGcpProjectSetup).not.toHaveBeenCalled();
 
     const response = await app.request("/api/integrations/gcp/select-project", {
-      body: JSON.stringify({ projectId: "konex-prod", selectionState: "selection-state" }),
+      body: JSON.stringify({ projectIds: ["konex-prod"], selectionState: "selection-state" }),
       headers: { "content-type": "application/json" },
       method: "POST",
     });
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
-      accountId: "30000000-0000-4000-8000-000000000000",
-      setup: { status: "running", step: "starting" },
+      accounts: [{
+        accountId: "30000000-0000-4000-8000-000000000000",
+        projectId: "konex-prod",
+        setup: { status: "running", step: "starting" },
+      }],
     });
     expect(encryptCredentials).toHaveBeenCalledWith({
       projectId: "konex-prod",
@@ -2084,6 +2087,74 @@ describe("integration callback routing", () => {
     }));
   });
 
+  it("starts one setup per chosen project and marks them all running before queueing", async () => {
+    vi.mocked(consumeIntegrationConnectionState).mockResolvedValue({
+      organizationId: tenant.organizationId,
+      userId: tenant.user.id,
+      returnTo: "/settings",
+      codeVerifier: null,
+      metadata: { encryptedCredentials: "encrypted-selection" },
+    });
+    vi.mocked(decryptCredentials).mockReturnValue({
+      accessToken: "google-token",
+      projects: [
+        { name: "Konex", projectId: "konex-prod", projectNumber: "123456789012" },
+        { name: "Konex staging", projectId: "konex-staging", projectNumber: "223456789012" },
+        { name: "Other", projectId: "other-project", projectNumber: "323456789012" },
+      ],
+    });
+    vi.mocked(createGcpSessionName).mockReturnValue(
+      "responder-gcp-abcdefghijklmnopqrstuvwxyz123456",
+    );
+    vi.mocked(encryptCredentials).mockReturnValue("encrypted");
+    vi.mocked(upsertIntegrationAccount)
+      .mockResolvedValueOnce("30000000-0000-4000-8000-000000000001")
+      .mockResolvedValueOnce("30000000-0000-4000-8000-000000000002");
+    const order: string[] = [];
+    vi.mocked(updateIntegrationAccountSetup).mockImplementation(async (input) => {
+      order.push(`${input.setup.status}:${input.integrationAccountId}`);
+      return true;
+    });
+    vi.mocked(queueGcpProjectSetup).mockImplementation(async (job) => {
+      order.push(`queue:${job.integrationAccountId}`);
+      if (job.integrationAccountId.endsWith("2")) throw new Error("queue down");
+      return "job-id";
+    });
+
+    const response = await app.request("/api/integrations/gcp/select-project", {
+      body: JSON.stringify({
+        projectIds: ["konex-prod", "konex-staging", "konex-prod"],
+        selectionState: "selection-state",
+      }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      accounts: [
+        {
+          accountId: "30000000-0000-4000-8000-000000000001",
+          projectId: "konex-prod",
+          setup: { status: "running" },
+        },
+        {
+          accountId: "30000000-0000-4000-8000-000000000002",
+          projectId: "konex-staging",
+          setup: { status: "failed" },
+        },
+      ],
+    });
+    expect(upsertIntegrationAccount).toHaveBeenCalledTimes(2);
+    expect(order).toEqual([
+      "running:30000000-0000-4000-8000-000000000001",
+      "running:30000000-0000-4000-8000-000000000002",
+      "queue:30000000-0000-4000-8000-000000000001",
+      "queue:30000000-0000-4000-8000-000000000002",
+      "failed:30000000-0000-4000-8000-000000000002",
+    ]);
+  });
+
   it("marks a new GCP account as failed when its setup cannot be queued", async () => {
     vi.mocked(consumeIntegrationConnectionState).mockResolvedValue({
       organizationId: tenant.organizationId,
@@ -2109,7 +2180,7 @@ describe("integration callback routing", () => {
     vi.mocked(queueGcpProjectSetup).mockRejectedValue(new Error("queue down"));
 
     const response = await app.request("/api/integrations/gcp/select-project", {
-      body: JSON.stringify({ projectId: "konex-prod", selectionState: "selection-state" }),
+      body: JSON.stringify({ projectIds: ["konex-prod"], selectionState: "selection-state" }),
       headers: { "content-type": "application/json" },
       method: "POST",
     });

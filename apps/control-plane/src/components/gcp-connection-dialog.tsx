@@ -145,15 +145,16 @@ export function GcpConnectionDialog({
       const response = await fetch(gcpEndpoint(connectUrl, "select-project"), {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ projectId, selectionState }),
+        body: JSON.stringify({ projectIds: [projectId], selectionState }),
       });
       const body = (await response.json().catch(() => null)) as
-        | { accountId?: string; error?: string; setup?: GcpSetupStatus }
+        | { accounts?: Array<{ accountId: string; setup: GcpSetupStatus }>; error?: string }
         | null;
-      if (!response.ok || !body?.accountId || !body.setup) {
+      const account = body?.accounts?.[0];
+      if (!response.ok || !account) {
         throw new Error(body?.error ?? "Unable to start Google Cloud setup");
       }
-      setStarted({ accountId: body.accountId, setup: body.setup });
+      setStarted({ accountId: account.accountId, setup: account.setup });
     } catch (caught) {
       setError(
         caught instanceof Error

@@ -71,6 +71,9 @@
 .signalRepoCheckbox svg { display: none; position: absolute; inset: 1px; color: #fff; pointer-events: none; }
 .signalRepoCheckbox input:checked + svg { display: block; }
 .signalRepoCheckbox input:disabled { opacity: .45; cursor: not-allowed; }
+.signalRepoList--more::after { content: ""; position: absolute; inset: auto 0 0; height: 48px; background: linear-gradient(#fff0, #fff); pointer-events: none; }
+.signalGcpProjectName { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #666; font-size: 12px; }
+.signal .signalGcpNote { max-width: 640px; font-size: 12px; color: #666; }
 .signalSlack .signalConnection { border-bottom: .5px solid #00000014; }
 .signalSlack .signalConnection__label { gap: 2px; min-height: 44px; font-weight: 600; }
 .signalSlackFields { padding: 0 20px; }
