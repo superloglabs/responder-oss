@@ -7,10 +7,10 @@ import { useDocumentTitle } from "../use-document-title";
 import { saveSignalSettings, type SignalSettings } from "./model";
 import { SignalPlanStep } from "./plan";
 import { contextSources, isConnectPage, slackScanReady, sourceActions, sourceName, telemetrySources, useOtelServices, useSetupData, type SetupData } from "./setup-data";
-import { ChannelSelect, RepositoryPicker, SlackScanFields, SourcePage, SourceRows } from "./setup-shared";
+import { ChannelSelect, RepositoryPicker, SlackChannelChecklist, slackScanLabel, SlackScanSwitch, SourcePage, SourceRows } from "./setup-shared";
 import { useSignalSetupState } from "./setup-state";
 import { SignalSettingsView } from "./settings";
-import { ConnectionRow, SignalLogo } from "./shared";
+import { ConnectionRow, SettingsRow, SignalLogo } from "./shared";
 
 const steps = ["telemetry", "code", "repositories", "slack", "context", "plan"] as const;
 type Step = (typeof steps)[number];
@@ -134,7 +134,16 @@ function SignalWizard({ data, organizationId, reload, setSettings }: SetupViewPr
 
     {step === "context" && <>
       <SourceRows sources={contextSources} actions={actions} otelServices={otel.count} />
-      <SlackScanFields options={options} value={draft.slackScan} onChange={(slackScan) => setDraft({ ...draft, slackScan })} />
+      <div className="signalSettingsCard signalSettingsCard--rows">
+        <SettingsRow label={slackScanLabel} description="Signal skips problems your team already discussed in the channels you choose.">
+          <SlackScanSwitch checked={draft.slackScan.enabled}
+            onChange={(enabled) => setDraft({ ...draft, slackScan: { ...draft.slackScan, enabled } })} />
+        </SettingsRow>
+        {draft.slackScan.enabled && <div className="signalSlackChannels">
+          <SlackChannelChecklist options={options} value={draft.slackScan.channels}
+            onChange={(channels) => setDraft({ ...draft, slackScan: { ...draft.slackScan, channels } })} />
+        </div>}
+      </div>
     </>}
 
     {step === "plan" && <SignalPlanStep settings={settings} slackChosen={Boolean(draft.slack)} saving={saving}

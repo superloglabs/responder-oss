@@ -150,3 +150,12 @@ export function slackChannels(options: AgentOptions) {
 export function slackScanReady(value: SignalSettings["slackScan"]) {
   return !value.enabled || value.channels.length > 0;
 }
+
+// Whether a Slack channel is one of the chosen ones.
+export function isChosenChannel(channel: { integrationAccountId: string; externalId: string }, chosen: SignalSettings["slackScan"]["channels"]) {
+  return chosen.some((item) => item.integrationAccountId === channel.integrationAccountId && item.channelId === channel.externalId);
+}
+
+export function slackChannelLabel(displayName: string) {
+  return `#${displayName.replace(/^#/u, "")}`;
+}
