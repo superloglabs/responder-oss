@@ -92,6 +92,20 @@ describe("Signal manage pages", () => {
     expect(view.disconnect).toContain("stops reading Axiom");
   });
 
+  it("shows the Langfuse project and deployment, and how to stop its keys", () => {
+    const view = manageView("langfuse", "Langfuse", account({
+      displayName: "Acme / Voice agent",
+      details: { organizationName: "Acme", projectName: "Voice agent", url: "https://cloud.langfuse.com" },
+    }));
+    expect(view.connectedTo).toBe("Acme / Voice agent");
+    expect(view.rows).toEqual([
+      { label: "Project", value: "Voice agent", note: "Acme" },
+      { label: "Deployment", value: "cloud.langfuse.com" },
+      { label: "Keys", value: "Stored encrypted", action: "Replace keys" },
+    ]);
+    expect(view.disconnect).toContain("stops reading Langfuse");
+  });
+
   it("leaves accounts that are still connecting off the page", () => {
     expect(manageableAccounts([
       account({ id: "a", status: "connected" }),

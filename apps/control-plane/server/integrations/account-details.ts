@@ -74,6 +74,12 @@ export function integrationAccountDetails(account: {
       return withoutEmpty({ accessLevel: text(metadata.accessLevel) });
     case "vercel":
       return withoutEmpty({ scope: text(metadata.scope) });
+    case "langfuse":
+      return withoutEmpty({
+        url: text(metadata.baseUrl),
+        organizationName: text(metadata.organizationName),
+        projectName: text(metadata.projectName),
+      });
     default:
       return undefined;
   }
