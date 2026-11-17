@@ -251,6 +251,37 @@ test("sets up Signal with the workspace's real connections and turns it on after
   expect(signal.writes[3]!.body).toEqual({ planId: "signal_max" });
 });
 
+test("scrolls a long list of Slack channels", async ({ page }) => {
+  const signal = fakeSignal(30, { setUp: false });
+  await workspace(page, { signal });
+  // Registered last, so it replaces the two channels the workspace has.
+  await page.route("**/api/agents/options", (route) => route.fulfill({ json: {
+    accounts: [],
+    resources: Array.from({ length: 40 }, (_, index) => ({
+      id: `r${index}`, integrationAccountId: "slack-account", kind: "slack_channel",
+      externalId: `C${String(index).padStart(2, "0")}`, displayName: `team-${String(index + 1).padStart(2, "0")}`,
+    })),
+    repositories: [],
+    secrets: [],
+  } }));
+  await page.goto("/signal/setup/context");
+  await page.getByRole("switch", { name: "Scan Slack to exclude known issues" }).click();
+  const list = page.getByLabel("Choose channels");
+  const viewport = list.locator('[data-slot="scroll-area-viewport"]');
+  const size = await viewport.evaluate((node) => ({ client: node.clientHeight, scroll: node.scrollHeight }));
+  expect(size.scroll).toBeGreaterThan(size.client);
+  await expect(list).toHaveClass(/signalRepoList--more/u);
+  // The scrollbar shows without hovering.
+  await expect(list.locator('[data-slot="scroll-area-thumb"]')).toBeVisible();
+  await page.screenshot({ path: "test-results/signal-channels-scroll.png", animations: "disabled" });
+  await viewport.evaluate((node) => node.scrollTo({ top: node.scrollHeight }));
+  await expect(list).not.toHaveClass(/signalRepoList--more/u);
+  await page.getByRole("checkbox", { name: "#team-40" }).check();
+  await expect(page.getByText("1 selected")).toBeVisible();
+  // The page itself does not grow with the list: the actions stay in view.
+  await expect(page.getByRole("button", { name: "Continue", exact: true })).toBeInViewport();
+});
+
 test("shows the current plan and its findings", async ({ page }) => {
   const signal = fakeSignal();
   signal.settings.slack = { integrationAccountId: "slack-account", channelId: "C02" };
