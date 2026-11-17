@@ -145,3 +145,8 @@ export function slackChannels(options: AgentOptions) {
     .filter((resource) => resource.kind === "slack_channel")
     .sort((a, b) => a.displayName.localeCompare(b.displayName));
 }
+
+// Whether the Slack search can be saved: off, or on with a channel.
+export function slackScanReady(value: SignalSettings["slackScan"]) {
+  return !value.enabled || value.channels.length > 0;
+}
