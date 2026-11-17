@@ -2,18 +2,21 @@ import { useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import { IconPlus } from "@tabler/icons-react";
 import { Button } from "../design-system";
+import type { SignalSettings } from "./model";
 import { accountSummary } from "./manage-model";
 import type { SettingsPageProps } from "./settings";
 import {
   contextSources,
   isConnectPage,
+  slackChannels,
+  slackScanReady,
   sourceActions,
   telemetrySources,
   useOtelServices,
   type Source,
   type SourceActions,
 } from "./setup-data";
-import { RepositoryPicker, SourcePage, SourceRows } from "./setup-shared";
+import { RepositoryPicker, SlackScanFields, SourcePage, SourceRows } from "./setup-shared";
 import { SettingsGroup, SettingsPage, SourceRow } from "./shared";
 
 const listPath = "/signal/setup/sources";
@@ -68,6 +71,7 @@ export function SettingsSources({ data, organizationId, reload, save, status, pr
     </SettingsGroup>
     <SettingsGroup title="Context" action={<Button onClick={() => navigate(`${listPath}/context`)}><IconPlus aria-hidden="true" size={14} stroke={2} />Add context</Button>}>
       {rows(contextSources, "No context is connected. Linear helps Signal skip problems your team already tracks.")}
+      <SlackScanSource options={data.options} value={data.settings.slackScan} onSave={(slackScan) => save({ slackScan })} />
     </SettingsGroup>
   </SettingsPage>;
 }
@@ -106,6 +110,42 @@ function GitHubSource({ actions, repositories, selected, onSave }: {
     </SourceRow>
   </div>;
 }
+
+function SlackScanSource({ options, value, onSave }: {
+  options: SettingsPageProps["data"]["options"];
+  value: SignalSettings["slackScan"];
+  onSave: (value: SignalSettings["slackScan"]) => void;
+}) {
+  // The setting being changed, while the editor is open.
+  const [editing, setEditing] = useState<SignalSettings["slackScan"] | null>(null);
+  const channels = slackChannels(options);
+  const names = channels
+    .filter((channel) => value.channels.some((chosen) => chosen.integrationAccountId === channel.integrationAccountId && chosen.channelId === channel.externalId))
+    .map((channel) => `#${channel.displayName.replace(/^#/u, "")}`)
+    .sort();
+  return <div className="signalSettingsCard">
+    <SourceRow provider="slack" name="Slack"
+      description={value.enabled ? "Signal skips problems your team already discussed in these channels." : "Off. Signal does not search Slack for known problems."}
+      meta={value.enabled ? `${names.length} of ${channels.length} ${channels.length === 1 ? "channel" : "channels"}` : undefined}
+      action={editing === null && <Button aria-label="Edit Slack search" onClick={() => setEditing(value)}>Edit</Button>}>
+      {editing === null
+        ? value.enabled && names.length > 0 && <div className="signalChips signalSourceRow__more">
+          {names.slice(0, maxChips).map((name) => <code className="signalChip" key={name}>{name}</code>)}
+          {names.length > maxChips && <span className="signalChipMore">and {names.length - maxChips} more</span>}
+        </div>
+        : <div className="signalSourceRow__more">
+          <SlackScanFields options={options} value={editing} onChange={setEditing} />
+          <div className="signalSettingsActions">
+            <Button onClick={() => setEditing(null)}>Cancel</Button>
+            <Button variant="primary" disabled={!slackScanReady(editing)} onClick={() => { onSave(editing); setEditing(null); }}>Save</Button>
+          </div>
+        </div>}
+    </SourceRow>
+  </div>;
+}
+
+// Chips shown before the rest are counted, so hundreds of channels stay short.
+const maxChips = 12;
 
 function AddSources({ title, description, sources, actions, otelServices }: {
   title: string; description: string; sources: Source[]; actions: SourceActions; otelServices: number | null;

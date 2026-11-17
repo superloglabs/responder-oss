@@ -77,6 +77,12 @@
 .signalSlack .signalConnection { border-bottom: .5px solid #00000014; }
 .signalSlack .signalConnection__label { gap: 2px; min-height: 44px; font-weight: 600; }
 .signalSlackFields { padding: 0 20px; }
+.signalSetup .signalSlackScan { display: flex; flex-direction: column; gap: 4px; padding: 16px 20px; border: .5px solid #00000014; border-radius: 6px; background: #fafafa; }
+.signalSlackScan .dsSwitch__copy strong { color: #202020; font-size: 13px; }
+.signalSlackScan .dsSwitch__copy span { color: #666; font-size: 12px; }
+.signalSlackScan .signalRepoList [data-slot="scroll-area-viewport"] { max-height: 260px; }
+.signalSourceRow__more .signalSlackScan { display: flex; flex-direction: column; gap: 4px; padding-bottom: 12px; }
+.signalChipMore { color: #666; font-size: 12px; }
 .signalField { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 20px 0; }
 .signalField > label { display: flex; flex: 1; flex-direction: column; gap: 4px; }
 .signalField strong { font-weight: 600; }

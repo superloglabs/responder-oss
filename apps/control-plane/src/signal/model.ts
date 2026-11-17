@@ -37,11 +37,16 @@ export interface SignalUsageDay {
 
 export type SignalCooldownHours = 6 | 24 | 72 | 168;
 
+export interface SignalSlackChannel {
+  integrationAccountId: string;
+  channelId: string;
+}
+
 export interface SignalSettings {
   enabled: boolean;
   // True once Signal has been turned on, even if it is off now.
   setupComplete?: boolean;
-  slack: { integrationAccountId: string; channelId: string } | null;
+  slack: SignalSlackChannel | null;
   repositoryIds: string[];
   // Findings below it stay on the Findings page: not posted, not billed.
   minimumSeverity: SignalSeverity;
@@ -51,6 +56,9 @@ export interface SignalSettings {
   // Exact service names, or a prefix ending in "*".
   skippedServices: string[];
   notes: string;
+  // Whether investigations search Slack for problems the team already
+  // knows about, and the channels they search.
+  slackScan: { enabled: boolean; channels: SignalSlackChannel[] };
   limits: { dailyInvestigationCap: number };
 }
 
@@ -124,6 +132,7 @@ export function withSettingsDefaults(settings: Partial<SignalSettings> & Pick<Si
     dismissalCooldownHours: settings.dismissalCooldownHours ?? 24,
     skippedServices: settings.skippedServices ?? [],
     notes: settings.notes ?? "",
+    slackScan: settings.slackScan ?? { enabled: false, channels: [] },
     limits: settings.limits ?? { dailyInvestigationCap: 50 },
   };
 }
@@ -139,6 +148,7 @@ export function settingsBody(settings: SignalSettings) {
     dismissalCooldownHours: settings.dismissalCooldownHours,
     skippedServices: settings.skippedServices,
     notes: settings.notes,
+    slackScan: settings.slackScan,
   };
 }
 
