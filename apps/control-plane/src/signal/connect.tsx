@@ -11,6 +11,7 @@ import {
   IconX,
 } from "@tabler/icons-react";
 import type { IntegrationSummary } from "../agents-api";
+import { langfuseCloudDeployments } from "@responder/core/integrations/langfuse-deployments";
 import { DATADOG_SITES, type DatadogSiteId } from "../components/datadog-sites";
 import { AwsLogStreaming } from "../components/aws-log-streaming";
 import { Button } from "../design-system";
@@ -37,6 +38,7 @@ export function SignalConnect({ page, ...props }: PageProps & { page: ConnectPag
     case "otel": return <OpenTelemetryConnect {...props} />;
     case "grafana": return <GrafanaConnect {...props} />;
     case "datadog": return <DatadogConnect {...props} />;
+    case "langfuse": return <LangfuseConnect {...props} />;
     case "aws": return <AwsConnect {...props} />;
     case "gcp": return <GcpConnect {...props} />;
     default: return <OAuthApproval page={page} {...props} />;
@@ -338,6 +340,74 @@ function DatadogConnect({ integration, listPath, onBack }: PageProps) {
     </div>
     <Actions onBack={onBack}>
       <Button type="submit" variant="primary" loading={submitting} disabled={!integration?.connectUrl || !apiKey.trim() || !applicationKey.trim()}>Connect Datadog</Button>
+    </Actions>
+  </form>;
+}
+
+// --- Langfuse --------------------------------------------------------------
+
+// What Signal does with Langfuse, shared by its connect and manage pages.
+export const langfuseSignalReads = "Signal reads your LLM traces, observations, scores, and metrics. It never changes anything in Langfuse.";
+
+const langfuseDeployments = [...langfuseCloudDeployments, { id: "self_hosted", name: "Self-hosted", baseUrl: "" }] as const;
+type LangfuseDeploymentId = (typeof langfuseDeployments)[number]["id"];
+
+function LangfuseConnect({ integration, listPath, onBack }: PageProps) {
+  const [deployment, setDeployment] = useState<LangfuseDeploymentId>("cloud_eu");
+  const [selfHostedUrl, setSelfHostedUrl] = useState("");
+  const [publicKey, setPublicKey] = useState("");
+  const [secretKey, setSecretKey] = useState("");
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const selected = langfuseDeployments.find((candidate) => candidate.id === deployment)!;
+  const selfHosted = deployment === "self_hosted";
+  const baseUrl = selfHosted ? selfHostedUrl.trim() : selected.baseUrl;
+
+  async function connect(event: FormEvent) {
+    event.preventDefault();
+    if (!integration?.connectUrl || submitting) return;
+    setError("");
+    setSubmitting(true);
+    try {
+      const body = await postJson(integration.connectUrl, { baseUrl, publicKey, returnTo: listPath, secretKey }, "Unable to connect Langfuse");
+      if (typeof body.redirectUrl !== "string") throw new Error("Unable to connect Langfuse");
+      window.location.assign(body.redirectUrl);
+    } catch (failure) {
+      setError(errorMessage(failure, "Unable to connect Langfuse"));
+      setSubmitting(false);
+    }
+  }
+
+  return <form className="signalConnectForm" onSubmit={(event) => void connect(event)}>
+    <Intro provider="langfuse" title="Connect Langfuse">{langfuseSignalReads}</Intro>
+    <div className="signalInput">
+      <label htmlFor="signal-langfuse-deployment">Deployment</label>
+      <select id="signal-langfuse-deployment" value={deployment} onChange={(e) => { setDeployment(e.target.value as LangfuseDeploymentId); setError(""); }}>
+        {langfuseDeployments.map((candidate) => <option key={candidate.id} value={candidate.id}>
+          {candidate.baseUrl ? `${candidate.name} · ${candidate.baseUrl.replace("https://", "")}` : candidate.name}
+        </option>)}
+      </select>
+      <ol className="signalInstructions">
+        <li>In Langfuse, open the project Signal should read, then <strong>Settings → API Keys</strong>.</li>
+        <li>Create a key pair for Signal and paste both keys below. Langfuse shows the secret key only once.</li>
+      </ol>
+    </div>
+    {selfHosted && <div className="signalInput">
+      <label htmlFor="signal-langfuse-url">Langfuse URL</label>
+      <input id="signal-langfuse-url" type="url" spellCheck={false} placeholder="https://langfuse.example.com" required value={selfHostedUrl} onChange={(e) => setSelfHostedUrl(e.target.value)} />
+    </div>}
+    <div className="signalInput">
+      <label htmlFor="signal-langfuse-public-key">Public key</label>
+      <input id="signal-langfuse-public-key" autoComplete="off" spellCheck={false} placeholder="pk-lf-…" required value={publicKey} onChange={(e) => setPublicKey(e.target.value)} />
+    </div>
+    <div className={`signalInput${error ? " signalInput--error" : ""}`}>
+      <label htmlFor="signal-langfuse-secret-key">Secret key</label>
+      <input id="signal-langfuse-secret-key" type="password" autoComplete="off" spellCheck={false} placeholder="sk-lf-…" required value={secretKey} onChange={(e) => setSecretKey(e.target.value)} />
+      {error ? <p className="signalFieldError" role="alert"><IconAlertCircle size={14} />{error}</p>
+        : <p>Stored encrypted. Signal uses the keys only to read.</p>}
+    </div>
+    <Actions onBack={onBack}>
+      <Button type="submit" variant="primary" loading={submitting} disabled={!integration?.connectUrl || !baseUrl || !publicKey.trim() || !secretKey.trim()}>Connect Langfuse</Button>
     </Actions>
   </form>;
 }

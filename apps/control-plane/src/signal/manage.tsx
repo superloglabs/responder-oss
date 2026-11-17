@@ -8,7 +8,7 @@ import { VercelDrains } from "../components/vercel-drains";
 import { Button } from "../design-system";
 import { CloudSourceSetup } from "../pages/telemetry-source";
 import { fetchServices } from "../telemetry-api";
-import { Actions, axiomSignalReads, Intro, postHogSignalReads, railwaySignalReads, vercelSignalReads } from "./connect";
+import { Actions, axiomSignalReads, Intro, langfuseSignalReads, postHogSignalReads, railwaySignalReads, vercelSignalReads } from "./connect";
 import type { ConnectPage } from "./connect-pages";
 import { manageableAccounts, manageView, type ManageRow } from "./manage-model";
 import { foundLabel } from "./model";
@@ -36,6 +36,7 @@ const descriptions: Record<ConnectPage, string> = {
   railway: `${railwaySignalReads} Superlog reads the logs of the environments you choose every minute, so Signal sees each new error as it happens.`,
   vercel: `${vercelSignalReads} Drains send your deployments' traces and logs to Superlog, so Signal sees each new error as it happens.`,
   linear: "Signal checks Linear before posting, so it skips problems your team already tracks.",
+  langfuse: langfuseSignalReads,
   posthog: `${postHogSignalReads} Superlog reads the error logs of the projects you choose every minute, so Signal sees each new error as it happens.`,
 };
 
