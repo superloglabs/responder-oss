@@ -297,7 +297,7 @@ const awsVerificationSchema = z.object({
   returnTo: z.string().max(2_048).optional(),
 });
 const gcpProjectSelectionSchema = z.object({
-  projectId: gcpProjectIdSchema,
+  projectIds: z.array(gcpProjectIdSchema).min(1).max(50),
   selectionState: z.string().min(1).max(512),
 });
 const gcpSelectionCredentialsSchema = z.object({
@@ -1855,42 +1855,73 @@ export const integrationRoutes = new Hono()
             .encryptedCredentials,
         ),
       );
-      const project = selection.projects.find(
-        (candidate) => candidate.projectId === parsed.data.projectId,
+      const projectIds = [...new Set(parsed.data.projectIds)];
+      const projects = selection.projects.filter((candidate) =>
+        projectIds.includes(candidate.projectId)
       );
-      if (!project) {
+      if (projects.length !== projectIds.length) {
         return context.json({ error: "Choose an authorized Google Cloud project" }, 403);
       }
-      const { accountId, connected } = await prepareGcpAccount({
-        organizationId: tenant.organizationId,
-        project,
-      });
-      const { job, setup } = startGcpProjectSetup({
-        accessToken: selection.accessToken,
-        integrationAccountId: accountId,
-        organizationId: tenant.organizationId,
-        userId: tenant.user.id,
-      });
-      // Setup continues in the worker, so it finishes even if the browser
-      // window closes. Progress is read back from the account's metadata.
-      await updateIntegrationAccountSetup({ integrationAccountId: accountId, setup });
-      try {
-        await queueGcpProjectSetup(job);
-      } catch (error) {
-        await updateIntegrationAccountSetup({
+      // Every setup is marked running before any job is queued. The worker
+      // revokes the shared Google token only when no other setup from this
+      // user is still running, so a fast first project cannot revoke it under
+      // the rest.
+      const started = [];
+      for (const project of projects) {
+        const { accountId, connected } = await prepareGcpAccount({
+          organizationId: tenant.organizationId,
+          project,
+        });
+        const { job, setup } = startGcpProjectSetup({
+          accessToken: selection.accessToken,
           integrationAccountId: accountId,
-          owner: { round: setup.round, runId: setup.runId },
-          setup: {
+          organizationId: tenant.organizationId,
+          userId: tenant.user.id,
+        });
+        // Setup continues in the worker, so it finishes even if the browser
+        // window closes. Progress is read back from the account's metadata.
+        await updateIntegrationAccountSetup({ integrationAccountId: accountId, setup });
+        started.push({ accountId, connected, job, project, setup });
+      }
+      const accounts = [];
+      let queued = 0;
+      for (const { accountId, connected, job, project, setup } of started) {
+        try {
+          await queueGcpProjectSetup(job);
+          queued += 1;
+          accounts.push({
+            accountId,
+            projectId: project.projectId,
+            setup: publicGcpSetupState({ setup }),
+          });
+        } catch (error) {
+          logCallbackError("GCP", error, {
+            organizationId: tenant.organizationId,
+            stage: "queue_project_setup",
+          });
+          const failed = {
             ...setup,
             message: "Responder could not start the setup. Try again.",
-            status: "failed",
-          },
-          // A failed reconnect leaves a working connection untouched.
-          status: connected ? undefined : "error",
-        });
-        throw error;
+            status: "failed" as const,
+          };
+          await updateIntegrationAccountSetup({
+            integrationAccountId: accountId,
+            owner: { round: setup.round, runId: setup.runId },
+            setup: failed,
+            // A failed reconnect leaves a working connection untouched.
+            status: connected ? undefined : "error",
+          });
+          accounts.push({
+            accountId,
+            projectId: project.projectId,
+            setup: publicGcpSetupState({ setup: failed }),
+          });
+        }
       }
-      return context.json({ accountId, setup: publicGcpSetupState({ setup }) });
+      if (queued === 0) {
+        return context.json({ error: "Unable to prepare the Google Cloud project" }, 502);
+      }
+      return context.json({ accounts });
     } catch (error) {
       logCallbackError("GCP", error, {
         organizationId: tenant.organizationId,

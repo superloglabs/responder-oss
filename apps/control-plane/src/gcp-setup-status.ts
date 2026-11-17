@@ -69,3 +69,44 @@ export function useGcpSetupStatus(
 
   return setup;
 }
+
+export interface GcpAccountSetup {
+  accountId: string;
+  projectId: string;
+  setup: GcpSetupStatus;
+}
+
+/** Polls several setups started together until each succeeds or fails. */
+export function useGcpSetupStatuses(initial: GcpAccountSetup[] | null): GcpAccountSetup[] | null {
+  const [polled, setPolled] = useState<Record<string, GcpSetupStatus>>({});
+  const accounts = initial?.map((account) => ({
+    ...account,
+    setup: polled[account.accountId] ?? account.setup,
+  })) ?? null;
+  const running = accounts
+    ?.filter((account) => account.setup.status === "running")
+    .map((account) => account.accountId)
+    .join(",") ?? "";
+
+  useEffect(() => {
+    if (!running) return;
+    let cancelled = false;
+    const timer = setInterval(() => {
+      for (const accountId of running.split(",")) {
+        void fetch(`/api/integrations/gcp/${accountId}/setup`)
+          .then(async (response) => {
+            if (!response.ok) return;
+            const body = (await response.json().catch(() => null)) as GcpSetupStatus | null;
+            if (!cancelled && body?.status) setPolled((current) => ({ ...current, [accountId]: body }));
+          })
+          .catch(() => undefined);
+      }
+    }, POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [running]);
+
+  return accounts;
+}
