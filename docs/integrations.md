@@ -48,7 +48,7 @@ drains (see Telemetry sources). Either way Signal reads new errors as
 they arrive rather than only during an investigation.
 
 **Disconnect** calls `DELETE /api/integrations/<provider>/accounts/<id>`, where
-`<provider>` is `aws`, `axiom`, `datadog`, `gcp`, `grafana`, `linear`, `posthog`,
+`<provider>` is `aws`, `axiom`, `datadog`, `gcp`, `grafana`, `langfuse`, `linear`, `posthog`,
 `railway`, `sentry`, or `vercel`. It deletes the stored credentials but does not revoke access on the
 provider's side; each manage page says what to revoke there. A Vercel
 connection's drains are deleted and their ingest key revoked first; while
@@ -896,6 +896,11 @@ metrics, prompts, and alerts. New upstream tools are unavailable until reviewed.
 Responder bounds unscoped observation searches to the latest 24 hours, limits
 result sizes and concurrency, redacts credential-shaped output, and keeps the
 project keys outside the repository investigation sandbox.
+
+Signal setup lists Langfuse with the other telemetry sources. Its connect page
+takes the same deployment and project keys and returns to setup; its manage
+page shows the project and deployment, replaces the keys, or disconnects.
+Signal reads Langfuse with the read-only allowlist above.
 
 ## Supabase
 

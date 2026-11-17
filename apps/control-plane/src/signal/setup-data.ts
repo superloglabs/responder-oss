@@ -20,6 +20,7 @@ export const telemetrySources: Source[] = [
   { provider: "railway", name: providerDisplayName("railway"), description: "Logs, deployments, and metrics" },
   { provider: "vercel", name: providerDisplayName("vercel"), description: "Logs, traces, and deployments" },
   { provider: "posthog", name: providerDisplayName("posthog"), description: "Logs, errors, and product usage" },
+  { provider: "langfuse", name: providerDisplayName("langfuse"), description: "LLM traces, errors, and scores" },
 ];
 
 export const contextSources: Source[] = [

@@ -31,6 +31,20 @@ describe("integrationAccountDetails", () => {
     })).toEqual({ deployment: "self_hosted", organizationName: "Main Org.", url: "https://grafana.acme.dev" });
   });
 
+  it("shows the Langfuse deployment and project but no keys", () => {
+    expect(integrationAccountDetails({
+      provider: "langfuse",
+      externalAccountId: "https://cloud.langfuse.com:project-1",
+      metadata: {
+        baseUrl: "https://cloud.langfuse.com",
+        organizationId: "org-1",
+        organizationName: "Acme",
+        projectId: "project-1",
+        projectName: "Voice agent",
+      },
+    })).toEqual({ organizationName: "Acme", projectName: "Voice agent", url: "https://cloud.langfuse.com" });
+  });
+
   it("shows the AWS account only once AWS has reported it", () => {
     expect(integrationAccountDetails({
       provider: "aws",
