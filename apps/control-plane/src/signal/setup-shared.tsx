@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { Combobox } from "@base-ui/react/combobox";
 import { Switch } from "../design-system";
@@ -71,7 +71,9 @@ export function SourcePage({ page, mode, actions, otel, organizationId, onChange
 
 const channelName = (displayName: string) => displayName.replace(/^#/u, "");
 
-// A searchable list of checkboxes. Items are matched by `label`.
+// A searchable list of checkboxes. Items are matched by `label`. A long list
+// scrolls with its scrollbar shown, and fades at the bottom while more is
+// below.
 function Checklist({ items, selected, onChange, noun, empty }: {
   items: Array<{ id: string; label: string }>;
   selected: string[];
@@ -86,12 +88,19 @@ function Checklist({ items, selected, onChange, noun, empty }: {
   const matches = items
     .filter((item) => item.label.toLowerCase().includes(query))
     .sort((a, b) => a.label.localeCompare(b.label));
-  return <div className="signalRepositories">
+  const [more, setMore] = useState(false);
+  const listRef = useRef<HTMLDivElement>(null);
+  const updateMore = useCallback(() => {
+    const viewport = listRef.current?.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]');
+    setMore(Boolean(viewport && viewport.scrollTop + viewport.clientHeight < viewport.scrollHeight - 1));
+  }, []);
+  useEffect(updateMore, [updateMore, matches.length]);
+  return <div className="signalRepositories" ref={listRef}>
     <div className="signalRepoSearch">
       <label className="signalSearch"><IconSearch size={14} /><input aria-label={`Search ${noun}`} placeholder={`Search ${noun}…`} value={search} onChange={(e) => setSearch(e.target.value)} /></label>
       <span>{selected.length} selected</span>
     </div>
-    <ScrollArea className="signalRepoList">
+    <ScrollArea type="auto" className={`signalRepoList${more ? " signalRepoList--more" : ""}`} aria-label={`Choose ${noun}`} onScrollCapture={updateMore}>
       {matches.map((item) => <label className="signalRepoRow" key={item.id}>
         <span className="signalRepoCheckbox">
           <input type="checkbox" checked={selected.includes(item.id)} onChange={(e) => onChange(e.target.checked
