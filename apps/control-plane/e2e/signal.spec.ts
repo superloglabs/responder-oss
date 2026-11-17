@@ -36,6 +36,7 @@ function fakeSignal(count = 30, options: { setUp?: boolean } = {}) {
       dismissalCooldownHours: 24,
       skippedServices: [] as string[],
       notes: "",
+      slackScan: { enabled: false, channels: [] as Array<{ integrationAccountId: string; channelId: string }> },
       limits: { dailyInvestigationCap: 50 },
     },
     // The next settings save fails with this error, like a server rejecting it.
@@ -216,7 +217,15 @@ test("sets up Signal with the workspace's real connections and turns it on after
   await page.getByRole("option", { name: "# engineering" }).click();
   await expect(page.getByLabel("Findings channel")).toHaveValue("engineering");
   await next.click();
-  await page.getByRole("button", { name: "Skip for now" }).click();
+  await expect(page).toHaveURL(/\/signal\/setup\/context$/);
+  await expect(page.getByRole("button", { name: "Skip for now" })).toBeVisible();
+  await page.getByRole("switch", { name: /Scan Slack to exclude known issues/u }).click();
+  // On, it needs a channel to search.
+  await expect(next).toBeDisabled();
+  await page.getByRole("checkbox", { name: "#incidents" }).check();
+  await expect(next).toBeEnabled();
+  await page.screenshot({ path: "test-results/signal-context.png", animations: "disabled" });
+  await next.click();
   await expect(page).toHaveURL(/\/signal\/setup\/plan$/);
   await expect(page.getByRole("heading", { name: "Choose your plan" })).toBeVisible();
   await expect(page.getByRole("article", { name: "Pro" })).toContainText("$100 / month");
@@ -227,16 +236,50 @@ test("sets up Signal with the workspace's real connections and turns it on after
   await page.getByRole("button", { name: "Choose Max ($200)" }).click();
   await expect(page).toHaveURL(/\/signal\/findings$/);
   await expect(navigation).toHaveText(["Findings", "Usage", "Setup", "Settings"]);
-  expect(signal.settings).toMatchObject({ enabled: true, setupComplete: true, slack: { integrationAccountId: "slack-account", channelId: "C02" }, repositoryIds: ["repo-api"] });
+  expect(signal.settings).toMatchObject({
+    enabled: true, setupComplete: true, slack: { integrationAccountId: "slack-account", channelId: "C02" }, repositoryIds: ["repo-api"],
+    slackScan: { enabled: true, channels: [{ integrationAccountId: "slack-account", channelId: "C01" }] },
+  });
   // Saves send the settings that can change, never the read-only ones.
   expect(signal.writes[0]!.body).toEqual({
     enabled: false, slack: null, repositoryIds: ["repo-api"], minimumSeverity: "SEV-3", dailyInvestigationCap: null,
-    dismissalCooldownHours: 24, skippedServices: [], notes: "",
+    dismissalCooldownHours: 24, skippedServices: [], notes: "", slackScan: { enabled: false, channels: [] },
   });
   expect(signal.writes.map((write) => `${write.method} ${write.path}`)).toEqual([
-    "PUT /settings", "PUT /settings", "POST /billing/checkout", "PUT /settings",
+    "PUT /settings", "PUT /settings", "PUT /settings", "POST /billing/checkout", "PUT /settings",
   ]);
-  expect(signal.writes[2]!.body).toEqual({ planId: "signal_max" });
+  expect(signal.writes[3]!.body).toEqual({ planId: "signal_max" });
+});
+
+test("scrolls a long list of Slack channels", async ({ page }) => {
+  const signal = fakeSignal(30, { setUp: false });
+  await workspace(page, { signal });
+  // Registered last, so it replaces the two channels the workspace has.
+  await page.route("**/api/agents/options", (route) => route.fulfill({ json: {
+    accounts: [],
+    resources: Array.from({ length: 40 }, (_, index) => ({
+      id: `r${index}`, integrationAccountId: "slack-account", kind: "slack_channel",
+      externalId: `C${String(index).padStart(2, "0")}`, displayName: `team-${String(index + 1).padStart(2, "0")}`,
+    })),
+    repositories: [],
+    secrets: [],
+  } }));
+  await page.goto("/signal/setup/context");
+  await page.getByRole("switch", { name: "Scan Slack to exclude known issues" }).click();
+  const list = page.getByLabel("Choose channels");
+  const viewport = list.locator('[data-slot="scroll-area-viewport"]');
+  const size = await viewport.evaluate((node) => ({ client: node.clientHeight, scroll: node.scrollHeight }));
+  expect(size.scroll).toBeGreaterThan(size.client);
+  await expect(list).toHaveClass(/signalRepoList--more/u);
+  // The scrollbar shows without hovering.
+  await expect(list.locator('[data-slot="scroll-area-thumb"]')).toBeVisible();
+  await page.screenshot({ path: "test-results/signal-channels-scroll.png", animations: "disabled" });
+  await viewport.evaluate((node) => node.scrollTo({ top: node.scrollHeight }));
+  await expect(list).not.toHaveClass(/signalRepoList--more/u);
+  await page.getByRole("checkbox", { name: "#team-40" }).check();
+  await expect(page.getByText("1 selected")).toBeVisible();
+  // The page itself does not grow with the list: the actions stay in view.
+  await expect(page.getByRole("button", { name: "Continue", exact: true })).toBeInViewport();
 });
 
 test("shows the current plan and its findings", async ({ page }) => {
@@ -448,6 +491,31 @@ test("manages sources from settings", async ({ page }) => {
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByRole("group", { name: "GitHub" })).toContainText("2 of 2 repositories");
   await expect.poll(() => signal.settings.repositoryIds).toEqual(["repo-api", "repo-web"]);
+
+  const context = page.getByRole("region", { name: "Context" });
+  const scan = context.getByRole("switch", { name: "Scan Slack to exclude known issues" });
+  await expect(scan).toHaveAttribute("aria-checked", "false");
+  // On with no channels, it asks for channels before saving anything.
+  await scan.click();
+  await expect(scan).toHaveAttribute("aria-checked", "true");
+  await expect(context.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+  await context.getByRole("button", { name: "Cancel" }).click();
+  await expect(scan).toHaveAttribute("aria-checked", "false");
+  await scan.click();
+  await context.getByLabel("Search channels").fill("#inc");
+  await context.getByRole("checkbox", { name: "#incidents" }).check();
+  await context.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(context).toContainText("1 of 2 channels");
+  await expect(context.locator(".signalChip")).toHaveText(["#incidents"]);
+  const incidents = [{ integrationAccountId: "slack-account", channelId: "C01" }];
+  await expect.poll(() => signal.settings.slackScan).toEqual({ enabled: true, channels: incidents });
+  await page.screenshot({ path: "test-results/signal-sources-slack.png", animations: "disabled" });
+  // With channels chosen, the switch saves at once and keeps them.
+  await scan.click();
+  await expect.poll(() => signal.settings.slackScan).toEqual({ enabled: false, channels: incidents });
+  await expect(context.getByRole("button", { name: "Edit channels" })).toHaveCount(0);
+  await scan.click();
+  await expect.poll(() => signal.settings.slackScan).toEqual({ enabled: true, channels: incidents });
 
   await page.getByRole("button", { name: "Manage Sentry" }).click();
   await expect(page).toHaveURL(/\/signal\/setup\/sources\/sentry$/u);

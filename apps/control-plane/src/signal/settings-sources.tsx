@@ -2,19 +2,23 @@ import { useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import { IconPlus } from "@tabler/icons-react";
 import { Button } from "../design-system";
+import type { SignalSettings } from "./model";
 import { accountSummary } from "./manage-model";
 import type { SettingsPageProps } from "./settings";
 import {
   contextSources,
+  isChosenChannel,
   isConnectPage,
+  slackChannelLabel,
+  slackChannels,
   sourceActions,
   telemetrySources,
   useOtelServices,
   type Source,
   type SourceActions,
 } from "./setup-data";
-import { RepositoryPicker, SourcePage, SourceRows } from "./setup-shared";
-import { SettingsGroup, SettingsPage, SourceRow } from "./shared";
+import { RepositoryPicker, SlackChannelChecklist, slackScanLabel, SlackScanSwitch, SourcePage, SourceRows } from "./setup-shared";
+import { SettingsGroup, SettingsPage, SettingsRow, SourceRow } from "./shared";
 
 const listPath = "/signal/setup/sources";
 
@@ -68,6 +72,7 @@ export function SettingsSources({ data, organizationId, reload, save, status, pr
     </SettingsGroup>
     <SettingsGroup title="Context" action={<Button onClick={() => navigate(`${listPath}/context`)}><IconPlus aria-hidden="true" size={14} stroke={2} />Add context</Button>}>
       {rows(contextSources, "No context is connected. Linear helps Signal skip problems your team already tracks.")}
+      <SlackScanSettings options={data.options} value={data.settings.slackScan} onSave={(slackScan) => save({ slackScan })} />
     </SettingsGroup>
   </SettingsPage>;
 }
@@ -106,6 +111,59 @@ function GitHubSource({ actions, repositories, selected, onSave }: {
     </SourceRow>
   </div>;
 }
+
+// The switch saves at once. Channels change with their own Save, and
+// turning the search on with no channels opens them first.
+function SlackScanSettings({ options, value, onSave }: {
+  options: SettingsPageProps["data"]["options"];
+  value: SignalSettings["slackScan"];
+  onSave: (value: SignalSettings["slackScan"]) => void;
+}) {
+  // The channels being chosen, while the list is open.
+  const [editing, setEditing] = useState<SignalSettings["slackScan"]["channels"] | null>(null);
+  const on = value.enabled || editing !== null;
+  const channels = slackChannels(options);
+  const names = channels.filter((channel) => isChosenChannel(channel, value.channels))
+    .map((channel) => slackChannelLabel(channel.displayName)).sort();
+
+  function toggle(enabled: boolean) {
+    if (enabled && value.channels.length === 0) {
+      setEditing([]);
+      return;
+    }
+    setEditing(null);
+    if (enabled !== value.enabled) onSave({ ...value, enabled });
+  }
+
+  return <div className="signalSettingsCard signalSettingsCard--rows">
+    <SettingsRow label={slackScanLabel} description="Signal skips problems your team already discussed in the channels you choose.">
+      <SlackScanSwitch checked={on} onChange={toggle} />
+    </SettingsRow>
+    {on && <div className="signalSlackChannels">
+      <SettingsRow label="Channels" description={editing === null
+        ? `${names.length} of ${channels.length} ${channels.length === 1 ? "channel" : "channels"}`
+        : "Signal searches only the channels you check."}>
+        {editing === null && <Button aria-label="Edit channels" onClick={() => setEditing(value.channels)}>Edit</Button>}
+      </SettingsRow>
+      {editing === null
+        ? names.length > 0 && <div className="signalChips">
+          {names.slice(0, maxChips).map((name) => <code className="signalChip" key={name}>{name}</code>)}
+          {names.length > maxChips && <span className="signalChipMore">and {names.length - maxChips} more</span>}
+        </div>
+        : <>
+          <SlackChannelChecklist options={options} value={editing} onChange={setEditing} />
+          <div className="signalSettingsActions">
+            <Button onClick={() => setEditing(null)}>Cancel</Button>
+            <Button variant="primary" disabled={editing.length === 0}
+              onClick={() => { onSave({ enabled: true, channels: editing }); setEditing(null); }}>Save</Button>
+          </div>
+        </>}
+    </div>}
+  </div>;
+}
+
+// Chips shown before the rest are counted, so hundreds of channels stay short.
+const maxChips = 12;
 
 function AddSources({ title, description, sources, actions, otelServices }: {
   title: string; description: string; sources: Source[]; actions: SourceActions; otelServices: number | null;
