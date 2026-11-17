@@ -6,11 +6,11 @@ import { Button } from "../design-system";
 import { useDocumentTitle } from "../use-document-title";
 import { saveSignalSettings, type SignalSettings } from "./model";
 import { SignalPlanStep } from "./plan";
-import { contextSources, isConnectPage, sourceActions, sourceName, telemetrySources, useOtelServices, useSetupData, type SetupData } from "./setup-data";
-import { ChannelSelect, RepositoryPicker, SourcePage, SourceRows } from "./setup-shared";
+import { contextSources, isConnectPage, slackScanReady, sourceActions, sourceName, telemetrySources, useOtelServices, useSetupData, type SetupData } from "./setup-data";
+import { ChannelSelect, RepositoryPicker, SlackChannelChecklist, slackScanLabel, SlackScanSwitch, SourcePage, SourceRows } from "./setup-shared";
 import { useSignalSetupState } from "./setup-state";
 import { SignalSettingsView } from "./settings";
-import { ConnectionRow, SignalLogo } from "./shared";
+import { ConnectionRow, SettingsRow, SignalLogo } from "./shared";
 
 const steps = ["telemetry", "code", "repositories", "slack", "context", "plan"] as const;
 type Step = (typeof steps)[number];
@@ -132,7 +132,19 @@ function SignalWizard({ data, organizationId, reload, setSettings }: SetupViewPr
       </div></div>
     </div>}
 
-    {step === "context" && <SourceRows sources={contextSources} actions={actions} otelServices={otel.count} />}
+    {step === "context" && <>
+      <SourceRows sources={contextSources} actions={actions} otelServices={otel.count} />
+      <div className="signalSettingsCard signalSettingsCard--rows">
+        <SettingsRow label={slackScanLabel} description="Signal skips problems your team already discussed in the channels you choose.">
+          <SlackScanSwitch checked={draft.slackScan.enabled}
+            onChange={(enabled) => setDraft({ ...draft, slackScan: { ...draft.slackScan, enabled } })} />
+        </SettingsRow>
+        {draft.slackScan.enabled && <div className="signalSlackChannels">
+          <SlackChannelChecklist options={options} value={draft.slackScan.channels}
+            onChange={(channels) => setDraft({ ...draft, slackScan: { ...draft.slackScan, channels } })} />
+        </div>}
+      </div>
+    </>}
 
     {step === "plan" && <SignalPlanStep settings={settings} slackChosen={Boolean(draft.slack)} saving={saving}
       onBack={() => go("context")}
@@ -151,10 +163,20 @@ function SignalWizard({ data, organizationId, reload, setSettings }: SetupViewPr
           {draft.repositoryIds.length ? "Continue" : "Skip for now"}
         </Button>
         : step === "slack" ? <Button variant="primary" disabled={saving || !draft.slack} onClick={() => void save(draft, "context")}>Continue</Button>
-        : <Button variant={step === "context" ? "secondary" : "primary"} onClick={() => go(steps[index + 1]!)}>
-          {step === "context" && !contextSources.some((source) => actions.connected(source.provider)) ? "Skip for now" : "Continue"}
-        </Button>}
+        : step === "context" ? <ContextContinue draft={draft} saving={saving}
+          anyConnected={contextSources.some((source) => actions.connected(source.provider))}
+          onContinue={() => void save(draft, "plan")} />
+        : <Button variant="primary" onClick={() => go(steps[index + 1]!)}>Continue</Button>}
     </footer>}
 
   </section>;
+}
+
+function ContextContinue({ draft, saving, anyConnected, onContinue }: {
+  draft: SignalSettings; saving: boolean; anyConnected: boolean; onContinue: () => void;
+}) {
+  const skipping = !anyConnected && !draft.slackScan.enabled;
+  return <Button variant={skipping ? "secondary" : "primary"} disabled={saving || !slackScanReady(draft.slackScan)} onClick={onContinue}>
+    {skipping ? "Skip for now" : "Continue"}
+  </Button>;
 }

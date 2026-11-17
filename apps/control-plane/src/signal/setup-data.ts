@@ -145,3 +145,17 @@ export function slackChannels(options: AgentOptions) {
     .filter((resource) => resource.kind === "slack_channel")
     .sort((a, b) => a.displayName.localeCompare(b.displayName));
 }
+
+// Whether the Slack search can be saved: off, or on with a channel.
+export function slackScanReady(value: SignalSettings["slackScan"]) {
+  return !value.enabled || value.channels.length > 0;
+}
+
+// Whether a Slack channel is one of the chosen ones.
+export function isChosenChannel(channel: { integrationAccountId: string; externalId: string }, chosen: SignalSettings["slackScan"]["channels"]) {
+  return chosen.some((item) => item.integrationAccountId === channel.integrationAccountId && item.channelId === channel.externalId);
+}
+
+export function slackChannelLabel(displayName: string) {
+  return `#${displayName.replace(/^#/u, "")}`;
+}
