@@ -180,7 +180,7 @@ test("offers Signal's Team, with checkout, to a Signal workspace on Pro", async 
 
   await expect(page.getByRole("heading", { name: "Invite teammates on the Team plan" })).toBeVisible();
   await expect(page.getByText(
-    "Your plan includes one seat. Team includes unlimited seats and up to 100 investigated findings each month, for $200 / month.",
+    "Your plan includes one seat. Team includes unlimited seats and 100 findings included each month, for $200 / month.",
   )).toBeVisible();
   await expect(page.getByLabel("Email address")).toHaveCount(0);
 

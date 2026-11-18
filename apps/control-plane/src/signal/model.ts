@@ -67,6 +67,11 @@ export interface SignalPlan {
   name: string;
   price: number;
   included: number;
+  // Dollars per finding past the included ones. Null when the included
+  // findings are a cap.
+  overagePrice: number | null;
+  // Whether the workspace can invite teammates on this plan.
+  includesTeammates: boolean;
 }
 
 export interface SignalBilling {
@@ -74,6 +79,8 @@ export interface SignalBilling {
   enabled: boolean;
   plan: { id: string; name: string; price: number; cancelsAtPeriodEnd: boolean } | null;
   included: number;
+  // Whether findings past `included` are billed instead of stopping Signal.
+  overageAllowed: boolean;
   used: number;
   remaining: number;
   // Milliseconds since the epoch.
