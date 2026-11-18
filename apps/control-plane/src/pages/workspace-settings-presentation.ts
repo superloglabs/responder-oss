@@ -40,5 +40,5 @@ export interface WorkspaceSeats {
 }
 
 export function extensionTeamPlanDescription(plan: ExtensionTeamPlan): string {
-  return `Your plan includes one seat. ${plan.name} includes unlimited seats and up to ${plan.included} investigated findings each month, for ${formatPlanPrice(plan.price)} / month.`;
+  return `Your plan includes one seat. ${plan.name} includes unlimited seats and ${plan.included} findings included each month, for ${formatPlanPrice(plan.price)} / month.`;
 }
