@@ -21,7 +21,9 @@ export function SettingsTabs({
   active: SettingsSection;
   capabilities: string[];
 }) {
-  if (capabilities.includes("signal")) return (
+  // Signal alone needs only workspace settings. With automations, the
+  // workspace keeps the settings its automations use.
+  if (capabilities.includes("signal") && !capabilities.includes("automations")) return (
     <nav aria-label="Settings sections" className="settingsTabs">
       <Link aria-current={active === "workspace" ? "page" : undefined} className={active === "workspace" ? "isActive" : undefined} to="/settings/workspace">Workspace</Link>
     </nav>
