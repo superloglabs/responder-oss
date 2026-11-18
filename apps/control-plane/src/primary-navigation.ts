@@ -53,15 +53,7 @@ interface NavigationOptions {
 // With telemetry the sidebar groups automation and telemetry pages under
 // labels, and lists the remaining product areas above them.
 export function primaryNavigation(options: NavigationOptions): NavigationItem[] {
-  if (options.signal) return [
-    ...(options.signalSetupComplete === false ? [] : [
-      { group: "Signal" as const, label: "Findings", section: "signal-findings" as const, to: "/signal/findings" },
-      { group: "Signal" as const, label: "Usage", section: "signal-usage" as const, to: "/signal/usage" },
-    ]),
-    { group: "Signal", label: "Setup", section: "signal-setup", to: "/signal/setup" },
-    { group: "Workspace", label: "Settings", section: "settings", to: "/settings/workspace" },
-  ];
-  const grouped = Boolean(options.telemetry);
+  const grouped = Boolean(options.telemetry || options.signal);
   const inGroup = (group: NavigationGroup, items: NavigationItem[]) =>
     grouped ? items.map((item) => ({ ...item, group })) : items;
   // Skills and memory extend automations and pull requests come from their
@@ -74,6 +66,16 @@ export function primaryNavigation(options: NavigationOptions): NavigationItem[] 
         { label: "PRs", section: "pull-requests", to: "/pull-requests" },
       ])
     : [];
+  // A Signal workspace that also has automations lists them below Signal.
+  if (options.signal) return [
+    ...(options.signalSetupComplete === false ? [] : [
+      { group: "Signal" as const, label: "Findings", section: "signal-findings" as const, to: "/signal/findings" },
+      { group: "Signal" as const, label: "Usage", section: "signal-usage" as const, to: "/signal/usage" },
+    ]),
+    { group: "Signal", label: "Setup", section: "signal-setup", to: "/signal/setup" },
+    ...automations,
+    { group: "Workspace", label: "Settings", section: "settings", to: "/settings/workspace" },
+  ];
   const telemetry = options.telemetry
     ? [
         ...inGroup("Explore", [

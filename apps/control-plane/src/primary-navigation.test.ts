@@ -196,4 +196,16 @@ describe("Signal navigation", () => {
     expect(primaryNavigation({ automations: false, simplified: false, signal: true })
       .map((item) => item.label)).toEqual(["Findings", "Usage", "Setup", "Settings"]);
   });
+
+  it("lists automations under their own group in a workspace that also has them", () => {
+    const navigation = primaryNavigation({ automations: true, simplified: true, signal: true, signalSetupComplete: true });
+    expect(navigation.map((item) => item.label))
+      .toEqual(["Findings", "Usage", "Setup", "Automations", "Skills", "Memory", "PRs", "Settings"]);
+    expect(navigationBlocks(navigation).map((block) => block.group)).toEqual(["Signal", "Automation", "Workspace"]);
+  });
+
+  it("keeps automations reachable while Signal setup is unfinished", () => {
+    expect(primaryNavigation({ automations: true, simplified: true, signal: true, signalSetupComplete: false })
+      .map((item) => item.label)).toEqual(["Setup", "Automations", "Skills", "Memory", "PRs", "Settings"]);
+  });
 });
