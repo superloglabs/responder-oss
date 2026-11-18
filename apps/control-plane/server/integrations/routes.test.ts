@@ -3743,6 +3743,32 @@ describe("integration callback routing", () => {
     );
   });
 
+  it("starts Signal PostHog OAuth read-only with Signal's scopes", async () => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(encryptCredentials).mockReturnValue("encrypted-credentials");
+    vi.mocked(createIntegrationConnectionState).mockResolvedValue("oauth-state");
+    vi.mocked(beginCustomMcpOAuth).mockResolvedValue({
+      authorizationUrl: "https://us.posthog.com/oauth/authorize",
+      oauth: { codeVerifier: "pkce-verifier" },
+    });
+    vi.mocked(updateIntegrationConnectionStateMetadata).mockResolvedValue(true);
+
+    const response = await app.request(
+      "/api/integrations/posthog/start?returnTo=%2Fsignal%2Fsetup%2Fposthog&mode=signal",
+    );
+
+    expect(response.status).toBe(302);
+    expect(beginCustomMcpOAuth).toHaveBeenCalledWith({
+      connectionState: "oauth-state",
+      mcpUrl: POSTHOG_MCP_URL,
+      redirectUrl: "https://responder.example/api/integrations/posthog/callback",
+      scope: postHogOAuthScope("signal"),
+    });
+    expect(encryptCredentials).toHaveBeenLastCalledWith(
+      expect.objectContaining({ accessLevel: "read_only", mcpUrl: POSTHOG_MCP_URL }),
+    );
+  });
+
   it("finishes read-write PostHog OAuth as a separate read-write connection", async () => {
     vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
     vi.mocked(consumeIntegrationConnectionState).mockResolvedValue({

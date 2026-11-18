@@ -75,9 +75,34 @@ export function postHogMcpUrl(accessLevel: PostHogAccessLevel): string {
   return accessLevel === "read_write" ? POSTHOG_READ_WRITE_MCP_URL : POSTHOG_MCP_URL;
 }
 
-/** The OAuth scopes a connection at this access level requests. */
-export function postHogOAuthScope(accessLevel: PostHogAccessLevel): string {
-  return (accessLevel === "read_write" ? postHogReadWriteScopes : postHogReadScopes).join(" ");
+// Signal reads logs, errors, traces, replays, insights, dashboards, and
+// events, and counts affected people with SQL. Its connections request only
+// those scopes. PostHog's MCP hides the tools a token has no scope for, so
+// these connections use the read-only MCP URL.
+const postHogSignalScopes = [
+  ...postHogAccountScopes,
+  "dashboard:read",
+  "error_tracking:read",
+  "event_definition:read",
+  "insight:read",
+  "logs:read",
+  "person:read",
+  "query:read",
+  "session_recording:read",
+  "tracing:read",
+];
+
+/** Which set of OAuth scopes a PostHog connection requests. */
+export type PostHogScopeProfile = PostHogAccessLevel | "signal";
+
+/** The OAuth scopes a connection with this profile requests. */
+export function postHogOAuthScope(profile: PostHogScopeProfile): string {
+  const scopes = {
+    read_only: postHogReadScopes,
+    read_write: postHogReadWriteScopes,
+    signal: postHogSignalScopes,
+  }[profile];
+  return scopes.join(" ");
 }
 
 export interface PostHogCredentials {
