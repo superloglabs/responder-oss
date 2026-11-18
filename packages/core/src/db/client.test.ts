@@ -1,5 +1,11 @@
-import { describe, expect, it } from "vitest";
-import { databaseConnectionString, databasePoolOptions } from "./client.js";
+import type { EventEmitter } from "node:events";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  closeDatabase,
+  databaseConnectionString,
+  databasePoolOptions,
+  getDatabase,
+} from "./client.js";
 
 describe("database connection configuration", () => {
   it("uses DATABASE_URL when it is present", () => {
@@ -47,5 +53,34 @@ describe("database connection configuration", () => {
     expect(
       databasePoolOptions({ DATABASE_POOL_SIZE: "0", DATABASE_QUERY_TIMEOUT_MS: "soon" }),
     ).toMatchObject({ max: 5, query_timeout: 120_000 });
+  });
+});
+
+describe("database pool", () => {
+  afterEach(async () => {
+    await closeDatabase();
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  // On 2026-11-10 an RDS failover ended every idle connection with 57P01 and
+  // the unhandled pool error crashed the worker, Signal worker, and API.
+  it("logs an idle client's error instead of crashing", () => {
+    vi.stubEnv("DATABASE_URL", "postgresql://responder@127.0.0.1:1/responder");
+    const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const error = Object.assign(new Error("terminating connection due to administrator command"), {
+      code: "57P01",
+    });
+
+    const pool = (getDatabase() as unknown as { $client: EventEmitter }).$client;
+
+    expect(() => pool.emit("error", error)).not.toThrow();
+    expect(log).toHaveBeenCalledWith(
+      JSON.stringify({
+        code: "57P01",
+        errorMessage: "terminating connection due to administrator command",
+        event: "database_idle_client_error",
+      }),
+    );
   });
 });
