@@ -60,4 +60,23 @@ describe("PostHog credentials", () => {
     expect(scopes).not.toEqual(expect.arrayContaining(["organization:write"]));
     expect(new Set(scopes).size).toBe(scopes.length);
   });
+
+  it("requests only what Signal reads for Signal connections", () => {
+    expect(postHogOAuthScope("signal").split(" ").sort()).toEqual([
+      "dashboard:read",
+      "error_tracking:read",
+      "event_definition:read",
+      "insight:read",
+      "logs:read",
+      "organization:read",
+      "person:read",
+      "project:read",
+      "query:read",
+      "session_recording:read",
+      "tracing:read",
+      "user:read",
+    ]);
+    expect(postHogOAuthScope("read_only").split(" "))
+      .toEqual(expect.arrayContaining(postHogOAuthScope("signal").split(" ")));
+  });
 });
