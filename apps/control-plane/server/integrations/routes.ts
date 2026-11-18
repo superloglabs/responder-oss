@@ -64,6 +64,7 @@ import {
   parsePostHogCredentials,
   postHogAccessLevelSchema,
   postHogMcpUrl,
+  postHogOAuthScope,
 } from "../../../../packages/core/src/integrations/posthog.js";
 import {
   assertCloudflareReadOnlyGrant,
@@ -1110,6 +1111,7 @@ export async function startIntegrationConnection(input: {
         connectionState,
         mcpUrl,
         redirectUrl: integrationCallbackUrl("posthog"),
+        scope: postHogOAuthScope(accessLevel),
       });
       const updated = await updateIntegrationConnectionStateMetadata({
         metadata: { encryptedCredentials: encryptCredentials({

@@ -4,6 +4,7 @@ import {
   POSTHOG_MCP_URL,
   POSTHOG_READ_WRITE_MCP_URL,
   postHogMcpUrl,
+  postHogOAuthScope,
 } from "./posthog.js";
 
 const oauth = { tokens: { access_token: "access-token" } };
@@ -40,5 +41,23 @@ describe("PostHog credentials", () => {
   it("keeps PostHog's read-only mode off only for read-write connections", () => {
     expect(new URL(postHogMcpUrl("read_only")).searchParams.get("readonly")).toBe("true");
     expect(new URL(postHogMcpUrl("read_write")).searchParams.has("readonly")).toBe(false);
+  });
+
+  it("requests no write scope for read-only connections", () => {
+    const scopes = postHogOAuthScope("read_only").split(" ");
+    expect(scopes).toEqual(expect.arrayContaining([
+      "user:read", "organization:read", "project:read", "logs:read", "query:read", "error_tracking:read",
+    ]));
+    expect(scopes.filter((scope) => !scope.endsWith(":read"))).toEqual([]);
+  });
+
+  it("requests write scopes only for the products read-write connections change", () => {
+    const scopes = postHogOAuthScope("read_write").split(" ");
+    expect(scopes).toEqual(expect.arrayContaining(postHogOAuthScope("read_only").split(" ")));
+    expect(scopes).toEqual(expect.arrayContaining(["feature_flag:write", "annotation:write", "insight:write"]));
+    expect(scopes).not.toEqual(expect.arrayContaining(["session_recording:write"]));
+    expect(scopes).not.toEqual(expect.arrayContaining(["project:write"]));
+    expect(scopes).not.toEqual(expect.arrayContaining(["organization:write"]));
+    expect(new Set(scopes).size).toBe(scopes.length);
   });
 });
