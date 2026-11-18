@@ -456,6 +456,7 @@ const approvals: Record<"axiom" | "sentry" | "linear" | "posthog" | "railway" | 
     allowed: ["Read logs, errors, and session replays", "Read insights, dashboards, and events"],
     denied: "Read-only access. Nothing in PostHog can be changed",
     returnHere: true,
+    mode: "signal",
   },
   railway: {
     name: "Railway",
@@ -482,7 +483,7 @@ function OAuthApproval({ page, integration, listPath, onBack }: PageProps & { pa
     <Intro provider={page} title={`Connect ${approval.name}`}>{approval.description}</Intro>
     <AccessList title="What Signal does" allowed={approval.allowed} denied={approval.denied} />
     <Actions onBack={onBack}>
-      {/* PostHog and Railway start read-only when no access mode is given. */}
+      {/* Railway starts read-only when no access mode is given. */}
       <Button variant="primary" loading={leaving} disabled={!integration?.connectUrl} onClick={() => {
         setLeaving(true);
         const start = new URL(integration!.connectUrl!, window.location.origin);

@@ -64,6 +64,7 @@ import {
   parsePostHogCredentials,
   postHogAccessLevelSchema,
   postHogMcpUrl,
+  postHogOAuthScope,
 } from "../../../../packages/core/src/integrations/posthog.js";
 import {
   assertCloudflareReadOnlyGrant,
@@ -1091,8 +1092,9 @@ export async function startIntegrationConnection(input: {
   }
   if (parsedProvider.data === "posthog") {
     // `mode=read_write` lets automations make changes too. Without it the
-    // connection only reads.
-    const accessLevel = postHogAccessLevelSchema.catch("read_only").parse(input.mode);
+    // connection only reads. `mode=signal` reads only what Signal uses.
+    const signal = input.mode === "signal";
+    const accessLevel = signal ? "read_only" : postHogAccessLevelSchema.catch("read_only").parse(input.mode);
     const mcpUrl = postHogMcpUrl(accessLevel);
     try {
       // Keep incomplete OAuth credentials in the expiring flow, not an account.
@@ -1110,6 +1112,7 @@ export async function startIntegrationConnection(input: {
         connectionState,
         mcpUrl,
         redirectUrl: integrationCallbackUrl("posthog"),
+        scope: postHogOAuthScope(signal ? "signal" : accessLevel),
       });
       const updated = await updateIntegrationConnectionStateMetadata({
         metadata: { encryptedCredentials: encryptCredentials({
