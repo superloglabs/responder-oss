@@ -58,6 +58,7 @@ import { normalizeDash0McpUrl } from "../../../../packages/core/src/integrations
 import {
   POSTHOG_MCP_URL,
   POSTHOG_READ_WRITE_MCP_URL,
+  postHogOAuthScope,
 } from "../../../../packages/core/src/integrations/posthog.js";
 import { CLOUDFLARE_MCP_URL } from "../../../../packages/core/src/integrations/cloudflare.js";
 import {
@@ -3701,6 +3702,7 @@ describe("integration callback routing", () => {
       connectionState: "oauth-state",
       mcpUrl: POSTHOG_MCP_URL,
       redirectUrl: "https://responder.example/api/integrations/posthog/callback",
+      scope: postHogOAuthScope("read_only"),
     });
     expect(encryptCredentials).toHaveBeenLastCalledWith(
       expect.objectContaining({
@@ -3731,6 +3733,7 @@ describe("integration callback routing", () => {
       connectionState: "oauth-state",
       mcpUrl: POSTHOG_READ_WRITE_MCP_URL,
       redirectUrl: "https://responder.example/api/integrations/posthog/callback",
+      scope: postHogOAuthScope("read_write"),
     });
     expect(encryptCredentials).toHaveBeenLastCalledWith(
       expect.objectContaining({
