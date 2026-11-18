@@ -6,8 +6,8 @@ interface FakeFinding {
 }
 
 const signalPlans = [
-  { id: "signal_pro", name: "Pro", price: 100, included: 50 },
-  { id: "signal_max", name: "Max", price: 200, included: 100 },
+  { id: "signal_pro", name: "Pro", price: 100, included: 50, overagePrice: 2.5, includesTeammates: false },
+  { id: "signal_max", name: "Max", price: 200, included: 100, overagePrice: 2.5, includesTeammates: true },
 ];
 
 // A Signal API in memory: findings, usage, settings, and the plan, with
@@ -47,6 +47,7 @@ function fakeSignal(count = 30, options: { setUp?: boolean } = {}) {
       enabled: true,
       plan: null as null | { id: string; name: string; price: number; cancelsAtPeriodEnd: boolean },
       included: 0,
+      overageAllowed: false,
       used: 0,
       remaining: 0,
       resetsAt: Date.parse("2026-12-01T00:00:00Z") as number | null,
@@ -229,8 +230,10 @@ test("sets up Signal with the workspace's real connections and turns it on after
   await expect(page).toHaveURL(/\/signal\/setup\/plan$/);
   await expect(page.getByRole("heading", { name: "Choose your plan" })).toBeVisible();
   await expect(page.getByRole("article", { name: "Pro" })).toContainText("$100 / month");
-  await expect(page.getByRole("article", { name: "Pro" })).toContainText("Up to 50 investigated findings");
-  await expect(page.getByRole("article", { name: "Max" })).toContainText("$2 per finding");
+  await expect(page.getByRole("article", { name: "Pro" })).toContainText("50 findings included");
+  await expect(page.getByRole("article", { name: "Pro" })).toContainText("1 seat. Teammates need Max ($200)");
+  await expect(page.getByRole("article", { name: "Max" })).toContainText("$2.50 per extra finding");
+  await expect(page.getByRole("article", { name: "Max" })).toContainText("Unlimited seats: invite teammates");
   await expect(page.getByRole("button", { name: "Turn on Signal" })).toHaveCount(0);
   await page.screenshot({ path: "test-results/signal-plan.png" });
   await page.getByRole("button", { name: "Choose Max ($200)" }).click();
@@ -286,12 +289,12 @@ test("shows the current plan and its findings", async ({ page }) => {
   const signal = fakeSignal();
   signal.settings.slack = { integrationAccountId: "slack-account", channelId: "C02" };
   Object.assign(signal.billing, {
-    plan: { id: "signal_pro", name: "Pro", price: 100, cancelsAtPeriodEnd: false }, included: 50, used: 12, remaining: 38,
+    plan: { id: "signal_pro", name: "Pro", price: 100, cancelsAtPeriodEnd: false }, included: 50, overageAllowed: true, used: 12, remaining: 38,
   });
   await workspace(page, { signal });
   await page.goto("/signal/setup/plan");
   const current = page.getByRole("group", { name: "Current plan" });
-  await expect(current).toContainText("Pro $100 / month · up to 50 findings");
+  await expect(current).toContainText("Pro $100 / month · 50 findings included, then $2.50 each");
   await expect(current).toContainText("12 of 50 findings used · resets 1 Dec");
   await expect(page.getByRole("meter", { name: "Findings used this month" })).toHaveAttribute("aria-valuenow", "12");
   await expect(page.getByRole("button", { name: "Switch to Max ($200)" })).toBeEnabled();
@@ -366,6 +369,19 @@ test("confirms a plan when checkout comes back to settings", async ({ page }) =>
   await expect(page.getByRole("group", { name: "Current plan" })).toContainText("Pro $100 / month");
   await expect(page).toHaveURL(/\/signal\/setup\/plan$/u);
   expect(signal.writes.map((write) => `${write.method} ${write.path}`)).toEqual(["POST /billing/checkout"]);
+});
+
+test("keeps investigating past the included findings on a plan that bills overage", async ({ page }) => {
+  const signal = fakeSignal();
+  signal.settings.slack = { integrationAccountId: "slack-account", channelId: "C02" };
+  Object.assign(signal.billing, {
+    plan: { id: "signal_pro", name: "Pro", price: 100, cancelsAtPeriodEnd: false }, included: 50, overageAllowed: true, used: 54, remaining: 0,
+  });
+  await workspace(page, { signal });
+  await page.goto("/signal/setup/plan");
+  await expect(page.getByRole("group", { name: "Current plan" })).toContainText("54 of 50 findings used · 4 extra · resets 1 Dec");
+  await expect(page.getByRole("meter", { name: "Findings used this month" })).toHaveAttribute("aria-valuenow", "50");
+  await expect(page.getByText(/starts investigating again/u)).toHaveCount(0);
 });
 
 test("waits for findings to reset once a plan's findings are used", async ({ page }) => {

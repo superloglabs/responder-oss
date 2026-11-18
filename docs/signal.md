@@ -33,7 +33,10 @@ those requests fail and the pages show their errors.
   workspace whose telemetry does not reach Superlog. Repositories and
   the findings channel come from the workspace's GitHub and Slack connections
   and are saved to Signal's settings. The last step is the plan: Pro ($100 a
-  month, up to 50 findings) or Max ($200 a month, up to 100). A Slack channel
+  month, 50 findings included, one seat) or Team ($200 a month, 100 findings
+  included, unlimited seats). Findings past the included ones cost $2.50 each
+  on both plans. Each card says which plan lets the workspace invite
+  teammates. A Slack channel
   must be chosen first. Choosing a plan opens checkout from
   `/api/signal/billing/checkout`. When checkout returns, the step waits up to
   10 seconds for the plan to be recorded and turns Signal on the first time;
