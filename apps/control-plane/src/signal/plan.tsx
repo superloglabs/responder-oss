@@ -110,13 +110,17 @@ function useBilling(onChosen: () => void) {
 function PlanCards({ billing, disabled, choose }: { billing: SignalBilling; disabled: boolean; choose: (plan: SignalPlan) => void }) {
   const current = billing.plan;
   const lastPlan = billing.plans.at(-1);
+  const teamPlan = billing.plans.find((plan) => plan.includesTeammates);
   return <div className="signalPlans">
     {billing.plans.map((plan) => <article className="signalPlan" key={plan.id} aria-label={plan.name}>
       <h3>{plan.name}</h3>
       <p className="signalPlanPrice">${plan.price}<span> / month</span></p>
       <div className="signalPlanTerms">
-        <p>Up to {plan.included} investigated findings</p>
-        <p>{perFinding(plan)} per finding</p>
+        <p>{plan.overagePrice === null ? `Up to ${plan.included} investigated findings` : `${plan.included} findings included`}</p>
+        {plan.overagePrice !== null && <p>{dollars(plan.overagePrice)} per extra finding</p>}
+        <p>{plan.includesTeammates
+          ? "Unlimited seats: invite teammates"
+          : `1 seat. Teammates need ${teamPlan ? `${teamPlan.name} ($${teamPlan.price})` : "another plan"}`}</p>
       </div>
       <div className="signalPlanAction">
         {current?.id === plan.id
@@ -173,7 +177,9 @@ export function SignalPlanSettings({ settings }: { settings: SignalSettings }) {
   const current = billing?.plan ?? null;
   const resets = billing?.resetsAt ? shortDate(new Date(billing.resetsAt)) : null;
   const others = billing?.plans.filter((plan) => plan.id !== current?.id) ?? [];
-  return <SettingsPage title="Plan" description="Only posted findings count. Signal stops posting at the monthly limit and starts again when it resets.">
+  const overagePrice = billing?.plans.find((plan) => plan.id === current?.id)?.overagePrice ?? null;
+  const extra = billing?.overageAllowed ? Math.max(0, billing.used - billing.included) : 0;
+  return <SettingsPage title="Plan" description="Only posted findings count. Findings past the included ones are billed per finding.">
     {status}
     {billing && !billing.enabled && <p className="signalNote">This deployment does not bill for Signal.</p>}
     {billing && settings.enabled && !canTurnOnSignal(billing) && <p className="signalError" role="alert">
@@ -183,15 +189,17 @@ export function SignalPlanSettings({ settings }: { settings: SignalSettings }) {
       <div className="signalSettingsCard signalCurrentPlan" aria-label="Current plan" role="group">
         <div className="signalCurrentPlan__summary">
           <div>
-            <p><strong>{current.name}</strong> ${current.price} / month · up to {billing.included} findings</p>
-            <p><strong>{billing.used} of {billing.included}</strong> findings used{resets ? ` · ${current.cancelsAtPeriodEnd ? "ends" : "resets"} ${resets}` : ""}</p>
+            <p><strong>{current.name}</strong> ${current.price} / month · {billing.overageAllowed
+              ? `${billing.included} findings included${overagePrice === null ? "" : `, then ${dollars(overagePrice)} each`}`
+              : `up to ${billing.included} findings`}</p>
+            <p><strong>{billing.used} of {billing.included}</strong> findings used{extra > 0 ? ` · ${extra} extra` : ""}{resets ? ` · ${current.cancelsAtPeriodEnd ? "ends" : "resets"} ${resets}` : ""}</p>
           </div>
           {others.map((plan) => <Button key={plan.id} disabled={busy !== null} onClick={() => void choose(plan)}>Switch to {plan.name} (${plan.price})</Button>)}
         </div>
-        <div className="signalMeter" role="meter" aria-label="Findings used this month" aria-valuemin={0} aria-valuemax={billing.included} aria-valuenow={billing.used}>
+        <div className="signalMeter" role="meter" aria-label="Findings used this month" aria-valuemin={0} aria-valuemax={billing.included} aria-valuenow={Math.min(billing.used, billing.included)}>
           <span style={{ width: `${Math.min(100, billing.included ? billing.used / billing.included * 100 : 0)}%` }} />
         </div>
-        {billing.remaining < 1 && resets && !current.cancelsAtPeriodEnd && <p className="signalNote">Signal starts investigating again on {resets}.</p>}
+        {!billing.overageAllowed && billing.remaining < 1 && resets && !current.cancelsAtPeriodEnd && <p className="signalNote">Signal starts investigating again on {resets}.</p>}
       </div>
     </SettingsGroup>}
     {billing?.enabled && !current && <SettingsGroup title="Choose a plan">
@@ -208,10 +216,9 @@ export function SignalPlanSettings({ settings }: { settings: SignalSettings }) {
   </SettingsPage>;
 }
 
-// Whole dollars where the price divides evenly, otherwise cents.
-function perFinding(plan: SignalPlan) {
-  const price = plan.price / plan.included;
-  return `$${Number.isInteger(price) ? price : price.toFixed(2)}`;
+// Whole dollars where the amount is whole, otherwise cents.
+function dollars(amount: number) {
+  return `$${Number.isInteger(amount) ? amount : amount.toFixed(2)}`;
 }
 
 function PlanStatus({ billing, settings, slackChosen }: {
@@ -225,7 +232,7 @@ function PlanStatus({ billing, settings, slackChosen }: {
     const plan = billing.plan ? `${billing.plan.name} plan: ` : "";
     lines.push(`${plan}${billing.used} of ${billing.included} findings used this month.`);
     if (billing.plan?.cancelsAtPeriodEnd && resets) lines.push(`The plan ends on ${resets}.`);
-    else if (billing.remaining < 1 && resets) lines.push(`Signal starts investigating again on ${resets}.`);
+    else if (!billing.overageAllowed && billing.remaining < 1 && resets) lines.push(`Signal starts investigating again on ${resets}.`);
     else if (resets) lines.push(`Resets on ${resets}.`);
   }
   if (!canTurnOnSignal(billing)) {
