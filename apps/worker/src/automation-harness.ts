@@ -103,13 +103,16 @@ export class AutomationHarnessError extends Error {
 // ChatGPT plan that does not serve the model or has hit its usage limit. The
 // run records it as subscription_refused. workStarted says whether the turn
 // had already done work before the refusal, which happens when a usage limit
-// is reached partway through.
+// is reached partway through. loginRejected says ChatGPT rejected the stored
+// access token, so the stored login needs a refresh.
 export class AutomationSubscriptionRefusalError extends AutomationHarnessError {
+  readonly loginRejected: boolean;
   readonly workStarted: boolean;
 
-  constructor(message: string, eventStream: string, options: { workStarted: boolean }) {
+  constructor(message: string, eventStream: string, options: { loginRejected?: boolean; workStarted: boolean }) {
     super(message, eventStream, true);
     this.name = "AutomationSubscriptionRefusalError";
+    this.loginRejected = options.loginRejected ?? false;
     this.workStarted = options.workStarted;
   }
 }

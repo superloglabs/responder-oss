@@ -91,6 +91,7 @@ import { reportWorkerException } from "./monitoring.js";
 import {
   createSubscriptionRunSecret,
   deleteSubscriptionRunSecret,
+  refreshSubscriptionInSandbox,
   subscriptionAuthCoveringRun,
   subscriptionSecretEnvironmentVariable,
   type SubscriptionRunSecret,
@@ -218,6 +219,8 @@ export interface AutomationRunDependencies {
   sleep(delayMs: number): Promise<void>;
   slackCard: AutomationSlackCardDependencies;
   subscriptionAuth: (owner: { credentialId: string; organizationId: string }, validUntil: Date) => Promise<string>;
+  // Rotates the stored login even when its access token has not expired.
+  refreshSubscription: (owner: { credentialId: string; organizationId: string }) => Promise<void>;
   createSubscriptionSecret: (input: { accessToken: string; runId: string }) => Promise<SubscriptionRunSecret>;
   deleteSubscriptionSecret: (secretId: string) => Promise<void>;
   updateEvent: typeof updateAutomationRunEvent;
@@ -281,6 +284,7 @@ export const defaultAutomationRunDependencies: AutomationRunDependencies = {
   sleep: (delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)),
   slackCard: defaultAutomationSlackCardDependencies,
   subscriptionAuth: (owner, validUntil) => subscriptionAuthCoveringRun(owner, validUntil),
+  refreshSubscription: (owner) => refreshSubscriptionInSandbox(owner),
   createSubscriptionSecret: (input) => createSubscriptionRunSecret(input),
   deleteSubscriptionSecret: (secretId) => deleteSubscriptionRunSecret(secretId),
   updateEvent: updateAutomationRunEvent,
@@ -892,6 +896,9 @@ export async function processAutomationRun(
 
   let grantId: string | undefined;
   let subscriptionSecret: SubscriptionRunSecret | undefined;
+  // A refresh of the stored subscription login after ChatGPT rejected it.
+  // It never rejects.
+  let loginRefresh: Promise<void> | undefined;
   let slackCard: AutomationSlackCard | null = null;
   // The newest event this turn's prompt includes, once it is read. A reply
   // stored after it arrived while the turn ran.
@@ -1361,6 +1368,23 @@ export async function processAutomationRun(
             try {
               return await harness(nativeSubscription);
             } catch (error) {
+              // ChatGPT revoked the access token before it expired. The
+              // refresh gives the next run a new one, or fails when the login
+              // itself was revoked and the organization must reconnect.
+              if (error instanceof AutomationSubscriptionRefusalError && error.loginRejected && credentialId && !loginRefresh) {
+                loginRefresh = dependencies.refreshSubscription({ credentialId, organizationId: run.organizationId })
+                  .then(() => console.log(JSON.stringify({
+                    event: "automation_subscription_login_refreshed",
+                    organizationId: run.organizationId,
+                    runId: run.runId,
+                  })))
+                  .catch((refreshError: unknown) => console.log(JSON.stringify({
+                    event: "automation_subscription_login_refresh_failed",
+                    message: refreshError instanceof Error ? refreshError.message : "Unknown error",
+                    organizationId: run.organizationId,
+                    runId: run.runId,
+                  })));
+              }
               // When the organization's ChatGPT subscription refuses the
               // turn before it did any work, the turn runs again on
               // Responder-funded inference if the workspace's usage allows it.
@@ -1599,6 +1623,8 @@ export async function processAutomationRun(
         }).catch(() => undefined);
       }
     }
+    // The refresh holds the stored login's lease, so the job waits for it.
+    await loginRefresh;
   }
   // The grant is revoked first, so the next worker never shares it.
   if (handedBack) {
