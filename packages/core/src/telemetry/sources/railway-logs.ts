@@ -63,6 +63,9 @@ const logfmtLevel = /(?:^|\s)level=["']?(trace|debug|info|notice|warn|warning)\b
 // starting: time`.
 const postgresPrefix = String.raw`^\s*\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)? [A-Za-z0-9+:-]+ \[\d+\](?: \S+)?\s+`;
 const postgresLevel = new RegExp(`${postgresPrefix}(DEBUG[1-5]?|LOG|INFO|NOTICE|WARNING|ERROR|FATAL|PANIC):`, "u");
+// The Postgres backend process that wrote the line. Processes share a
+// replica and their lines can interleave.
+const postgresProcess = new RegExp(String.raw`^\s*\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)? [A-Za-z0-9+:-]+ \[(\d+)\]`, "u");
 // The lines Postgres writes after an error about the same statement.
 const postgresDetail = new RegExp(`${postgresPrefix}(?:DETAIL|HINT|CONTEXT|STATEMENT|QUERY|LOCATION):`, "u");
 const postgresLevels: Record<string, string> = {
@@ -152,9 +155,16 @@ export function railwayLogBlocks(lines: RailwayLogLine[]): RailwayLogBlock[] {
     .map((line) => ({ line, nanos: BigInt(rfc3339ToNanos(line.timestamp)) }))
     .sort((a, b) => (a.nanos < b.nanos ? -1 : a.nanos > b.nanos ? 1 : 0));
   const blocks: RailwayLogBlock[] = [];
+  // Open blocks by replica, and by Postgres process within a replica. A line
+  // without a process joins the replica's latest block, such as the next
+  // line of a multi-line statement.
   const open = new Map<string, OpenBlock>();
+  const latest = new Map<string, string>();
   for (const { line, nanos } of ordered) {
-    const key = replica(line);
+    const replicaKey = replica(line);
+    const process = postgresProcess.exec(line.message)?.[1];
+    const processKey = process ? `${replicaKey}\u0000${process}` : null;
+    const key = processKey ?? latest.get(replicaKey) ?? replicaKey;
     const current = open.get(key);
     if (current && nanos - current.last <= continuationGapNanos && current.block.lines.length < maxBlockLines) {
       const next = joins(current, line.message);
@@ -163,12 +173,15 @@ export function railwayLogBlocks(lines: RailwayLogLine[]): RailwayLogBlock[] {
         current.last = nanos;
         if (line.message.trim()) current.lastText = line.message;
         current.traceback = next.traceback;
+        latest.set(replicaKey, key);
         continue;
       }
     }
     const block: RailwayLogBlock = { first: line, lines: [line.message], nanos, severity: railwaySeverity(line) };
     blocks.push(block);
-    open.set(key, { block, last: nanos, lastText: line.message, traceback: line.message.trim() === tracebackStart });
+    const blockKey = processKey ?? replicaKey;
+    open.set(blockKey, { block, last: nanos, lastText: line.message, traceback: line.message.trim() === tracebackStart });
+    latest.set(replicaKey, blockKey);
   }
   // A block of blank lines says nothing.
   return blocks.filter((block) => block.lines.some((text) => text.trim()));

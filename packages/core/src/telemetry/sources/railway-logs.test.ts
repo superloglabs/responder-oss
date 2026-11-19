@@ -100,6 +100,25 @@ describe("railwayLogBlocks", () => {
     expect(blocks.map((block) => [block.severity.text, block.lines.length])).toEqual([["ERROR", 3], ["INFO", 1]]);
   });
 
+  it("joins a Postgres detail line to the error of the same process when processes interleave", () => {
+    const blocks = railwayLogBlocks([
+      line('2026-11-19 13:05:00.100 UTC [88] ERROR:  duplicate key value violates unique constraint "users_pkey"', "2026-11-19T13:05:00.100000100Z"),
+      line("2026-11-19 13:05:00.100 UTC [130] LOG:  checkpoint starting: time", "2026-11-19T13:05:00.100000150Z"),
+      line("2026-11-19 13:05:00.100 UTC [88] DETAIL:  Key (id)=(7) already exists.", "2026-11-19T13:05:00.100000200Z"),
+      line("2026-11-19 13:05:00.100 UTC [88] STATEMENT:  INSERT INTO users (id)", "2026-11-19T13:05:00.100000300Z"),
+      line("\tVALUES (7)", "2026-11-19T13:05:00.100000400Z"),
+    ]);
+    expect(blocks.map((block) => [block.severity.text, block.lines])).toEqual([
+      ["ERROR", [
+        '2026-11-19 13:05:00.100 UTC [88] ERROR:  duplicate key value violates unique constraint "users_pkey"',
+        "2026-11-19 13:05:00.100 UTC [88] DETAIL:  Key (id)=(7) already exists.",
+        "2026-11-19 13:05:00.100 UTC [88] STATEMENT:  INSERT INTO users (id)",
+        "\tVALUES (7)",
+      ]],
+      ["INFO", ["2026-11-19 13:05:00.100 UTC [130] LOG:  checkpoint starting: time"]],
+    ]);
+  });
+
   it("leaves out Railway's own build logs", () => {
     // Railway's builder writes into the environment's logs with a build ID
     // as both service and deployment, and no replica.
