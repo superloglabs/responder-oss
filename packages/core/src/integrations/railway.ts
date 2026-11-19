@@ -271,7 +271,9 @@ export async function railwaySharedWorkspaces(input: {
     try {
       await railwayGraphql({
         ...input,
-        query: "query ($workspaceId: String!) { workspace(workspaceId: $workspaceId) { id } }",
+        // OAuth tokens cannot read `workspace(workspaceId)`, even for a
+        // workspace the person shared; they read its projects.
+        query: "query ($workspaceId: String!) { projects(workspaceId: $workspaceId, first: 1) { edges { node { id } } } }",
         variables: { workspaceId: workspace.id },
       });
       return workspace;
@@ -564,24 +566,24 @@ type ProjectNode = {
   services: Connection<{ id: string; name: string }>;
 };
 
+// A workspace's projects are read with `projects(workspaceId)`: OAuth tokens
+// cannot read `workspace(workspaceId)`.
 const listProjectsQuery = `query ($workspaceId: String!) {
-  workspace(workspaceId: $workspaceId) {
-    projects(first: 50) {
-      edges { node {
+  projects(workspaceId: $workspaceId, first: 50) {
+    edges { node {
+      id
+      name
+      services(first: 100) { edges { node { id name } } }
+      environments(first: 20) { edges { node {
         id
         name
-        services(first: 100) { edges { node { id name } } }
-        environments(first: 20) { edges { node {
-          id
-          name
-          serviceInstances(first: 100) { edges { node {
-            serviceId
-            serviceName
-            latestDeployment { id status createdAt }
-          } } }
+        serviceInstances(first: 100) { edges { node {
+          serviceId
+          serviceName
+          latestDeployment { id status createdAt }
         } } }
-      } }
-    }
+      } } }
+    } }
   }
 }`;
 
@@ -592,7 +594,7 @@ async function listProjects(
 ) {
   const workspaces = await workspacesFor(connection, options, args.workspaceId);
   return Promise.all(workspaces.map(async (workspace) => {
-    const data = await railwayGraphql<{ workspace: { projects: Connection<ProjectNode> } }>({
+    const data = await railwayGraphql<{ projects: Connection<ProjectNode> }>({
       ...options,
       accessToken: connection.accessToken,
       query: listProjectsQuery,
@@ -601,7 +603,7 @@ async function listProjects(
     return {
       id: workspace.id,
       name: workspace.name,
-      projects: nodes(data.workspace.projects).map((project) => ({
+      projects: nodes(data.projects).map((project) => ({
         environments: nodes(project.environments).map((environment) => ({
           id: environment.id,
           name: environment.name,
@@ -643,11 +645,9 @@ const environmentFields = "edges { node { id name } } pageInfo { hasNextPage end
 // most 50 projects with their first 20 environments, and a project with more
 // reads the rest in its own pages.
 const projectPageQuery = `query ($workspaceId: String!, $after: String) {
-  workspace(workspaceId: $workspaceId) {
-    projects(first: 50, after: $after) {
-      edges { node { id name environments(first: 20, isEphemeral: false) { ${environmentFields} } } }
-      pageInfo { hasNextPage endCursor }
-    }
+  projects(workspaceId: $workspaceId, first: 50, after: $after) {
+    edges { node { id name environments(first: 20, isEphemeral: false) { ${environmentFields} } } }
+    pageInfo { hasNextPage endCursor }
   }
 }`;
 
@@ -676,12 +676,12 @@ async function workspaceEnvironments(
   options: RailwayCallOptions,
 ): Promise<RailwayEnvironment[]> {
   type Project = { environments: Page<{ id: string; name: string }>; id: string; name: string };
-  const projects = await allPages<Project>(async (after) => (await railwayGraphql<{ workspace: { projects: Page<Project> } }>({
+  const projects = await allPages<Project>(async (after) => (await railwayGraphql<{ projects: Page<Project> }>({
     ...options,
     accessToken,
     query: projectPageQuery,
     variables: { after, workspaceId: workspace.id },
-  })).workspace.projects);
+  })).projects);
   const listed = await Promise.all(projects.map(async (project) => {
     const environments = await allPages<{ id: string; name: string }>(
       async (after) => (await railwayGraphql<{ project: { environments: Page<{ id: string; name: string }> } }>({
