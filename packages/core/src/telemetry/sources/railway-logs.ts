@@ -57,6 +57,39 @@ const leadingLevel =
   /^\s*(?:\[?\d{4}-\d{2}-\d{2}[T ][\d:.,]+(?:Z|[+-]\d{2}:?\d{2})?\]?\s*[-|]?\s*)?\[?(trace|debug|info|notice|warn|warning)\]?(?=[\s:|\]-])/iu;
 // logfmt, as Go's slog and logrus write it.
 const logfmtLevel = /(?:^|\s)level=["']?(trace|debug|info|notice|warn|warning)\b/iu;
+// Postgres writes every line to stderr after its log_line_prefix, by default
+// a timestamp with its zone and the process ID, sometimes followed by
+// user@database: `2026-11-19 13:01:27.463 UTC [130] LOG:  checkpoint
+// starting: time`.
+const postgresPrefix = String.raw`^\s*\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(?:\.\d+)? [A-Za-z0-9+:-]+ \[\d+\](?: \S+)?\s+`;
+const postgresLevel = new RegExp(`${postgresPrefix}(DEBUG[1-5]?|LOG|INFO|NOTICE|WARNING|ERROR|FATAL|PANIC):`, "u");
+// The lines Postgres writes after an error about the same statement.
+const postgresDetail = new RegExp(`${postgresPrefix}(?:DETAIL|HINT|CONTEXT|STATEMENT|QUERY|LOCATION):`, "u");
+const postgresLevels: Record<string, string> = {
+  DEBUG: "debug",
+  ERROR: "error",
+  FATAL: "fatal",
+  INFO: "info",
+  LOG: "info",
+  NOTICE: "notice",
+  PANIC: "panic",
+  WARNING: "warning",
+};
+
+function postgresSeverityName(message: string): string | undefined {
+  const level = postgresLevel.exec(message)?.[1];
+  return level ? postgresLevels[level.replace(/\d$/u, "")] : undefined;
+}
+
+/**
+ * Whether the line comes from Railway's builder rather than a service.
+ * Railway writes its build machinery's logs, such as BuildKit's, into the
+ * environment's logs with the build's ID as both service and deployment.
+ */
+export function isRailwayBuildLog(line: Pick<RailwayLogLine, "tags">): boolean {
+  const serviceId = line.tags?.serviceId;
+  return Boolean(serviceId) && serviceId === line.tags?.deploymentId;
+}
 
 /**
  * The line's severity. Railway marks everything written to stderr as an
@@ -67,7 +100,7 @@ export function railwaySeverity(line: Pick<RailwayLogLine, "attributes" | "messa
   const level = (line.severity ?? line.attributes?.find((item) => item.key === "level")?.value ?? "").toLowerCase();
   const severity = severities[level];
   if (severity && severity.number < 17) return severity;
-  const named = leadingLevel.exec(line.message)?.[1] ?? logfmtLevel.exec(line.message)?.[1];
+  const named = leadingLevel.exec(line.message)?.[1] ?? logfmtLevel.exec(line.message)?.[1] ?? postgresSeverityName(line.message);
   const lower = named ? severities[named.toLowerCase()] : undefined;
   if (lower && (!severity || lower.number < severity.number)) return lower;
   return severity ?? { number: 0, text: "" };
@@ -104,6 +137,7 @@ type OpenBlock = { block: RailwayLogBlock; last: bigint; lastText: string; trace
 function joins(open: OpenBlock, message: string): { joins: boolean; traceback: boolean } {
   if (message.trim() === tracebackStart && chainedTraceback.test(open.lastText)) return { joins: true, traceback: true };
   if (open.traceback && tracebackEnd.test(message)) return { joins: true, traceback: false };
+  if (postgresDetail.test(message)) return { joins: true, traceback: open.traceback };
   return { joins: continuation.test(message), traceback: open.traceback };
 }
 
@@ -114,6 +148,7 @@ function joins(open: OpenBlock, message: string): { joins: boolean; traceback: b
  */
 export function railwayLogBlocks(lines: RailwayLogLine[]): RailwayLogBlock[] {
   const ordered = lines
+    .filter((line) => !isRailwayBuildLog(line))
     .map((line) => ({ line, nanos: BigInt(rfc3339ToNanos(line.timestamp)) }))
     .sort((a, b) => (a.nanos < b.nanos ? -1 : a.nanos > b.nanos ? 1 : 0));
   const blocks: RailwayLogBlock[] = [];

@@ -132,6 +132,25 @@ describe("pullRailwaySource", () => {
     expect(payload.resourceLogs[0]!.resource.attributes).toContainEqual({ key: "service.name", value: { stringValue: "api" } });
   });
 
+  it("leaves out Railway's build logs without reading service names again", async () => {
+    const build = { ...log("2026-11-13T09:58:00.000000000Z", "CDI setup error /etc/buildkit/cdi"), tags: { deploymentId: "build-1", projectId: "project-1", serviceId: "build-1" } };
+    const api = railway([build]);
+    const forward = vi.fn<(payload: unknown) => Promise<boolean>>(async () => true);
+
+    const result = await pullRailwaySource({
+      accessToken: "token",
+      environmentId: "env-prod",
+      fetch: api.fetch,
+      forward,
+      now,
+      state: { projectId: "project-1", services: { "svc-api": "api" }, servicesReadAt: now.toISOString() },
+    });
+
+    expect(result).toMatchObject({ error: null, logs: 0, received: false, state: { logsCursor: "2026-11-13T09:59:40.000Z" } });
+    expect(forward).not.toHaveBeenCalled();
+    expect(api.fetch.mock.calls.some(([, init]) => String(init.body).includes("services("))).toBe(false);
+  });
+
   it("keeps the cursor when the collector refuses the logs", async () => {
     const api = railway([log("2026-11-13T09:59:00Z")]);
     const state = { logsCursor: "2026-11-13T09:58:40.000Z", services: { "svc-api": "api" }, servicesReadAt: now.toISOString() };
