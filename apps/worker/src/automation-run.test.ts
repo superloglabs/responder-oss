@@ -159,6 +159,7 @@ function dependencies() {
     setStatus: vi.fn().mockResolvedValue(true),
     sleep: vi.fn<AutomationRunDependencies["sleep"]>().mockResolvedValue(undefined),
     subscriptionAuth: vi.fn<(owner: { credentialId: string; organizationId: string }, validUntil: Date) => Promise<string>>(),
+    refreshSubscription: vi.fn<AutomationRunDependencies["refreshSubscription"]>().mockResolvedValue(undefined),
     createSubscriptionSecret: vi.fn<AutomationRunDependencies["createSubscriptionSecret"]>().mockResolvedValue({ id: "secret-1", name: "responder_chatgpt_run", placeholder: "dtn_secret_run" }),
     deleteSubscriptionSecret: vi.fn<AutomationRunDependencies["deleteSubscriptionSecret"]>().mockResolvedValue(undefined),
     slackCard: {
@@ -2179,6 +2180,47 @@ describe("automation run processor", () => {
 
       expect(deps.runCodex).toHaveBeenCalledOnce();
       expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({ failureCategory: "subscription_refused" }));
+    });
+
+    it("refreshes the stored login once when ChatGPT rejected its access token", async () => {
+      const deps = subscriptionDependencies();
+      const rejected = "ChatGPT rejected the login of the connected subscription.";
+      deps.runCodex.mockReset()
+        .mockRejectedValueOnce(new AutomationSubscriptionRefusalError(rejected, "", { loginRejected: true, workStarted: false }))
+        .mockResolvedValueOnce({ eventStream: "completed" });
+
+      await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
+
+      expect(deps.refreshSubscription).toHaveBeenCalledExactlyOnceWith({ credentialId, organizationId });
+      expect(deps.appendEvent).toHaveBeenCalledWith({ data: { reason: rejected }, runId, type: "subscription_fallback" });
+      expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({ status: "succeeded" }));
+    });
+
+    it("records the rejected login as a subscription refusal when the refresh fails", async () => {
+      const deps = subscriptionDependencies();
+      const rejected = "ChatGPT rejected the login of the connected subscription.";
+      deps.checkAllowance.mockResolvedValueOnce(allowance).mockResolvedValueOnce({ ...allowance, allowed: false, exhausted: "usage_credit" });
+      deps.runCodex.mockReset()
+        .mockRejectedValueOnce(new AutomationSubscriptionRefusalError(rejected, "", { loginRejected: true, workStarted: false }));
+      deps.refreshSubscription.mockRejectedValue(new Error("Unable to refresh the ChatGPT subscription"));
+
+      await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
+
+      expect(deps.refreshSubscription).toHaveBeenCalledOnce();
+      expect(deps.reportException).not.toHaveBeenCalled();
+      expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({
+        failureCategory: "subscription_refused",
+        failureMessage: rejected,
+        status: "failed",
+      }));
+    });
+
+    it("leaves the stored login alone for other refusals", async () => {
+      const deps = subscriptionDependencies();
+
+      await processAutomationRun("job-1", { kind: "automation_run", queuedAt: "2026-09-22T19:00:00.000Z", runId }, process.env, deps);
+
+      expect(deps.refreshSubscription).not.toHaveBeenCalled();
     });
 
     it("stops at the usage limit when the credit runs out during the fallback turn", async () => {
