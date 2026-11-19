@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { Autumn, type Customer } from "autumn-js";
+import { Autumn, ResponseValidationError, type Customer } from "autumn-js";
 import { usesPlanModel } from "../automations/config.js";
 import { getRunBillingAccount, type RunBillingAccount } from "../db/run-billing-accounts.js";
 import { sandboxTimeIsBilled } from "./usage-charges.js";
@@ -66,13 +66,47 @@ async function getOrCreateCustomer(
   organizationId: string,
   data: BillingCustomerData = {},
 ): Promise<Customer> {
-  return client.customers.getOrCreate({
-    customerId: organizationId,
-    autoEnablePlanId: FREE_PLAN_ID,
-    email: data.email,
-    name: data.name,
-    metadata: { responderOrganizationId: organizationId },
-  });
+  try {
+    return await client.customers.getOrCreate({
+      customerId: organizationId,
+      autoEnablePlanId: FREE_PLAN_ID,
+      email: data.email,
+      name: data.name,
+      metadata: { responderOrganizationId: organizationId },
+    });
+  } catch (error) {
+    if (isFailOpenCustomer(error)) return unavailableCustomer();
+    throw error;
+  }
+}
+
+// When Autumn cannot be reached, the SDK answers with a customer whose id is
+// null so callers can fail open, but its own response schema rejects that
+// customer. A real customer always has an id.
+function isFailOpenCustomer(error: unknown): boolean {
+  if (!(error instanceof ResponseValidationError)) return false;
+  const value = error.rawValue;
+  return typeof value === "object" && value !== null && "id" in value && value.id === null;
+}
+
+function unavailableCustomer(): Customer {
+  return {
+    balances: {},
+    billingControls: {},
+    createdAt: 0,
+    email: null,
+    env: "live",
+    fingerprint: null,
+    flags: {},
+    id: null,
+    licenses: [],
+    metadata: {},
+    name: null,
+    purchases: [],
+    sendEmailReceipts: false,
+    stripeId: null,
+    subscriptions: [],
+  };
 }
 
 export async function consumeInvestigation(
@@ -651,9 +685,12 @@ export function summarizeAutomationBillingCustomer(
   };
 }
 
+// With `failOpen: false`, throws when Autumn cannot be reached instead of
+// returning the summary of an empty customer.
 export async function getAutomationBillingSummary(
   organizationId: string,
   data?: BillingCustomerData,
+  options: { failOpen?: boolean } = {},
 ): Promise<AutomationBillingSummary> {
   if (!billingIsEnabled()) return disabledAutomationSummary(false, false);
   const client = getAutomationClientOrNull();
@@ -662,6 +699,9 @@ export async function getAutomationBillingSummary(
     ensureAutomationPlan(client, organizationId, data),
     getRunBillingAccount(organizationId),
   ]);
+  if (customer.id === null && options.failOpen === false) {
+    throw new Error("Autumn could not be reached");
+  }
   const runBilling = activeRunBilling(runBillingAccount, customer);
   const runCustomer = runBilling ? await getRunBillingCustomer(client, runBilling.customerId) : null;
   return summarizeAutomationBillingCustomer(customer, runBillingAccount, runCustomer);

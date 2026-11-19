@@ -499,16 +499,20 @@ async function runAutomationUsageBillingPass(): Promise<void> {
   // used up.
   try {
     const startedAt = new Date();
+    const retried = new Set(usageNoticeRetries);
     const result = await sendUsageNotices(
       new Date(usageNoticesCheckedAt.getTime() - usageNoticeOverlapMs),
       usageNoticeRetries,
     );
     usageNoticesCheckedAt = startedAt;
     usageNoticeRetries = result.failedOrganizationIds;
-    if (result.failedOrganizationIds.length > 0) {
+    // A first failure is retried on the next check; report only a failed
+    // retry.
+    const failedAgain = result.failedOrganizationIds.filter((id) => retried.has(id));
+    if (failedAgain.length > 0) {
       await reportWorkerException(
         new Error(
-          `${result.failedOrganizationIds.length} organizations could not be checked for usage notices`,
+          `${failedAgain.length} organizations could not be checked for usage notices`,
         ),
         { operation: "worker" },
       ).catch(() => undefined);
