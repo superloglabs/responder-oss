@@ -117,7 +117,10 @@ interface UsageNoticeDependencies {
 }
 
 const defaultDependencies: UsageNoticeDependencies = {
-  getSummary: (organizationId) => getAutomationBillingSummary(organizationId),
+  // An organization Autumn cannot report on is retried, not read as having
+  // its balances left.
+  getSummary: (organizationId) =>
+    getAutomationBillingSummary(organizationId, undefined, { failOpen: false }),
   listOrganizations: organizationsToCheckForUsageNotices,
   notify: notifyBillingLimitReached,
   refreshSlackChannels: (organizationId) => refreshSlackChannelResources(organizationId),
@@ -136,6 +139,7 @@ export async function sendUsageNotices(
 ): Promise<{ checked: number; failedOrganizationIds: string[]; notified: number }> {
   const result = { checked: 0, failedOrganizationIds: [] as string[], notified: 0 };
   if (!billingIsEnabled()) return result;
+  const retrying = new Set(retry);
   const organizationIds = new Set([...(await dependencies.listOrganizations(since)), ...retry]);
   for (const organizationId of organizationIds) {
     result.checked += 1;
@@ -152,7 +156,10 @@ export async function sendUsageNotices(
       result.notified += 1;
     } catch (error) {
       result.failedOrganizationIds.push(organizationId);
-      console.error(JSON.stringify({
+      // The next check retries the organization, so only a failed retry is
+      // an error. A brief Autumn outage is a warning.
+      const log = retrying.has(organizationId) ? console.error : console.warn;
+      log(JSON.stringify({
         error: error instanceof Error ? error.message : String(error),
         event: "usage_notice_failed",
         organizationId,
