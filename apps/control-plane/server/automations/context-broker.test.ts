@@ -608,7 +608,7 @@ describe("automation context broker", () => {
       }
     });
 
-    it("refuses calls when a read-only grant gained member access", async () => {
+    it("refuses calls when a grant gained more than member access", async () => {
       const fetchMock = vi.fn();
       vi.stubGlobal("fetch", fetchMock);
       const { app, dependencies } = appFor(railwayClaim("read_only", 0));
@@ -616,7 +616,7 @@ describe("automation context broker", () => {
         tokens: {
           access_token: "fresh-railway-token",
           expires_in: 3600,
-          scope: "openid workspace:member",
+          scope: "openid workspace:admin",
           token_type: "bearer",
         },
       });

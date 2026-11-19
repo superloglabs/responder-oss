@@ -1164,8 +1164,9 @@ export async function startIntegrationConnection(input: {
     }
   }
   if (parsedProvider.data === "railway") {
-    // `mode=redeploy` asks for member access, which can also redeploy and
-    // restart. Without it the connection only reads.
+    // Both modes ask Railway for member access, which logs need. With
+    // `mode=redeploy`, tag mode and automations may also redeploy and
+    // restart; without it the connection only reads.
     const accessLevel = railwayAccessLevelSchema.catch("read_only").parse(input.mode);
     try {
       const connectionState = await createIntegrationConnectionState({
@@ -1181,7 +1182,7 @@ export async function startIntegrationConnection(input: {
         mcpUrl: RAILWAY_API_ORIGIN,
         resourceIndicator: RAILWAY_RESOURCE_INDICATOR,
         redirectUrl: integrationCallbackUrl("railway"),
-        scope: railwayOAuthScope(accessLevel),
+        scope: railwayOAuthScope(),
       });
       const updated = await updateIntegrationConnectionStateMetadata({
         metadata: { encryptedCredentials: encryptCredentials({
@@ -3181,7 +3182,7 @@ export const integrationRoutes = new Hono()
       });
       const accessToken = oauth.tokens?.access_token;
       if (!accessToken) throw new Error("The Railway OAuth access token is missing");
-      assertRailwayGrant(oauth.tokens, credentials.accessLevel);
+      assertRailwayGrant(oauth.tokens);
       const profile = await railwayConnectionProfile({
         accessLevel: credentials.accessLevel,
         accessToken,

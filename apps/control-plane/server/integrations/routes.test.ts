@@ -3991,9 +3991,11 @@ describe("integration callback routing", () => {
     expect(redeploy.status).toBe(302);
     expect(readOnly.status).toBe(302);
     expect(redeploy.headers.get("location")).toBe("https://backboard.railway.com/oauth/auth");
+    // Both ask for member access, which Railway needs to read logs; the mode
+    // decides whether runs may redeploy.
     expect(vi.mocked(beginCustomMcpOAuth).mock.calls.map(([input]) => input.scope)).toEqual([
       "openid email profile offline_access workspace:member",
-      "openid email profile offline_access workspace:viewer",
+      "openid email profile offline_access workspace:member",
     ]);
     expect(beginCustomMcpOAuth).toHaveBeenCalledWith(expect.objectContaining({
       clientMetadataUrl: "https://responder.example/api/integrations/railway/client-metadata.json",
@@ -4089,7 +4091,7 @@ describe("integration callback routing", () => {
     }));
   });
 
-  it("refuses a read-only Railway grant with member access", async () => {
+  it("refuses a Railway grant beyond member access", async () => {
     vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
     vi.mocked(consumeIntegrationConnectionState).mockResolvedValue({
       organizationId: tenant.organizationId,
@@ -4106,7 +4108,7 @@ describe("integration callback routing", () => {
     vi.mocked(finishCustomMcpOAuth).mockResolvedValue({
       tokens: {
         access_token: "railway-access-token",
-        scope: "openid workspace:member",
+        scope: "openid workspace:admin",
         token_type: "bearer",
       },
     });
