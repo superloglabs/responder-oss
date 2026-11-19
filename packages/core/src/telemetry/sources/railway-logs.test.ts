@@ -25,6 +25,26 @@ describe("railwaySeverity", () => {
     expect(railwaySeverity({ message: 'time=2026-11-13T10:00:00Z level=debug msg="cache hit"', severity: "error" }).text).toBe("DEBUG");
   });
 
+  it("reads Postgres's own level after its timestamp and process ID", () => {
+    expect(railwaySeverity({ message: "2026-11-19 13:01:27.463 UTC [130] LOG:  checkpoint complete: wrote 4 buffers", severity: "error" }).text)
+      .toBe("INFO");
+    expect(railwaySeverity({ message: "2026-11-19 13:01:27.031 UTC [130] LOG:  checkpoint starting: time", severity: "error" }).text)
+      .toBe("INFO");
+    expect(railwaySeverity({ message: "2026-11-19 13:05:00.100 UTC [88] postgres@railway NOTICE:  relation exists, skipping", severity: "error" }).text)
+      .toBe("INFO");
+    expect(railwaySeverity({ message: "2026-11-19 13:05:00.100 UTC [88] WARNING:  there is no transaction in progress", severity: "error" }).text)
+      .toBe("WARN");
+    expect(railwaySeverity({ message: "2026-11-19 13:05:00 UTC [88] DEBUG1:  autovacuum", severity: "error" }).text)
+      .toBe("DEBUG");
+  });
+
+  it("keeps Postgres errors as errors", () => {
+    expect(railwaySeverity({ message: '2026-11-19 13:05:00.100 UTC [88] ERROR:  duplicate key value violates unique constraint "users_pkey"', severity: "error" }).text)
+      .toBe("ERROR");
+    expect(railwaySeverity({ message: "2026-11-19 13:05:00.100 UTC [88] FATAL:  password authentication failed for user \"app\"", severity: "error" }).text)
+      .toBe("ERROR");
+  });
+
   it("keeps an error whose text only mentions a level", () => {
     expect(railwaySeverity({ message: "Information about the failed payment", severity: "error" }).text).toBe("ERROR");
     expect(railwaySeverity({ message: "ERROR: payment failed", severity: "error" }).text).toBe("ERROR");
@@ -68,6 +88,47 @@ describe("railwayLogBlocks", () => {
     expect(blocks).toHaveLength(2);
     expect(blocks[0]!.lines).toEqual(messages.slice(0, 10));
     expect(blocks[1]!.lines).toEqual(["Worker restarted"]);
+  });
+
+  it("joins a Postgres error's detail, hint, and statement lines", () => {
+    const blocks = railwayLogBlocks([
+      line('2026-11-19 13:05:00.100 UTC [88] ERROR:  duplicate key value violates unique constraint "users_pkey"', "2026-11-19T13:05:00.100000100Z"),
+      line("2026-11-19 13:05:00.100 UTC [88] DETAIL:  Key (id)=(7) already exists.", "2026-11-19T13:05:00.100000200Z"),
+      line("2026-11-19 13:05:00.100 UTC [88] STATEMENT:  INSERT INTO users (id) VALUES (7)", "2026-11-19T13:05:00.100000300Z"),
+      line("2026-11-19 13:05:01.000 UTC [130] LOG:  checkpoint starting: time", "2026-11-19T13:05:01.000000000Z"),
+    ]);
+    expect(blocks.map((block) => [block.severity.text, block.lines.length])).toEqual([["ERROR", 3], ["INFO", 1]]);
+  });
+
+  it("joins a Postgres detail line to the error of the same process when processes interleave", () => {
+    const blocks = railwayLogBlocks([
+      line('2026-11-19 13:05:00.100 UTC [88] ERROR:  duplicate key value violates unique constraint "users_pkey"', "2026-11-19T13:05:00.100000100Z"),
+      line("2026-11-19 13:05:00.100 UTC [130] LOG:  checkpoint starting: time", "2026-11-19T13:05:00.100000150Z"),
+      line("2026-11-19 13:05:00.100 UTC [88] DETAIL:  Key (id)=(7) already exists.", "2026-11-19T13:05:00.100000200Z"),
+      line("2026-11-19 13:05:00.100 UTC [88] STATEMENT:  INSERT INTO users (id)", "2026-11-19T13:05:00.100000300Z"),
+      line("\tVALUES (7)", "2026-11-19T13:05:00.100000400Z"),
+    ]);
+    expect(blocks.map((block) => [block.severity.text, block.lines])).toEqual([
+      ["ERROR", [
+        '2026-11-19 13:05:00.100 UTC [88] ERROR:  duplicate key value violates unique constraint "users_pkey"',
+        "2026-11-19 13:05:00.100 UTC [88] DETAIL:  Key (id)=(7) already exists.",
+        "2026-11-19 13:05:00.100 UTC [88] STATEMENT:  INSERT INTO users (id)",
+        "\tVALUES (7)",
+      ]],
+      ["INFO", ["2026-11-19 13:05:00.100 UTC [130] LOG:  checkpoint starting: time"]],
+    ]);
+  });
+
+  it("leaves out Railway's own build logs", () => {
+    // Railway's builder writes into the environment's logs with a build ID
+    // as both service and deployment, and no replica.
+    const build = { deploymentId: "4c83fd3e-81a3-58f5-b877-149e98c07d99", serviceId: "4c83fd3e-81a3-58f5-b877-149e98c07d99" };
+    const blocks = railwayLogBlocks([
+      line("CDI setup error /etc/buildkit/cdi: failed to monitor for changes: no such file or directory", "2026-11-19T13:00:00Z", { tags: build }),
+      line("2026/11/19 13:01:19 traces export: rpc error: code = DeadlineExceeded desc = context deadline exceeded", "2026-11-19T13:01:19Z", { tags: build }),
+      line("Error: payment failed", "2026-11-19T13:02:00Z"),
+    ]);
+    expect(blocks.map((block) => block.lines)).toEqual([["Error: payment failed"]]);
   });
 
   it("keeps lines from different replicas apart", () => {

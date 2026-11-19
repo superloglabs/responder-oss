@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { type RailwayFetch, railwayGraphql, railwayProjectServiceNames } from "../../integrations/railway.js";
 import { rfc3339ToNanos } from "./otlp-json.js";
-import { type RailwayLogLine, railwayLogBlocks, railwayLogsToOtlp } from "./railway-logs.js";
+import { isRailwayBuildLog, type RailwayLogLine, railwayLogBlocks, railwayLogsToOtlp } from "./railway-logs.js";
 import type { OtlpLogsRequest } from "./otlp-json.js";
 
 // Reads a Railway environment's runtime logs every minute with the
@@ -120,13 +120,16 @@ export async function pullRailwaySource(input: {
   const end = new Date(now.getTime() - LOG_VISIBILITY_LAG_MS).toISOString();
   if (start >= end) return { error: null, logs: 0, received: false, state, truncated: false };
   try {
-    const { lines, truncated } = await readRailwayLogWindow({
+    const read = await readRailwayLogWindow({
       accessToken: input.accessToken,
       end,
       environmentId: input.environmentId,
       start,
       ...(input.fetch ? { fetch: input.fetch } : {}),
     });
+    const { truncated } = read;
+    // Railway's own build logs name no service of the project.
+    const lines = read.lines.filter((line) => !isRailwayBuildLog(line));
     const projectId = state.projectId ?? lines.find((line) => line.tags?.projectId)?.tags?.projectId ?? undefined;
     const unknown = lines.some((line) => line.tags?.serviceId && !state.services[line.tags.serviceId]);
     const stale = !state.servicesReadAt || now.getTime() - new Date(state.servicesReadAt).getTime() >= SERVICES_EVERY_MS;
