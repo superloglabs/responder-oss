@@ -94,9 +94,18 @@ function harnessFailure(output: string): string {
   return reason ? `Codex automation harness failed: ${reason}` : "Codex automation harness failed";
 }
 
+// Codex checks the ChatGPT workspace of the login before the turn. ChatGPT
+// answers 401 when it has revoked the access token, which happens when the
+// account's plan or workspace changes. The token has not expired, so the
+// stored login is refreshed after the run.
+const loginRejectedFailure = "workspace routing discovery unauthorized (401)";
+const loginRejectedRefusal =
+  "ChatGPT rejected the login of the connected subscription. This happens when the ChatGPT plan or workspace changes. If the next run fails the same way, reconnect ChatGPT in model settings.";
+
 // Names the ChatGPT refusals the organization can fix itself.
 function subscriptionRefusal(output: string, model: string): string | null {
   const failure = turnFailure(output) ?? codexError(output) ?? "";
+  if (failure.includes(loginRejectedFailure)) return loginRejectedRefusal;
   // A ChatGPT account serves fewer models than the included catalog.
   if (failure.includes("model is not supported when using Codex with a ChatGPT account"))
     return `${model} is not available with the connected ChatGPT subscription. Choose another model for this automation.`;
@@ -420,7 +429,12 @@ export async function runCodexAutomation(
   // last attempt names the failure.
   if (!commandSucceeded(attempt)) {
     const refusal = input.model.subscription ? subscriptionRefusal(attempt, input.model.model) : null;
-    if (refusal) throw new AutomationSubscriptionRefusalError(refusal, output, { workStarted: turnDidWork(output) });
+    if (refusal) {
+      throw new AutomationSubscriptionRefusalError(refusal, output, {
+        loginRejected: refusal === loginRejectedRefusal,
+        workStarted: turnDidWork(output),
+      });
+    }
     throw new AutomationHarnessError(harnessFailure(attempt), output);
   }
   return { eventStream: output };

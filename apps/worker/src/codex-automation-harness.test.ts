@@ -426,6 +426,42 @@ it("says so when the ChatGPT workspace behind the subscription is deactivated", 
   await expect(run).rejects.toBeInstanceOf(AutomationSubscriptionRefusalError);
 });
 
+it("asks for a refresh of the stored login when ChatGPT rejects its access token", async () => {
+  const authJson = JSON.stringify({
+    tokens: {
+      id_token: "id-token",
+      access_token: "dtn_secret_access",
+      refresh_token: runOnlyRefreshToken,
+      account_id: "account",
+    },
+  });
+  const rejection = JSON.stringify({ type: "error", message: "workspace routing discovery unauthorized (401)" });
+  const session = {
+    execCommand: vi
+      .fn()
+      .mockResolvedValue("Process exited with code 0\n")
+      .mockResolvedValueOnce("Process exited with code 0\n")
+      .mockResolvedValueOnce("Process exited with code 0\n")
+      .mockResolvedValueOnce("Process exited with code 0\n")
+      .mockResolvedValueOnce("Process exited with code 0\n")
+      .mockResolvedValueOnce(`Process exited with code 1\nOutput:\n${rejection}\n`),
+    materializeEntry: vi.fn().mockResolvedValue(undefined),
+  } as unknown as DaytonaSandboxSession;
+
+  const run = runCodexAutomation(session, {
+    ...input,
+    model: { ...input.model, subscription: { authJson } },
+  });
+
+  await expect(run).rejects.toBeInstanceOf(AutomationSubscriptionRefusalError);
+  await expect(run).rejects.toHaveProperty(
+    "message",
+    "ChatGPT rejected the login of the connected subscription. This happens when the ChatGPT plan or workspace changes. If the next run fails the same way, reconnect ChatGPT in model settings.",
+  );
+  await expect(run).rejects.toHaveProperty("loginRejected", true);
+  await expect(run).rejects.toHaveProperty("workStarted", false);
+});
+
 describe("when the ChatGPT subscription has hit its usage limit", () => {
   const authJson = JSON.stringify({
     tokens: {
