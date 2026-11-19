@@ -112,6 +112,9 @@ export function RailwayConnectionDialog({
           ) : null}
           <p className="siteDialog__oauthNote">
             You’ll continue to Railway and choose the workspaces to share.
+            Railway asks for member access because it shares logs only with
+            workspace members; Superlog changes nothing unless you chose
+            redeploys.
           </p>
 
           <footer className="siteDialog__footer">

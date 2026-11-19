@@ -2487,7 +2487,7 @@ export async function getRuntimeRailwayConnections(
           );
           const accessToken = oauth.tokens?.access_token;
           if (!accessToken) throw new McpOAuthRefreshError(true);
-          assertRailwayGrant(oauth.tokens, credentials.accessLevel);
+          assertRailwayGrant(oauth.tokens);
           return {
             ...(oauth === credentials.oauth
               ? {}

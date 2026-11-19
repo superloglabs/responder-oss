@@ -18,24 +18,23 @@ export const railwayAccessLevels = ["read_only", "redeploy"] as const;
 export const railwayAccessLevelSchema = z.enum(railwayAccessLevels);
 export type RailwayAccessLevel = z.infer<typeof railwayAccessLevelSchema>;
 
-// Railway's consent screen asks the person which workspaces to share. Viewer
-// access reads projects, deployments, logs, and metrics; member access can
-// also redeploy and restart services.
-const workspaceScope: Record<RailwayAccessLevel, string> = {
-  read_only: "workspace:viewer",
-  redeploy: "workspace:member",
-};
+// Railway's consent screen asks the person which workspaces to share. Every
+// connection asks for member access: Railway lets only workspace members read
+// logs, and viewer access reads projects, deployments, and metrics but no
+// logs. Whether a run may redeploy or restart is Superlog's choice, made by
+// the connection's access level when tools are offered (railwayToolNames).
+const workspaceScope = "workspace:member";
 const identityScopes = ["openid", "email", "profile", "offline_access"];
 
-export function railwayOAuthScope(accessLevel: RailwayAccessLevel): string {
-  return [...identityScopes, workspaceScope[accessLevel]].join(" ");
+export function railwayOAuthScope(): string {
+  return [...identityScopes, workspaceScope].join(" ");
 }
 
 export class RailwayScopeError extends Error {
   constructor(readonly scopes: string[]) {
     super(
       scopes.length > 0
-        ? `Railway granted scopes beyond the chosen access: ${scopes.join(", ")}`
+        ? `Railway granted scopes beyond member access: ${scopes.join(", ")}`
         : "Railway did not report the granted scopes",
     );
     this.name = "RailwayScopeError";
@@ -43,19 +42,16 @@ export class RailwayScopeError extends Error {
 }
 
 /**
- * Throws unless the grant stays within the chosen access level. A read-only
- * connection must not hold a scope that can change resources.
+ * Throws unless the grant stays within member access, such as one that could
+ * manage the workspace. Viewer grants made before connections asked for
+ * member access still pass; they read everything except logs.
  */
-export function assertRailwayGrant(
-  tokens: StoredCustomMcpOAuthState["tokens"],
-  accessLevel: RailwayAccessLevel,
-): void {
+export function assertRailwayGrant(tokens: StoredCustomMcpOAuthState["tokens"]): void {
   const scopes = typeof tokens?.scope === "string"
     ? tokens.scope.split(/\s+/u).filter(Boolean)
     : [];
   if (scopes.length === 0) throw new RailwayScopeError([]);
-  const allowed = new Set([...identityScopes, "workspace:viewer", "project:viewer"]);
-  if (accessLevel === "redeploy") allowed.add(workspaceScope.redeploy);
+  const allowed = new Set([...identityScopes, "workspace:viewer", workspaceScope, "project:viewer", "project:member"]);
   const extra = scopes.filter((scope) => !allowed.has(scope));
   if (extra.length > 0) throw new RailwayScopeError(extra);
 }
