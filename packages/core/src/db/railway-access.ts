@@ -53,7 +53,7 @@ export async function railwayAccessToken(
       );
       if (oauth === current.oauth) return { value: current };
       // A refreshed grant with more access than chosen is never stored.
-      assertRailwayGrant(oauth.tokens, current.accessLevel);
+      assertRailwayGrant(oauth.tokens);
       const updated = { ...current, oauth, tokenIssuedAt: now };
       return { encryptedCredentials: encryptCredentials(updated), value: updated };
     },
@@ -63,6 +63,6 @@ export async function railwayAccessToken(
   if (!credentials) return null;
   const accessToken = credentials.oauth.tokens?.access_token;
   if (typeof accessToken !== "string" || !accessToken) throw new McpOAuthRefreshError(true);
-  assertRailwayGrant(credentials.oauth.tokens, credentials.accessLevel);
+  assertRailwayGrant(credentials.oauth.tokens);
   return accessToken;
 }

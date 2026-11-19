@@ -604,7 +604,7 @@ async function railwayCredentials(
   if (typeof credentials?.oauth.tokens?.access_token !== "string") {
     throw new McpOAuthRefreshError(true);
   }
-  assertRailwayGrant(credentials.oauth.tokens, credentials.accessLevel);
+  assertRailwayGrant(credentials.oauth.tokens);
   return credentials;
 }
 

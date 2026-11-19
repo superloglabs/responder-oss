@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   assertRailwayGrant,
   callRailwayTool,
+  isRailwayWriteTool,
   parseRailwayCredentials,
   RAILWAY_GRAPHQL_URL,
   railwayAccessTokenIsFresh,
@@ -29,30 +30,30 @@ const readOnly: RailwayToolConnection = {
 };
 
 describe("Railway access", () => {
-  it("requests viewer access to read and member access to redeploy", () => {
-    expect(railwayOAuthScope("read_only")).toBe("openid email profile offline_access workspace:viewer");
-    expect(railwayOAuthScope("redeploy")).toBe("openid email profile offline_access workspace:member");
+  it("requests member access, which Railway needs to read logs", () => {
+    expect(railwayOAuthScope()).toBe("openid email profile offline_access workspace:member");
   });
 
-  it("refuses a read-only grant that can change resources", () => {
+  it("accepts viewer or member grants and refuses anything more", () => {
     expect(() => assertRailwayGrant(
       { access_token: "t", scope: "openid offline_access workspace:viewer", token_type: "bearer" },
-      "read_only",
     )).not.toThrow();
     expect(() => assertRailwayGrant(
-      { access_token: "t", scope: "openid workspace:member", token_type: "bearer" },
-      "read_only",
-    )).toThrow("workspace:member");
-    expect(() => assertRailwayGrant(
-      { access_token: "t", scope: "openid workspace:member", token_type: "bearer" },
-      "redeploy",
+      { access_token: "t", scope: "openid offline_access workspace:member", token_type: "bearer" },
     )).not.toThrow();
     expect(() => assertRailwayGrant(
       { access_token: "t", scope: "openid workspace:admin", token_type: "bearer" },
-      "redeploy",
     )).toThrow(RailwayScopeError);
-    expect(() => assertRailwayGrant({ access_token: "t", token_type: "bearer" }, "read_only"))
+    expect(() => assertRailwayGrant({ access_token: "t", token_type: "bearer" }))
       .toThrow("did not report the granted scopes");
+  });
+
+  it("offers write tools only to a redeploy connection that allows writes", () => {
+    const tools = (accessLevel: "read_only" | "redeploy", allowWrites: boolean) =>
+      railwayToolNames({ ...readOnly, accessLevel }, allowWrites).filter(isRailwayWriteTool);
+    expect(tools("read_only", true)).toEqual([]);
+    expect(tools("redeploy", false)).toEqual([]);
+    expect(tools("redeploy", true).length).toBeGreaterThan(0);
   });
 
   it("keeps the checked scope when a refresh leaves it out", () => {
