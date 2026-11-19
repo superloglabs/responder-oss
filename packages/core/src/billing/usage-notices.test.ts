@@ -99,7 +99,7 @@ describe("sendUsageNotices", () => {
   });
 
   it("notifies organizations that ran out and keeps going after a failure", async () => {
-    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const since = new Date("2026-10-08T12:00:00Z");
     const listOrganizations = vi.fn().mockResolvedValue(["org-ok", "org-down", "org-out"]);
     const getSummary = vi.fn(async (organizationId: string) => {
@@ -142,6 +142,32 @@ describe("sendUsageNotices", () => {
       refreshSlackChannels: undefined,
       usage: { balance: "usage_credit", investigations: false, modelRunsOnly: true },
       usageBased: true,
+    });
+  });
+
+  it("warns about a first failure and logs an error when the retry fails too", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const dependencies = {
+      getSummary: vi.fn().mockRejectedValue(new Error("Autumn could not be reached")),
+      listOrganizations: vi.fn().mockResolvedValue(["org-new"]),
+      notify: vi.fn(),
+      usesUsageBilling: vi.fn(),
+    };
+
+    await expect(sendUsageNotices(new Date(), ["org-retry"], dependencies)).resolves.toEqual({
+      checked: 2,
+      failedOrganizationIds: ["org-new", "org-retry"],
+      notified: 0,
+    });
+
+    const logged = (spy: typeof warn) =>
+      spy.mock.calls.map(([line]) => JSON.parse(String(line)).organizationId);
+    expect(logged(warn)).toEqual(["org-new"]);
+    expect(logged(error)).toEqual(["org-retry"]);
+    expect(JSON.parse(String(error.mock.calls[0]?.[0]))).toMatchObject({
+      error: "Autumn could not be reached",
+      event: "usage_notice_failed",
     });
   });
 
