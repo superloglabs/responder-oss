@@ -208,6 +208,37 @@ describe("Railway tools", () => {
     expect(text).not.toContain("railway-access-token");
   });
 
+  it("lists a shared workspace's projects without reading the workspace itself", async () => {
+    const fetch = graphqlFetch(({ query, variables }) => {
+      expect(query).not.toContain("workspace(");
+      expect(variables).toEqual({ workspaceId: "w1" });
+      return { data: { projects: { edges: [{ node: {
+        id: "p1",
+        name: "shop",
+        services: { edges: [{ node: { id: "s1", name: "api" } }] },
+        environments: { edges: [{ node: { id: "e1", name: "production", serviceInstances: { edges: [{ node: {
+          serviceId: "s1",
+          serviceName: "api",
+          latestDeployment: { createdAt: "2026-11-19T10:00:00.000Z", id: "d1", status: "SUCCESS" },
+        } }] } } }] },
+      } }] } } };
+    });
+
+    const text = await callRailwayTool({
+      allowWrites: false,
+      args: {},
+      connection: readOnly,
+      name: "list_railway_projects",
+      options: { fetch },
+    });
+
+    expect(JSON.parse(text)).toMatchObject({ workspaces: [{ id: "w1", name: "Acme", projects: [{
+      id: "p1",
+      name: "shop",
+      environments: [{ id: "e1", name: "production", services: [{ name: "api", latestDeployment: { status: "SUCCESS" } }] }],
+    }] }] });
+  });
+
   it("redeploys a deployment with redeploy access", async () => {
     const fetch = graphqlFetch(() => ({
       data: {
@@ -240,8 +271,11 @@ describe("Railway workspaces", () => {
       if (query.includes("me {")) {
         return { data: { me: { workspaces: [{ id: "w1", name: "Acme" }, { id: "w2", name: "Personal" }] } } };
       }
+      // OAuth tokens read a shared workspace's projects, never
+      // `workspace(workspaceId)`.
+      expect(query).not.toContain("workspace(");
       return variables.workspaceId === "w1"
-        ? { data: { workspace: { id: "w1" } } }
+        ? { data: { projects: { edges: [] } } }
         : { data: null, errors: [{ message: "Not Authorized" }] };
     });
 
@@ -259,16 +293,17 @@ describe("railwayEnvironments", () => {
   it("lists every persistent environment of every project, page by page", async () => {
     const fetch = graphqlFetch(({ query, variables }) => {
       expect(query).toContain("isEphemeral: false");
-      if (query.includes("workspace(")) {
+      expect(query).not.toContain("workspace(");
+      if (query.includes("projects(workspaceId")) {
         return variables.after === null
-          ? { data: { workspace: { projects: {
+          ? { data: { projects: {
               edges: [{ node: { environments: environments(["production"], "env-page-2"), id: "p1", name: "shop" } }],
               pageInfo: { endCursor: "project-page-2", hasNextPage: true },
-            } } } }
-          : { data: { workspace: { projects: {
+            } } }
+          : { data: { projects: {
               edges: [{ node: { environments: environments(["staging"]), id: "p2", name: "blog" } }],
               pageInfo: { endCursor: null, hasNextPage: false },
-            } } } };
+            } } };
       }
       expect(variables).toEqual({ after: "env-page-2", projectId: "p1" });
       return { data: { project: { environments: environments(["preview-main"]) } } };
@@ -294,12 +329,12 @@ describe("railwayEnvironments", () => {
   it("reads the shared workspaces when none were stored, and skips one that fails", async () => {
     const fetch = graphqlFetch(({ query, variables }) => {
       if (query.includes("me {")) return { data: { me: { workspaces: [{ id: "w1", name: "Acme" }, { id: "w2", name: "Gone" }] } } };
-      if (query.includes("workspace(workspaceId: $workspaceId) { id }")) return { data: { workspace: { id: variables.workspaceId } } };
+      if (query.includes("first: 1)")) return { data: { projects: { edges: [] } } };
       if (variables.workspaceId === "w2") return { errors: [{ message: "Not Authorized" }] };
-      return { data: { workspace: { projects: {
+      return { data: { projects: {
         edges: [{ node: { environments: environments(["production"]), id: "p1", name: "shop" } }],
         pageInfo: { endCursor: null, hasNextPage: false },
-      } } } };
+      } } };
     });
 
     const listed = await railwayEnvironments({ accessToken: "t", workspaces: [] }, { fetch });
