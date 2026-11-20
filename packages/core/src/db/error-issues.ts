@@ -38,6 +38,8 @@ export type ErrorIssueStore = {
   organizationIds(): Promise<string[]>;
   // Workspaces whose new issues start nothing.
   pausedOrganizationIds(): Promise<Set<string>>;
+  // Workspaces whose logs at WARN level become issues too.
+  warningOrganizationIds(): Promise<Set<string>>;
   record(occurrences: ErrorOccurrences): Promise<RecordedErrorOccurrences>;
   saveCursor(kind: ErrorIssueKind, cursor: ErrorCandidateCursor): Promise<void>;
 };
@@ -70,6 +72,7 @@ export async function withErrorIssueStore<T>(pass: (store: ErrorIssueStore) => P
         return tx.transaction((savepoint) => recordErrorOccurrences(savepoint, occurrences, { notify }));
       },
       saveCursor: (kind, cursor) => saveErrorIssueCursor(tx, kind, cursor),
+      warningOrganizationIds: async () => (await telemetry()).warningIssues,
     });
   });
 }
