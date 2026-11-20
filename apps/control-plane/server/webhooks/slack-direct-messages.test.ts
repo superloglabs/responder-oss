@@ -257,6 +257,17 @@ describe("Slack direct messages", () => {
     expect(mocks.postMessage).not.toHaveBeenCalled();
   });
 
+  it("ignores Slackbot's notices, which arrive in a direct message that can't be answered", async () => {
+    const response = await directMessage({
+      text: "*Superlog* has stopped sharing *<#C123>* with your organisation.",
+      user: "USLACK",
+    });
+
+    expect(await response.json()).toEqual({ ignored: true, ok: true, reason: "direct_message_from_app" });
+    expect(mocks.findAgents).not.toHaveBeenCalled();
+    expect(mocks.postMessage).not.toHaveBeenCalled();
+  });
+
   it("ignores a mention in a direct message, which also arrives as a message", async () => {
     const response = await sign(JSON.stringify({
       event: { channel: "D123", text: "<@UBOT> hi", ts: "1790000002.000100", type: "app_mention", user: "U123" },
