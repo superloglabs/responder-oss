@@ -247,7 +247,7 @@ export async function errorCandidates(
         AND (discovered_at, candidate_id) > (fromUnixTimestamp64Milli({fromMs:Int64}, 'UTC'), toUUID({fromId:String}))
         AND discovered_at < fromUnixTimestamp64Milli({untilMs:Int64}, 'UTC')
         AND (
-          severity_number < {warningSeverity:UInt8}
+          (severity_number < {warningSeverity:UInt8} AND upper(trimBoth(severity)) NOT IN {warningTexts:Array(String)})
           OR severity_number >= {errorSeverity:UInt8}
           OR project_id IN {warningOrganizationIds:Array(String)}
           OR (
@@ -270,6 +270,7 @@ export async function errorCandidates(
       untilMs: input.window.until.getTime(),
       warningOrganizationIds: input.warningOrganizationIds,
       warningSeverity: warningSeverityNumber,
+      warningTexts: [...warningSeverityTexts],
     },
   });
   return result.json<ErrorCandidate>();
