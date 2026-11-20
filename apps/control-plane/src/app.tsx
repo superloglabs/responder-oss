@@ -34,7 +34,6 @@ import { homePath } from "./primary-navigation";
 function PageLoading() {
   return (
     <div
-      aria-busy="true"
       className="flex min-h-[50vh] items-center justify-center text-sm opacity-60"
       role="status"
     >
