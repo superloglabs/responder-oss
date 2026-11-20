@@ -1,4 +1,4 @@
-import { Navigate } from "react-router-dom";
+import { Link, Navigate } from "react-router-dom";
 import "./edition-pages.css";
 
 export function HomePage() {
@@ -83,4 +83,16 @@ export function OpenSourcePage() {
 
 export function ObservabilityPage() {
   return <Navigate replace to="/app" />;
+}
+
+export function NotFoundPage() {
+  return (
+    <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-3 px-6">
+      <h1 className="text-xl font-semibold">Page not found</h1>
+      <p>No page exists at this address.</p>
+      <Link className="underline" to="/app">
+        Open Superlog
+      </Link>
+    </main>
+  );
 }

@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   editionSeoMetadataForPath,
+  notFoundDocument,
   publicDocumentRoutes,
   renderPublicRoute,
 } from "../.prerender/prerender-entry.js";
@@ -39,12 +40,19 @@ function renderHead(metadata) {
   ].join("\n    ");
 }
 
-function renderDocument(pathname, metadata) {
+function renderNotFoundHead() {
+  return [
+    "<title>Page not found · Superlog</title>",
+    '<meta data-responder-seo="" name="robots" content="noindex">',
+  ].join("\n    ");
+}
+
+function renderDocument(pathname, head) {
   const markup = renderPublicRoute(pathname);
   return shell
     .replace(/\s*<meta\s+name="description"[\s\S]*?\/>/, "")
     .replace(/\s*<title>[\s\S]*?<\/title>/, "")
-    .replace("</head>", `    ${renderHead(metadata)}\n  </head>`)
+    .replace("</head>", `    ${head}\n  </head>`)
     .replace('<div id="root"></div>', `<div id="root">${markup}</div>`);
 }
 
@@ -56,9 +64,14 @@ for (const route of publicDocumentRoutes) {
   await mkdir(path.dirname(output), { recursive: true });
   await writeFile(
     output,
-    metadata ? renderDocument(route.pathname, metadata) : shell,
+    metadata ? renderDocument(route.pathname, renderHead(metadata)) : shell,
   );
 }
+
+await writeFile(
+  path.join(distRoot, notFoundDocument.output),
+  renderDocument(notFoundDocument.pathname, renderNotFoundHead()),
+);
 
 await rm(path.join(applicationRoot, ".prerender"), {
   force: true,
