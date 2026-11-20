@@ -441,10 +441,12 @@ describe("groupErrorCandidates with warnings", () => {
     ], { warningOrganizationIds: warnings })).toEqual([]);
   });
 
-  it("still groups a warning that is a failed request by its request", () => {
-    const [group] = groupErrorCandidates([
-      warning("request failed", { attrs: { code: "502", endpoint: "data" } }),
-    ], { warningOrganizationIds: warnings });
-    expect(group?.title).toBe("HTTP 502 data");
+  it("still groups a warning that is a failed request by its request, in any workspace", () => {
+    for (const project_id of [organizationId, otherOrganizationId]) {
+      const [group] = groupErrorCandidates([
+        warning("request failed", { attrs: { code: "502", endpoint: "data" }, project_id }),
+      ], { warningOrganizationIds: warnings });
+      expect(group).toMatchObject({ organizationId: project_id, title: "HTTP 502 data" });
+    }
   });
 });
