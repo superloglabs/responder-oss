@@ -299,7 +299,12 @@ export interface SlackEventAuthor {
   name?: string;
 }
 
-// Who posted the message. A message without a bot or app is a person's.
+// Slackbot posts as this user ID with no bot or app, for example the notice
+// that a Slack Connect channel is no longer shared.
+const slackbotUserId = "USLACK";
+
+// Who posted the message. A message without a bot or app is a person's,
+// except Slackbot's.
 export function slackEventAuthor(
   event: Pick<z.infer<typeof slackMessageSchema>, "app_id" | "bot_id" | "bot_profile" | "user" | "user_profile" | "username">,
 ): SlackEventAuthor | null {
@@ -307,6 +312,9 @@ export function slackEventAuthor(
     ...new Set([event.user, event.bot_id, event.bot_profile?.id, event.app_id, event.bot_profile?.app_id]
       .filter((value): value is string => Boolean(value))),
   ];
+  if (event.user === slackbotUserId && !event.bot_id && !event.app_id && !event.bot_profile) {
+    return { id: slackbotUserId, ids, kind: "app", name: event.username?.trim() || "Slackbot" };
+  }
   if (event.user && !event.bot_id && !event.app_id && !event.bot_profile) {
     const name = event.user_profile?.display_name?.trim() || event.user_profile?.real_name?.trim();
     return { id: event.user, ids, kind: "person", ...(name ? { name } : {}) };
