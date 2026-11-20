@@ -85,6 +85,7 @@ export async function ingestErrorIssues(
   const changes = await dependencies.withStore(async (store) => {
     const organizationIds = await store.organizationIds();
     const paused = await store.pausedOrganizationIds();
+    const warnings = await store.warningOrganizationIds();
     const opened: ErrorIssueChange[] = [];
     const notices: Parameters<typeof notifyErrorIssueOpened>[0][] = [];
     for (const kind of errorIssueKinds) {
@@ -93,9 +94,11 @@ export async function ingestErrorIssues(
         kind,
         limit: candidatesPerPass,
         organizationIds,
+        warningOrganizationIds: [...warnings],
         window,
       });
-      for (const occurrences of groupErrorCandidates(await symbolicate(rows, dependencies.sourceMaps))) {
+      const symbolicated = await symbolicate(rows, dependencies.sourceMaps);
+      for (const occurrences of groupErrorCandidates(symbolicated, { warningOrganizationIds: warnings })) {
         try {
           const recorded = await store.record(occurrences);
           if (recorded.transition === "new" || recorded.transition === "regressed") {

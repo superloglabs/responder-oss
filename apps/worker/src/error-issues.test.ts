@@ -39,6 +39,7 @@ function store(overrides: Partial<ErrorIssueStore> = {}) {
     cursors,
     organizationIds: vi.fn(async () => [organizationId]),
     pausedOrganizationIds: vi.fn(async () => new Set<string>()),
+    warningOrganizationIds: vi.fn(async () => new Set<string>()),
     record: vi.fn<ErrorIssueStore["record"]>(async () => ({ issueId: "issue-1", transition: "new" })),
     saveCursor: vi.fn(async (kind: ErrorIssueKind, cursor: ErrorCandidateCursor) => {
       cursors.set(kind, cursor);
@@ -95,6 +96,30 @@ describe("ingestErrorIssues", () => {
       organizationIds: [organizationId],
     }));
     expect(fake.saveCursor).toHaveBeenCalledTimes(2);
+  });
+
+  it("reads and groups warnings only for the workspaces that make them issues", async () => {
+    const otherOrganizationId = "0b9f6b9e-2f4a-4c1e-9d2b-3f8a6c1d7e03";
+    const fake = store({
+      organizationIds: vi.fn(async () => [organizationId, otherOrganizationId]),
+      warningOrganizationIds: vi.fn(async () => new Set([organizationId])),
+    });
+    const warning = { body: "Phase1 extraction 2/2 raised exception", exception_message: "", exception_stacktrace: "", exception_type: "", severity: "WARN", severity_number: 13 };
+    const deps = dependencies(fake, (kind) => (kind === "log"
+      ? [
+        candidate({ kind, ...warning }),
+        candidate({ candidate_id: "6a0d1c1e-0000-4000-8000-000000000002", kind, project_id: otherOrganizationId, ...warning }),
+      ]
+      : []));
+
+    await ingestErrorIssues(deps);
+
+    expect(deps.candidates).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      kind: "log",
+      warningOrganizationIds: [organizationId],
+    }));
+    expect(fake.record).toHaveBeenCalledTimes(1);
+    expect(fake.record).toHaveBeenCalledWith(expect.objectContaining({ exceptionType: "WARN", organizationId }));
   });
 
   it("marks issues that opened in a workspace whose notifications are paused", async () => {
