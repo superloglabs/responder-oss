@@ -54,9 +54,10 @@ function renderDocument(pathname, head) {
     ? shell
         .replace(/\s*<meta\s+name="description"[\s\S]*?\/>/, "")
         .replace(/\s*<title>[\s\S]*?<\/title>/, "")
-        .replace("</head>", `    ${head}\n  </head>`)
+        .replace("</head>", () => `    ${head}\n  </head>`)
     : shell;
-  return document.replace('<div id="root"></div>', `<div id="root">${markup}</div>`);
+  // Replacer functions insert the text literally, without $ patterns.
+  return document.replace('<div id="root"></div>', () => `<div id="root">${markup}</div>`);
 }
 
 await writeFile(path.join(distRoot, "app.html"), shell);
