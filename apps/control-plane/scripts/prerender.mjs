@@ -47,13 +47,16 @@ function renderNotFoundHead() {
   ].join("\n    ");
 }
 
+// Without a head of its own, a page keeps the shell's title and description.
 function renderDocument(pathname, head) {
   const markup = renderPublicRoute(pathname);
-  return shell
-    .replace(/\s*<meta\s+name="description"[\s\S]*?\/>/, "")
-    .replace(/\s*<title>[\s\S]*?<\/title>/, "")
-    .replace("</head>", `    ${head}\n  </head>`)
-    .replace('<div id="root"></div>', `<div id="root">${markup}</div>`);
+  const document = head
+    ? shell
+        .replace(/\s*<meta\s+name="description"[\s\S]*?\/>/, "")
+        .replace(/\s*<title>[\s\S]*?<\/title>/, "")
+        .replace("</head>", `    ${head}\n  </head>`)
+    : shell;
+  return document.replace('<div id="root"></div>', `<div id="root">${markup}</div>`);
 }
 
 await writeFile(path.join(distRoot, "app.html"), shell);
@@ -64,7 +67,7 @@ for (const route of publicDocumentRoutes) {
   await mkdir(path.dirname(output), { recursive: true });
   await writeFile(
     output,
-    metadata ? renderDocument(route.pathname, renderHead(metadata)) : shell,
+    renderDocument(route.pathname, metadata ? renderHead(metadata) : undefined),
   );
 }
 
