@@ -31,6 +31,18 @@ import { usePageMetadata } from "./use-page-metadata";
 import { useOrganizationCapabilities } from "./organization-capabilities";
 import { homePath } from "./primary-navigation";
 
+function PageLoading() {
+  return (
+    <div
+      aria-busy="true"
+      className="flex min-h-[50vh] items-center justify-center text-sm opacity-60"
+      role="status"
+    >
+      Loading…
+    </div>
+  );
+}
+
 // Product screens load on first visit, so public pages do not download them.
 function lazyNamed<Module, Name extends keyof Module>(
   load: () => Promise<Module>,
@@ -41,7 +53,7 @@ function lazyNamed<Module, Name extends keyof Module>(
   }));
   function LazyPage(props: object) {
     return (
-      <Suspense fallback={null}>
+      <Suspense fallback={<PageLoading />}>
         <Page {...props} />
       </Suspense>
     );
