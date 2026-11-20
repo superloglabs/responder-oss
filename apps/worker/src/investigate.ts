@@ -1360,7 +1360,11 @@ export async function runInvestigationAgent(
         environment,
         new Date(),
       );
-      if (event) await writeTrace(event);
+      // A trace row that cannot be stored is logged by writeTrace and skipped.
+      // Leaving this loop early abandons the agent run, and its unobserved
+      // failure exits the whole worker process through the agents SDK's
+      // unhandled rejection handler.
+      if (event) await writeTrace(event).catch(() => undefined);
     }
     await result.completed;
     if (typeof result.finalOutput !== "string" || !result.finalOutput.trim()) {
