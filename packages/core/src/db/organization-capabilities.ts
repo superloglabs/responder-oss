@@ -66,10 +66,11 @@ type Database = ReturnType<typeof getDatabase>;
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 
 // Every workspace that receives telemetry, such as for grouping errors into
-// issues, and which of them have Signal without the telemetry product.
+// issues, which of them have Signal without the telemetry product, and which
+// of them make their warnings issues too.
 export async function listTelemetryOrganizations(
   executor: Database | Transaction = getDatabase(),
-): Promise<{ organizationIds: string[]; signalOnly: Set<string> }> {
+): Promise<{ organizationIds: string[]; signalOnly: Set<string>; warningIssues: Set<string> }> {
   const rows = await executor
     .select({
       capability: organizationCapabilities.capability,
@@ -78,17 +79,22 @@ export async function listTelemetryOrganizations(
     .from(organizationCapabilities)
     .where(
       and(
-        inArray(organizationCapabilities.capability, [...telemetryDataCapabilities]),
+        inArray(organizationCapabilities.capability, [...telemetryDataCapabilities, "warning_issues"]),
         eq(organizationCapabilities.enabled, true),
       ),
     );
-  const product = new Set(
-    rows.filter((row) => row.capability === "telemetry").map((row) => row.organizationId),
-  );
-  const organizationIds = [...new Set(rows.map((row) => row.organizationId))];
+  const withCapability = (capability: OrganizationCapability) =>
+    new Set(rows.filter((row) => row.capability === capability).map((row) => row.organizationId));
+  const product = withCapability("telemetry");
+  const warnings = withCapability("warning_issues");
+  const receiving = new Set<string>(telemetryDataCapabilities);
+  const organizationIds = [
+    ...new Set(rows.filter((row) => receiving.has(row.capability)).map((row) => row.organizationId)),
+  ];
   return {
     organizationIds,
     signalOnly: new Set(organizationIds.filter((id) => !product.has(id))),
+    warningIssues: new Set(organizationIds.filter((id) => warnings.has(id))),
   };
 }
 

@@ -9,7 +9,12 @@ import {
   previousFingerprint,
   previousFingerprintLog,
 } from "./fingerprint.js";
-import { failedRequestMessage, failedRequestOf } from "./failed-requests.js";
+import {
+  failedRequestMessage,
+  failedRequestOf,
+  failedRequestRouteAttributes,
+  failedRequestStatusAttributes,
+} from "./failed-requests.js";
 import { fingerprintLogV1, fingerprintV1 } from "./fingerprint-v1.js";
 import { decodeReactError, minifiedMessageAttribute } from "./react-errors.js";
 
@@ -158,6 +163,10 @@ export const errorCandidateSettleMs = 30_000;
 // severity text when a source sets only that.
 const errorSeverityNumber = 17;
 const errorSeverityTexts = new Set(["ERROR", "FATAL", "CRITICAL", "ALERT", "EMERGENCY"]);
+// A log is a warning by its severity number, 13 to 16, or by its severity
+// text when a source sets only that.
+const warningSeverityNumber = 13;
+const warningSeverityTexts = new Set(["WARN", "WARNING"]);
 const maximumMessageLength = 4_000;
 const maximumStacktraceLength = 16_000;
 const maximumTitleLength = 200;
@@ -208,12 +217,16 @@ export function nextErrorCandidateCursor(
   return { candidateId: zeroCandidateId, discoveredAt: window.until };
 }
 
+// The projection holds every workspace's warnings. A warning is read only
+// for a workspace that makes warnings issues, or when it is a failed request,
+// so the other workspaces' warnings are not read only to be dropped.
 export async function errorCandidates(
   client: TelemetryClient,
   input: {
     kind: ErrorIssueKind;
     limit: number;
     organizationIds: string[];
+    warningOrganizationIds: string[];
     window: { cursor: ErrorCandidateCursor; until: Date };
   },
 ): Promise<ErrorCandidate[]> {
@@ -233,6 +246,15 @@ export async function errorCandidates(
         AND project_id IN {organizationIds:Array(String)}
         AND (discovered_at, candidate_id) > (fromUnixTimestamp64Milli({fromMs:Int64}, 'UTC'), toUUID({fromId:String}))
         AND discovered_at < fromUnixTimestamp64Milli({untilMs:Int64}, 'UTC')
+        AND (
+          (severity_number < {warningSeverity:UInt8} AND upper(trimBoth(severity)) NOT IN {warningTexts:Array(String)})
+          OR severity_number >= {errorSeverity:UInt8}
+          OR project_id IN {warningOrganizationIds:Array(String)}
+          OR (
+            arrayExists(name -> match(trimBoth(attrs[name]), '^5[0-9][0-9]$'), {statusAttributes:Array(String)})
+            AND arrayExists(name -> trimBoth(attrs[name]) != '', {routeAttributes:Array(String)})
+          )
+        )
       ORDER BY discovered_at, candidate_id
       LIMIT {limit:UInt32}
     `,
@@ -241,8 +263,14 @@ export async function errorCandidates(
       fromMs: input.window.cursor.discoveredAt.getTime(),
       kind: input.kind,
       limit: input.limit,
+      errorSeverity: errorSeverityNumber,
       organizationIds: input.organizationIds,
+      routeAttributes: [...failedRequestRouteAttributes],
+      statusAttributes: [...failedRequestStatusAttributes],
       untilMs: input.window.until.getTime(),
+      warningOrganizationIds: input.warningOrganizationIds,
+      warningSeverity: warningSeverityNumber,
+      warningTexts: [...warningSeverityTexts],
     },
   });
   return result.json<ErrorCandidate>();
@@ -298,21 +326,34 @@ function withReactMessage(candidate: ErrorCandidate): ErrorCandidate {
   };
 }
 
+function isWarning(candidate: ErrorCandidate): boolean {
+  const number = Number(candidate.severity_number);
+  if (number >= warningSeverityNumber && number < errorSeverityNumber) return true;
+  return number === 0 && warningSeverityTexts.has(candidate.severity.trim().toUpperCase());
+}
+
 // Fingerprints each candidate and collapses those with the same workspace and
 // fingerprint, so an exception storm is one write per issue. The newest
 // occurrence becomes the sample.
-export function groupErrorCandidates(candidates: ErrorCandidate[]): ErrorOccurrences[] {
+export function groupErrorCandidates(
+  candidates: ErrorCandidate[],
+  options: { warningOrganizationIds?: ReadonlySet<string> } = {},
+): ErrorOccurrences[] {
   const groups = new Map<string, ErrorOccurrences>();
   for (const received of candidates) {
     const candidate = withReactMessage(received);
-    // A log below error level is here only as a failed request. Its issue is
+    // A log below error level is here as a failed request, or as a warning
+    // of a workspace that makes warnings issues. A failed request's issue is
     // the request's status, route, and error text; the line around them is
-    // not an error message. Without those fields the line is not an error.
+    // not an error message. A warning's issue is its own message. Any other
+    // line is not an error.
     const belowError = candidate.kind === "log" && candidate.severity_number !== undefined &&
       Number(candidate.severity_number) < errorSeverityNumber &&
       !errorSeverityTexts.has(candidate.severity.trim().toUpperCase());
     const failedRequest = belowError ? failedRequestOf(candidate.attrs) : null;
-    if (belowError && !failedRequest) continue;
+    const warning = belowError && !failedRequest && isWarning(candidate) &&
+      (options.warningOrganizationIds?.has(candidate.project_id) ?? false);
+    if (belowError && !failedRequest && !warning) continue;
     // A log whose body is a Python traceback has its stack there.
     const bodyTraceback = candidate.kind === "log" && !candidate.exception_stacktrace
       ? pythonTracebackException(candidate.body)

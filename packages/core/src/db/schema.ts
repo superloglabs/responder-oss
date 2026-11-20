@@ -879,6 +879,9 @@ export const organizationCapabilityValues = [
   // Lets a workspace invite teammates whatever its plan, for a deal agreed
   // by hand.
   "unlimited_seats",
+  // Makes the workspace's logs at WARN level error issues too, for a team
+  // that logs real failures as warnings.
+  "warning_issues",
 ] as const;
 
 export type OrganizationCapability = (typeof organizationCapabilityValues)[number];

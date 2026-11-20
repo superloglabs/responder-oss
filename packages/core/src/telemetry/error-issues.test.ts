@@ -388,3 +388,65 @@ describe("groupErrorCandidates with a failed request log", () => {
     ])).toEqual([]);
   });
 });
+
+describe("groupErrorCandidates with warnings", () => {
+  const otherOrganizationId = "5c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f";
+  const warnings = new Set([organizationId]);
+  function warning(body: string, overrides: Partial<ErrorCandidate> = {}): ErrorCandidate {
+    return candidate({
+      attrs: { "code.file.path": "/app/analyze_tender.py", "code.line.number": "6396" },
+      body,
+      exception_message: "",
+      exception_stacktrace: "",
+      exception_type: "",
+      kind: "log",
+      severity: "WARN",
+      severity_number: 13,
+      span_name: "",
+      ...overrides,
+    });
+  }
+  const refusal = "[company 776] Phase1 extraction 2/2 raised exception: Error code: 400 - invalid_prompt";
+
+  it("makes a warning an issue of its own in a workspace that asked for it", () => {
+    const groups = groupErrorCandidates([
+      warning(refusal),
+      warning("[company 63] Phase1 extraction 2/2 raised exception: Error code: 400 - invalid_prompt"),
+    ], { warningOrganizationIds: warnings });
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toMatchObject({
+      eventCount: 2,
+      exceptionType: "WARN",
+      kind: "log",
+      organizationId,
+      title: "WARN: [company 63] Phase1 extraction 2/2 raised exception: Error code: 400 - invalid_prompt",
+    });
+    expect(groups[0]!.sample.severity).toBe("WARN");
+  });
+
+  it("drops the warnings of every other workspace", () => {
+    expect(groupErrorCandidates([warning(refusal, { project_id: otherOrganizationId })], { warningOrganizationIds: warnings })).toEqual([]);
+    expect(groupErrorCandidates([warning(refusal)])).toEqual([]);
+  });
+
+  it("knows a warning by its severity text when a source sets no number", () => {
+    const [group] = groupErrorCandidates([warning(refusal, { severity: "warning", severity_number: 0 })], { warningOrganizationIds: warnings });
+    expect(group?.exceptionType).toBe("warning");
+  });
+
+  it("keeps lines below warning level out", () => {
+    expect(groupErrorCandidates([
+      warning("Tender 1480219 analyzed", { severity: "INFO", severity_number: 9 }),
+      warning("retrying", { severity: "DEBUG", severity_number: 5 }),
+    ], { warningOrganizationIds: warnings })).toEqual([]);
+  });
+
+  it("still groups a warning that is a failed request by its request, in any workspace", () => {
+    for (const project_id of [organizationId, otherOrganizationId]) {
+      const [group] = groupErrorCandidates([
+        warning("request failed", { attrs: { code: "502", endpoint: "data" }, project_id }),
+      ], { warningOrganizationIds: warnings });
+      expect(group).toMatchObject({ organizationId: project_id, title: "HTTP 502 data" });
+    }
+  });
+});

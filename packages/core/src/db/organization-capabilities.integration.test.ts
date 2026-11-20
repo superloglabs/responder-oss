@@ -18,12 +18,16 @@ describe.skipIf(!testUrl)("organization capabilities (PostgreSQL)", () => {
     signal: randomUUID(),
     signalOff: randomUUID(),
     telemetry: randomUUID(),
+    warningsOnly: randomUUID(),
   };
   const grants: Array<[string, OrganizationCapability, boolean]> = [
     [workspaces.automationsOnly, "automations", true],
     [workspaces.signal, "signal", true],
     [workspaces.signalOff, "signal", false],
     [workspaces.telemetry, "telemetry", true],
+    [workspaces.signal, "warning_issues", true],
+    [workspaces.telemetry, "warning_issues", false],
+    [workspaces.warningsOnly, "warning_issues", true],
   ];
 
   beforeAll(async () => {
@@ -55,6 +59,12 @@ describe.skipIf(!testUrl)("organization capabilities (PostgreSQL)", () => {
     expect(receiving.organizationIds).not.toContain(workspaces.automationsOnly);
     expect(receiving.signalOnly.has(workspaces.signal)).toBe(true);
     expect(receiving.signalOnly.has(workspaces.telemetry)).toBe(false);
+    // Warnings become issues only where the capability is on and telemetry
+    // is received at all.
+    expect(receiving.warningIssues.has(workspaces.signal)).toBe(true);
+    expect(receiving.warningIssues.has(workspaces.telemetry)).toBe(false);
+    expect(receiving.warningIssues.has(workspaces.warningsOnly)).toBe(false);
+    expect(receiving.organizationIds).not.toContain(workspaces.warningsOnly);
   });
 
   it("groups a Signal workspace's errors without waking anything for them", async () => {
