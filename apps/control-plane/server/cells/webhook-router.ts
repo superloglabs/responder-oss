@@ -1,4 +1,5 @@
 import type { Context, MiddlewareHandler } from "hono";
+import { fetchOnFreshConnection } from "../../../../packages/core/src/cell-forward.js";
 import { type Cell, type CellDirectory, cellDirectory } from "../../../../packages/core/src/cells.js";
 import {
   hasWebhookTenant,
@@ -59,13 +60,16 @@ const defaultDependencies: CellWebhookRouterDependencies = {
   askCell: askCellForTenant,
   cellToken: () => process.env.RESPONDER_CELL_TOKEN?.trim() || undefined,
   directory: () => cellDirectory(),
-  forward: (url, init) => fetch(url, init),
+  forward: fetchOnFreshConnection,
   hasTenant: hasWebhookTenant,
   now: () => Date.now(),
 };
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  if (!(error instanceof Error)) return String(error);
+  // fetch reports every network failure as "fetch failed" and keeps the
+  // reason, such as "read ECONNRESET", in its cause.
+  return error.cause instanceof Error ? `${error.message}: ${error.cause.message}` : error.message;
 }
 
 // The other cells that hold the tenant. Throws when no holder was found but
