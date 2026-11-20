@@ -1,47 +1,6 @@
 import { SuperlogRoutes } from "@superlog/react/router";
+import { type ComponentType, lazy, Suspense } from "react";
 import { Navigate, Outlet, Route, useLocation } from "react-router-dom";
-import { AuthGate } from "./components/auth-gate";
-import { AgentDetailPage, AgentEditRedirect } from "./pages/agent-detail";
-import { AgentCreatePage } from "./pages/agent-create";
-import { AgentContextStoryboardPage } from "./pages/agent-context-storyboard";
-import { AgentsPage } from "./pages/agents";
-import { AutomationsPage } from "./pages/automations";
-import { AutomationConnectionCompletePage } from "./pages/automation-connection-complete";
-import { AutomationCreatePage } from "./pages/automation-create";
-import { AutomationDetailPage, AutomationEditRedirect } from "./pages/automation-detail";
-import { AutomationRunPage, AutomationTestChatPage } from "./pages/automation-run";
-import { BillingPage } from "./pages/billing";
-import { OAuthAuthorizePage } from "./pages/oauth-authorize";
-import { ResetPasswordPage } from "./pages/reset-password";
-import { OnboardingPage } from "./pages/onboarding";
-import { AlertPage } from "./pages/alert";
-import { AlertDetailPage, AlertActivationPage } from "./pages/alert-detail";
-import { AlertsPage } from "./pages/alerts";
-import { SyntheticCheckPage } from "./pages/synthetic-check";
-import { SyntheticCheckEditPage } from "./pages/synthetic-check-edit";
-import { SyntheticsPage } from "./pages/synthetics";
-import { ErrorIssuePage } from "./pages/error-issue";
-import { ErrorsPage } from "./pages/errors";
-import { DashboardPage } from "./pages/dashboard";
-import { AiModelsPage } from "./pages/ai-models";
-import { DashboardsPage } from "./pages/dashboards";
-import { DesignLibraryPage } from "./pages/design-library";
-import { InvestigationDetailPage } from "./pages/investigation-detail";
-import { IssueDetailPage } from "./pages/issue-detail";
-import { IssuesPage } from "./pages/issues";
-import { LogsPage } from "./pages/logs";
-import { MetricExplorerPage } from "./pages/metric-explorer";
-import { PullRequestDetailPage } from "./pages/pull-request-detail";
-import { PullRequestsPage } from "./pages/pull-requests";
-import { ScanDetailPage } from "./pages/scan-detail";
-import { ScansPage } from "./pages/scans";
-import { SharedAutomationTemplatePage } from "./pages/shared-automation-template";
-import { TraceDetailPage } from "./pages/trace-detail";
-import { TelemetryOverviewPage } from "./pages/telemetry-overview";
-import { TelemetrySetupPage } from "./pages/telemetry-setup";
-import { TelemetrySourcePage } from "./pages/telemetry-source";
-import { TracesPage } from "./pages/traces";
-import { TracesOverviewPage } from "./pages/traces-overview";
 import { editionSeoMetadataForPath } from "./edition-metadata";
 import {
   BlogArticlePage,
@@ -54,6 +13,7 @@ import {
   HomePage,
   IntegrationPage,
   IntegrationsPage,
+  NotFoundPage,
   ObservabilityPage,
   OpenSourcePage,
   PrivacyPage,
@@ -66,27 +26,105 @@ import {
   TeamPage,
   TermsPage,
 } from "./edition-pages";
-import { SettingsPage } from "./pages/settings";
-import { SkillEditorPage } from "./pages/skill-editor";
-import { SkillsPage } from "./pages/skills";
-import { MemoriesPage } from "./pages/memories";
-import { MemoryEditorPage } from "./pages/memory-editor";
-import { SuggestionsPage } from "./pages/suggestions";
-import { SuperuserUsersPage } from "./pages/superuser-users";
-import { WorkspaceSettingsPage } from "./pages/workspace-settings";
-import { ModelAccessSettingsPage } from "./pages/model-access-settings";
-import { ApiKeySettingsPage } from "./pages/api-key-settings";
-import { IngestKeySettingsPage } from "./pages/ingest-key-settings";
-import { McpSettingsPage } from "./pages/mcp-settings";
-import { TagModeSettingsPage } from "./pages/tag-mode-settings";
 import { blogArticlePath } from "./public-routes";
 import { usePageMetadata } from "./use-page-metadata";
 import { useOrganizationCapabilities } from "./organization-capabilities";
 import { homePath } from "./primary-navigation";
-import { SignalHome, SignalLayout } from "./signal/layout";
-import { SignalSetup } from "./signal/setup";
-import { SignalFindings, SignalFindingDetail } from "./signal/findings";
-import { SignalUsage } from "./signal/usage";
+
+function PageLoading() {
+  return (
+    <div
+      className="flex min-h-[50vh] items-center justify-center text-sm opacity-60"
+      role="status"
+    >
+      Loading…
+    </div>
+  );
+}
+
+// Product screens load on first visit, so public pages do not download them.
+function lazyNamed<Module, Name extends keyof Module>(
+  load: () => Promise<Module>,
+  name: Name,
+): Module[Name] {
+  const Page = lazy(async () => ({
+    default: (await load())[name] as ComponentType<object>,
+  }));
+  function LazyPage(props: object) {
+    return (
+      <Suspense fallback={<PageLoading />}>
+        <Page {...props} />
+      </Suspense>
+    );
+  }
+  return LazyPage as Module[Name];
+}
+
+const AuthGate = lazyNamed(() => import("./components/auth-gate"), "AuthGate");
+const AgentDetailPage = lazyNamed(() => import("./pages/agent-detail"), "AgentDetailPage");
+const AgentEditRedirect = lazyNamed(() => import("./pages/agent-detail"), "AgentEditRedirect");
+const AgentCreatePage = lazyNamed(() => import("./pages/agent-create"), "AgentCreatePage");
+const AgentContextStoryboardPage = lazyNamed(() => import("./pages/agent-context-storyboard"), "AgentContextStoryboardPage");
+const AgentsPage = lazyNamed(() => import("./pages/agents"), "AgentsPage");
+const AutomationsPage = lazyNamed(() => import("./pages/automations"), "AutomationsPage");
+const AutomationConnectionCompletePage = lazyNamed(() => import("./pages/automation-connection-complete"), "AutomationConnectionCompletePage");
+const AutomationCreatePage = lazyNamed(() => import("./pages/automation-create"), "AutomationCreatePage");
+const AutomationDetailPage = lazyNamed(() => import("./pages/automation-detail"), "AutomationDetailPage");
+const AutomationEditRedirect = lazyNamed(() => import("./pages/automation-detail"), "AutomationEditRedirect");
+const AutomationRunPage = lazyNamed(() => import("./pages/automation-run"), "AutomationRunPage");
+const AutomationTestChatPage = lazyNamed(() => import("./pages/automation-run"), "AutomationTestChatPage");
+const BillingPage = lazyNamed(() => import("./pages/billing"), "BillingPage");
+const OAuthAuthorizePage = lazyNamed(() => import("./pages/oauth-authorize"), "OAuthAuthorizePage");
+const ResetPasswordPage = lazyNamed(() => import("./pages/reset-password"), "ResetPasswordPage");
+const OnboardingPage = lazyNamed(() => import("./pages/onboarding"), "OnboardingPage");
+const AlertPage = lazyNamed(() => import("./pages/alert"), "AlertPage");
+const AlertDetailPage = lazyNamed(() => import("./pages/alert-detail"), "AlertDetailPage");
+const AlertActivationPage = lazyNamed(() => import("./pages/alert-detail"), "AlertActivationPage");
+const AlertsPage = lazyNamed(() => import("./pages/alerts"), "AlertsPage");
+const SyntheticCheckPage = lazyNamed(() => import("./pages/synthetic-check"), "SyntheticCheckPage");
+const SyntheticCheckEditPage = lazyNamed(() => import("./pages/synthetic-check-edit"), "SyntheticCheckEditPage");
+const SyntheticsPage = lazyNamed(() => import("./pages/synthetics"), "SyntheticsPage");
+const ErrorIssuePage = lazyNamed(() => import("./pages/error-issue"), "ErrorIssuePage");
+const ErrorsPage = lazyNamed(() => import("./pages/errors"), "ErrorsPage");
+const DashboardPage = lazyNamed(() => import("./pages/dashboard"), "DashboardPage");
+const AiModelsPage = lazyNamed(() => import("./pages/ai-models"), "AiModelsPage");
+const DashboardsPage = lazyNamed(() => import("./pages/dashboards"), "DashboardsPage");
+const DesignLibraryPage = lazyNamed(() => import("./pages/design-library"), "DesignLibraryPage");
+const InvestigationDetailPage = lazyNamed(() => import("./pages/investigation-detail"), "InvestigationDetailPage");
+const IssueDetailPage = lazyNamed(() => import("./pages/issue-detail"), "IssueDetailPage");
+const IssuesPage = lazyNamed(() => import("./pages/issues"), "IssuesPage");
+const LogsPage = lazyNamed(() => import("./pages/logs"), "LogsPage");
+const MetricExplorerPage = lazyNamed(() => import("./pages/metric-explorer"), "MetricExplorerPage");
+const PullRequestDetailPage = lazyNamed(() => import("./pages/pull-request-detail"), "PullRequestDetailPage");
+const PullRequestsPage = lazyNamed(() => import("./pages/pull-requests"), "PullRequestsPage");
+const ScanDetailPage = lazyNamed(() => import("./pages/scan-detail"), "ScanDetailPage");
+const ScansPage = lazyNamed(() => import("./pages/scans"), "ScansPage");
+const SharedAutomationTemplatePage = lazyNamed(() => import("./pages/shared-automation-template"), "SharedAutomationTemplatePage");
+const TraceDetailPage = lazyNamed(() => import("./pages/trace-detail"), "TraceDetailPage");
+const TelemetryOverviewPage = lazyNamed(() => import("./pages/telemetry-overview"), "TelemetryOverviewPage");
+const TelemetrySetupPage = lazyNamed(() => import("./pages/telemetry-setup"), "TelemetrySetupPage");
+const TelemetrySourcePage = lazyNamed(() => import("./pages/telemetry-source"), "TelemetrySourcePage");
+const TracesPage = lazyNamed(() => import("./pages/traces"), "TracesPage");
+const TracesOverviewPage = lazyNamed(() => import("./pages/traces-overview"), "TracesOverviewPage");
+const SettingsPage = lazyNamed(() => import("./pages/settings"), "SettingsPage");
+const SkillEditorPage = lazyNamed(() => import("./pages/skill-editor"), "SkillEditorPage");
+const SkillsPage = lazyNamed(() => import("./pages/skills"), "SkillsPage");
+const MemoriesPage = lazyNamed(() => import("./pages/memories"), "MemoriesPage");
+const MemoryEditorPage = lazyNamed(() => import("./pages/memory-editor"), "MemoryEditorPage");
+const SuggestionsPage = lazyNamed(() => import("./pages/suggestions"), "SuggestionsPage");
+const SuperuserUsersPage = lazyNamed(() => import("./pages/superuser-users"), "SuperuserUsersPage");
+const WorkspaceSettingsPage = lazyNamed(() => import("./pages/workspace-settings"), "WorkspaceSettingsPage");
+const ModelAccessSettingsPage = lazyNamed(() => import("./pages/model-access-settings"), "ModelAccessSettingsPage");
+const ApiKeySettingsPage = lazyNamed(() => import("./pages/api-key-settings"), "ApiKeySettingsPage");
+const IngestKeySettingsPage = lazyNamed(() => import("./pages/ingest-key-settings"), "IngestKeySettingsPage");
+const McpSettingsPage = lazyNamed(() => import("./pages/mcp-settings"), "McpSettingsPage");
+const TagModeSettingsPage = lazyNamed(() => import("./pages/tag-mode-settings"), "TagModeSettingsPage");
+const SignalHome = lazyNamed(() => import("./signal/layout"), "SignalHome");
+const SignalLayout = lazyNamed(() => import("./signal/layout"), "SignalLayout");
+const SignalSetup = lazyNamed(() => import("./signal/setup"), "SignalSetup");
+const SignalFindings = lazyNamed(() => import("./signal/findings"), "SignalFindings");
+const SignalFindingDetail = lazyNamed(() => import("./signal/findings"), "SignalFindingDetail");
+const SignalUsage = lazyNamed(() => import("./signal/usage"), "SignalUsage");
 
 function ProtectedApp() {
   return (
@@ -253,7 +291,7 @@ export function App() {
         <Route element={<IngestKeySettingsPage />} path="/settings/ingest-keys" />
         <Route element={<SuperuserUsersPage />} path="/superuser/users" />
       </Route>
-      <Route element={<Navigate replace to="/" />} path="*" />
+      <Route element={<NotFoundPage />} path="*" />
     </SuperlogRoutes>
   );
 }
