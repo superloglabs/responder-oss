@@ -220,6 +220,10 @@ export function nextErrorCandidateCursor(
 // The projection holds every workspace's warnings. A warning is read only
 // for a workspace that makes warnings issues, or when it is a failed request,
 // so the other workspaces' warnings are not read only to be dropped.
+//
+// ClickHouse skips no parts or granules for a tuple comparison, so the plain
+// lower bound on discovered_at is what limits the read to the window. Without
+// it each pass reads the whole table.
 export async function errorCandidates(
   client: TelemetryClient,
   input: {
@@ -244,6 +248,7 @@ export async function errorCandidates(
       FROM otel_issue_candidates
       WHERE kind = {kind:String}
         AND project_id IN {organizationIds:Array(String)}
+        AND discovered_at >= fromUnixTimestamp64Milli({fromMs:Int64}, 'UTC')
         AND (discovered_at, candidate_id) > (fromUnixTimestamp64Milli({fromMs:Int64}, 'UTC'), toUUID({fromId:String}))
         AND discovered_at < fromUnixTimestamp64Milli({untilMs:Int64}, 'UTC')
         AND (

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import type { TelemetryClient } from "./client.js";
 import {
   type ErrorCandidate,
+  errorCandidates,
   errorCandidateSettleMs,
   errorCandidateWindow,
   errorCandidateWindowMs,
@@ -251,6 +253,32 @@ describe("error candidate cursor", () => {
     const cursor = { candidateId: "b", discoveredAt: settled };
     const window = errorCandidateWindow(cursor, now);
     expect(nextErrorCandidateCursor(window, [], 2)).toBe(cursor);
+  });
+});
+
+describe("errorCandidates", () => {
+  // ClickHouse skips no granules for the tuple comparison, so without a plain
+  // bound each pass reads the whole projection and times out.
+  it("bounds discovered_at below with a plain comparison", async () => {
+    const calls: { params: Record<string, unknown>; query: string }[] = [];
+    const client = {
+      query: async ({ query, query_params }: { query: string; query_params: Record<string, unknown> }) => {
+        calls.push({ params: query_params, query });
+        return { json: async () => [] };
+      },
+    } as unknown as TelemetryClient;
+    const discoveredAt = new Date("2026-11-20T09:58:40.671Z");
+
+    await errorCandidates(client, {
+      kind: "log",
+      limit: 500,
+      organizationIds: [organizationId],
+      warningOrganizationIds: [],
+      window: { cursor: { candidateId: zeroCandidateId, discoveredAt }, until: new Date(discoveredAt.getTime() + 60_000) },
+    });
+
+    expect(calls[0]!.query).toContain("discovered_at >= fromUnixTimestamp64Milli({fromMs:Int64}, 'UTC')");
+    expect(calls[0]!.params.fromMs).toBe(discoveredAt.getTime());
   });
 });
 
