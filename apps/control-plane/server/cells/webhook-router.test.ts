@@ -206,6 +206,57 @@ describe("cell webhook router", () => {
     expect(handled).not.toHaveBeenCalled();
   });
 
+  it("sends the request again once when the pooled connection was closed", async () => {
+    const reset = new TypeError("fetch failed", {
+      cause: Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" }),
+    });
+    const forward = vi
+      .fn<CellWebhookRouterDependencies["forward"]>()
+      .mockRejectedValueOnce(reset)
+      .mockResolvedValueOnce(Response.json({ ok: true, from: "us" }, { status: 202 }));
+    const { app, handled } = harness({ forward });
+
+    const response = await app.request("/api/webhooks/slack", slackRequest());
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toEqual({ ok: true, from: "us" });
+    expect(handled).not.toHaveBeenCalled();
+    expect(forward).toHaveBeenCalledTimes(2);
+    const [[firstUrl, first], [secondUrl, second]] = forward.mock.calls as [
+      [string, RequestInit],
+      [string, RequestInit],
+    ];
+    expect(secondUrl).toBe(firstUrl);
+    expect(second.body).toBe(first.body);
+    expect(second.signal).not.toBe(first.signal);
+  });
+
+  it("fails the delivery when the connection is closed twice", async () => {
+    const forward = vi.fn<CellWebhookRouterDependencies["forward"]>(async () => {
+      throw new TypeError("fetch failed", {
+        cause: Object.assign(new Error("other side closed"), { code: "UND_ERR_SOCKET" }),
+      });
+    });
+    const { app } = harness({ forward });
+
+    const response = await app.request("/api/webhooks/slack", slackRequest());
+
+    expect(response.status).toBe(502);
+    expect(forward).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not send the request again after a timeout", async () => {
+    const forward = vi.fn<CellWebhookRouterDependencies["forward"]>(async () => {
+      throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+    });
+    const { app } = harness({ forward });
+
+    const response = await app.request("/api/webhooks/slack", slackRequest());
+
+    expect(response.status).toBe(502);
+    expect(forward).toHaveBeenCalledTimes(1);
+  });
+
   describe("Slack buttons that name their cell", () => {
     const press = (blockId: string) => ({
       body: new URLSearchParams({

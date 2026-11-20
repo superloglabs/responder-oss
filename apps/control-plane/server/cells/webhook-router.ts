@@ -65,7 +65,20 @@ const defaultDependencies: CellWebhookRouterDependencies = {
 };
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  if (!(error instanceof Error)) return String(error);
+  // fetch reports every network failure as "fetch failed" and keeps the
+  // reason, such as "read ECONNRESET", in its cause.
+  return error.cause instanceof Error ? `${error.message}: ${error.cause.message}` : error.message;
+}
+
+// Socket errors that mean a pooled keep-alive connection was already closed
+// by the other cell's edge when the request went out on it.
+const closedConnectionCodes = new Set(["ECONNRESET", "EPIPE", "UND_ERR_SOCKET"]);
+
+function closedConnection(error: unknown): boolean {
+  const cause = error instanceof Error ? error.cause : undefined;
+  const code = cause && typeof cause === "object" && "code" in cause ? cause.code : undefined;
+  return typeof code === "string" && closedConnectionCodes.has(code);
 }
 
 // The other cells that hold the tenant. Throws when no holder was found but
@@ -135,10 +148,31 @@ async function forwardTo(
   });
   headers.set(forwardedHeader, currentCell);
   const url = new URL(context.req.url);
-  const forwarded = await dependencies.forward(
-    new URL(url.pathname + url.search, cell.url).toString(),
-    { body, headers, method: "POST", signal: AbortSignal.timeout(forwardTimeoutMs) },
-  );
+  const target = new URL(url.pathname + url.search, cell.url).toString();
+  const send = () =>
+    dependencies.forward(target, {
+      body,
+      headers,
+      method: "POST",
+      signal: AbortSignal.timeout(forwardTimeoutMs),
+    });
+  let forwarded: Response;
+  try {
+    forwarded = await send();
+  } catch (error) {
+    // A connection the other cell closed while it sat idle in the pool fails
+    // at once. Send the request again once, on a new connection.
+    if (!closedConnection(error)) throw error;
+    console.warn(
+      JSON.stringify({
+        cell: cell.id,
+        errorMessage: errorMessage(error),
+        event: "cell_webhook_forward_retried",
+        provider: tenant.provider,
+      }),
+    );
+    forwarded = await send();
+  }
   console.info(
     JSON.stringify({
       cell: cell.id,
