@@ -60,6 +60,8 @@ export async function runSubscriptionClient(
   const sdk = new Daytona(daytonaClientOptions(config));
   let sandbox;
   let originalAccountId: string | undefined;
+  // The client can only refresh the login once it has started.
+  let clientStarted = false;
   try {
     const authJson = await acquireSubscriptionCredential({ ...lease, expiresAt: new Date(Date.now() + 180_000) });
     originalAccountId = parseSubscriptionAuth(authJson).tokens.account_id;
@@ -68,12 +70,13 @@ export async function runSubscriptionClient(
     if (setup.exitCode !== 0) throw new Error("Unable to prepare the subscription client");
     await sandbox.fs.uploadFile(Buffer.from(authJson), `${root}/auth/auth.json`);
     await sandbox.fs.uploadFile(Buffer.from(task.runner), `${root}/run.mjs`);
+    clientStarted = true;
     const result = await sandbox.process.executeCommand(`chmod 600 ${root}/auth/auth.json; node ${root}/run.mjs`, undefined, undefined, 55);
     if (result.exitCode !== 0) throw new Error("The subscription client failed");
     return (await sandbox.fs.downloadFile(`${root}/${output}`)).toString();
   } finally {
     try {
-      if (sandbox && originalAccountId) {
+      if (sandbox && originalAccountId && clientStarted) {
         // Preserve managed refreshes even if the script itself failed.
         const updated = await sandbox.fs.downloadFile(`${root}/auth/auth.json`).catch(() => null);
         if (updated) await persistSubscriptionCredential({ ...lease, authJson: updated.toString(), previousAccountId: originalAccountId });

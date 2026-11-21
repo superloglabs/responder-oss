@@ -2,8 +2,64 @@ import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
-import { expect, it } from "vitest";
-import { subscriptionModelsRunner } from "./subscription-models.js";
+import { beforeEach, expect, it, vi } from "vitest";
+import { runSubscriptionClient, subscriptionModelsRunner } from "./subscription-models.js";
+
+const daytona = vi.hoisted(() => ({
+  create: vi.fn(),
+  delete: vi.fn(),
+  sandbox: {
+    fs: { downloadFile: vi.fn(), uploadFile: vi.fn() },
+    process: { executeCommand: vi.fn() },
+  },
+}));
+const credentials = vi.hoisted(() => ({
+  acquireSubscriptionCredential: vi.fn(),
+  persistSubscriptionCredential: vi.fn(),
+  releaseSubscriptionCredential: vi.fn(),
+}));
+vi.mock("@daytona/sdk", () => ({
+  Daytona: vi.fn(function Daytona() {
+    return { create: daytona.create, delete: daytona.delete, [Symbol.asyncDispose]: vi.fn().mockResolvedValue(undefined) };
+  }),
+}));
+vi.mock("../../../../packages/core/src/daytona-config.js", () => ({
+  daytonaClientOptions: () => ({}),
+  requireDaytonaClientConfig: () => ({ sandboxSnapshotName: "snapshot" }),
+}));
+vi.mock("../../../../packages/core/src/db/automation-model-credentials.js", () => credentials);
+
+const owner = { credentialId: "credential", organizationId: "organization" };
+const task = { name: "usage", output: "usage.json", root: "/root", runner: "runner" };
+const storedAuth = JSON.stringify({ tokens: { id_token: "id", access_token: "access", refresh_token: "refresh", account_id: "account" } });
+const refreshedAuth = storedAuth.replace("refresh", "renewed");
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  credentials.acquireSubscriptionCredential.mockResolvedValue(storedAuth);
+  daytona.create.mockResolvedValue(daytona.sandbox);
+  daytona.sandbox.process.executeCommand.mockResolvedValue({ exitCode: 0 });
+  daytona.sandbox.fs.uploadFile.mockResolvedValue(undefined);
+});
+
+it("keeps a login the client refreshed even when the client fails", async () => {
+  daytona.sandbox.process.executeCommand.mockResolvedValueOnce({ exitCode: 0 }).mockResolvedValueOnce({ exitCode: 1 });
+  daytona.sandbox.fs.downloadFile.mockResolvedValue(Buffer.from(refreshedAuth));
+  await expect(runSubscriptionClient(owner, task)).rejects.toThrow("The subscription client failed");
+  expect(daytona.sandbox.fs.downloadFile).toHaveBeenCalledWith("/root/auth/auth.json");
+  expect(credentials.persistSubscriptionCredential).toHaveBeenCalledWith(expect.objectContaining({ authJson: refreshedAuth, previousAccountId: "account" }));
+  expect(daytona.delete).toHaveBeenCalledWith(daytona.sandbox);
+  expect(credentials.releaseSubscriptionCredential).toHaveBeenCalledOnce();
+});
+
+it("does not read the login back when the client never started", async () => {
+  daytona.sandbox.fs.uploadFile.mockRejectedValueOnce(new Error("Request failed with status code 502"));
+  await expect(runSubscriptionClient(owner, task)).rejects.toThrow("502");
+  expect(daytona.sandbox.fs.downloadFile).not.toHaveBeenCalled();
+  expect(credentials.persistSubscriptionCredential).not.toHaveBeenCalled();
+  expect(daytona.delete).toHaveBeenCalledWith(daytona.sandbox);
+  expect(credentials.releaseSubscriptionCredential).toHaveBeenCalledOnce();
+});
 
 it("discovers all visible subscription models through managed authentication and pagination", async () => {
   const root = await mkdtemp(join(tmpdir(), "responder-models-test-"));
