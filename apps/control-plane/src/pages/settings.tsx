@@ -32,6 +32,7 @@ import {
 import { ProviderGlyph } from "../components/icons";
 import { MagnifyingGlassIcon, XIcon } from "@phosphor-icons/react";
 import { providerDisplayName } from "../components/provider-glyphs";
+import { connectionErrorDetail } from "../connection-errors";
 import { SettingsHeading } from "../components/settings-heading";
 import { IntegrationSettingsSkeleton } from "../components/screen-skeletons";
 import { useDocumentTitle } from "../use-document-title";
@@ -147,7 +148,8 @@ function connectionNotice(): {
 
   const reason = search.get("reason");
   const detail =
-    reason === "already_connected"
+    connectionErrorDetail(reason) ??
+    (reason === "already_connected"
       ? "That account is already connected to another workspace."
       : reason === "cancelled"
         ? "The connection was cancelled."
@@ -155,7 +157,7 @@ function connectionNotice(): {
           ? "That Google account cannot see any active projects."
           : reason === "write_scopes"
             ? "Choose read-only permissions on the consent screen. Responder connects only with permissions that cannot change resources."
-            : "The connection could not be completed.";
+            : "The connection could not be completed.");
   return { tone: "error", message: `${name}: ${detail}` };
 }
 

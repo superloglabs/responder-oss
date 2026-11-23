@@ -73,6 +73,7 @@ import {
   contextProviderMetadata as CONTEXT_PROVIDER_METADATA,
   providerDisplayName,
 } from "../components/provider-glyphs";
+import { connectionErrorDetail } from "../connection-errors";
 import {
   Alert,
   Button,
@@ -421,7 +422,7 @@ function connectionNotice(): {
         ? `${name} connection was cancelled.`
         : search.get("reason") === "write_scopes"
           ? `${name} could not be connected. Choose read-only permissions on the consent screen.`
-          : `${name} could not be connected.`,
+          : [`${name} could not be connected.`, connectionErrorDetail(search.get("reason"))].filter(Boolean).join(" "),
   };
 }
 

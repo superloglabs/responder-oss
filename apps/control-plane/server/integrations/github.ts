@@ -150,6 +150,40 @@ export async function verifyGitHubUserInstallation(
   throw new Error("GitHub App installation does not belong to the connecting user");
 }
 
+const githubRepositoryCountSchema = z.object({
+  total_count: z.number().int().nonnegative(),
+});
+
+// A connection stores every repository its installation covers, so the
+// connecting user must be able to see all of them, not only some.
+export class GitHubPartialInstallationAccessError extends Error {
+  constructor(readonly installationId: number) {
+    super("The GitHub user cannot see every repository of the installation");
+    this.name = "GitHubPartialInstallationAccessError";
+  }
+}
+
+// The number of the installation's repositories the user can see. The user
+// token only reaches repositories that both the user and the installation can
+// access, so this equals the installation's own count only when the user sees
+// all of them.
+export async function countGitHubUserInstallationRepositories(
+  userAccessToken: string,
+  installationId: number,
+): Promise<number> {
+  const url = new URL(
+    `https://api.github.com/user/installations/${installationId}/repositories`,
+  );
+  url.searchParams.set("per_page", "1");
+  const response = await fetch(url, {
+    headers: githubAppHeaders(userAccessToken),
+  });
+  if (!response.ok) {
+    throw new Error("Unable to list the GitHub user's installation repositories");
+  }
+  return githubRepositoryCountSchema.parse(await response.json()).total_count;
+}
+
 export async function listGitHubRepositories(installationId: number) {
   const installationToken = await createGitHubInstallationToken(installationId);
   const repositories: Array<{
