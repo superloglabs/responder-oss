@@ -425,6 +425,7 @@
 .signalSettingsRow__label { display: flex; flex: 1 1 240px; min-width: 0; flex-direction: column; gap: 2px; }
 .signalSettingsRow__label strong { color: #161616; font-weight: 600; }
 .signalSettingsRow__label span { color: #666; }
+.signalSettingsRow__label a { color: #3039bd; font-weight: 600; text-decoration: none; }
 .signal .signalSettingsSelect { width: 240px; flex-shrink: 0; border-radius: 6px; }
 .signalSettingsActions { display: flex; justify-content: flex-end; gap: 8px; }
 .signalSourceRow + .signalSourceRow, .signalSourceRow + .signalSettingsCard--rows { border-top: .5px solid #00000014; }

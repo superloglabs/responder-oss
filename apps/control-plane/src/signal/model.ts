@@ -36,6 +36,7 @@ export interface SignalUsageDay {
 }
 
 export type SignalCooldownHours = 6 | 24 | 72 | 168;
+export type SignalRetentionDays = 30 | 60 | 90 | 365;
 
 export interface SignalSlackChannel {
   integrationAccountId: string;
@@ -59,6 +60,9 @@ export interface SignalSettings {
   // Whether investigations search Slack for problems the team already
   // knows about, and the channels they search.
   slackScan: { enabled: boolean; channels: SignalSlackChannel[] };
+  // Days Signal keeps findings, investigations, and the data it stored for
+  // them. Null keeps them until the workspace is deleted.
+  retentionDays: SignalRetentionDays | null;
   limits: { dailyInvestigationCap: number };
 }
 
@@ -86,6 +90,9 @@ export interface SignalBilling {
   // Milliseconds since the epoch.
   resetsAt: number | null;
   plans: SignalPlan[];
+  // Whether the workspace may choose how long Signal keeps its data: on
+  // Team, or where the deployment does not bill.
+  includesRetention?: boolean;
 }
 
 export const signalPeriods = [7, 14, 30] as const;
@@ -140,6 +147,7 @@ export function withSettingsDefaults(settings: Partial<SignalSettings> & Pick<Si
     skippedServices: settings.skippedServices ?? [],
     notes: settings.notes ?? "",
     slackScan: settings.slackScan ?? { enabled: false, channels: [] },
+    retentionDays: settings.retentionDays ?? null,
     limits: settings.limits ?? { dailyInvestigationCap: 50 },
   };
 }
@@ -156,6 +164,7 @@ export function settingsBody(settings: SignalSettings) {
     skippedServices: settings.skippedServices,
     notes: settings.notes,
     slackScan: settings.slackScan,
+    retentionDays: settings.retentionDays,
   };
 }
 
