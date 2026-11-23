@@ -1,9 +1,10 @@
 import { createServer, type Server } from "node:http";
+import { createServer as createTcpServer } from "node:net";
 import { gzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 import { safeCustomMcpFetch } from "./custom-mcp.js";
 
-async function listen(server: Server): Promise<number> {
+async function listen(server: Server | ReturnType<typeof createTcpServer>): Promise<number> {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("Missing test port");
@@ -16,6 +17,12 @@ async function close(server: Server): Promise<void> {
   );
   server.closeAllConnections();
   await closing;
+}
+
+async function closeTcp(server: ReturnType<typeof createTcpServer>): Promise<void> {
+  await new Promise<void>((resolve, reject) =>
+    server.close((error) => (error ? reject(error) : resolve())),
+  );
 }
 
 describe("custom MCP response streaming", () => {
@@ -94,6 +101,34 @@ describe("custom MCP response streaming", () => {
       expect(requestedEncoding).toBe("identity");
     } finally {
       await close(server);
+    }
+  });
+
+  it("survives a response with too many content codings that closes early", async () => {
+    // GHSA-xjj6-f33q-929c: vulnerable undici versions reject the fetch but leave
+    // an orphaned body stream whose error is unhandled and exits the process.
+    const uncaught: unknown[] = [];
+    const onUncaught = (error: unknown) => uncaught.push(error);
+    process.on("uncaughtException", onUncaught);
+    const server = createTcpServer((socket) => {
+      socket.once("data", () => {
+        socket.end(
+          "HTTP/1.1 200 OK\r\n" +
+            "content-encoding: gzip, gzip, gzip, gzip, gzip, gzip\r\n" +
+            "content-length: 100\r\n\r\n",
+        );
+      });
+    });
+    const port = await listen(server);
+    try {
+      await expect(
+        safeCustomMcpFetch(`http://localhost:${port}/mcp`),
+      ).rejects.toThrow("fetch failed");
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(uncaught).toEqual([]);
+    } finally {
+      process.off("uncaughtException", onUncaught);
+      await closeTcp(server);
     }
   });
 });
