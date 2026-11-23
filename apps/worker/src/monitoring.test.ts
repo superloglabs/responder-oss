@@ -163,6 +163,37 @@ describe("worker error monitoring", () => {
     ).toEqual({ message: "request failed for [redacted]" });
   });
 
+  it("keeps request headers, query strings, and path tokens out of spans sent to Sentry", async () => {
+    const monitoring = await import("./monitoring.js");
+    monitoring.initializeErrorMonitoring({ SENTRY_DSN: "https://public@example.invalid/1" });
+    const options = sentryMocks.init.mock.calls[0]![0] as {
+      beforeBreadcrumb: (breadcrumb: unknown) => unknown;
+      beforeSendSpan: (span: unknown) => unknown;
+    };
+
+    expect(options.beforeSendSpan({
+      data: { "url.full": "https://mcp.example.com/sse?key=abc", "url.query": "?key=abc" },
+      description: "GET https://mcp.example.com/sse?key=abc",
+    })).toEqual({
+      data: { "url.full": "https://mcp.example.com/sse" },
+      description: "GET https://mcp.example.com/sse",
+    });
+    expect(options.beforeBreadcrumb({
+      data: { url: "https://checks.example.com/?api_key=abc" },
+    })).toEqual({ data: { url: "https://checks.example.com/" } });
+
+    const processor = sentryMocks.addEventProcessor.mock.calls[0]?.[0] as (
+      event: Record<string, unknown>,
+    ) => Record<string, unknown>;
+    expect(processor({
+      contexts: { trace: { data: { "http.url": "https://hooks.slack.com/services/T1/B2/abc" } } },
+      type: "transaction",
+    })).toEqual({
+      contexts: { trace: { data: { "http.url": "https://hooks.slack.com/services/[redacted]" } } },
+      type: "transaction",
+    });
+  });
+
   it("redacts values behind getter-only and frozen properties without writing to them", async () => {
     sentryMocks.isInitialized.mockReturnValue(true);
     const monitoring = await import("./monitoring.js");
