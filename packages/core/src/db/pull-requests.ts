@@ -1,6 +1,10 @@
-import { and, asc, desc, eq, inArray, lt, sql } from "drizzle-orm";
+import { and, asc, desc, eq, exists, inArray, lt, sql } from "drizzle-orm";
 import type { IssuePullRequestActivityEvent } from "./schema.js";
 import { getDatabase } from "./client.js";
+import {
+  type GitHubRepositoryIds,
+  workspaceHoldsGitHubRepository,
+} from "./github-repository-match.js";
 import {
   agentConfigVersions,
   agentVersionRepositories,
@@ -747,7 +751,7 @@ export async function markIssuePullRequestCreated(input: {
     );
 }
 
-export async function markIssuePullRequestMerged(input: {
+export async function markIssuePullRequestMerged(input: GitHubRepositoryIds & {
   repositoryFullName: string;
   pullRequestNumber: number;
 }): Promise<{
@@ -767,6 +771,12 @@ export async function markIssuePullRequestMerged(input: {
         eq(issuePullRequests.repositoryFullName, input.repositoryFullName),
         eq(issuePullRequests.pullRequestNumber, input.pullRequestNumber),
         eq(issuePullRequests.status, "created"),
+        exists(
+          db.select({ held: sql`1` }).from(issues).where(and(
+            eq(issues.id, issuePullRequests.issueId),
+            workspaceHoldsGitHubRepository(issues.organizationId, input),
+          )),
+        ),
       ),
     )
     .returning({

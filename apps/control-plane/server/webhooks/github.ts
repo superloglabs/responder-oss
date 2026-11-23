@@ -19,6 +19,7 @@ import {
 
 const pullRequestEventSchema = z.object({
   action: z.string(),
+  installation: z.object({ id: z.number().int().positive() }),
   pull_request: z.object({
     number: z.number().int().positive(),
     merged: z.boolean().optional(),
@@ -26,6 +27,7 @@ const pullRequestEventSchema = z.object({
   }),
   repository: z.object({
     full_name: z.string().min(1),
+    id: z.number().int().positive(),
   }),
 });
 
@@ -147,29 +149,28 @@ async function recordPullRequestMerge(
     return { ignored: true };
   }
 
-  const { action, pull_request: pullRequest, repository } = parsed.data;
+  const { action, installation, pull_request: pullRequest, repository } = parsed.data;
   if (action !== "closed" || pullRequest.merged !== true) {
     return { ignored: true };
   }
 
-  const mergedIssue = await markIssuePullRequestMerged({
-    repositoryFullName: repository.full_name,
+  // GitHub's IDs keep a pull request in a renamed repository's former name
+  // from matching one Responder opened.
+  const pullRequestIds = {
+    installationId: installation.id,
     pullRequestNumber: pullRequest.number,
-  });
+    repositoryFullName: repository.full_name,
+    repositoryId: repository.id,
+  };
+  const mergedIssue = await markIssuePullRequestMerged(pullRequestIds);
   const mergedSuggestion = mergedIssue
     ? null
-    : await markSuggestionPullRequestMerged({
-        repositoryFullName: repository.full_name,
-        pullRequestNumber: pullRequest.number,
-      });
+    : await markSuggestionPullRequestMerged(pullRequestIds);
   const merged = mergedIssue ?? mergedSuggestion;
   if (!merged) {
     // Pull requests opened by automations and Slack threads keep their merge
     // time on their origin.
-    const mergedOrigin = await markPullRequestOriginMerged({
-      pullRequestNumber: pullRequest.number,
-      repositoryFullName: repository.full_name,
-    });
+    const mergedOrigin = await markPullRequestOriginMerged(pullRequestIds);
     return { matched: mergedOrigin };
   }
   if (mergedIssue) {

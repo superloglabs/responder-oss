@@ -1,6 +1,10 @@
 import { and, desc, eq, sql } from "drizzle-orm";
 import { getDatabase } from "./client.js";
 import {
+  type GitHubRepositoryIds,
+  workspaceHoldsGitHubRepository,
+} from "./github-repository-match.js";
+import {
   automationRuns,
   automations,
   investigations,
@@ -42,7 +46,7 @@ export async function recordPullRequestOrigin(input: PullRequestOwner & {
 
 // Records the first merge GitHub reports for a pull request a thread or run
 // opened. Returns whether such a pull request exists.
-export async function markPullRequestOriginMerged(input: {
+export async function markPullRequestOriginMerged(input: GitHubRepositoryIds & {
   pullRequestNumber: number;
   repositoryFullName: string;
 }): Promise<boolean> {
@@ -55,6 +59,7 @@ export async function markPullRequestOriginMerged(input: {
     .where(and(
       eq(pullRequestOrigins.repositoryFullName, input.repositoryFullName),
       eq(pullRequestOrigins.pullRequestNumber, input.pullRequestNumber),
+      workspaceHoldsGitHubRepository(pullRequestOrigins.organizationId, input),
     ))
     .returning({ id: pullRequestOrigins.id });
   return updated.length > 0;
@@ -103,7 +108,7 @@ export interface PullRequestReviewTarget {
   } | null;
 }
 
-export async function findPullRequestReviewTarget(input: {
+export async function findPullRequestReviewTarget(input: GitHubRepositoryIds & {
   pullRequestNumber: number;
   repositoryFullName: string;
 }): Promise<PullRequestReviewTarget | null> {
@@ -131,6 +136,7 @@ export async function findPullRequestReviewTarget(input: {
     .where(and(
       eq(pullRequestOrigins.repositoryFullName, input.repositoryFullName),
       eq(pullRequestOrigins.pullRequestNumber, input.pullRequestNumber),
+      workspaceHoldsGitHubRepository(pullRequestOrigins.organizationId, input),
     ))
     .limit(1);
   const row = rows[0];
