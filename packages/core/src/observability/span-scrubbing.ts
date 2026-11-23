@@ -115,7 +115,9 @@ type SentrySpanLike = {
 type SentryBreadcrumbLike = { data?: Record<string, unknown> };
 type SentryEventLike = {
   breadcrumbs?: SentryBreadcrumbLike[];
-  contexts?: { trace?: { data?: Record<string, unknown> } };
+  contexts?: {
+    trace?: { data?: Record<string, unknown>; description?: string };
+  };
   request?: {
     cookies?: unknown;
     data?: unknown;
@@ -160,12 +162,7 @@ export function scrubSentryEventTelemetry<T extends SentryEventLike>(event: T): 
     event.transaction = scrubSpanName(event.transaction);
   }
   const trace = event.contexts?.trace;
-  if (trace?.data) {
-    event.contexts = {
-      ...event.contexts,
-      trace: { ...trace, data: scrubSpanAttributes(trace.data) },
-    };
-  }
+  if (trace) event.contexts = { ...event.contexts, trace: scrubSentrySpan(trace) };
   if (event.spans) event.spans = event.spans.map(scrubSentrySpan);
   if (event.breadcrumbs) {
     event.breadcrumbs = event.breadcrumbs.map(scrubSentryBreadcrumb);
