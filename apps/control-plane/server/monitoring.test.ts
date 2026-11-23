@@ -137,6 +137,46 @@ describe("control-plane error monitoring", () => {
     expect(sentryMocks.flush).toHaveBeenCalledWith(2_000);
   });
 
+  it("keeps request headers, query strings, and path tokens out of spans sent to Sentry", async () => {
+    const monitoring = await import("./monitoring.js");
+    monitoring.initializeServerMonitoring({ SENTRY_DSN: "https://public@example.invalid/1" });
+    const options = sentryMocks.init.mock.calls[0]![0];
+
+    expect(options.beforeSendSpan({
+      data: {
+        "http.request.header.user_agent": "Slackbot 1.0",
+        "http.request.header.x_responder_origin_verify": "origin-secret",
+        "http.request.header.x_slack_signature": "v0=abc",
+        "http.url": "https://app.example.com/api/auth/verify-email?token=abc",
+      },
+      description: "GET /api/auth/verify-email",
+    })).toEqual({
+      data: {
+        "http.request.header.user_agent": "Slackbot 1.0",
+        "http.url": "https://app.example.com/api/auth/verify-email",
+      },
+      description: "GET /api/auth/verify-email",
+    });
+    expect(options.beforeSendTransaction({
+      contexts: { trace: { data: { "url.query": "?code=abc" } } },
+      transaction: "GET /api/auth/reset-password/tok123",
+    })).toEqual({
+      contexts: { trace: { data: {} } },
+      transaction: "GET /api/auth/reset-password/[redacted]",
+    });
+    expect(options.beforeBreadcrumb({
+      category: "http",
+      data: { url: "https://checks.example.com/?api_key=abc" },
+    })).toEqual({ category: "http", data: { url: "https://checks.example.com/" } });
+
+    const event = await options.beforeSend({
+      request: { url: "https://app.example.com/api/auth/reset-password/tok123" },
+      transaction: "GET /api/auth/reset-password/tok123",
+    });
+    expect(event.transaction).toBe("GET /api/auth/reset-password/[redacted]");
+    expect(event.request).toEqual({ url: "https://app.example.com/api/auth/reset-password/[redacted]" });
+  });
+
   it("exports traces, metrics, and logs over OTLP without a DSN", async () => {
     const client = { name: "client" };
     sentryMocks.init.mockReturnValue(client);

@@ -12,6 +12,11 @@ import {
   sentryRelease,
   sentrySampleRate,
 } from "@responder/core/observability/sentry";
+import {
+  scrubSentryBreadcrumb,
+  scrubSentryEventTelemetry,
+  scrubSentrySpan,
+} from "@responder/core/observability/span-scrubbing";
 import { scrubSentryEvent } from "./sentry-scrubbing.js";
 
 let telemetry: NodeTelemetry | null = null;
@@ -50,8 +55,14 @@ export function initializeServerMonitoring(
             typeof organizationId === "string" ? organizationId : undefined,
           ),
         };
-        return scrubSentryEvent(event);
+        return scrubSentryEvent(scrubSentryEventTelemetry(event));
       },
+      // Spans keep no request headers but a few, and no query strings or
+      // path tokens. With OTLP export, ScrubbingSpanProcessor already removed
+      // them; this covers spans Sentry records on its own.
+      beforeBreadcrumb: (breadcrumb) => scrubSentryBreadcrumb(breadcrumb),
+      beforeSendSpan: (span) => scrubSentrySpan(span),
+      beforeSendTransaction: (event) => scrubSentryEventTelemetry(event),
       // Without a DSN, Sentry only instruments the process for OTLP export.
       dsn: dsn || instrumentationOnlySentryDsn,
       environment: sentryEnvironment(environment),
