@@ -1,4 +1,4 @@
-import type { SignalCooldownHours, SignalSeverity } from "./model";
+import type { SignalCooldownHours, SignalRetentionDays, SignalSeverity } from "./model";
 
 export const severityOptions: Array<{ value: SignalSeverity; label: string }> = [
   { value: "SEV-1", label: "SEV-1" },
@@ -11,6 +11,14 @@ export const cooldownOptions: Array<{ value: SignalCooldownHours; label: string 
   { value: 24, label: "After 1 day" },
   { value: 72, label: "After 3 days" },
   { value: 168, label: "After 7 days" },
+];
+
+export const retentionOptions: Array<{ value: SignalRetentionDays | null; label: string }> = [
+  { value: null, label: "Keep everything" },
+  { value: 30, label: "30 days" },
+  { value: 60, label: "60 days" },
+  { value: 90, label: "90 days" },
+  { value: 365, label: "1 year" },
 ];
 
 const capPresets = [10, 25, 50, 100, 200];

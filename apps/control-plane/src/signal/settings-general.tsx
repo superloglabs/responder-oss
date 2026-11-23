@@ -1,10 +1,17 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { IconPlus, IconX } from "@tabler/icons-react";
 import { Button, SegmentedControl, Switch } from "../design-system";
-import { canTurnOnSignal, fetchSignalBilling, type SignalBilling, type SignalCooldownHours, type SignalSeverity } from "./model";
+import {
+  canTurnOnSignal,
+  fetchSignalBilling,
+  type SignalBilling,
+  type SignalCooldownHours,
+  type SignalRetentionDays,
+  type SignalSeverity,
+} from "./model";
 import type { SettingsPageProps } from "./settings";
-import { capOptions, cooldownOptions, severityOptions, skippedServiceError } from "./settings-model";
+import { capOptions, cooldownOptions, retentionOptions, severityOptions, skippedServiceError } from "./settings-model";
 import { SettingsGroup, SettingsPage, SettingsRow } from "./shared";
 
 const notesLimit = 2000;
@@ -13,12 +20,17 @@ export function SettingsGeneral({ data, save, fail, status }: SettingsPageProps)
   const { settings } = data;
   const navigate = useNavigate();
   const [billing, setBilling] = useState<SignalBilling | null>(null);
+  const [billingFailed, setBillingFailed] = useState(false);
+  const [billingAttempt, setBillingAttempt] = useState(0);
   useEffect(() => {
     let current = true;
-    // Only needed to turn Signal on, which loads it again if this failed.
-    fetchSignalBilling().then((loaded) => { if (current) setBilling(loaded); }).catch(() => undefined);
+    // Needed to turn Signal on, which loads it again if this failed, and to
+    // know whether the plan lets the workspace choose a retention.
+    fetchSignalBilling()
+      .then((loaded) => { if (current) { setBilling(loaded); setBillingFailed(false); } })
+      .catch(() => { if (current) setBillingFailed(true); });
     return () => { current = false; };
-  }, []);
+  }, [billingAttempt]);
 
   // Turning on needs a plan, like the last setup step; turning off never does.
   async function setEnabled(enabled: boolean) {
@@ -44,6 +56,10 @@ export function SettingsGeneral({ data, save, fail, status }: SettingsPageProps)
   const max = settings.limits.dailyInvestigationCap;
   const cap = settings.dailyInvestigationCap ?? max;
   const needsPlan = !settings.enabled && billing !== null && !canTurnOnSignal(billing);
+  // Choosing a retention needs Team. A workspace that left Team keeps the one
+  // it chose and can still turn it off.
+  const canChooseRetention = billing?.includesRetention === true;
+  const retentionNeedsTeam = billing !== null && !canChooseRetention;
 
   return <SettingsPage title="General" description="Decide what Signal investigates and what it posts." status={status}>
     <SettingsGroup title="Signal">
@@ -89,6 +105,28 @@ export function SettingsGeneral({ data, save, fail, status }: SettingsPageProps)
           <SkippedServices services={settings.skippedServices} onChange={(skippedServices) => save({ skippedServices })} />
         </SettingsRow>
         <Notes saved={settings.notes} onSave={(notes) => save({ notes })} />
+      </div>
+    </SettingsGroup>
+
+    <SettingsGroup title="Data">
+      <div className="signalSettingsCard signalSettingsCard--rows">
+        <SettingsRow label="Data retention"
+          description={billingFailed && !billing
+            ? <>Could not load your plan. <button type="button" className="signalLinkButton" onClick={() => setBillingAttempt((attempt) => attempt + 1)}>Try again</button></>
+            : retentionNeedsTeam && settings.retentionDays !== null
+              ? <>Findings, investigations, and the error and log details Signal stored for them are deleted once they are older than this. Choosing another period needs the Team plan. <Link to="/signal/setup/plan">Upgrade to Team</Link></>
+              : retentionNeedsTeam
+              ? <>Choose how long Signal keeps findings and investigations on the Team plan. <Link to="/signal/setup/plan">Upgrade to Team</Link></>
+              : settings.retentionDays === null
+                ? "Signal keeps findings, investigations, and the error and log details it stored for them until the workspace is deleted."
+                : "Findings, investigations, and the error and log details Signal stored for them are deleted once they are older than this."}>
+          <select className="signalSettingsSelect" aria-label="Data retention" value={settings.retentionDays ?? ""}
+            disabled={!canChooseRetention && settings.retentionDays === null}
+            onChange={(e) => save({ retentionDays: e.target.value ? Number(e.target.value) as SignalRetentionDays : null })}>
+            {retentionOptions.map((option) => <option key={option.value ?? "keep"} value={option.value ?? ""}
+              disabled={!canChooseRetention && option.value !== null && option.value !== settings.retentionDays}>{option.label}</option>)}
+          </select>
+        </SettingsRow>
       </div>
     </SettingsGroup>
   </SettingsPage>;

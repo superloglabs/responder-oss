@@ -37,10 +37,13 @@ function fakeSignal(count = 30, options: { setUp?: boolean } = {}) {
       skippedServices: [] as string[],
       notes: "",
       slackScan: { enabled: false, channels: [] as Array<{ integrationAccountId: string; channelId: string }> },
+      retentionDays: null as 30 | 60 | 90 | 365 | null,
       limits: { dailyInvestigationCap: 50 },
     },
     // The next settings save fails with this error, like a server rejecting it.
     failNextSave: null as string | null,
+    // Plan lookups fail while this is set, like a billing outage.
+    failBilling: false,
     // How long each settings save takes, to change settings while one runs.
     saveDelayMs: 0,
     billing: {
@@ -52,6 +55,7 @@ function fakeSignal(count = 30, options: { setUp?: boolean } = {}) {
       remaining: 0,
       resetsAt: Date.parse("2026-12-01T00:00:00Z") as number | null,
       plans: signalPlans,
+      includesRetention: false,
     },
     // Where checkout sends the member; null when the plan changes in place.
     checkoutUrl: "/signal/setup/plan?checkout=success" as string | null,
@@ -119,7 +123,12 @@ async function workspace(page: Page, options: { enabled?: boolean; signal?: Retu
       }
       return route.fulfill({ json: signal.settings });
     }
-    if (path === "/billing") return route.fulfill({ json: signal.billing });
+    if (path === "/billing") {
+      if (signal.failBilling) {
+        return route.fulfill({ status: 503, json: { error: "Something went wrong." } });
+      }
+      return route.fulfill({ json: signal.billing });
+    }
     if (path === "/billing/checkout") {
       // Stands in for Stripe: the plan is recorded and checkout returns.
       const plan = signalPlans.find((candidate) => candidate.id === body!.planId)!;
@@ -246,7 +255,7 @@ test("sets up Signal with the workspace's real connections and turns it on after
   // Saves send the settings that can change, never the read-only ones.
   expect(signal.writes[0]!.body).toEqual({
     enabled: false, slack: null, repositoryIds: ["repo-api"], minimumSeverity: "SEV-3", dailyInvestigationCap: null,
-    dismissalCooldownHours: 24, skippedServices: [], notes: "", slackScan: { enabled: false, channels: [] },
+    dismissalCooldownHours: 24, skippedServices: [], notes: "", slackScan: { enabled: false, channels: [] }, retentionDays: null,
   });
   expect(signal.writes.map((write) => `${write.method} ${write.path}`)).toEqual([
     "PUT /settings", "PUT /settings", "PUT /settings", "POST /billing/checkout", "PUT /settings",
@@ -447,6 +456,76 @@ test("saves each general setting as it changes", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Add service" })).toBeVisible();
   await page.setViewportSize({ width: 1440, height: 1300 });
   await page.screenshot({ path: "../.context/impl-setup-general.png" });
+});
+
+test("lets Team choose how long Signal keeps data", async ({ page }) => {
+  const signal = fakeSignal();
+  signal.settings.slack = { integrationAccountId: "slack-account", channelId: "C02" };
+  Object.assign(signal.billing, {
+    plan: { id: "signal_max", name: "Team", price: 200, cancelsAtPeriodEnd: false }, included: 100, remaining: 100, includesRetention: true,
+  });
+  await workspace(page, { signal });
+  await page.goto("/signal/setup/general");
+  const retention = page.getByLabel("Data retention");
+  await expect(retention).toBeEnabled();
+  const data = page.getByRole("region", { name: "Data" });
+  await expect(data).toContainText("until the workspace is deleted");
+  await expect(retention.locator("option")).toHaveText(["Keep everything", "30 days", "60 days", "90 days", "1 year"]);
+  await retention.selectOption({ label: "60 days" });
+  await expect.poll(() => signal.settings.retentionDays).toBe(60);
+  await expect(data).toContainText("deleted once they are older than this");
+  await retention.selectOption({ label: "1 year" });
+  await expect.poll(() => signal.settings.retentionDays).toBe(365);
+  await retention.selectOption({ label: "Keep everything" });
+  await expect.poll(() => signal.settings.retentionDays).toBeNull();
+  await retention.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: "../.context/signal-retention-team.png" });
+});
+
+test("offers data retention on Team only, and lets a workspace that left Team turn it off", async ({ page }) => {
+  const signal = fakeSignal();
+  signal.settings.slack = { integrationAccountId: "slack-account", channelId: "C02" };
+  Object.assign(signal.billing, { plan: { id: "signal_pro", name: "Pro", price: 100, cancelsAtPeriodEnd: false }, included: 50, remaining: 50 });
+  await workspace(page, { signal });
+  await page.goto("/signal/setup/general");
+  const retention = page.getByLabel("Data retention");
+  await expect(retention).toBeDisabled();
+  await expect(retention).toHaveValue("");
+  const data = page.getByRole("region", { name: "Data" });
+  await expect(data).toContainText("on the Team plan");
+  await data.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: "../.context/signal-retention-pro.png" });
+  await data.getByRole("link", { name: "Upgrade to Team" }).click();
+  await expect(page).toHaveURL(/\/signal\/setup\/plan$/u);
+
+  signal.settings.retentionDays = 90;
+  await page.goto("/signal/setup/general");
+  await expect(retention).toBeEnabled();
+  await expect(retention).toHaveValue("90");
+  await expect(data).toContainText("deleted once they are older than this. Choosing another period needs the Team plan.");
+  await expect(retention.locator("option:not([disabled])")).toHaveText(["Keep everything", "90 days"]);
+  await retention.selectOption({ label: "Keep everything" });
+  await expect.poll(() => signal.settings.retentionDays).toBeNull();
+  await expect(retention).toBeDisabled();
+});
+
+test("offers to load the plan again when the retention cannot be checked", async ({ page }) => {
+  const signal = fakeSignal();
+  signal.settings.slack = { integrationAccountId: "slack-account", channelId: "C02" };
+  Object.assign(signal.billing, {
+    plan: { id: "signal_max", name: "Team", price: 200, cancelsAtPeriodEnd: false }, included: 100, remaining: 100, includesRetention: true,
+  });
+  signal.failBilling = true;
+  await workspace(page, { signal });
+  await page.goto("/signal/setup/general");
+  const data = page.getByRole("region", { name: "Data" });
+  const retention = page.getByLabel("Data retention");
+  await expect(data).toContainText("Could not load your plan.");
+  await expect(retention).toBeDisabled();
+  signal.failBilling = false;
+  await data.getByRole("button", { name: "Try again" }).click();
+  await expect(retention).toBeEnabled();
+  await expect(data).not.toContainText("Could not load your plan.");
 });
 
 test("undoes a setting whose save fails and shows why", async ({ page }) => {
