@@ -55,6 +55,11 @@ describe("returnedConnectionError", () => {
       .toBe("The connection was cancelled.");
   });
 
+  it("tells the person who can connect a GitHub installation they cannot fully see", () => {
+    expect(returnedConnectionError("?integration=github&status=error&reason=partial_repository_access", "github"))
+      .toMatch(/organization owner or admin, or someone with access to every repository of that installation/u);
+  });
+
   it("ignores other providers, successful connections, and plain visits", () => {
     expect(returnedConnectionError("?integration=datadog&status=error", "posthog")).toBeNull();
     expect(returnedConnectionError("?integration=posthog&status=connected", "posthog")).toBeNull();

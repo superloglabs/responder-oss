@@ -1,6 +1,7 @@
 import { fetchAutomationOptions, type AutomationConfiguration, type AutomationOptions, type SharedAutomationTemplate } from "../automations-api";
 import type { SuggestedAutomationTemplate } from "./automation-templates";
 import { providerDisplayName } from "../components/provider-glyphs";
+import { connectionErrorDetail } from "../connection-errors";
 
 // Keeps a new automation's draft while a connector is connected in the same
 // tab. The connection flow returns to the create page with its result.
@@ -99,7 +100,7 @@ export function restoreAutomationDraft(options: AutomationOptions, location: Loc
   const name = providerDisplayName(provider);
   return {
     draft: withConnectedAccounts(draft, added),
-    error: connected || selectingProject ? null : search.get("reason") === "cancelled" ? `${name} connection was cancelled.` : search.get("reason") === "write_scopes" ? `${name} could not be connected. Choose read-only permissions on the consent screen.` : `${name} could not be connected.`,
+    error: connected || selectingProject ? null : search.get("reason") === "cancelled" ? `${name} connection was cancelled.` : search.get("reason") === "write_scopes" ? `${name} could not be connected. Choose read-only permissions on the consent screen.` : [`${name} could not be connected.`, connectionErrorDetail(search.get("reason"))].filter(Boolean).join(" "),
     finishing: status === "finishing" && !added.length,
     returnedAccountId,
   };

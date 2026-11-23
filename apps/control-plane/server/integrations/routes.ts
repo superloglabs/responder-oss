@@ -98,8 +98,10 @@ import {
   productIntegrationIds,
 } from "./catalog.js";
 import {
+  countGitHubUserInstallationRepositories,
   exchangeGitHubCode,
   GitHubOAuthError,
+  GitHubPartialInstallationAccessError,
   githubAuthorizeUrl,
   githubInstallUrl,
   listGitHubUserInstallations,
@@ -549,6 +551,9 @@ async function consumeBrowserOAuthConnectionState(input: {
 
 function callbackErrorReason(error: unknown): string {
   if (error instanceof GitHubPullRequestAuthorError) return error.reason;
+  if (error instanceof GitHubPartialInstallationAccessError) {
+    return "partial_repository_access";
+  }
   if (error instanceof GitHubOAuthError) {
     if (error.githubCode === "incorrect_client_credentials") {
       return "integration_misconfigured";
@@ -4956,7 +4961,7 @@ export const integrationRoutes = new Hono()
           ? ""
           : integrationCallbackUrl("github"),
       );
-      const installations = installationId
+      const candidates = installationId
         ? [
             await verifyGitHubUserInstallation(
               userToken.access_token,
@@ -4964,16 +4969,42 @@ export const integrationRoutes = new Hono()
             ),
           ]
         : await listGitHubUserInstallations(userToken.access_token);
-      if (installations.length === 0) {
+      if (candidates.length === 0) {
         throw new Error("No GitHub App installations are available to this user");
+      }
+
+      // A connection stores every repository the installation covers, so
+      // only installations whose repositories the user can all see are
+      // connected. Unequal counts in either direction mean the two lists
+      // disagree, so the installation is skipped.
+      const installations: Array<{
+        installation: (typeof candidates)[number];
+        repositories: Awaited<ReturnType<typeof listGitHubRepositories>>;
+      }> = [];
+      for (const installation of candidates) {
+        const repositories = await listGitHubRepositories(installation.id);
+        const visibleCount = await countGitHubUserInstallationRepositories(
+          userToken.access_token,
+          installation.id,
+        );
+        if (visibleCount !== repositories.length) {
+          console.info(JSON.stringify({
+            event: "github_installation_partial_access",
+            installationId: installation.id,
+          }));
+          continue;
+        }
+        installations.push({ installation, repositories });
+      }
+      if (installations.length === 0) {
+        throw new GitHubPartialInstallationAccessError(candidates[0]!.id);
       }
 
       const connectedAccounts: Array<{
         accountId: string;
         repositoryCount: number;
       }> = [];
-      for (const installation of installations) {
-        const repositories = await listGitHubRepositories(installation.id);
+      for (const { installation, repositories } of installations) {
         const { id: accountId, replacedAccountIds } =
           await upsertGitHubInstallationAccount({
             organizationId: connectionState.organizationId,
