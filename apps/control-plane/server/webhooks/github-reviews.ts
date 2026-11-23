@@ -21,7 +21,10 @@ export const pullRequestReviewEventSchema = z.object({
     html_url: z.string().url(),
     number: z.number().int().positive(),
   }),
-  repository: z.object({ full_name: z.string().min(1) }),
+  repository: z.object({
+    full_name: z.string().min(1),
+    id: z.number().int().positive(),
+  }),
   review: z.object({
     author_association: z.string(),
     body: z.string().max(65_536).nullable(),
@@ -199,8 +202,10 @@ export async function startPullRequestReviewTurn(
   }
 
   const target = await dependencies.findTarget({
+    installationId: event.installation.id,
     pullRequestNumber: event.pull_request.number,
     repositoryFullName: event.repository.full_name,
+    repositoryId: event.repository.id,
   });
   if (!target) return "not_ours";
   if (target.automationRun && !target.automationRun.automationEnabled) return "ignored";

@@ -390,16 +390,19 @@ When that app's setup URL points at `/api/integrations/github/callback`,
 `LEGACY_GITHUB_SETUP_URL` names the other product's setup address. A callback
 whose state Responder created continues in Responder. A callback without state,
 which GitHub sends after someone changes an installation on GitHub, stays in
-Responder when the signed-in user has a GitHub connection pending or a
-workspace whose telemetry notifications are not paused holds the installation.
-Every other callback is redirected to the other product with its query
-unchanged.
+Responder when the signed-in user has a GitHub connection pending or their
+active workspace holds the installation. Otherwise it goes to the cell the
+browser last used, when that is another cell. Every other callback is
+redirected to the other product with its query unchanged. Where a callback
+without state goes depends only on the browser's own session and cookies.
 
 The private key never enters the investigation sandbox. Responder creates a
 short-lived installation token and materializes only selected repositories.
 A review on a pull request that a tag mode thread or an automation run opened
-continues that thread or run. GitHub sends one `pull_request_review` event per
-review. Responder reads the review's inline comments and passes the review and
+continues that thread or run. The review must come through the GitHub
+installation and repository, by GitHub ID, that the thread's or run's
+workspace holds; merges are matched the same way. GitHub sends one
+`pull_request_review` event per review. Responder reads the review's inline comments and passes the review and
 its comments to the thread or run as one message, on the pull request's latest
 commit. Comments that do not fit in the message are left out, and the message
 says how many. The agent checks each comment, pushes fixes with `update_pull_request`,

@@ -1,11 +1,26 @@
 import { Hono } from "hono";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CellDirectory } from "../../../../packages/core/src/cells.js";
 import {
+  getPendingIntegrationConnectionState,
+  listConnectedIntegrationAccounts,
+} from "../../../../packages/core/src/db/integrations.js";
+import { getActiveTenant } from "../tenant.js";
+import {
+  keepsGitHubSetupHere,
   type LegacyGitHubSetupDependencies,
   legacyGitHubSetupRedirect,
   legacyGitHubSetupUrl,
 } from "./legacy-github-setup.js";
+
+vi.mock("../../../../packages/core/src/db/integrations.js", () => ({
+  getPendingIntegrationConnectionState: vi.fn(),
+  listConnectedIntegrationAccounts: vi.fn(),
+}));
+
+vi.mock("../tenant.js", () => ({
+  getActiveTenant: vi.fn(),
+}));
 
 const directory: CellDirectory = {
   cells: [
@@ -22,12 +37,9 @@ const callbackPath = "/api/integrations/github/callback";
 function harness(overrides: Partial<LegacyGitHubSetupDependencies> = {}) {
   const handled = vi.fn();
   const dependencies: LegacyGitHubSetupDependencies = {
-    askCell: vi.fn(async () => ({ active: false, held: false })),
-    cellToken: () => "cell-token",
     directory: () => directory,
-    hasPendingFlow: vi.fn(async () => false),
+    keepsHere: vi.fn(async () => false),
     setupUrl: () => legacySetupUrl,
-    tenantState: vi.fn(async () => ({ active: false, held: false })),
     ...overrides,
   };
   const app = new Hono()
@@ -53,7 +65,7 @@ describe("legacy GitHub setup redirect", () => {
 
     expect(await response.json()).toEqual({ from: "application" });
     expect(handled).toHaveBeenCalledOnce();
-    expect(dependencies.hasPendingFlow).not.toHaveBeenCalled();
+    expect(dependencies.keepsHere).not.toHaveBeenCalled();
   });
 
   it("redirects a callback with another state to the old product with its query unchanged", async () => {
@@ -67,80 +79,60 @@ describe("legacy GitHub setup redirect", () => {
     expect(handled).not.toHaveBeenCalled();
   });
 
-  it("keeps a callback without state when the signed-in user has a GitHub connection pending", async () => {
-    const { app, dependencies, handled } = harness({ hasPendingFlow: vi.fn(async () => true) });
+  it("keeps a callback without state when the signed-in user's workspace holds the installation or a GitHub connection is pending", async () => {
+    const { app, dependencies, handled } = harness({ keepsHere: vi.fn(async () => true) });
 
     const response = await app.request(`${callbackPath}?installation_id=42&setup_action=update`);
 
     expect(await response.json()).toEqual({ from: "application" });
     expect(handled).toHaveBeenCalledOnce();
-    expect(dependencies.tenantState).not.toHaveBeenCalled();
+    expect(dependencies.keepsHere).toHaveBeenCalledWith(expect.any(Headers), 42);
   });
 
-  it("keeps a callback without state for an installation an active workspace here holds", async () => {
-    const { app, dependencies, handled } = harness({
-      tenantState: vi.fn(async () => ({ active: true, held: true })),
-    });
-
-    await app.request(`${callbackPath}?installation_id=42&setup_action=update`);
-
-    expect(handled).toHaveBeenCalledOnce();
-    expect(dependencies.tenantState).toHaveBeenCalledWith({ key: "42", provider: "github" });
-  });
-
-  it("sends a callback without state to the cell whose active workspace holds the installation", async () => {
-    const { app, handled } = harness({
-      askCell: vi.fn(async () => ({ active: true, held: true })),
-    });
+  it("sends a callback without state to the other cell the browser last used", async () => {
+    const { app, handled } = harness();
     const query = "?installation_id=42&setup_action=update";
 
-    const response = await app.request(`${callbackPath}${query}`);
+    const response = await app.request(`${callbackPath}${query}`, {
+      headers: { cookie: "responder_cell=us" },
+    });
 
     expect(response.status).toBe(302);
     expect(response.headers.get("location")).toBe(`https://us.superlog.sh${callbackPath}${query}`);
     expect(handled).not.toHaveBeenCalled();
   });
 
-  it("redirects a callback without state to the old product when only paused workspaces hold the installation", async () => {
-    const { app, handled } = harness({
-      askCell: vi.fn(async () => ({ active: false, held: true })),
-      tenantState: vi.fn(async () => ({ active: false, held: true })),
-    });
+  it("redirects a callback without state to the old product when the browser last used this cell or none", async () => {
     const query = "?installation_id=42&setup_action=update";
+    for (const headers of [{ cookie: "responder_cell=eu" }, { cookie: "responder_cell=elsewhere" }, {}] as Array<Record<string, string>>) {
+      const { app, handled } = harness();
 
-    const response = await app.request(`${callbackPath}${query}`);
+      const response = await app.request(`${callbackPath}${query}`, { headers });
 
-    expect(response.headers.get("location")).toBe(`${legacySetupUrl}${query}`);
-    expect(handled).not.toHaveBeenCalled();
+      expect(response.headers.get("location")).toBe(`${legacySetupUrl}${query}`);
+      expect(handled).not.toHaveBeenCalled();
+    }
   });
 
-  it("keeps a callback without state when a cell that might hold the installation cannot be asked", async () => {
-    const { app, handled } = harness({
-      askCell: vi.fn(async () => {
-        throw new Error("cell unavailable");
-      }),
-    });
+  it("answers a signed-out callback without state the same way for any installation", async () => {
+    const locations = new Set<string | null>();
+    for (const installationId of [1, 42, 99_999_999]) {
+      const { app } = harness();
+      const response = await app.request(`${callbackPath}?setup_action=update`);
+      const withInstallation = await app.request(
+        `${callbackPath}?installation_id=${installationId}&setup_action=update`,
+      );
+      locations.add(new URL(response.headers.get("location")!).origin);
+      locations.add(new URL(withInstallation.headers.get("location")!).origin);
+    }
 
-    const response = await app.request(`${callbackPath}?installation_id=42&setup_action=update`);
-
-    expect(await response.json()).toEqual({ from: "application" });
-    expect(handled).toHaveBeenCalledOnce();
-  });
-
-  it("keeps a callback without state when other cells exist but there is no cell token to ask them", async () => {
-    const { app, dependencies, handled } = harness({ cellToken: () => undefined });
-
-    const response = await app.request(`${callbackPath}?installation_id=42&setup_action=update`);
-
-    expect(await response.json()).toEqual({ from: "application" });
-    expect(handled).toHaveBeenCalledOnce();
-    expect(dependencies.askCell).not.toHaveBeenCalled();
+    expect([...locations]).toEqual([new URL(legacySetupUrl).origin]);
   });
 
   it("lets the application answer when it cannot tell whose callback it is", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const { app, handled } = harness({
-      tenantState: vi.fn(async () => {
+      keepsHere: vi.fn(async () => {
         throw new Error("database unavailable");
       }),
     });
@@ -160,5 +152,45 @@ describe("legacy GitHub setup redirect", () => {
     expect(legacyGitHubSetupUrl({ LEGACY_GITHUB_SETUP_URL: legacySetupUrl })).toBe(legacySetupUrl);
     expect(() => legacyGitHubSetupUrl({ LEGACY_GITHUB_SETUP_URL: "http://api.superlog.sh/x" }))
       .toThrow(/LEGACY_GITHUB_SETUP_URL/u);
+  });
+});
+
+describe("keepsGitHubSetupHere", () => {
+  const headers = new Headers();
+  const tenant = {
+    ok: true as const,
+    organizationId: "10000000-0000-4000-8000-000000000000",
+    role: "member",
+    user: { email: "test@example.com", id: "20000000-0000-4000-8000-000000000000", name: "Test User" },
+  };
+
+  afterEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it("does not look up the installation for a signed-out browser", async () => {
+    vi.mocked(getActiveTenant).mockResolvedValue({ error: "Unauthorized", ok: false, status: 401 });
+
+    await expect(keepsGitHubSetupHere(headers, 42)).resolves.toBe(false);
+    expect(listConnectedIntegrationAccounts).not.toHaveBeenCalled();
+  });
+
+  it("keeps a pending GitHub connection", async () => {
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    vi.mocked(getPendingIntegrationConnectionState).mockResolvedValue({ metadata: {}, returnTo: "/settings" });
+
+    await expect(keepsGitHubSetupHere(headers, null)).resolves.toBe(true);
+  });
+
+  it("keeps an installation only the signed-in user's workspace holds", async () => {
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    vi.mocked(getPendingIntegrationConnectionState).mockResolvedValue(null);
+    vi.mocked(listConnectedIntegrationAccounts).mockResolvedValue([
+      { externalAccountId: "42", id: "30000000-0000-4000-8000-000000000000" },
+    ]);
+
+    await expect(keepsGitHubSetupHere(headers, 42)).resolves.toBe(true);
+    await expect(keepsGitHubSetupHere(headers, 43)).resolves.toBe(false);
+    expect(listConnectedIntegrationAccounts).toHaveBeenCalledWith(tenant.organizationId, "github");
   });
 });

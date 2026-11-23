@@ -1,5 +1,9 @@
-import { and, desc, eq, inArray, lt } from "drizzle-orm";
+import { and, desc, eq, exists, inArray, lt, sql } from "drizzle-orm";
 import { getDatabase } from "./client.js";
+import {
+  type GitHubRepositoryIds,
+  workspaceHoldsGitHubRepository,
+} from "./github-repository-match.js";
 import { suggestionCodeChangeSchema } from "../suggestions/model.js";
 import {
   agentConfigVersions,
@@ -277,7 +281,7 @@ export async function markSuggestionPullRequestCreated(input: {
     );
 }
 
-export async function markSuggestionPullRequestMerged(input: {
+export async function markSuggestionPullRequestMerged(input: GitHubRepositoryIds & {
   pullRequestNumber: number;
   repositoryFullName: string;
 }) {
@@ -290,6 +294,12 @@ export async function markSuggestionPullRequestMerged(input: {
         eq(suggestionPullRequests.repositoryFullName, input.repositoryFullName),
         eq(suggestionPullRequests.pullRequestNumber, input.pullRequestNumber),
         eq(suggestionPullRequests.status, "created"),
+        exists(
+          db.select({ held: sql`1` }).from(suggestions).where(and(
+            eq(suggestions.id, suggestionPullRequests.suggestionId),
+            workspaceHoldsGitHubRepository(suggestions.organizationId, input),
+          )),
+        ),
       ),
     )
     .returning({

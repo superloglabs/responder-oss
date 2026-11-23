@@ -56,12 +56,13 @@ function pullRequestEvent(overrides: {
 } = {}) {
   return JSON.stringify({
     action: overrides.action ?? "closed",
+    installation: { id: 789 },
     pull_request: {
       number: overrides.number ?? 42,
       merged: overrides.merged ?? true,
       html_url: "https://github.com/acme/api/pull/42",
     },
-    repository: { full_name: overrides.repository ?? "acme/api" },
+    repository: { full_name: overrides.repository ?? "acme/api", id: 456 },
   });
 }
 
@@ -70,7 +71,7 @@ function reviewEvent() {
     action: "submitted",
     installation: { id: 789 },
     pull_request: { html_url: "https://github.com/acme/api/pull/42", number: 42 },
-    repository: { full_name: "acme/api" },
+    repository: { full_name: "acme/api", id: 456 },
     review: {
       author_association: "NONE",
       body: "",
@@ -174,8 +175,10 @@ describe("GitHub pull request webhooks", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ ok: true, matched: true });
     expect(markIssuePullRequestMerged).toHaveBeenCalledWith({
-      repositoryFullName: "acme/api",
+      installationId: 789,
       pullRequestNumber: 42,
+      repositoryFullName: "acme/api",
+      repositoryId: 456,
     });
     expect(markSuggestionPullRequestMerged).not.toHaveBeenCalled();
     expect(refreshIssuePullRequestSlackMessages).toHaveBeenCalledWith("req-1");
@@ -210,8 +213,10 @@ describe("GitHub pull request webhooks", () => {
 
     await expect(response.json()).resolves.toEqual({ ok: true, matched: true });
     expect(markSuggestionPullRequestMerged).toHaveBeenCalledWith({
-      repositoryFullName: "acme/api",
+      installationId: 789,
       pullRequestNumber: 42,
+      repositoryFullName: "acme/api",
+      repositoryId: 456,
     });
     expect(refreshIssuePullRequestSlackMessages).not.toHaveBeenCalled();
     expect(captureAnalyticsEvent).toHaveBeenCalledWith(
@@ -323,8 +328,10 @@ describe("GitHub pull request webhooks", () => {
 
     await expect(response.json()).resolves.toEqual({ ok: true, matched: true });
     expect(markPullRequestOriginMerged).toHaveBeenCalledWith({
+      installationId: 789,
       pullRequestNumber: 42,
       repositoryFullName: "acme/api",
+      repositoryId: 456,
     });
     expect(refreshIssuePullRequestSlackMessages).not.toHaveBeenCalled();
     expect(captureAnalyticsEvent).not.toHaveBeenCalled();

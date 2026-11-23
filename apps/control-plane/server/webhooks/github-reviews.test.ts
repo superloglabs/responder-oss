@@ -27,7 +27,7 @@ function reviewEvent(overrides: {
     action: overrides.action ?? "submitted",
     installation: { id: 789 },
     pull_request: { html_url: "https://github.com/acme/api/pull/42", number: 42 },
-    repository: { full_name: "acme/api" },
+    repository: { full_name: "acme/api", id: 456 },
     review: {
       author_association: overrides.association ?? "NONE",
       body: overrides.body ?? "",
@@ -110,6 +110,13 @@ describe("pull request review turns", () => {
 
     await expect(startPullRequestReviewTurn(reviewEvent(), deps, environment)).resolves.toBe("queued");
 
+    // GitHub's installation and repository IDs, not only the name, pick the run.
+    expect(deps.findTarget).toHaveBeenCalledWith({
+      installationId: 789,
+      pullRequestNumber: 42,
+      repositoryFullName: "acme/api",
+      repositoryId: 456,
+    });
     expect(deps.queueAutomationRunReply).toHaveBeenCalledWith({
       message: {
         authorId: "greptile-apps[bot]",
