@@ -18,7 +18,7 @@ export type SlackAuthorProfile = {
 // that is not shared outside the org counts as a member. When Slack sends no
 // team for the author, the message is taken as a member's.
 export function slackOutsideAuthorReason(input: {
-  // The envelope's enterprise_id, set for Enterprise Grid workspaces.
+  // The Enterprise Grid org the event was delivered through, if any.
   enterpriseId?: string;
   event: SlackAuthorProfile;
   // The envelope's is_ext_shared_channel.
