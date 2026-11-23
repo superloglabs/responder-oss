@@ -450,10 +450,25 @@ describe("Slack mentions when more than one workspace holds the team", () => {
   });
 
   it("keeps every match when one workspace holds the team", async () => {
+    const mentionAgent = {
+      ...tagMode,
+      agentId: "82828282-8282-4282-8282-828282828282",
+      channelSelected: false,
+      trigger: "slack_mention",
+    };
     mocks.listAccounts.mockResolvedValue([account]);
-    mocks.findAgents.mockResolvedValue([tagMode]);
+    mocks.findAgents.mockResolvedValue([tagMode, mentionAgent]);
+    mocks.queueInvestigation.mockResolvedValue({ investigationId, kind: "queued" });
 
-    expect(await (await mention()).json()).toEqual({ matchedAgents: 1, ok: true });
+    expect(await (await mention()).json()).toEqual({ matchedAgents: 2, ok: true });
+
+    expect(mocks.queueThreadInvestigation).toHaveBeenCalledWith(
+      expect.objectContaining({ agentId: tagMode.agentId }),
+      expect.anything(),
+    );
+    expect(mocks.queueInvestigation).toHaveBeenCalledWith(
+      expect.objectContaining({ agentId: mentionAgent.agentId }),
+    );
   });
 
   it("ignores a mention from a person in another Slack team in a shared channel", async () => {
