@@ -134,6 +134,15 @@ describe("Slack event routing", () => {
       },
       {
         accountMetadata: { appId: "A123", botUserId: "U123" },
+        agentId: "replaced-mention-agent",
+        integrationAccountId: "slack-account-1",
+        organizationId: "workspace-1",
+        purpose: "standard",
+        trigger: "slack_mention",
+        triggerConfig: { channelIds: ["C123"], integrationAccountId: "slack-account-1" },
+      },
+      {
+        accountMetadata: { appId: "A123", botUserId: "U123" },
         agentId: "mention-agent",
         integrationAccountId: "slack-account-2",
         organizationId: "workspace-2",
