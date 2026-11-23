@@ -204,6 +204,27 @@ describe("Signal navigation", () => {
     expect(navigationBlocks(navigation).map((block) => block.group)).toEqual(["Signal", "Automation", "Workspace"]);
   });
 
+  it("lists telemetry pages in a workspace that also has telemetry", () => {
+    const navigation = primaryNavigation({
+      alerts: true,
+      automations: true,
+      dashboards: true,
+      signal: true,
+      signalSetupComplete: true,
+      simplified: true,
+      telemetry: true,
+    });
+    expect(navigation.map((item) => item.label)).toEqual([
+      "Findings", "Usage", "Setup",
+      "Automations", "Skills", "Memory", "PRs",
+      "Overview", "Dashboards", "Logs", "Metrics", "Traces",
+      "Errors", "Alerts", "Synthetics",
+      "Settings",
+    ]);
+    expect(navigationBlocks(navigation).map((block) => block.group))
+      .toEqual(["Signal", "Automation", "Explore", "Detect", "Workspace"]);
+  });
+
   it("keeps automations reachable while Signal setup is unfinished", () => {
     expect(primaryNavigation({ automations: true, simplified: true, signal: true, signalSetupComplete: false })
       .map((item) => item.label)).toEqual(["Setup", "Automations", "Skills", "Memory", "PRs", "Settings"]);
