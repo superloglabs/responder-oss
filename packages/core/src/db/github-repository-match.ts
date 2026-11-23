@@ -12,8 +12,9 @@ export interface GitHubRepositoryIds {
 }
 
 // True when the workspace still holds the GitHub installation and the
-// repository a webhook names. Pull requests are recorded by full name, so this
-// keeps another owner's repository of the same name from matching them.
+// repository a webhook names: the connection is connected and the repository
+// available. Pull requests are recorded by full name, so this keeps another
+// owner's repository of the same name from matching them.
 export function workspaceHoldsGitHubRepository(
   organizationId: AnyPgColumn,
   ids: GitHubRepositoryIds,
@@ -30,7 +31,9 @@ export function workspaceHoldsGitHubRepository(
         eq(integrationAccounts.organizationId, organizationId),
         eq(integrationAccounts.provider, "github"),
         eq(integrationAccounts.externalAccountId, String(ids.installationId)),
+        eq(integrationAccounts.status, "connected"),
         eq(repositories.externalId, String(ids.repositoryId)),
+        eq(repositories.available, true),
       )),
   );
 }
