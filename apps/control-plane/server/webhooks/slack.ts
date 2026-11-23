@@ -7,6 +7,10 @@ import { z } from "zod";
 import { captureAnalyticsEvent } from "@responder/core/analytics";
 import { decryptCredentials } from "../../../../packages/core/src/credentials/encryption.js";
 import { findAgentsForSlackEvent } from "../../../../packages/core/src/db/agents.js";
+import {
+  slackConversationOrganizations,
+  slackOutsideAuthorReason,
+} from "./slack-routing.js";
 import { slackSigningSecrets } from "../../../../packages/core/src/integrations/slack-apps.js";
 import {
   automationButtonIndex,
@@ -84,10 +88,16 @@ const slackMessageSchema = z.object({
   ts: z.string().min(1),
   thread_ts: z.string().optional(),
   user: z.string().optional(),
+  // The Slack team of the person who wrote the message.
+  user_team: z.string().optional(),
   user_profile: z
     .object({
       display_name: z.string().optional(),
       real_name: z.string().optional(),
+      team: z.string().optional(),
+      // A guest of the Slack team.
+      is_restricted: z.boolean().optional(),
+      is_ultra_restricted: z.boolean().optional(),
     })
     .passthrough()
     .optional(),
@@ -137,6 +147,16 @@ const slackEventCallbackSchema = z.object({
   // The app the event was sent to.
   api_app_id: z.string().min(1).optional(),
   team_id: z.string().min(1),
+  // The Enterprise Grid org the app receives the event through. Null outside
+  // Enterprise Grid.
+  context_enterprise_id: z.string().min(1).nullish(),
+  // The installation that can see the event. Its enterprise_id is the
+  // installation's Enterprise Grid org.
+  authorizations: z
+    .array(z.object({ enterprise_id: z.string().min(1).nullish() }).passthrough())
+    .optional(),
+  // Whether the channel is shared with another Slack organization.
+  is_ext_shared_channel: z.boolean().optional(),
   event_id: z.string().min(1),
   event: slackMessageSchema,
 });
@@ -1034,7 +1054,30 @@ function logBlockedSlackInvestigation(input: {
 }
 
 type SlackMessageEvent = z.infer<typeof slackMessageSchema>;
+
+// The Enterprise Grid org the event was delivered through, if any.
+export function slackEventEnterpriseId(callback: {
+  authorizations?: ReadonlyArray<{ enterprise_id?: string | null }>;
+  context_enterprise_id?: string | null;
+}): string | undefined {
+  return callback.context_enterprise_id
+    ?? callback.authorizations?.find((authorization) => authorization.enterprise_id)?.enterprise_id
+    ?? undefined;
+}
 type SlackAgentMatch = Awaited<ReturnType<typeof findAgentsForSlackEvent>>[number];
+
+function logSlackOutsideAuthorIgnored(input: {
+  channelId: string;
+  eventId: string;
+  reason: "guest" | "other_team";
+  teamId: string;
+}) {
+  console.info(JSON.stringify({
+    ...input,
+    event: "slack_webhook_ignored",
+    reason: `author_${input.reason}`,
+  }));
+}
 
 // Returns false when the organization has no allowance left.
 async function startSlackAgentRequest(input: {
@@ -1170,10 +1213,14 @@ export function slackDirectMessageBody(event: SlackMessageEvent): string {
 
 // A direct message works like a mention: tag mode answers in the message's
 // thread, and a reply in that thread continues the conversation.
+// Only members of the Slack team are answered. When more than one organization
+// holds the team, the one that connected it first answers.
 export async function answerSlackDirectMessage(input: {
   appId?: string;
+  enterpriseId?: string;
   event: SlackMessageEvent;
   eventId: string;
+  externallyShared?: boolean;
   teamId: string;
 }) {
   const { event } = input;
@@ -1182,15 +1229,39 @@ export async function answerSlackDirectMessage(input: {
   if (author?.kind !== "person") {
     return { ok: true, ignored: true, reason: "direct_message_from_app" };
   }
+  const outsideReason = slackOutsideAuthorReason({
+    enterpriseId: input.enterpriseId,
+    event,
+    externallyShared: input.externallyShared,
+    teamId: input.teamId,
+  });
+  if (outsideReason) {
+    logSlackOutsideAuthorIgnored({
+      channelId: event.channel,
+      eventId: input.eventId,
+      reason: outsideReason,
+      teamId: input.teamId,
+    });
+    return { ok: true, ignored: true, reason: "author_outside_team" };
+  }
   const threadTimestamp = event.thread_ts ?? event.ts;
   const body = slackDirectMessageBody(event);
-  const matches = await findAgentsForSlackEvent({
+  const found = await findAgentsForSlackEvent({
     appId: input.appId,
     channelId: event.channel,
     eventType: "direct_message",
     teamId: input.teamId,
     userId: author.id,
   });
+  const answering = found.length > 0
+    ? slackConversationOrganizations({
+      channelOrganizationIds: [],
+      connections: await listConnectedSlackAccountsForTeam(input.teamId, input.appId),
+    })
+    : null;
+  const matches = answering
+    ? found.filter((match) => answering.has(match.organizationId))
+    : found;
   if (matches.length === 0) {
     await replyInSlackDirectMessage({
       appId: input.appId,
@@ -1214,7 +1285,6 @@ export async function answerSlackDirectMessage(input: {
         teamId: input.teamId,
       })),
   );
-  // Another organization on the workspace may still answer.
   if (!started.some(Boolean)) {
     await replyInSlackDirectMessage({
       appId: input.appId,
@@ -1333,8 +1403,10 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
     }
     return context.json(await answerSlackDirectMessage({
       appId: callback.data.api_app_id,
+      enterpriseId: slackEventEnterpriseId(callback.data),
       event,
       eventId: callback.data.event_id,
+      externallyShared: callback.data.is_ext_shared_channel,
       teamId: callback.data.team_id,
     }));
   }
@@ -1519,6 +1591,31 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
       failedCount: automationResults.filter((result) => result.status === "rejected").length,
     }));
   }
+  // Tag mode and agents answer a mention only from a member of the team.
+  // Automations that chose the channel still see it.
+  const outsideReason = event.type === "app_mention"
+    ? slackOutsideAuthorReason({
+      enterpriseId: slackEventEnterpriseId(callback.data),
+      event,
+      externallyShared: callback.data.is_ext_shared_channel,
+      teamId: callback.data.team_id,
+    })
+    : null;
+  if (outsideReason) {
+    logSlackOutsideAuthorIgnored({
+      channelId: event.channel,
+      eventId: callback.data.event_id,
+      reason: outsideReason,
+      teamId: callback.data.team_id,
+    });
+    return context.json({
+      ok: true,
+      matchedAgents: 0,
+      ...(automationMatches.length > 0
+        ? { matchedAutomations: automationMatches.length }
+        : {}),
+    });
+  }
   if (event.type === "app_mention" && event.thread_ts) {
     const linked = await findSlackIssueThread({
       channelId: event.channel,
@@ -1632,6 +1729,25 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
     userId: event.user,
     senderAppId: event.app_id ?? event.bot_profile?.app_id,
   }) ?? [];
+  // When more than one organization holds the team, a mention goes to the
+  // organizations that chose its channel, or else to the first to connect.
+  if (event.type === "app_mention" && matches.length > 0) {
+    const answering = slackConversationOrganizations({
+      channelOrganizationIds: [
+        ...automationMatches.map((match) => match.organizationId),
+        ...matches
+          .filter((match) => match.channelSelected)
+          .map((match) => match.organizationId),
+      ],
+      connections: await listConnectedSlackAccountsForTeam(
+        callback.data.team_id,
+        callback.data.api_app_id,
+      ),
+    });
+    if (answering) {
+      matches = matches.filter((match) => answering.has(match.organizationId));
+    }
+  }
   matches = matches.filter((match) => !automationThreadOrganizations.has(match.organizationId));
   await Promise.all(
     matches.map((match) =>

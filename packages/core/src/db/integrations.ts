@@ -1427,7 +1427,7 @@ export function slackAccountOfApp(appId: string | undefined) {
 }
 
 // Every organization connected to a Slack workspace through the same app can
-// write to a person's messages tab with any of their tokens.
+// write to a person's messages tab with any of their tokens. Oldest first.
 export async function listConnectedSlackAccountsForTeam(teamId: string, appId?: string) {
   return getDatabase()
     .select({
@@ -1446,7 +1446,7 @@ export async function listConnectedSlackAccountsForTeam(teamId: string, appId?: 
         slackAccountOfApp(appId),
       ),
     )
-    .orderBy(integrationAccounts.createdAt);
+    .orderBy(integrationAccounts.createdAt, integrationAccounts.id);
 }
 
 // True for one caller at a time, and never after the welcome was sent. A

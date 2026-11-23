@@ -219,6 +219,18 @@ A new message starts a new conversation. When tag mode is off, the app replies
 that an admin has to turn it on. The first time a person opens the app's
 Messages tab, the app sends them a welcome message once.
 
+Tag mode answers mentions and direct messages from members of the connected
+Slack workspace only. Messages from guests and from people in another Slack
+organization, such as in a Slack Connect channel, are ignored. Within an
+Enterprise Grid org, members of its other workspaces are answered in channels
+not shared outside the org. Automations that watch a channel still see every
+message in it.
+
+When more than one Superlog workspace connects the same Slack workspace, a
+mention in a channel goes to the workspaces whose automation or agent chose
+that channel. Otherwise, and for every direct message, it goes to the
+workspace that connected Slack first.
+
 Responder searches Slack on demand through Slack's `search.messages` Web API
 method with the connecting user's token. Search accepts Slack's search syntax,
 such as `from:`, `after:`, `has:`, and quoted phrases, except `in:`: Responder

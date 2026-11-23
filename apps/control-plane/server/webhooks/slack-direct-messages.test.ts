@@ -36,7 +36,7 @@ vi.mock("../../../../packages/core/src/db/agents.js", () => ({
 vi.mock("../../../../packages/core/src/db/automations.js", () => ({
   findAutomationsForSlackEvent: mocks.findAutomations,
   findSlackThreadAutomationRun: vi.fn(),
-  recordSlackMessageAuthor: vi.fn(),
+  recordSlackMessageAuthor: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("../automations/queue.js", () => ({
   queueAutomationRun: mocks.queueRun,
@@ -297,21 +297,231 @@ describe("Slack direct messages", () => {
     });
   });
 
-  it("does not report the usage limit when another organization answers", async () => {
-    mocks.findAgents.mockResolvedValue([
-      tagMode,
-      { ...tagMode, agentId: "71717171-7171-4171-8171-717171717171", organizationId: "other-org" },
-    ]);
-    mocks.queueThreadInvestigation
-      .mockResolvedValueOnce({ kind: "blocked" })
-      .mockResolvedValueOnce({ investigationId, kind: "queued" });
-    mocks.accountCredential.mockResolvedValue({ encryptedCredentials: "sealed", organizationId: "other-org" });
+  it("answers a direct message only from the workspace that connected the team first", async () => {
+    const laterTagMode = { ...tagMode, agentId: "71717171-7171-4171-8171-717171717171", organizationId: "later-org" };
+    mocks.findAgents.mockResolvedValue([laterTagMode, tagMode]);
+    mocks.listAccounts.mockResolvedValue([account, { ...account, id: "later-account", organizationId: "later-org" }]);
+
+    expect(await (await directMessage()).json()).toEqual({ matchedAgents: 1, ok: true });
+
+    expect(mocks.queueThreadInvestigation).toHaveBeenCalledOnce();
+    expect(mocks.queueThreadInvestigation).toHaveBeenCalledWith(
+      expect.objectContaining({ agentId: tagMode.agentId }),
+      expect.anything(),
+    );
+  });
+
+  it("does not hand a direct message to a later workspace when the first has tag mode off", async () => {
+    const laterTagMode = { ...tagMode, agentId: "71717171-7171-4171-8171-717171717171", organizationId: "later-org" };
+    mocks.findAgents.mockResolvedValue([laterTagMode]);
+    mocks.listAccounts.mockResolvedValue([account, { ...account, id: "later-account", organizationId: "later-org" }]);
 
     await directMessage();
 
-    expect(mocks.postMessage).not.toHaveBeenCalledWith(
-      expect.objectContaining({ text: slackAllowanceExhaustedReply }),
+    expect(mocks.queueThreadInvestigation).not.toHaveBeenCalled();
+    expect(mocks.postMessage).toHaveBeenCalledWith(expect.objectContaining({
+      accessToken: "token-for-sealed",
+      text: slackTagModeOffReply,
+    }));
+  });
+
+  it("ignores a direct message from a person in another Slack team", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+
+    const response = await directMessage({ user_team: "T999" });
+
+    expect(await response.json()).toEqual({ ignored: true, ok: true, reason: "author_outside_team" });
+    expect(mocks.findAgents).not.toHaveBeenCalled();
+    expect(mocks.queueThreadInvestigation).not.toHaveBeenCalled();
+    expect(mocks.postMessage).not.toHaveBeenCalled();
+    info.mockRestore();
+  });
+
+  it("ignores a direct message from a guest", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+
+    const response = await directMessage({
+      user_profile: { display_name: "Grace", is_restricted: true, team: "T123" },
+      user_team: "T123",
+    });
+
+    expect(await response.json()).toEqual({ ignored: true, ok: true, reason: "author_outside_team" });
+    expect(mocks.queueThreadInvestigation).not.toHaveBeenCalled();
+    info.mockRestore();
+  });
+
+  it("answers a direct message from a member of the team", async () => {
+    await directMessage({
+      user_profile: { display_name: "Ada", is_restricted: false, is_ultra_restricted: false, team: "T123" },
+      user_team: "T123",
+    });
+
+    expect(mocks.queueThreadInvestigation).toHaveBeenCalledOnce();
+  });
+});
+
+describe("Slack mentions when more than one workspace holds the team", () => {
+  const laterTagMode = {
+    ...tagMode,
+    agentId: "71717171-7171-4171-8171-717171717171",
+    integrationAccountId: "later-account",
+    organizationId: "later-org",
+  };
+
+  function mention(event: Record<string, unknown> = {}, envelope: Record<string, unknown> = {}) {
+    return sign(JSON.stringify({
+      event: {
+        channel: "C123",
+        text: "<@UBOT> Why is checkout slow?",
+        ts: "1790000002.000100",
+        type: "app_mention",
+        user: "U123",
+        ...event,
+      },
+      event_id: "Ev4",
+      team_id: "T123",
+      type: "event_callback",
+      ...envelope,
+    }));
+  }
+
+  beforeEach(() => {
+    vi.stubEnv("SLACK_SIGNING_SECRET", signingSecret);
+    mocks.accountCredential.mockResolvedValue({ encryptedCredentials: "sealed", organizationId: "org" });
+    mocks.addReaction.mockResolvedValue(undefined);
+    mocks.channelConnection.mockResolvedValue(null);
+    mocks.findAgents.mockResolvedValue([laterTagMode, tagMode]);
+    mocks.findAutomations.mockResolvedValue([]);
+    mocks.hasCapability.mockResolvedValue(false);
+    mocks.listAccounts.mockResolvedValue([account, { ...account, id: "later-account", organizationId: "later-org" }]);
+    mocks.postMessage.mockResolvedValue("1790000003.000100");
+    mocks.queueRun.mockResolvedValue({ duplicate: false, runId: "run-1" });
+    mocks.queueThreadInvestigation.mockResolvedValue({ investigationId, kind: "queued" });
+    mocks.recordMessage.mockResolvedValue("investigating");
+    mocks.recordSource.mockResolvedValue(undefined);
+    mocks.setReaction.mockResolvedValue(undefined);
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.clearAllMocks();
+  });
+
+  it("answers with the workspace that connected the team first when no workspace chose the channel", async () => {
+    expect(await (await mention()).json()).toEqual({ matchedAgents: 1, ok: true });
+
+    expect(mocks.queueThreadInvestigation).toHaveBeenCalledOnce();
+    expect(mocks.queueThreadInvestigation).toHaveBeenCalledWith(
+      expect.objectContaining({ agentId: tagMode.agentId }),
+      expect.anything(),
     );
+  });
+
+  it("answers with the workspace whose agent chose the channel", async () => {
+    const mentionAgent = {
+      ...laterTagMode,
+      agentId: "81818181-8181-4181-8181-818181818181",
+      channelSelected: true,
+      trigger: "slack_mention",
+    };
+    mocks.findAgents.mockResolvedValue([tagMode, mentionAgent]);
+    mocks.queueInvestigation.mockResolvedValue({ investigationId, kind: "queued" });
+
+    expect(await (await mention()).json()).toEqual({ matchedAgents: 1, ok: true });
+
+    expect(mocks.queueInvestigation).toHaveBeenCalledWith(
+      expect.objectContaining({ agentId: mentionAgent.agentId }),
+    );
+    expect(mocks.queueThreadInvestigation).not.toHaveBeenCalled();
+  });
+
+  it("leaves a channel to the workspace whose automation chose it", async () => {
+    mocks.findAutomations.mockResolvedValue([{
+      automationId: "91919191-9191-4191-8191-919191919191",
+      integrationAccountId: "later-account",
+      mentioned: true,
+      organizationId: "later-org",
+      startsRun: true,
+    }]);
+
+    expect(await (await mention()).json()).toEqual({ matchedAgents: 0, matchedAutomations: 1, ok: true });
+
+    expect(mocks.queueRun).toHaveBeenCalledOnce();
+    expect(mocks.queueThreadInvestigation).not.toHaveBeenCalled();
+  });
+
+  it("keeps every match when one workspace holds the team", async () => {
+    const mentionAgent = {
+      ...tagMode,
+      agentId: "82828282-8282-4282-8282-828282828282",
+      channelSelected: false,
+      trigger: "slack_mention",
+    };
+    mocks.listAccounts.mockResolvedValue([account]);
+    mocks.findAgents.mockResolvedValue([tagMode, mentionAgent]);
+    mocks.queueInvestigation.mockResolvedValue({ investigationId, kind: "queued" });
+
+    expect(await (await mention()).json()).toEqual({ matchedAgents: 2, ok: true });
+
+    expect(mocks.queueThreadInvestigation).toHaveBeenCalledWith(
+      expect.objectContaining({ agentId: tagMode.agentId }),
+      expect.anything(),
+    );
+    expect(mocks.queueInvestigation).toHaveBeenCalledWith(
+      expect.objectContaining({ agentId: mentionAgent.agentId }),
+    );
+  });
+
+  it("ignores a mention from a person in another Slack team in a shared channel", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+
+    const response = await mention({ user_team: "T999" }, { is_ext_shared_channel: true });
+
+    expect(await response.json()).toEqual({ matchedAgents: 0, ok: true });
+    expect(mocks.findAgents).not.toHaveBeenCalled();
+    expect(mocks.queueThreadInvestigation).not.toHaveBeenCalled();
+    info.mockRestore();
+  });
+
+  it("answers a member of another workspace in the same Enterprise Grid org", async () => {
+    mocks.listAccounts.mockResolvedValue([account]);
+    mocks.findAgents.mockResolvedValue([tagMode]);
+
+    const response = await mention(
+      { user_team: "T456" },
+      { context_enterprise_id: "E123", is_ext_shared_channel: false },
+    );
+
+    expect(await response.json()).toEqual({ matchedAgents: 1, ok: true });
+  });
+
+  it("reads the Enterprise Grid org from the event's authorization", async () => {
+    mocks.listAccounts.mockResolvedValue([account]);
+    mocks.findAgents.mockResolvedValue([tagMode]);
+
+    const response = await mention(
+      { user_team: "T456" },
+      {
+        authorizations: [{ enterprise_id: "E123", team_id: "T123" }],
+        context_enterprise_id: null,
+        is_ext_shared_channel: false,
+      },
+    );
+
+    expect(await response.json()).toEqual({ matchedAgents: 1, ok: true });
+  });
+
+  it("ignores a member of another workspace when the event names no Enterprise Grid org", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    mocks.listAccounts.mockResolvedValue([account]);
+    mocks.findAgents.mockResolvedValue([tagMode]);
+
+    const response = await mention(
+      { user_team: "T456" },
+      { context_enterprise_id: null, is_ext_shared_channel: false },
+    );
+
+    expect(await response.json()).toEqual({ matchedAgents: 0, ok: true });
+    info.mockRestore();
   });
 });
 

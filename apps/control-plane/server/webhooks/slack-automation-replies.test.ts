@@ -32,6 +32,10 @@ vi.mock("../../../../packages/core/src/db/investigations.js", async (importOrigi
   findSlackIssueThread: mocks.findIssueThread,
   recordInvestigationSlackSource: mocks.recordSource,
 }));
+vi.mock("../../../../packages/core/src/db/integrations.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../../../packages/core/src/db/integrations.js")>(),
+  listConnectedSlackAccountsForTeam: vi.fn().mockResolvedValue([{ organizationId: "org" }]),
+}));
 vi.mock("../../../../packages/core/src/db/organization-capabilities.js", () => ({
   organizationHasCapability: mocks.hasCapability,
 }));
