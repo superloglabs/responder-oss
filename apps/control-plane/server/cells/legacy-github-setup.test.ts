@@ -143,6 +143,23 @@ describe("legacy GitHub setup redirect", () => {
     error.mockRestore();
   });
 
+  it("lets the application answer when the cell directory is misconfigured", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const { app, handled } = harness({
+      directory: () => {
+        throw new Error("CELL_DIRECTORY is invalid");
+      },
+    });
+
+    const response = await app.request(`${callbackPath}?installation_id=42&setup_action=update`, {
+      headers: { cookie: "responder_cell=us" },
+    });
+
+    expect(response.status).toBe(200);
+    expect(handled).toHaveBeenCalledOnce();
+    error.mockRestore();
+  });
+
   it("does nothing without a configured address, and rejects one that is not HTTPS", async () => {
     const { app, handled } = harness({ setupUrl: () => null });
     await app.request(`${callbackPath}?installation_id=42&state=${encodeURIComponent(oldProductState)}`);

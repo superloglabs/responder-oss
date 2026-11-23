@@ -82,6 +82,7 @@ export function legacyGitHubSetupRedirect(
     if (!state) {
       const installationId = z.coerce.number().int().positive()
         .safeParse(requestUrl.searchParams.get("installation_id"));
+      let cell: Cell | null;
       try {
         if (await dependencies.keepsHere(
           context.req.raw.headers,
@@ -89,12 +90,12 @@ export function legacyGitHubSetupRedirect(
         )) {
           return next();
         }
+        cell = rememberedOtherCell(getCookie(context, cellCookieName), dependencies.directory());
       } catch (error) {
         // The application answers when it cannot tell whose callback this is.
         console.error(JSON.stringify({ errorMessage: errorMessage(error), event: "legacy_github_setup_lookup_failed" }));
         return next();
       }
-      const cell = rememberedOtherCell(getCookie(context, cellCookieName), dependencies.directory());
       if (cell) {
         console.info(JSON.stringify({ cell: cell.id, event: "github_setup_callback_forwarded" }));
         return context.redirect(`${cell.url}${requestUrl.pathname}${requestUrl.search}`, 302);
