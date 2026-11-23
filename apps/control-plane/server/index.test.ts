@@ -41,6 +41,7 @@ const slackWebhookMocks = vi.hoisted(() => ({
   findAutomationsForSlackEvent: vi.fn().mockResolvedValue([]),
   findAgentsForSlackEvent: vi.fn(),
   getSlackChannelConnection: vi.fn(),
+  listConnectedSlackAccountsForTeam: vi.fn().mockResolvedValue([]),
   organizationHasCapability: vi.fn().mockResolvedValue(false),
   recordInvestigationSlackSource: vi.fn(),
   recordSlackMessageAuthor: vi.fn().mockResolvedValue(undefined),
@@ -77,6 +78,8 @@ vi.mock(
   async (importOriginal) => ({
     ...(await importOriginal()),
     getSlackChannelConnection: slackWebhookMocks.getSlackChannelConnection,
+    listConnectedSlackAccountsForTeam:
+      slackWebhookMocks.listConnectedSlackAccountsForTeam,
   }),
 );
 

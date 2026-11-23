@@ -52,7 +52,9 @@ export class AgentConfigurationError extends Error {
   }
 }
 
-// A direct message reaches tag mode only, as a mention does.
+// A direct message reaches tag mode only, as a mention does. An organization
+// with tag mode on answers mentions with it rather than its mention agents.
+// `channelSelected` says whether the agent chose the event's channel by name.
 export async function findAgentsForSlackEvent(input: {
   // The Slack app the event was sent to.
   appId?: string;
@@ -64,6 +66,7 @@ export async function findAgentsForSlackEvent(input: {
 }): Promise<
   Array<{
     agentId: string;
+    channelSelected: boolean;
     integrationAccountId: string;
     organizationId: string;
     trigger: "slack_channel" | "slack_mention" | "slack_thread";
@@ -104,8 +107,13 @@ export async function findAgentsForSlackEvent(input: {
 
   const tagModeEvent = input.eventType === "app_mention" ||
     input.eventType === "direct_message";
-  const useSlackThreadMode =
-    tagModeEvent && rows.some((row) => row.purpose === "slack_thread");
+  const threadModeOrganizations = new Set(
+    tagModeEvent
+      ? rows
+        .filter((row) => row.purpose === "slack_thread")
+        .map((row) => row.organizationId)
+      : [],
+  );
 
   return rows
     .filter((row) => {
@@ -118,7 +126,10 @@ export async function findAgentsForSlackEvent(input: {
         return false;
       }
       if (row.purpose === "slack_thread") return tagModeEvent;
-      if (useSlackThreadMode || input.eventType === "direct_message") {
+      if (
+        threadModeOrganizations.has(row.organizationId) ||
+        input.eventType === "direct_message"
+      ) {
         return false;
       }
       if (row.triggerConfig.integrationAccountId !== row.integrationAccountId) return false;
@@ -139,6 +150,12 @@ export async function findAgentsForSlackEvent(input: {
     })
     .map((row) => ({
       agentId: row.agentId,
+      channelSelected: row.purpose !== "slack_thread" && (
+        ("channelId" in row.triggerConfig &&
+          row.triggerConfig.channelId === input.channelId) ||
+        ("channelIds" in row.triggerConfig &&
+          row.triggerConfig.channelIds.includes(input.channelId))
+      ),
       integrationAccountId: row.integrationAccountId,
       organizationId: row.organizationId,
       trigger: row.purpose === "slack_thread"

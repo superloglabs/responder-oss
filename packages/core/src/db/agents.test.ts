@@ -66,12 +66,14 @@ describe("Slack event routing", () => {
     ).resolves.toEqual([
       {
         agentId: "agent-1",
+        channelSelected: true,
         integrationAccountId: "slack-account-1",
         organizationId: "workspace-1",
         trigger: "slack_channel",
       },
       {
         agentId: "agent-2",
+        channelSelected: true,
         integrationAccountId: "slack-account-2",
         organizationId: "workspace-2",
         trigger: "slack_channel",
@@ -111,9 +113,73 @@ describe("Slack event routing", () => {
     ).resolves.toEqual([
       {
         agentId: "tag-mode",
+        channelSelected: false,
         integrationAccountId: "slack-account-1",
         organizationId: "workspace-1",
         trigger: "slack_thread",
+      },
+    ]);
+  });
+
+  it("lets only a workspace with tag mode on replace its mention agents with tag mode", async () => {
+    returnAgents([
+      {
+        accountMetadata: { appId: "A123", botUserId: "U123" },
+        agentId: "tag-mode",
+        integrationAccountId: "slack-account-1",
+        organizationId: "workspace-1",
+        purpose: "slack_thread",
+        trigger: "slack_mention",
+        triggerConfig: {},
+      },
+      {
+        accountMetadata: { appId: "A123", botUserId: "U123" },
+        agentId: "mention-agent",
+        integrationAccountId: "slack-account-2",
+        organizationId: "workspace-2",
+        purpose: "standard",
+        trigger: "slack_mention",
+        triggerConfig: { channelIds: ["C123"], integrationAccountId: "slack-account-2" },
+      },
+      {
+        accountMetadata: { appId: "A123", botUserId: "U123" },
+        agentId: "any-channel-agent",
+        integrationAccountId: "slack-account-2",
+        organizationId: "workspace-2",
+        purpose: "standard",
+        trigger: "slack_mention",
+        triggerConfig: { channelIds: [], integrationAccountId: "slack-account-2" },
+      },
+    ]);
+
+    await expect(
+      findAgentsForSlackEvent({
+        channelId: "C123",
+        eventType: "app_mention",
+        teamId: "T123",
+        userId: "U999",
+      }),
+    ).resolves.toEqual([
+      {
+        agentId: "tag-mode",
+        channelSelected: false,
+        integrationAccountId: "slack-account-1",
+        organizationId: "workspace-1",
+        trigger: "slack_thread",
+      },
+      {
+        agentId: "mention-agent",
+        channelSelected: true,
+        integrationAccountId: "slack-account-2",
+        organizationId: "workspace-2",
+        trigger: "slack_mention",
+      },
+      {
+        agentId: "any-channel-agent",
+        channelSelected: false,
+        integrationAccountId: "slack-account-2",
+        organizationId: "workspace-2",
+        trigger: "slack_mention",
       },
     ]);
   });
