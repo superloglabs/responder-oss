@@ -12,18 +12,18 @@ const organization = {
 };
 const eu = { id: "eu", label: "Europe", url: "https://superlog.sh" };
 const us = { id: "us", label: "United States", url: "https://us.superlog.sh" };
-const ali = {
+const alex = {
   banned: false,
   canImpersonate: true,
   createdAt: "2026-10-26T10:00:00.000Z",
-  email: "ali@nautilus.co",
+  email: "alex@acme.example",
   id: "44444444-4444-4444-8444-444444444444",
   image: null,
-  name: "Ali",
+  name: "Alex",
   role: "user",
 };
 const ana = {
-  ...ali,
+  ...alex,
   createdAt: "2026-10-01T10:00:00.000Z",
   email: "ana@example.com",
   id: "55555555-5555-4555-8555-555555555555",
@@ -82,7 +82,7 @@ test("lists the users of every cell and hands another cell's user to that cell",
     currentCell: "eu",
     unavailableCells: [],
     users: [
-      { ...ali, cell: us },
+      { ...alex, cell: us },
       { ...ana, cell: eu },
     ],
   });
@@ -93,14 +93,14 @@ test("lists the users of every cell and hands another cell's user to that cell",
   await page.goto("/superuser/users");
   await page.getByRole("button", { name: "Reject All" }).click();
   const table = page.getByRole("region", { name: "Responder users" });
-  await expect(table.getByRole("row", { name: /Ali/u })).toContainText("United States");
+  await expect(table.getByRole("row", { name: /Alex/u })).toContainText("United States");
   await expect(table.getByRole("row", { name: /Ana/u })).toContainText("Europe");
   await page.screenshot({ path: "test-results/user-support-cells.png" });
 
-  await table.getByRole("row", { name: /Ali/u }).getByRole("button", { name: "View as user" }).click();
+  await table.getByRole("row", { name: /Alex/u }).getByRole("button", { name: "View as user" }).click();
 
   await expect(page).toHaveURL(
-    `https://us.superlog.sh/superuser/users?search=ali%40nautilus.co&view=${ali.id}`,
+    `https://us.superlog.sh/superuser/users?search=alex%40acme.example&view=${alex.id}`,
   );
 });
 
@@ -108,17 +108,17 @@ test("asks to view as the user a link from another cell names", async ({ page })
   const impersonated: unknown[] = [];
   await mockSuperuser(
     page,
-    { currentCell: "us", unavailableCells: [], users: [{ ...ali, cell: us }] },
+    { currentCell: "us", unavailableCells: [], users: [{ ...alex, cell: us }] },
     (body) => impersonated.push(body),
   );
   const dialog = page.waitForEvent("dialog");
 
-  await page.goto(`/superuser/users?search=ali%40nautilus.co&view=${ali.id}`);
+  await page.goto(`/superuser/users?search=alex%40acme.example&view=${alex.id}`);
 
   const prompt = await dialog;
-  expect(prompt.message()).toContain("View Responder as Ali in United States?");
+  expect(prompt.message()).toContain("View Responder as Alex in United States?");
   await prompt.accept();
-  await expect.poll(() => impersonated).toEqual([{ userId: ali.id }]);
+  await expect.poll(() => impersonated).toEqual([{ userId: alex.id }]);
 });
 
 test("says which cells could not be reached", async ({ page }) => {

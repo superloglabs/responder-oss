@@ -415,7 +415,7 @@ test("clears a deleted active workspace and offers the workspace in another regi
         workspaces: [
           {
             cell: { id: "us", label: "United States", url: "https://us.example.com" },
-            name: "Alara Dental",
+            name: "Northwind Clinic",
           },
         ],
       },
@@ -453,7 +453,7 @@ test("clears a deleted active workspace and offers the workspace in another regi
 
   await expect(
     page.getByRole("heading", {
-      name: "Your workspace Alara Dental is in the United States region",
+      name: "Your workspace Northwind Clinic is in the United States region",
     }),
   ).toBeVisible();
   await expect(page.getByText("Organization access denied")).toHaveCount(0);

@@ -308,7 +308,7 @@ describe("groupErrorCandidates with a failed request log", () => {
   function request(attrs: Record<string, string>, overrides: Partial<ErrorCandidate> = {}): ErrorCandidate {
     return candidate({
       attrs,
-      body: JSON.stringify({ type: "rest", timestamp: "2026-11-16T10:13:10.536Z", token: "hD72JOZDlZ7d9VY55K0A", ...attrs }),
+      body: JSON.stringify({ type: "rest", timestamp: "2026-01-05T09:00:00.000Z", token: "test-token-0001", ...attrs }),
       exception_message: "",
       exception_stacktrace: "",
       exception_type: "",
@@ -319,12 +319,12 @@ describe("groupErrorCandidates with a failed request log", () => {
       ...overrides,
     });
   }
-  const bigquery = '{"type":{"code":500,"description":"Internal Server Error"},"message":"Error connecting to bigquery source","label":undefined}';
+  const warehouse = '{"type":{"code":500,"description":"Internal Server Error"},"message":"Could not reach the warehouse"}';
 
   it("makes one issue of requests that failed the same way, whatever the rest of the line says", () => {
     const groups = groupErrorCandidates([
-      request({ code: "500", endpoint: "data", response: bigquery, qid: "70276c43a3f07102db5e92117c87ac08", ip: "4.178.21.198" }),
-      request({ code: "500", endpoint: "data", response: bigquery, qid: "aa276c43a3f07102db5e92117c87ac08", key: "854c5503-1d0b-46f2-a78d-f02a1275b0bb" }),
+      request({ code: "500", endpoint: "data", response: warehouse, qid: "q-0001", ip: "203.0.113.7" }),
+      request({ code: "500", endpoint: "data", response: warehouse, qid: "q-0002", key: "00000000-0000-4000-8000-000000000001" }),
     ]);
     expect(groups).toHaveLength(1);
     expect(groups[0]).toMatchObject({
@@ -332,24 +332,24 @@ describe("groupErrorCandidates with a failed request log", () => {
       exceptionType: "HTTP 500",
       frames: [],
       kind: "log",
-      message: "HTTP 500 data: Error connecting to bigquery source",
+      message: "HTTP 500 data: Could not reach the warehouse",
       previousFingerprints: [],
-      title: "HTTP 500 data: Error connecting to bigquery source",
+      title: "HTTP 500 data: Could not reach the warehouse",
       topFrame: null,
     });
-    expect(groups[0]!.sample.attributes).toMatchObject({ endpoint: "data", qid: "aa276c43a3f07102db5e92117c87ac08" });
+    expect(groups[0]!.sample.attributes).toMatchObject({ endpoint: "data", qid: "q-0002" });
   });
 
   it("keeps routes, statuses, services, and error texts apart", () => {
     const fingerprints = groupErrorCandidates([
-      request({ code: "500", endpoint: "data", response: bigquery }),
+      request({ code: "500", endpoint: "data", response: warehouse }),
       request({ code: "500", endpoint: "data", response: "Internal Server Error" }),
-      request({ code: "502", endpoint: "data", response: bigquery }),
-      request({ code: "500", endpoint: "aichart", response: bigquery }),
+      request({ code: "502", endpoint: "data", response: warehouse }),
+      request({ code: "500", endpoint: "summary", response: warehouse }),
       // Routes that are paths stay distinct.
-      request({ code: "500", endpoint: "/query", response: bigquery }),
-      request({ code: "500", endpoint: "/export", response: bigquery }),
-      request({ code: "500", endpoint: "data", response: bigquery }, { service: "plugins" }),
+      request({ code: "500", endpoint: "/query", response: warehouse }),
+      request({ code: "500", endpoint: "/export", response: warehouse }),
+      request({ code: "500", endpoint: "data", response: warehouse }, { service: "plugins" }),
     ]).map((group) => group.fingerprint);
     expect(new Set(fingerprints).size).toBe(7);
   });
@@ -376,7 +376,7 @@ describe("groupErrorCandidates with a failed request log", () => {
   it("finds the error text in a response body, or goes without one", () => {
     const title = (attrs: Record<string, string>) => groupErrorCandidates([request({ code: "500", endpoint: "data", ...attrs })])[0]!.title;
     expect(title({ response: '{\n  "type": {\n    "code": 500\n  },\n  "message": "An unexpected error occurred."\n}' })).toBe("HTTP 500 data: An unexpected error occurred.");
-    expect(title({ response: '{"error":"Member was not in project"}' })).toBe("HTTP 500 data: Member was not in project");
+    expect(title({ response: '{"error":"Member not found"}' })).toBe("HTTP 500 data: Member not found");
     expect(title({ response: "Internal Server Error\nat handler" })).toBe("HTTP 500 data: Internal Server Error");
     expect(title({ response: '{\r\n  "type": "https://tools.ietf.org/html/rfc9110#section-15.6.1",\r\n  "title": "An error occurred while processing your request.",\r\n  "status": 500,\r\n  "detail": null\r\n}' }))
       .toBe("HTTP 500 data: An error occurred while processing your request.");

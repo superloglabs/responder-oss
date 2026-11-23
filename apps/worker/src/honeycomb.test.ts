@@ -18,7 +18,7 @@ describe("Honeycomb MCP", () => {
   it("opens the team's regional server with its key as a bearer token", () => {
     createHoneycombMcpServer({
       accountId: "a0000000-0000-4000-8000-000000000000",
-      displayName: "StarSling",
+      displayName: "Acme",
       keyId: "hcxmk_key",
       keySecret: "secret-value",
       mcpUrl: "https://mcp.eu1.honeycomb.io/mcp",
