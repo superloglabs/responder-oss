@@ -379,7 +379,7 @@ Configure a public GitHub App with:
 A connection stores every repository its installation covers, so Responder
 connects an installation only when the authorizing user can see all of its
 repositories. A GitHub organization owner or admin, or someone with access to
-every repository the app is installed on, connects it.
+every repository of that installation, connects it.
 
 New connections install this app. Connections to installations of an earlier
 app keep working when `GITHUB_ADDITIONAL_APPS` lists it as JSON,
