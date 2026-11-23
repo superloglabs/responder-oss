@@ -227,9 +227,9 @@ not shared outside the org. Automations that watch a channel still see every
 message in it.
 
 When more than one Superlog workspace connects the same Slack workspace, a
-mention or direct message goes to one of them. A mention in a channel goes to
-the workspaces whose automation or agent chose that channel. Otherwise, and for
-every direct message, it goes to the workspace that connected Slack first.
+mention in a channel goes to the workspaces whose automation or agent chose
+that channel. Otherwise, and for every direct message, it goes to the
+workspace that connected Slack first.
 
 Responder searches Slack on demand through Slack's `search.messages` Web API
 method with the connecting user's token. Search accepts Slack's search syntax,
