@@ -113,6 +113,25 @@ describe("scrubUrl", () => {
       "https://app.example.com/api/widgets",
     );
   });
+
+  it("replaces the path of a Slack URL with a port", () => {
+    expect(scrubUrl("https://hooks.slack.com:443/actions/T123/456/abcdef")).toBe(
+      "https://hooks.slack.com:443/actions/[redacted]",
+    );
+  });
+
+  it("replaces a Slack webhook path given without its host", () => {
+    expect(scrubUrl("/services/T123/B456/abcdef")).toBe("/services/[redacted]");
+    expect(scrubSpanName("POST /actions/T123/456/abcdef")).toBe(
+      "POST /actions/[redacted]",
+    );
+  });
+
+  it("keeps other paths that start like a Slack path", () => {
+    expect(scrubUrl("/services")).toBe("/services");
+    expect(scrubUrl("/api/telemetry/services")).toBe("/api/telemetry/services");
+    expect(scrubUrl("/actions/review/42")).toBe("/actions/review/42");
+  });
 });
 
 describe("ScrubbingSpanProcessor", () => {

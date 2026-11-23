@@ -33,9 +33,14 @@ const slackHookPath = /^(\/(?:actions|services|triggers|workflows)\/)[^?#\s]+/iu
 const tokenPaths: ReadonlyArray<readonly [RegExp, string]> = [
   // Password reset links.
   [/(\/api\/auth\/reset-password\/)[^/?#\s]+/gu, `$1${redactedValue}`],
-  // Slack incoming webhooks and response URLs.
+  // Slack incoming webhooks and response URLs, with or without a port.
   [
-    /(\/\/hooks\.slack\.com\/(?:actions|services|triggers|workflows)\/)[^?#\s]+/giu,
+    /(\/\/hooks\.slack\.com(?::\d+)?\/(?:actions|services|triggers|workflows)\/)[^?#\s]+/giu,
+    `$1${redactedValue}`,
+  ],
+  // The same paths without their host, which start with a Slack team ID.
+  [
+    /^(\/(?:actions|services|triggers|workflows)\/)T[A-Z0-9]+\/[^?#\s]+/gu,
     `$1${redactedValue}`,
   ],
 ];
