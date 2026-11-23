@@ -355,6 +355,13 @@ share and defaults to 1 while OTLP export is on.
   writes one per forwarded call; the OpenAI client and AI SDK calls that pass
   `modelCallTelemetry` are traced by their instrumentations. Prompts and
   outputs are not recorded.
+- Spans keep only the `user-agent`, `content-type`, and `content-length`
+  request and response headers. URL attributes, span names, Sentry events,
+  and HTTP breadcrumbs drop query strings and fragments. Password reset tokens
+  and Slack webhook paths are replaced with `[redacted]`. A span processor
+  scrubs spans before both exporters, and Sentry's `beforeSendSpan`,
+  `beforeSendTransaction`, and `beforeBreadcrumb` do the same for what Sentry
+  records on its own (`packages/core/src/observability/span-scrubbing.ts`).
 - Metrics are the Node.js runtime metrics, process memory
   (`process.memory.usage` for resident set size, `nodejs.memory.external`, and
   `nodejs.memory.array_buffers`), and `http.server.request.duration` by route

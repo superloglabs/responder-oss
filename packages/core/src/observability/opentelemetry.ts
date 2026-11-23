@@ -39,6 +39,7 @@ import {
   SentrySpanProcessor,
 } from "@sentry/opentelemetry";
 import { sentryEnvironment, sentryRelease } from "./sentry.js";
+import { ScrubbingSpanProcessor } from "./span-scrubbing.js";
 
 export type TelemetryEnvironment = Record<string, string | undefined>;
 
@@ -337,6 +338,8 @@ export function startNodeTelemetry(options: NodeTelemetryOptions): NodeTelemetry
     resource,
     sampler: new DetachedSpanSampler(new SentrySampler(options.sentryClient)),
     spanProcessors: [
+      // First, so the exporters below never see what it removes.
+      new ScrubbingSpanProcessor(),
       new SentrySpanProcessor({ client: options.sentryClient }),
       new BatchSpanProcessor(new OTLPTraceExporter()),
     ],
