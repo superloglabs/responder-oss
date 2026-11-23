@@ -180,7 +180,13 @@ describe("Sentry scrubbing", () => {
     };
     const event = scrubSentryEventTelemetry({
       breadcrumbs: [{ data: { url: "https://example.com/?api_key=abc" } }],
-      contexts: { trace: { data: rootData, span_id: "1" } },
+      contexts: {
+        trace: {
+          data: rootData,
+          description: "GET /api/auth/reset-password/tok123",
+          span_id: "1",
+        },
+      },
       request: {
         cookies: { session: "abc" },
         headers: {
@@ -199,6 +205,7 @@ describe("Sentry scrubbing", () => {
       contexts: {
         trace: {
           data: { "http.target": "/api/integrations/chat/complete" },
+          description: "GET /api/auth/reset-password/[redacted]",
           span_id: "1",
         },
       },
