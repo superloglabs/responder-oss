@@ -289,7 +289,9 @@ describe("GitHub pull request webhooks", () => {
     await expect(response.json()).resolves.toEqual({ ok: true, outcome: "queued" });
     expect(startPullRequestReviewTurn).toHaveBeenCalledWith(expect.objectContaining({
       action: "submitted",
+      installation: { id: 789 },
       pull_request: expect.objectContaining({ number: 42 }),
+      repository: { full_name: "acme/api", id: 456 },
       review: expect.objectContaining({ id: 5 }),
     }));
   });
