@@ -360,7 +360,7 @@ share and defaults to 1 while OTLP export is on.
   breadcrumb URLs drop query strings and fragments, and so do these fields of
   Sentry events: the request URL, the transaction name, and the data and
   description of the trace context and of each span. A Sentry event's request
-  keeps only those headers and loses its cookies, body, and query string.
+  keeps no other headers and loses its cookies, body, and query string.
   Exception messages and other contexts are not scrubbed. Password reset
   tokens and Slack webhook paths are replaced with `[redacted]`. A span
   processor scrubs spans before both exporters, and Sentry's `beforeSendSpan`,
