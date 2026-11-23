@@ -1,5 +1,6 @@
 import { automationTemplates, type AutomationTemplate } from "./automation-templates";
 import type { PlanCatalog } from "../plan-comparison";
+import { connectionErrorDetail } from "../connection-errors";
 
 export type OnboardingStep = "workspace" | "code" | "alerts" | "usage" | "templates";
 
@@ -53,7 +54,9 @@ export function connectedProviders(integrations: ReadonlyArray<{ id: string; sta
 export function returnedConnectionError(search: string, provider: string): string | null {
   const params = new URLSearchParams(search);
   if (params.get("integration") !== provider || params.get("status") !== "error") return null;
-  return params.get("reason") === "cancelled" ? "The connection was cancelled." : "The connection could not be completed.";
+  const reason = params.get("reason");
+  if (reason === "cancelled") return "The connection was cancelled.";
+  return connectionErrorDetail(reason) ?? "The connection could not be completed.";
 }
 
 export function formatPlanPrice(value: number): string {
