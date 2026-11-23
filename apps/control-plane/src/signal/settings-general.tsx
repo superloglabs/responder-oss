@@ -20,13 +20,17 @@ export function SettingsGeneral({ data, save, fail, status }: SettingsPageProps)
   const { settings } = data;
   const navigate = useNavigate();
   const [billing, setBilling] = useState<SignalBilling | null>(null);
+  const [billingFailed, setBillingFailed] = useState(false);
+  const [billingAttempt, setBillingAttempt] = useState(0);
   useEffect(() => {
     let current = true;
     // Needed to turn Signal on, which loads it again if this failed, and to
     // know whether the plan lets the workspace choose a retention.
-    fetchSignalBilling().then((loaded) => { if (current) setBilling(loaded); }).catch(() => undefined);
+    fetchSignalBilling()
+      .then((loaded) => { if (current) { setBilling(loaded); setBillingFailed(false); } })
+      .catch(() => { if (current) setBillingFailed(true); });
     return () => { current = false; };
-  }, []);
+  }, [billingAttempt]);
 
   // Turning on needs a plan, like the last setup step; turning off never does.
   async function setEnabled(enabled: boolean) {
@@ -107,9 +111,13 @@ export function SettingsGeneral({ data, save, fail, status }: SettingsPageProps)
     <SettingsGroup title="Data">
       <div className="signalSettingsCard signalSettingsCard--rows">
         <SettingsRow label="Data retention"
-          description={retentionNeedsTeam
-            ? <>Choose how long Signal keeps findings and investigations on the Team plan. <Link to="/signal/setup/plan">Upgrade to Team</Link></>
-            : "Findings, investigations, and the error and log details Signal stored for them are deleted once they are older than this."}>
+          description={billingFailed && !billing
+            ? <>Could not load your plan. <button type="button" className="signalLinkButton" onClick={() => setBillingAttempt((attempt) => attempt + 1)}>Try again</button></>
+            : retentionNeedsTeam
+              ? <>Choose how long Signal keeps findings and investigations on the Team plan. <Link to="/signal/setup/plan">Upgrade to Team</Link></>
+              : settings.retentionDays === null
+                ? "Signal keeps findings, investigations, and the error and log details it stored for them until the workspace is deleted."
+                : "Findings, investigations, and the error and log details Signal stored for them are deleted once they are older than this."}>
           <select className="signalSettingsSelect" aria-label="Data retention" value={settings.retentionDays ?? ""}
             disabled={!canChooseRetention && settings.retentionDays === null}
             onChange={(e) => save({ retentionDays: e.target.value ? Number(e.target.value) as SignalRetentionDays : null })}>
