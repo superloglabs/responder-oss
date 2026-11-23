@@ -72,8 +72,8 @@ describe("MCP requests forwarded by the old product", () => {
     mocks.getOrganizationSummary.mockResolvedValue({
       createdAt: new Date("2026-10-01T10:00:00.000Z"),
       id: organizationId,
-      name: "Nautilus",
-      slug: "nautilus",
+      name: "Acme",
+      slug: "acme",
     });
 
     const response = await forwarded(

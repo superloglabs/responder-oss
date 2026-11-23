@@ -61,7 +61,7 @@ function appFor(activeClaim: ReturnType<typeof claim> | null) {
     gcp: {
       authHeaders: vi.fn(async () => new Headers({
         authorization: "Bearer google-federated-token",
-        "x-goog-user-project": "konex-prod",
+        "x-goog-user-project": "northwind-prod",
       })),
       now: () => Date.now(),
     },
@@ -135,7 +135,7 @@ function appFor(activeClaim: ReturnType<typeof claim> | null) {
 
 function gcpClaim(sessionSuffix: string) {
   return claim("gcp", {
-    projectId: "konex-prod",
+    projectId: "northwind-prod",
     projectNumber: "123456789012",
     sessionName: `responder-gcp-${sessionSuffix.padEnd(32, "x")}`,
   });
@@ -355,7 +355,7 @@ describe("automation context broker", () => {
       expect(url).toBe("https://logging.googleapis.com/mcp");
       const headers = new Headers(init.headers);
       expect(headers.get("authorization")).toBe("Bearer google-federated-token");
-      expect(headers.get("x-goog-user-project")).toBe("konex-prod");
+      expect(headers.get("x-goog-user-project")).toBe("northwind-prod");
       expect(headers.get("mcp-session-id")).toBe("run-session");
     });
 

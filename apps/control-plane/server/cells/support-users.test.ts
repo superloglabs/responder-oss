@@ -49,7 +49,7 @@ describe("support users across cells", () => {
   });
 
   it("merges every cell's users, newest first, and names each user's cell", async () => {
-    const askCell = vi.fn().mockResolvedValue([user("ali", "2026-10-26T00:00:00.000Z")]);
+    const askCell = vi.fn().mockResolvedValue([user("alex", "2026-10-26T00:00:00.000Z")]);
 
     const result = await supportUsersAcrossCells({
       askCell,
@@ -63,7 +63,7 @@ describe("support users across cells", () => {
     expect(result.currentCell).toBe("eu");
     expect(result.unavailableCells).toEqual([]);
     expect(result.users.map((listed) => [listed.id, listed.cell?.id])).toEqual([
-      ["ali", "us"],
+      ["alex", "us"],
       ["ana", "eu"],
     ]);
   });
@@ -121,7 +121,7 @@ describe("support users route for other cells", () => {
     vi.stubEnv("RESPONDER_CELL_TOKEN", "cell-token");
     vi.stubEnv("SUPERUSER_EMAILS", "admin@example.com");
     listSupportUsers.mockResolvedValue([
-      { ...user("ali", ""), createdAt: new Date("2026-10-26T00:00:00.000Z") },
+      { ...user("alex", ""), createdAt: new Date("2026-10-26T00:00:00.000Z") },
       {
         ...user("admin", ""),
         createdAt: new Date("2026-10-02T00:00:00.000Z"),
@@ -129,12 +129,12 @@ describe("support users route for other cells", () => {
       },
     ]);
 
-    const response = await ask({ search: " nautilus " }, "cell-token");
+    const response = await ask({ search: " acme " }, "cell-token");
 
-    expect(listSupportUsers).toHaveBeenCalledWith("nautilus");
+    expect(listSupportUsers).toHaveBeenCalledWith("acme");
     const body = (await response.json()) as { users: SupportUser[] };
     expect(body.users.map((listed) => [listed.id, listed.canImpersonate, listed.createdAt])).toEqual([
-      ["ali", true, "2026-10-26T00:00:00.000Z"],
+      ["alex", true, "2026-10-26T00:00:00.000Z"],
       ["admin", false, "2026-10-02T00:00:00.000Z"],
     ]);
   });

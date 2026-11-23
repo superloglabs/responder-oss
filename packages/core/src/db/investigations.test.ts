@@ -707,7 +707,7 @@ describe("custom MCP runtime logging", () => {
 
     await expect(
       loadContextConnection(
-        { displayName: "swishis.grafana.net", id: "account-1", provider: "grafana" },
+        { displayName: "acme.grafana.net", id: "account-1", provider: "grafana" },
         "version-1",
         { onUnavailable },
         () => Promise.reject(new McpOAuthRefreshError(true)),
@@ -715,7 +715,7 @@ describe("custom MCP runtime logging", () => {
     ).resolves.toBeNull();
 
     expect(onUnavailable).toHaveBeenCalledWith(expect.objectContaining({
-      message: 'Reconnect the Grafana Cloud connection "swishis.grafana.net" in Settings.',
+      message: 'Reconnect the Grafana Cloud connection "acme.grafana.net" in Settings.',
     }));
     expect(JSON.parse(consoleError.mock.calls[0]![0] as string)).toMatchObject({
       event: "context_connection_unavailable",

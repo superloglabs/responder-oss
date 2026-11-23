@@ -23,31 +23,31 @@ describe("superuser impersonation eligibility", () => {
 
 describe("viewing as a user of another cell", () => {
   const us = { id: "us", label: "United States", url: "https://us.superlog.sh" };
-  const ali = {
+  const alex = {
     banned: false,
     canImpersonate: true,
     cell: us,
     createdAt: "2026-10-26T00:00:00.000Z",
-    email: "ali@nautilus.co",
+    email: "alex@acme.example",
     id: "6c1f",
-    name: "Ali",
+    name: "Alex",
   };
 
   it("sends a user of another cell to that cell's user support page", () => {
-    expect(otherCellViewUrl(ali, "eu")).toBe(
-      "https://us.superlog.sh/superuser/users?search=ali%40nautilus.co&view=6c1f",
+    expect(otherCellViewUrl(alex, "eu")).toBe(
+      "https://us.superlog.sh/superuser/users?search=alex%40acme.example&view=6c1f",
     );
   });
 
   it("views a user of this cell here", () => {
-    expect(otherCellViewUrl(ali, "us")).toBeNull();
-    expect(otherCellViewUrl({ ...ali, cell: null }, null)).toBeNull();
+    expect(otherCellViewUrl(alex, "us")).toBeNull();
+    expect(otherCellViewUrl({ ...alex, cell: null }, null)).toBeNull();
   });
 
   it("acts on a handed-over link only for a user this cell listed", () => {
-    expect(requestedViewUser([ali], "6c1f", "us")).toBe(ali);
-    expect(requestedViewUser([ali], "6c1f", "eu")).toBeNull();
-    expect(requestedViewUser([ali], "other", "us")).toBeNull();
-    expect(requestedViewUser([ali], null, "us")).toBeNull();
+    expect(requestedViewUser([alex], "6c1f", "us")).toBe(alex);
+    expect(requestedViewUser([alex], "6c1f", "eu")).toBeNull();
+    expect(requestedViewUser([alex], "other", "us")).toBeNull();
+    expect(requestedViewUser([alex], null, "us")).toBeNull();
   });
 });

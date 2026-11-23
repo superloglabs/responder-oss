@@ -120,7 +120,7 @@ describe("alert operations", () => {
     mocks.capabilities = new Set(["telemetry", "alerts"]);
     mocks.client.mockReturnValue({});
     mocks.slackChannels.mockResolvedValue([
-      { accountName: "Nautilus", channelId: "C0ALERTS", integrationAccountId: slackAccountId, name: "alerts", private: false },
+      { accountName: "Acme", channelId: "C0ALERTS", integrationAccountId: slackAccountId, name: "alerts", private: false },
     ]);
   });
 

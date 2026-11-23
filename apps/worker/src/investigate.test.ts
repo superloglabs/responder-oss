@@ -673,12 +673,12 @@ describe("sandbox agent configuration", () => {
       repositories: [],
       sentryConnected: false,
       unavailableConnectionMessages: [
-        'Reconnect the Grafana Cloud connection "swishis.grafana.net" in Settings.',
+        'Reconnect the Grafana Cloud connection "acme.grafana.net" in Settings.',
       ],
     });
 
     expect(instructions).toContain(
-      'These selected connections could not be used: Reconnect the Grafana Cloud connection "swishis.grafana.net" in Settings. Continue',
+      'These selected connections could not be used: Reconnect the Grafana Cloud connection "acme.grafana.net" in Settings. Continue',
     );
     expect(instructions).toContain("repeat what the person needs to do");
   });
