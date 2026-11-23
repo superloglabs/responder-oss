@@ -147,8 +147,14 @@ const slackEventCallbackSchema = z.object({
   // The app the event was sent to.
   api_app_id: z.string().min(1).optional(),
   team_id: z.string().min(1),
-  // Set for an Enterprise Grid workspace.
-  enterprise_id: z.string().min(1).nullish(),
+  // The Enterprise Grid org the app receives the event through. Null outside
+  // Enterprise Grid.
+  context_enterprise_id: z.string().min(1).nullish(),
+  // The installation that can see the event. Its enterprise_id is the
+  // installation's Enterprise Grid org.
+  authorizations: z
+    .array(z.object({ enterprise_id: z.string().min(1).nullish() }).passthrough())
+    .optional(),
   // Whether the channel is shared with another Slack organization.
   is_ext_shared_channel: z.boolean().optional(),
   event_id: z.string().min(1),
@@ -1048,6 +1054,16 @@ function logBlockedSlackInvestigation(input: {
 }
 
 type SlackMessageEvent = z.infer<typeof slackMessageSchema>;
+
+// The Enterprise Grid org the event was delivered through, if any.
+export function slackEventEnterpriseId(callback: {
+  authorizations?: ReadonlyArray<{ enterprise_id?: string | null }>;
+  context_enterprise_id?: string | null;
+}): string | undefined {
+  return callback.context_enterprise_id
+    ?? callback.authorizations?.find((authorization) => authorization.enterprise_id)?.enterprise_id
+    ?? undefined;
+}
 type SlackAgentMatch = Awaited<ReturnType<typeof findAgentsForSlackEvent>>[number];
 
 function logSlackOutsideAuthorIgnored(input: {
@@ -1387,7 +1403,7 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
     }
     return context.json(await answerSlackDirectMessage({
       appId: callback.data.api_app_id,
-      enterpriseId: callback.data.enterprise_id ?? undefined,
+      enterpriseId: slackEventEnterpriseId(callback.data),
       event,
       eventId: callback.data.event_id,
       externallyShared: callback.data.is_ext_shared_channel,
@@ -1579,7 +1595,7 @@ export const slackWebhookRoutes = new Hono().post("/", async (context) => {
   // Automations that chose the channel still see it.
   const outsideReason = event.type === "app_mention"
     ? slackOutsideAuthorReason({
-      enterpriseId: callback.data.enterprise_id ?? undefined,
+      enterpriseId: slackEventEnterpriseId(callback.data),
       event,
       externallyShared: callback.data.is_ext_shared_channel,
       teamId: callback.data.team_id,

@@ -473,10 +473,40 @@ describe("Slack mentions when more than one workspace holds the team", () => {
 
     const response = await mention(
       { user_team: "T456" },
-      { enterprise_id: "E123", is_ext_shared_channel: false },
+      { context_enterprise_id: "E123", is_ext_shared_channel: false },
     );
 
     expect(await response.json()).toEqual({ matchedAgents: 1, ok: true });
+  });
+
+  it("reads the Enterprise Grid org from the event's authorization", async () => {
+    mocks.listAccounts.mockResolvedValue([account]);
+    mocks.findAgents.mockResolvedValue([tagMode]);
+
+    const response = await mention(
+      { user_team: "T456" },
+      {
+        authorizations: [{ enterprise_id: "E123", team_id: "T123" }],
+        context_enterprise_id: null,
+        is_ext_shared_channel: false,
+      },
+    );
+
+    expect(await response.json()).toEqual({ matchedAgents: 1, ok: true });
+  });
+
+  it("ignores a member of another workspace when the event names no Enterprise Grid org", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    mocks.listAccounts.mockResolvedValue([account]);
+    mocks.findAgents.mockResolvedValue([tagMode]);
+
+    const response = await mention(
+      { user_team: "T456" },
+      { context_enterprise_id: null, is_ext_shared_channel: false },
+    );
+
+    expect(await response.json()).toEqual({ matchedAgents: 0, ok: true });
+    info.mockRestore();
   });
 });
 
