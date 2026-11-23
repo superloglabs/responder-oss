@@ -763,7 +763,7 @@ test("fingerprint reads V8 stacks whose message has an asterisk", () => {
   expect(fp.normalizedFrames).toEqual(["glob@apps/api/src/glob.ts"]);
 });
 
-const failedRequest = { message: "Error connecting to bigquery source", route: "data", service: "api", status: 500 };
+const failedRequest = { message: "Could not reach the warehouse", route: "data", service: "api", status: 500 };
 
 test("a failed request has one fingerprint per service, status, route, and error text", () => {
   expect(fingerprintFailedRequest(failedRequest)).toEqual(fingerprintFailedRequest({ ...failedRequest }));
@@ -777,7 +777,7 @@ test("a failed request's fingerprint leaves out the values in its error text and
   expect(hash("https://api.example.com/users/4812?page=2", null)).toBe(hash("/users/9", null));
   expect(hash("/Query", null)).toBe(hash("/query", null));
   expect(hash("/query", null)).not.toBe(hash("/export", null));
-  expect(hash("data", "Error connecting to bigquery source")).not.toBe(hash("data", "Error connecting to Snowflake source"));
+  expect(hash("data", "Could not reach the warehouse")).not.toBe(hash("data", "Could not reach the cache"));
   // A code with a long number in it names a record; a short number in a name does not.
   expect(hash("/orders/ORD-12345", null)).toBe(hash("/orders/ORD-67890", null));
   expect(hash("/files/report_20261116.pdf", null)).toBe(hash("/files/report_20251001.pdf", null));

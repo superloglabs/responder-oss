@@ -16,7 +16,7 @@ vi.mock("../credentials/encryption.js", () => ({
     value === "encrypted-token"
       ? { accessToken: "google-token" }
       : {
-          projectId: "konex-prod",
+          projectId: "northwind-prod",
           projectNumber: "123456789012",
           sessionName: "responder-gcp-abcdefghijklmnopqrstuvwxyz123456",
         }
@@ -117,7 +117,7 @@ describe("Google Cloud setup job", () => {
 
     expect(deps.advance).toHaveBeenCalledWith({
       accessToken: "google-token",
-      connection: expect.objectContaining({ projectId: "konex-prod" }),
+      connection: expect.objectContaining({ projectId: "northwind-prod" }),
     });
     expect(account.metadata.setup).toMatchObject({
       round: 1,

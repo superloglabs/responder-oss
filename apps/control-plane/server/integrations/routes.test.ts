@@ -1973,7 +1973,7 @@ describe("integration callback routing", () => {
   it("offers the projects visible to the Google account after OAuth", async () => {
     vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
     const projects = [
-      { name: "Konex", projectId: "konex-prod", projectNumber: "123456789012" },
+      { name: "Northwind", projectId: "northwind-prod", projectNumber: "123456789012" },
     ];
     vi.mocked(consumeIntegrationConnectionState).mockResolvedValue({
       organizationId: tenant.organizationId,
@@ -2021,7 +2021,7 @@ describe("integration callback routing", () => {
     vi.mocked(decryptCredentials).mockReturnValue({
       accessToken: "google-token",
       projects: [
-        { name: "Konex", projectId: "konex-prod", projectNumber: "123456789012" },
+        { name: "Northwind", projectId: "northwind-prod", projectNumber: "123456789012" },
       ],
     });
     vi.mocked(createGcpSessionName).mockReturnValue(
@@ -2037,7 +2037,7 @@ describe("integration callback routing", () => {
     vi.mocked(queueGcpProjectSetup).mockResolvedValue("job-id");
 
     const unauthorized = await app.request("/api/integrations/gcp/select-project", {
-      body: JSON.stringify({ projectIds: ["konex-prod", "someone-else"], selectionState: "selection-state" }),
+      body: JSON.stringify({ projectIds: ["northwind-prod", "someone-else"], selectionState: "selection-state" }),
       headers: { "content-type": "application/json" },
       method: "POST",
     });
@@ -2046,7 +2046,7 @@ describe("integration callback routing", () => {
     expect(queueGcpProjectSetup).not.toHaveBeenCalled();
 
     const response = await app.request("/api/integrations/gcp/select-project", {
-      body: JSON.stringify({ projectIds: ["konex-prod"], selectionState: "selection-state" }),
+      body: JSON.stringify({ projectIds: ["northwind-prod"], selectionState: "selection-state" }),
       headers: { "content-type": "application/json" },
       method: "POST",
     });
@@ -2055,19 +2055,19 @@ describe("integration callback routing", () => {
     await expect(response.json()).resolves.toMatchObject({
       accounts: [{
         accountId: "30000000-0000-4000-8000-000000000000",
-        projectId: "konex-prod",
+        projectId: "northwind-prod",
         setup: { status: "running", step: "starting" },
       }],
     });
     expect(encryptCredentials).toHaveBeenCalledWith({
-      projectId: "konex-prod",
+      projectId: "northwind-prod",
       projectNumber: "123456789012",
       sessionName: "responder-gcp-abcdefghijklmnopqrstuvwxyz123456",
     });
     expect(upsertIntegrationAccount).toHaveBeenCalledWith(
       expect.objectContaining({
-        displayName: "GCP · konex-prod",
-        externalAccountId: "konex-prod",
+        displayName: "GCP · northwind-prod",
+        externalAccountId: "northwind-prod",
         provider: "gcp",
         status: "pending",
       }),
@@ -2099,8 +2099,8 @@ describe("integration callback routing", () => {
     vi.mocked(decryptCredentials).mockReturnValue({
       accessToken: "google-token",
       projects: [
-        { name: "Konex", projectId: "konex-prod", projectNumber: "123456789012" },
-        { name: "Konex staging", projectId: "konex-staging", projectNumber: "223456789012" },
+        { name: "Northwind", projectId: "northwind-prod", projectNumber: "123456789012" },
+        { name: "Northwind staging", projectId: "northwind-staging", projectNumber: "223456789012" },
         { name: "Other", projectId: "other-project", projectNumber: "323456789012" },
       ],
     });
@@ -2124,7 +2124,7 @@ describe("integration callback routing", () => {
 
     const response = await app.request("/api/integrations/gcp/select-project", {
       body: JSON.stringify({
-        projectIds: ["konex-prod", "konex-staging", "konex-prod"],
+        projectIds: ["northwind-prod", "northwind-staging", "northwind-prod"],
         selectionState: "selection-state",
       }),
       headers: { "content-type": "application/json" },
@@ -2136,12 +2136,12 @@ describe("integration callback routing", () => {
       accounts: [
         {
           accountId: "30000000-0000-4000-8000-000000000001",
-          projectId: "konex-prod",
+          projectId: "northwind-prod",
           setup: { status: "running" },
         },
         {
           accountId: "30000000-0000-4000-8000-000000000002",
-          projectId: "konex-staging",
+          projectId: "northwind-staging",
           setup: { status: "failed" },
         },
       ],
@@ -2167,7 +2167,7 @@ describe("integration callback routing", () => {
     vi.mocked(decryptCredentials).mockReturnValue({
       accessToken: "google-token",
       projects: [
-        { name: "Konex", projectId: "konex-prod", projectNumber: "123456789012" },
+        { name: "Northwind", projectId: "northwind-prod", projectNumber: "123456789012" },
       ],
     });
     vi.mocked(createGcpSessionName).mockReturnValue(
@@ -2181,7 +2181,7 @@ describe("integration callback routing", () => {
     vi.mocked(queueGcpProjectSetup).mockRejectedValue(new Error("queue down"));
 
     const response = await app.request("/api/integrations/gcp/select-project", {
-      body: JSON.stringify({ projectIds: ["konex-prod"], selectionState: "selection-state" }),
+      body: JSON.stringify({ projectIds: ["northwind-prod"], selectionState: "selection-state" }),
       headers: { "content-type": "application/json" },
       method: "POST",
     });

@@ -15,13 +15,13 @@ const environment = {
 };
 
 const connection = {
-  projectId: "konex-prod",
+  projectId: "northwind-prod",
   projectNumber: "123456789012",
   sessionName: "responder-gcp-abcdefghijklmnopqrstuvwxyz123456",
 };
 
 const serviceAccount =
-  "responder-investigation@konex-prod.iam.gserviceaccount.com";
+  "responder-investigation@northwind-prod.iam.gserviceaccount.com";
 const poolPath =
   "projects/123456789012/locations/global/workloadIdentityPools/responder";
 
@@ -67,10 +67,10 @@ function fakeGoogle(options: {
   const serviceAccountPolicy: Policy = { bindings: [], etag: "a", version: 1 };
   const projectPolicy: Policy = {
     bindings: [
-      { members: ["user:owner@glowtify.com"], role: "roles/owner" },
+      { members: ["user:owner@globex.example"], role: "roles/owner" },
       {
         condition: { expression: "request.time < timestamp('2030-01-01')" },
-        members: ["user:contractor@glowtify.com"],
+        members: ["user:contractor@globex.example"],
         role: "roles/logging.viewer",
       },
     ],
@@ -86,7 +86,7 @@ function fakeGoogle(options: {
     const path = `${url.host}${url.pathname}`;
     if (method !== "GET") writes.push(`${method} ${path}`);
 
-    if (path.endsWith("/projects/konex-prod:testIamPermissions")) {
+    if (path.endsWith("/projects/northwind-prod:testIamPermissions")) {
       return json({
         permissions: (body.permissions as string[]).filter(
           (permission) => !options.missingPermissions?.includes(permission),
@@ -110,7 +110,7 @@ function fakeGoogle(options: {
         ? json({ email: serviceAccount })
         : googleError(404, "Not found");
     }
-    if (path.endsWith("/projects/konex-prod/serviceAccounts") && method === "POST") {
+    if (path.endsWith("/projects/northwind-prod/serviceAccounts") && method === "POST") {
       serviceAccountExists = true;
       return json({ email: serviceAccount });
     }
@@ -152,11 +152,11 @@ function fakeGoogle(options: {
       serviceAccountPolicy.bindings = body.policy.bindings;
       return json(body.policy);
     }
-    if (path.endsWith("/projects/konex-prod:getIamPolicy")) {
+    if (path.endsWith("/projects/northwind-prod:getIamPolicy")) {
       expect(body).toEqual({ options: { requestedPolicyVersion: 3 } });
       return json(structuredClone(projectPolicy));
     }
-    if (path.endsWith("/projects/konex-prod:setIamPolicy")) {
+    if (path.endsWith("/projects/northwind-prod:setIamPolicy")) {
       expect(body.policy.version).toBe(3);
       projectPolicy.bindings = body.policy.bindings;
       return json(body.policy);
@@ -232,21 +232,21 @@ describe("Google Cloud OAuth setup", () => {
       return url.searchParams.get("pageToken")
         ? json({
             projects: [
-              { name: "Konex", projectId: "konex-prod", projectNumber: "123456789012" },
+              { name: "Northwind", projectId: "northwind-prod", projectNumber: "123456789012" },
             ],
           })
         : json({
             nextPageToken: "next",
             projects: [
               { projectId: "example.com:legacy", projectNumber: "222222222222" },
-              { projectId: "glowtify-staging", projectNumber: "333333333333" },
+              { projectId: "globex-staging", projectNumber: "333333333333" },
             ],
           });
     }) as typeof fetch;
 
     await expect(listGcpProjects("token", fetchImpl)).resolves.toEqual([
-      { name: "glowtify-staging", projectId: "glowtify-staging", projectNumber: "333333333333" },
-      { name: "Konex", projectId: "konex-prod", projectNumber: "123456789012" },
+      { name: "globex-staging", projectId: "globex-staging", projectNumber: "333333333333" },
+      { name: "Northwind", projectId: "northwind-prod", projectNumber: "123456789012" },
     ]);
     expect(requested).toEqual(["", "next"]);
   });
@@ -283,7 +283,7 @@ describe("Google Cloud OAuth setup", () => {
     // The conditional binding is preserved, and the grant is unconditional.
     expect(google.projectPolicy.bindings).toContainEqual(expect.objectContaining({
       condition: expect.anything(),
-      members: ["user:contractor@glowtify.com"],
+      members: ["user:contractor@globex.example"],
     }));
 
     google.writes.length = 0;
@@ -323,10 +323,10 @@ describe("Google Cloud OAuth setup", () => {
     await expect(setup).rejects.toBeInstanceOf(GcpSetupError);
     await expect(setup).rejects.toMatchObject({ reason: "permission_denied" });
     await expect(setup).rejects.toThrow(
-      "Your Google account cannot set up access in konex-prod. Ask a project Owner to connect it, or get the Project IAM Admin role on the project and try again.",
+      "Your Google account cannot set up access in northwind-prod. Ask a project Owner to connect it, or get the Project IAM Admin role on the project and try again.",
     );
     expect(google.writes).toEqual([
-      "POST cloudresourcemanager.googleapis.com/v1/projects/konex-prod:testIamPermissions",
+      "POST cloudresourcemanager.googleapis.com/v1/projects/northwind-prod:testIamPermissions",
     ]);
   });
 

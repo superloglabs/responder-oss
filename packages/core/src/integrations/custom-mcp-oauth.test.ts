@@ -135,10 +135,10 @@ describe("custom MCP OAuth refresh", () => {
   it("names the provider and connection in the message", () => {
     expect(
       oauthConnectionRefreshMessage(
-        { displayName: "swishis.grafana.net", provider: "grafana" },
+        { displayName: "acme.grafana.net", provider: "grafana" },
         new McpOAuthRefreshError(true),
       ),
-    ).toBe('Reconnect the Grafana Cloud connection "swishis.grafana.net" in Settings.');
+    ).toBe('Reconnect the Grafana Cloud connection "acme.grafana.net" in Settings.');
     expect(
       oauthConnectionRefreshMessage(
         { provider: "cloudflare" },
