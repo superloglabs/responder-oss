@@ -109,7 +109,6 @@ describe("custom MCP response streaming", () => {
     // an orphaned body stream whose error is unhandled and exits the process.
     const uncaught: unknown[] = [];
     const onUncaught = (error: unknown) => uncaught.push(error);
-    process.on("uncaughtException", onUncaught);
     const server = createTcpServer((socket) => {
       socket.once("data", () => {
         socket.end(
@@ -120,6 +119,7 @@ describe("custom MCP response streaming", () => {
       });
     });
     const port = await listen(server);
+    process.on("uncaughtException", onUncaught);
     try {
       await expect(
         safeCustomMcpFetch(`http://localhost:${port}/mcp`),
