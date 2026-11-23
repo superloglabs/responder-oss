@@ -4975,7 +4975,8 @@ export const integrationRoutes = new Hono()
 
       // A connection stores every repository the installation covers, so
       // only installations whose repositories the user can all see are
-      // connected.
+      // connected. Unequal counts in either direction mean the two lists
+      // disagree, so the installation is skipped.
       const installations: Array<{
         installation: (typeof candidates)[number];
         repositories: Awaited<ReturnType<typeof listGitHubRepositories>>;
@@ -4986,7 +4987,7 @@ export const integrationRoutes = new Hono()
           userToken.access_token,
           installation.id,
         );
-        if (visibleCount < repositories.length) {
+        if (visibleCount !== repositories.length) {
           console.info(JSON.stringify({
             event: "github_installation_partial_access",
             installationId: installation.id,

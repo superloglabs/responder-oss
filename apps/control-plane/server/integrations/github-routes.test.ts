@@ -104,7 +104,11 @@ describe("GitHub integration routing", () => {
   beforeEach(() => {
     vi.mocked(getActiveTenant).mockResolvedValue(tenant);
     vi.mocked(organizationHasCapability).mockResolvedValue(true);
-    vi.mocked(countGitHubUserInstallationRepositories).mockResolvedValue(1_000);
+    // By default the user sees every repository the callback just listed.
+    vi.mocked(countGitHubUserInstallationRepositories).mockImplementation(
+      async () =>
+        (await vi.mocked(listGitHubRepositories).mock.results.at(-1)?.value)?.length ?? 0,
+    );
   });
 
   afterEach(() => {
@@ -532,6 +536,8 @@ describe("GitHub integration routing", () => {
         "30000000-0000-4000-8000-000000000000",
         [repository("3", "octo/tools")],
       );
+      expect(countGitHubUserInstallationRepositories).toHaveBeenCalledWith("user-token", 111);
+      expect(countGitHubUserInstallationRepositories).toHaveBeenCalledWith("user-token", 222);
     });
 
     it("refuses when none of the user's installations are fully visible to them", async () => {
@@ -550,6 +556,30 @@ describe("GitHub integration routing", () => {
         repository("2", "acme/gadgets"),
       ]);
       vi.mocked(countGitHubUserInstallationRepositories).mockResolvedValue(0);
+
+      const response = await app.request(
+        "/api/integrations/github/callback?code=one-time-code&state=authorization-state",
+      );
+
+      expect(response.headers.get("location")).toContain("reason=partial_repository_access");
+      expect(upsertGitHubInstallationAccount).not.toHaveBeenCalled();
+      expect(replaceRepositories).not.toHaveBeenCalled();
+    });
+
+    it("refuses when the user sees more repositories than the installation list holds", async () => {
+      vi.mocked(consumeIntegrationConnectionState).mockResolvedValue({
+        codeVerifier: null,
+        metadata: {},
+        organizationId: tenant.organizationId,
+        returnTo: "/settings",
+        userId: tenant.user.id,
+      });
+      vi.mocked(listGitHubUserInstallations).mockResolvedValue([
+        { account: { id: 98, login: "acme", type: "Organization" }, id: 111, repository_selection: "all" },
+      ]);
+      vi.mocked(listGitHubRepositories).mockResolvedValue([repository("1", "acme/widgets")]);
+      // A repository was added between the two GitHub calls.
+      vi.mocked(countGitHubUserInstallationRepositories).mockResolvedValue(2);
 
       const response = await app.request(
         "/api/integrations/github/callback?code=one-time-code&state=authorization-state",
