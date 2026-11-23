@@ -113,7 +113,9 @@ export function SettingsGeneral({ data, save, fail, status }: SettingsPageProps)
         <SettingsRow label="Data retention"
           description={billingFailed && !billing
             ? <>Could not load your plan. <button type="button" className="signalLinkButton" onClick={() => setBillingAttempt((attempt) => attempt + 1)}>Try again</button></>
-            : retentionNeedsTeam
+            : retentionNeedsTeam && settings.retentionDays !== null
+              ? <>Findings, investigations, and the error and log details Signal stored for them are deleted once they are older than this. Choosing another period needs the Team plan. <Link to="/signal/setup/plan">Upgrade to Team</Link></>
+              : retentionNeedsTeam
               ? <>Choose how long Signal keeps findings and investigations on the Team plan. <Link to="/signal/setup/plan">Upgrade to Team</Link></>
               : settings.retentionDays === null
                 ? "Signal keeps findings, investigations, and the error and log details it stored for them until the workspace is deleted."

@@ -502,6 +502,7 @@ test("offers data retention on Team only, and lets a workspace that left Team tu
   await page.goto("/signal/setup/general");
   await expect(retention).toBeEnabled();
   await expect(retention).toHaveValue("90");
+  await expect(data).toContainText("deleted once they are older than this. Choosing another period needs the Team plan.");
   await expect(retention.locator("option:not([disabled])")).toHaveText(["Keep everything", "90 days"]);
   await retention.selectOption({ label: "Keep everything" });
   await expect.poll(() => signal.settings.retentionDays).toBeNull();
