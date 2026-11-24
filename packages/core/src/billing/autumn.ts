@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Autumn, type Customer } from "autumn-js";
 import { usesPlanModel } from "../automations/config.js";
 import { getRunBillingAccount, type RunBillingAccount } from "../db/run-billing-accounts.js";
+import { businessCheckoutSessionParams } from "./checkout.js";
 import { sandboxTimeIsBilled } from "./usage-charges.js";
 
 export const INVESTIGATIONS_FEATURE_ID = "responder_investigations";
@@ -1035,6 +1036,7 @@ export async function changeAutomationPlan(
     planId,
     redirectMode: "if_required",
     successUrl,
+    checkoutSessionParams: businessCheckoutSessionParams,
   });
   return { url: result.paymentUrl ?? null };
 }
