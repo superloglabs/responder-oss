@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { apiErrorMessage, fetchIntegrations, formatRunCost, refreshSentryAgentOptions } from "./agents-api";
+import { apiErrorMessage, fetchIntegrations, fetchSignalIntegrations, formatRunCost, refreshSentryAgentOptions } from "./agents-api";
 
 describe("API error messages", () => {
   it("surfaces specific validation issues instead of the generic error", () => {
@@ -63,9 +63,18 @@ describe("editor context integrations", () => {
 
     const result = await fetchIntegrations();
 
-    expect(result).toEqual(integrationCatalog.filter(({ id }) => id !== "devrev" && id !== "discord" && id !== "signoz" && id !== "honeycomb" && id !== "betterstack"));
+    expect(result).toEqual(integrationCatalog.filter(({ id }) => id !== "devrev" && id !== "discord" && id !== "signoz" && id !== "honeycomb" && id !== "betterstack" && id !== "jira"));
     expect(result.some(({ id }) => id === "sentry")).toBe(true);
     expect(result.some(({ id }) => id === "custom_mcp")).toBe(true);
+    expect(result.some(({ id }) => (id as string) === "jira")).toBe(false);
+  });
+
+  it("keeps Jira for Signal's pages", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ integrations: [{ id: "jira" }, { id: "linear" }, { id: "discord" }] })),
+    ));
+
+    expect((await fetchSignalIntegrations()).map(({ id }) => id)).toEqual(["jira", "linear"]);
   });
 });
 

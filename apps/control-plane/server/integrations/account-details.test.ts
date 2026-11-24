@@ -74,6 +74,17 @@ describe("integrationAccountDetails", () => {
     });
   });
 
+  it("shows the Jira site and the account its token belongs to, never the token", () => {
+    expect(integrationAccountDetails({
+      provider: "jira",
+      externalAccountId: "example.atlassian.net",
+      metadata: {
+        siteUrl: "https://example.atlassian.net", accountName: "Dev Example", atlassianAccountId: "account-1",
+        token: "token-that-must-not-show",
+      },
+    })).toEqual({ url: "https://example.atlassian.net", userHandle: "Dev Example" });
+  });
+
   it("shows the Sentry organization and the PostHog and Railway access levels", () => {
     expect(integrationAccountDetails({ provider: "sentry", externalAccountId: "install-1", metadata: { organizationSlug: "acme" } }))
       .toEqual({ organizationSlug: "acme" });

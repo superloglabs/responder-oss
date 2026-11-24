@@ -18,6 +18,7 @@ export const providerGlyphs = {
   linear: { label: "Linear", logo: "linear" },
   langfuse: { label: "Langfuse", logo: "langfuse" },
   honeycomb: { label: "Honeycomb", logo: "honeycomb" },
+  jira: { label: "Jira", text: "J" },
   sentry: { label: "Sentry", logo: "sentry" },
   signoz: { label: "SigNoz", logo: "signoz" },
   scan: { label: "Scan", text: "S" },
@@ -50,7 +51,7 @@ export const contextCategoryDescriptions: Record<ContextCategory, string> = {
 };
 
 export const contextProviderMetadata: Record<
-  Exclude<ProviderGlyphId, "betterstack" | "devrev" | "discord" | "google" | "honeycomb" | "scan" | "signoz">,
+  Exclude<ProviderGlyphId, "betterstack" | "devrev" | "discord" | "google" | "honeycomb" | "jira" | "scan" | "signoz">,
   { category: ContextCategory; searchTerms: string }
 > = {
   sentry: { category: "Observability", searchTerms: "errors exceptions monitoring" },

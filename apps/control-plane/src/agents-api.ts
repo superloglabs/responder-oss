@@ -743,6 +743,24 @@ export async function fetchIntegrations(): Promise<IntegrationSummary[]> {
   );
 }
 
+// Signal also files findings in Jira, which automations do not use.
+const signalOnlyProviders: readonly string[] = ["jira"];
+
+export type SignalIntegrationSummary = Omit<IntegrationSummary, "id"> & {
+  id: IntegrationSummary["id"] | "jira";
+};
+
+// The integrations Signal's pages offer: the ones above, and Jira.
+export async function fetchSignalIntegrations(): Promise<SignalIntegrationSummary[]> {
+  const response = await apiJson<{ integrations: SignalIntegrationSummary[] }>(
+    "/api/integrations",
+  );
+  return response.integrations.filter((integration) =>
+    Object.hasOwn(contextProviderMetadata, integration.id) ||
+    signalOnlyProviders.includes(integration.id),
+  );
+}
+
 export async function saveAgent(
   agentId: string | undefined,
   configuration: AgentConfiguration,

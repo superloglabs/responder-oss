@@ -27,6 +27,33 @@ export interface SignalFindingDetail extends SignalFindingSummary {
   suggestedFix: string;
   evidence: SignalEvidence[];
   prompt: string;
+  // Missing from older servers.
+  jira?: SignalFindingJira;
+}
+
+export interface SignalJiraIssue {
+  key: string;
+  url: string;
+}
+
+export interface SignalFindingJira {
+  // Whether members can file the finding in Jira.
+  enabled: boolean;
+  issue: SignalJiraIssue | null;
+  // Why Signal could not file it automatically.
+  error: string | null;
+}
+
+// button: members file findings with a button. automatic: Signal files
+// every posted finding.
+export type SignalJiraMode = "button" | "automatic";
+
+export interface SignalJiraSettings {
+  integrationAccountId: string;
+  projectId: string;
+  projectKey: string;
+  issueTypeId: string;
+  mode: SignalJiraMode;
 }
 
 export interface SignalUsageDay {
@@ -63,6 +90,8 @@ export interface SignalSettings {
   // Days Signal keeps findings, investigations, and the data it stored for
   // them. Null keeps them until the workspace is deleted.
   retentionDays: SignalRetentionDays | null;
+  // The Jira project findings are filed in, or null when Jira is off.
+  jira: SignalJiraSettings | null;
   // Whether a Replicas automation webhook is saved, which adds Send to
   // Replicas to findings in Slack. The URL itself is never sent back.
   replicas: { connected: boolean };
@@ -135,6 +164,26 @@ export function recordPromptCopied(id: string) {
   return signalJson<{ status: SignalFindingStatus }>(`/findings/${encodeURIComponent(id)}/copied`, { method: "POST" });
 }
 
+// Files the finding in Jira, or returns the issue already filed for it.
+export function fileFindingInJira(id: string) {
+  return signalJson<{ issue: SignalJiraIssue; created: boolean }>(`/findings/${encodeURIComponent(id)}/jira`, { method: "POST" });
+}
+
+export interface SignalJiraProject { id: string; key: string; name: string }
+export interface SignalJiraIssueType { id: string; name: string }
+
+export async function fetchJiraProjects(integrationAccountId: string) {
+  const query = new URLSearchParams({ integrationAccountId });
+  return (await signalJson<{ projects: SignalJiraProject[] }>(`/jira/projects?${query}`)).projects;
+}
+
+export async function fetchJiraIssueTypes(integrationAccountId: string, projectId: string) {
+  const query = new URLSearchParams({ integrationAccountId });
+  return (await signalJson<{ issueTypes: SignalJiraIssueType[] }>(
+    `/jira/projects/${encodeURIComponent(projectId)}/issue-types?${query}`,
+  )).issueTypes;
+}
+
 export function fetchUsage(days: SignalPeriod) {
   return signalJson<{ daily: SignalUsageDay[] }>(`/usage?days=${days}`);
 }
@@ -151,6 +200,7 @@ export function withSettingsDefaults(settings: Partial<SignalSettings> & Pick<Si
     notes: settings.notes ?? "",
     slackScan: settings.slackScan ?? { enabled: false, channels: [] },
     retentionDays: settings.retentionDays ?? null,
+    jira: settings.jira ?? null,
     replicas: settings.replicas ?? { connected: false },
     limits: settings.limits ?? { dailyInvestigationCap: 50 },
   };
@@ -169,6 +219,7 @@ export function settingsBody(settings: SignalSettings) {
     notes: settings.notes,
     slackScan: settings.slackScan,
     retentionDays: settings.retentionDays,
+    jira: settings.jira,
   };
 }
 

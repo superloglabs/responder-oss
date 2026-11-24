@@ -50,6 +50,8 @@ export function integrationAccountDetails(account: {
     }
     case "sentry":
       return withoutEmpty({ organizationSlug: text(metadata.organizationSlug) });
+    case "jira":
+      return withoutEmpty({ url: text(metadata.siteUrl), userHandle: text(metadata.accountName) });
     case "aws":
       return withoutEmpty({
         // A one-click setup holds a placeholder ID until AWS reports the account.

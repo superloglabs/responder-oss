@@ -67,6 +67,7 @@ import {
   DevRevApiError,
   getDevRevOrganization,
 } from "../../../../packages/core/src/integrations/devrev.js";
+import { getJiraAccount, JiraApiError } from "../../../../packages/core/src/integrations/jira.js";
 import {
   createLinearPkce,
   exchangeLinearOAuthCode,
@@ -194,6 +195,10 @@ vi.mock("../../../../packages/core/src/integrations/dash0.js", async (importOrig
   };
 });
 
+vi.mock("../../../../packages/core/src/integrations/jira.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../../../../packages/core/src/integrations/jira.js")>(),
+  getJiraAccount: vi.fn(),
+}));
 vi.mock("../../../../packages/core/src/integrations/devrev.js", async (importOriginal) => ({
   ...await importOriginal<typeof import("../../../../packages/core/src/integrations/devrev.js")>(),
   createDevRevTicketWebhook: vi.fn(),
@@ -5127,6 +5132,102 @@ describe("DevRev connections", () => {
     expect(hidden.integrations).not.toContainEqual(expect.objectContaining({ id: "devrev" }));
     expect((await connect()).status).toBe(404);
     expect(getDevRevOrganization).not.toHaveBeenCalled();
+  });
+});
+
+describe("Jira connections", () => {
+  const accountId = "30000000-0000-4000-8000-000000000000";
+
+  function connect(body: Record<string, unknown> = {}) {
+    return app.request("/api/integrations/jira/connect", {
+      body: JSON.stringify({
+        email: "dev@example.com",
+        returnTo: "/signal/setup/notifications",
+        siteUrl: "example.atlassian.net/jira/your-work",
+        token: "jira-token",
+        ...body,
+      }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+  }
+
+  beforeEach(() => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    vi.mocked(organizationHasCapability).mockResolvedValue(true);
+    vi.mocked(encryptCredentials).mockImplementation((value) => JSON.stringify(value));
+    vi.mocked(getJiraAccount).mockResolvedValue({ accountId: "account-1", displayName: "Dev Example", siteName: "Example" });
+    vi.mocked(upsertIntegrationAccount).mockResolvedValue(accountId);
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it("checks the token against the site and saves one connection per site", async () => {
+    const response = await connect();
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      accountId,
+      redirectUrl: "https://responder.example/signal/setup/notifications?integration=jira&status=connected",
+    });
+    const auth = { siteUrl: "https://example.atlassian.net", email: "dev@example.com", token: "jira-token" };
+    expect(getJiraAccount).toHaveBeenCalledWith(auth);
+    expect(upsertIntegrationAccount).toHaveBeenCalledWith({
+      credentialKeyVersion: 1,
+      displayName: "Example",
+      encryptedCredentials: JSON.stringify({ authType: "api_token", ...auth }),
+      externalAccountId: "example.atlassian.net",
+      metadata: { siteUrl: "https://example.atlassian.net", accountName: "Dev Example", atlassianAccountId: "account-1" },
+      organizationId: tenant.organizationId,
+      provider: "jira",
+    });
+  });
+
+  it("answers with a connection error when the connection cannot be saved", async () => {
+    vi.mocked(upsertIntegrationAccount).mockRejectedValue(new Error("database unavailable"));
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const response = await connect();
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toEqual({ error: "Unable to save the Jira connection" });
+  });
+
+  it("refuses sites that are not Jira Cloud", async () => {
+    const response = await connect({ siteUrl: "https://jira.internal.example" });
+
+    expect(response.status).toBe(400);
+    expect(getJiraAccount).not.toHaveBeenCalled();
+    expect(upsertIntegrationAccount).not.toHaveBeenCalled();
+  });
+
+  it("rejects an email and token Jira does not accept", async () => {
+    vi.mocked(getJiraAccount).mockRejectedValue(new JiraApiError("account lookup", 401));
+
+    const response = await connect();
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({ error: "Jira rejected the email and API token for this site" });
+    expect(upsertIntegrationAccount).not.toHaveBeenCalled();
+  });
+
+  it("is available only with Signal", async () => {
+    vi.mocked(listOrganizationIntegrationAccounts).mockResolvedValue([]);
+    const listed = await (await app.request("/api/integrations")).json();
+    expect(listed.integrations).toContainEqual(expect.objectContaining({
+      connectUrl: "/api/integrations/jira/connect",
+      id: "jira",
+    }));
+
+    vi.mocked(organizationHasCapability).mockImplementation(async (_organizationId, capability) => capability !== "signal");
+    const hidden = await (await app.request("/api/integrations")).json();
+    expect(hidden.integrations).not.toContainEqual(expect.objectContaining({ id: "jira" }));
+    expect((await connect()).status).toBe(404);
+    expect(getJiraAccount).not.toHaveBeenCalled();
   });
 });
 
