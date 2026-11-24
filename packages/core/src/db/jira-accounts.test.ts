@@ -108,7 +108,7 @@ describe("jiraAccountAuth", () => {
   it("marks the connection failed only when Atlassian refuses the grant", async () => {
     stored({ ...oauth, expiresAt: Date.now() + 10_000 });
     vi.mocked(withIntegrationAccountCredentialLease).mockResolvedValue(null);
-    await jiraAccountAuth(ids).catch(() => undefined);
+    await expect(jiraAccountAuth(ids)).rejects.toThrow("The Jira token could not be refreshed");
     const { statusOnError } = vi.mocked(withIntegrationAccountCredentialLease).mock.calls[0]![0];
     expect(statusOnError?.(new JiraOAuthGrantError(403, "invalid_grant"))).toBe("error");
     expect(statusOnError?.(new Error("timeout"))).toBeUndefined();

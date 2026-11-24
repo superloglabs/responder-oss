@@ -410,6 +410,10 @@ export interface JiraOAuthTokens {
 
 // Shorter than the 15-second credential refresh lease, so a refresh gives up
 // before another caller can take the lease and redeem the same refresh token.
+// If Atlassian rotated the token but its answer arrives after the timeout, the
+// new token is lost. The connection stays connected, since a timeout is not a
+// refusal, and the next refresh tries the old token; if Atlassian refuses it,
+// the connection is marked failed and must be reconnected.
 const JIRA_TOKEN_TIMEOUT_MS = 8_000;
 
 async function requestJiraToken(
