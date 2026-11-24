@@ -28,7 +28,8 @@ describe("Signal settings", () => {
     const settings = withSettingsDefaults({ enabled: true, setupComplete: true, slack: null, repositoryIds: ["r"] });
     expect(settings).toMatchObject({
       minimumSeverity: "SEV-3", dailyInvestigationCap: null, dismissalCooldownHours: 24, skippedServices: [], notes: "",
-      slackScan: { enabled: false, channels: [] }, retentionDays: null, limits: { dailyInvestigationCap: 50 },
+      slackScan: { enabled: false, channels: [] }, retentionDays: null, replicas: { connected: false },
+      limits: { dailyInvestigationCap: 50 },
     });
     expect(Object.keys(settingsBody(settings)).sort()).toEqual([
       "dailyInvestigationCap", "dismissalCooldownHours", "enabled", "minimumSeverity", "notes", "repositoryIds", "retentionDays", "skippedServices", "slack", "slackScan",

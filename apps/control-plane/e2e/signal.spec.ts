@@ -38,6 +38,7 @@ function fakeSignal(count = 30, options: { setUp?: boolean } = {}) {
       notes: "",
       slackScan: { enabled: false, channels: [] as Array<{ integrationAccountId: string; channelId: string }> },
       retentionDays: null as 30 | 60 | 90 | 365 | null,
+      replicas: { connected: false },
       limits: { dailyInvestigationCap: 50 },
     },
     // The next settings save fails with this error, like a server rejecting it.
@@ -121,6 +122,14 @@ async function workspace(page: Page, options: { enabled?: boolean; signal?: Retu
         Object.assign(signal.settings, body);
         if (signal.settings.enabled) signal.settings.setupComplete = true;
       }
+      return route.fulfill({ json: signal.settings });
+    }
+    if (path === "/settings/replicas" && request.method() === "PUT") {
+      const webhookUrl = body!.webhookUrl as string | null;
+      if (webhookUrl !== null && !webhookUrl.startsWith("https://api.replicas.dev/v1/automations/webhook/")) {
+        return route.fulfill({ status: 400, json: { error: "Paste the webhook URL of a Replicas automation." } });
+      }
+      signal.settings.replicas = { connected: webhookUrl !== null };
       return route.fulfill({ json: signal.settings });
     }
     if (path === "/billing") {
@@ -688,6 +697,34 @@ test("changes where findings are posted", async ({ page }) => {
   // Managing Slack opens the workspace's integrations, like setup does.
   await page.getByRole("button", { name: "Manage Slack" }).click();
   await expect(page).toHaveURL(/\/settings$/u);
+});
+
+test("connects Replicas with a webhook URL and removes it", async ({ page }) => {
+  const signal = fakeSignal();
+  signal.settings.slack = { integrationAccountId: "slack-account", channelId: "C02" };
+  await workspace(page, { signal });
+  await page.goto("/signal/setup/notifications");
+  const url = page.getByLabel("Replicas webhook URL");
+  await expect(url).toHaveAttribute("type", "password");
+  await url.fill("https://evil.example/hook");
+  await page.getByRole("button", { name: "Connect Replicas" }).click();
+  await expect(page.getByRole("alert")).toHaveText("Paste the webhook URL of a Replicas automation.");
+  expect(signal.settings.replicas).toEqual({ connected: false });
+
+  await url.fill("https://api.replicas.dev/v1/automations/webhook/whtok_abcdef123456");
+  await page.getByRole("button", { name: "Connect Replicas" }).click();
+  await expect(page.getByText("have a Send to Replicas button")).toBeVisible();
+  expect(signal.writes.at(-1)).toEqual({
+    method: "PUT", path: "/settings/replicas",
+    body: { webhookUrl: "https://api.replicas.dev/v1/automations/webhook/whtok_abcdef123456" },
+  });
+  // The URL is never shown again; it can be replaced or removed.
+  await expect(url).toHaveCount(0);
+  await page.getByRole("button", { name: "Replace URL" }).click();
+  await page.getByRole("button", { name: "Cancel" }).click();
+  await page.getByRole("button", { name: "Remove" }).click();
+  await expect(page.getByLabel("Replicas webhook URL")).toBeVisible();
+  expect(signal.writes.at(-1)).toEqual({ method: "PUT", path: "/settings/replicas", body: { webhookUrl: null } });
 });
 
 test("explains an empty channel list in setup and in settings", async ({ page }) => {
