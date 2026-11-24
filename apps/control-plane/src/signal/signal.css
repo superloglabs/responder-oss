@@ -454,6 +454,8 @@
 .signal .signalChipForm .dsButton { height: 24px; min-height: 24px; padding: 2px 8px; font-size: 12px; }
 .signalNotes { min-height: 76px; padding: 8px 10px; border: 0; border-radius: 6px; background: #fff; box-shadow: 0 1px 1.5px #0000001a, 0 0 0 .5px #00000024; color: #202020; font: 400 13px/20px var(--ds-font-sans); resize: vertical; }
 .signal .signalNotes:focus-visible { outline: 2px solid var(--signal-accent); outline-offset: 2px; }
+.signalReplicasForm { display: flex; flex-direction: column; gap: 8px; }
+.signalReplicasActions { display: flex; flex-shrink: 0; justify-content: flex-end; gap: 8px; }
 .signalNotesActions { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: #777; font-size: 12px; }
 .signal .signalSwitch { width: auto; flex-shrink: 0; gap: 8px; }
 .signal .signalSwitch .dsSwitch__copy { order: 1; }

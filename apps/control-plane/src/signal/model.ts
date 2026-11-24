@@ -92,6 +92,9 @@ export interface SignalSettings {
   retentionDays: SignalRetentionDays | null;
   // The Jira project findings are filed in, or null when Jira is off.
   jira: SignalJiraSettings | null;
+  // Whether a Replicas automation webhook is saved, which adds Send to
+  // Replicas to findings in Slack. The URL itself is never sent back.
+  replicas: { connected: boolean };
   limits: { dailyInvestigationCap: number };
 }
 
@@ -198,6 +201,7 @@ export function withSettingsDefaults(settings: Partial<SignalSettings> & Pick<Si
     slackScan: settings.slackScan ?? { enabled: false, channels: [] },
     retentionDays: settings.retentionDays ?? null,
     jira: settings.jira ?? null,
+    replicas: settings.replicas ?? { connected: false },
     limits: settings.limits ?? { dailyInvestigationCap: 50 },
   };
 }
@@ -225,6 +229,11 @@ export async function fetchSignalSettings() {
 
 export async function saveSignalSettings(settings: SignalSettings) {
   return withSettingsDefaults(await signalJson<SignalSettings>("/settings", jsonBody("PUT", settingsBody(settings))));
+}
+
+// Saves the webhook URL of a Replicas automation, or removes it with null.
+export async function saveReplicasWebhook(webhookUrl: string | null) {
+  return withSettingsDefaults(await signalJson<SignalSettings>("/settings/replicas", jsonBody("PUT", { webhookUrl })));
 }
 
 export function fetchSignalBilling() {
