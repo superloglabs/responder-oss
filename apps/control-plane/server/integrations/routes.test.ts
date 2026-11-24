@@ -67,7 +67,12 @@ import {
   DevRevApiError,
   getDevRevOrganization,
 } from "../../../../packages/core/src/integrations/devrev.js";
-import { getJiraAccount, JiraApiError } from "../../../../packages/core/src/integrations/jira.js";
+import {
+  exchangeJiraOAuthCode,
+  getJiraAccount,
+  JiraApiError,
+  listJiraAccessibleSites,
+} from "../../../../packages/core/src/integrations/jira.js";
 import {
   createLinearPkce,
   exchangeLinearOAuthCode,
@@ -198,6 +203,8 @@ vi.mock("../../../../packages/core/src/integrations/dash0.js", async (importOrig
 vi.mock("../../../../packages/core/src/integrations/jira.js", async (importOriginal) => ({
   ...await importOriginal<typeof import("../../../../packages/core/src/integrations/jira.js")>(),
   getJiraAccount: vi.fn(),
+  exchangeJiraOAuthCode: vi.fn(),
+  listJiraAccessibleSites: vi.fn(),
 }));
 vi.mock("../../../../packages/core/src/integrations/devrev.js", async (importOriginal) => ({
   ...await importOriginal<typeof import("../../../../packages/core/src/integrations/devrev.js")>(),
@@ -5228,6 +5235,150 @@ describe("Jira connections", () => {
     expect(hidden.integrations).not.toContainEqual(expect.objectContaining({ id: "jira" }));
     expect((await connect()).status).toBe(404);
     expect(getJiraAccount).not.toHaveBeenCalled();
+  });
+
+  describe("with Atlassian OAuth", () => {
+    const tokens = { accessToken: "jira-access", refreshToken: "jira-refresh", expiresAt: 1_900_000_000_000, scope: "read:jira-work write:jira-work offline_access" };
+    const site = { cloudId: "cloud-1", siteUrl: "https://example.atlassian.net", name: "Example" };
+    const otherSite = { cloudId: "cloud-2", siteUrl: "https://example-dev.atlassian.net", name: "Example Dev" };
+
+    beforeEach(() => {
+      vi.stubEnv("JIRA_CLIENT_ID", "jira-client");
+      vi.stubEnv("JIRA_CLIENT_SECRET", "jira-secret");
+      vi.mocked(consumeIntegrationConnectionState).mockResolvedValue({
+        organizationId: tenant.organizationId,
+        userId: tenant.user.id,
+        returnTo: "/signal/setup/notifications",
+        codeVerifier: null,
+        metadata: {},
+      });
+      vi.mocked(exchangeJiraOAuthCode).mockResolvedValue(tokens);
+    });
+
+    it("offers the consent screen instead of the token form", async () => {
+      vi.mocked(listOrganizationIntegrationAccounts).mockResolvedValue([]);
+      const listed = await (await app.request("/api/integrations")).json();
+      expect(listed.integrations).toContainEqual(expect.objectContaining({
+        connectUrl: "/api/integrations/jira/start",
+        id: "jira",
+      }));
+
+      vi.mocked(createIntegrationConnectionState).mockResolvedValue("jira-state");
+      const response = await app.request("/api/integrations/jira/start?returnTo=%2Fsignal%2Fsetup%2Fnotifications");
+
+      expect(response.status).toBe(302);
+      const location = new URL(response.headers.get("location")!);
+      expect(`${location.origin}${location.pathname}`).toBe("https://auth.atlassian.com/authorize");
+      expect(Object.fromEntries(location.searchParams)).toEqual({
+        audience: "api.atlassian.com",
+        client_id: "jira-client",
+        prompt: "consent",
+        redirect_uri: "https://responder.example/api/integrations/jira/callback",
+        response_type: "code",
+        scope: "read:jira-work write:jira-work offline_access",
+        state: "jira-state",
+      });
+      expect(createIntegrationConnectionState).toHaveBeenCalledWith({
+        organizationId: tenant.organizationId,
+        userId: tenant.user.id,
+        provider: "jira",
+        returnTo: "/signal/setup/notifications",
+        routingUrl: "https://responder.example/api/integrations/jira/callback",
+      });
+    });
+
+    it("saves the one granted site without the Atlassian account", async () => {
+      vi.mocked(listJiraAccessibleSites).mockResolvedValue([site]);
+
+      const response = await app.request("/api/integrations/jira/callback?state=jira-state&code=jira-code");
+
+      expect(response.status).toBe(302);
+      expect(response.headers.get("location")).toBe(
+        `https://responder.example/signal/setup/notifications?integration=jira&status=connected&integration_account_id=${accountId}`,
+      );
+      expect(exchangeJiraOAuthCode).toHaveBeenCalledWith({
+        code: "jira-code",
+        redirectUri: "https://responder.example/api/integrations/jira/callback",
+      });
+      expect(listJiraAccessibleSites).toHaveBeenCalledWith("jira-access");
+      expect(upsertIntegrationAccount).toHaveBeenCalledWith({
+        credentialKeyVersion: 1,
+        displayName: "Example",
+        encryptedCredentials: JSON.stringify({ authType: "jira_oauth", siteUrl: site.siteUrl, cloudId: "cloud-1", ...tokens }),
+        externalAccountId: "example.atlassian.net",
+        metadata: { authType: "jira_oauth", cloudId: "cloud-1", siteUrl: site.siteUrl },
+        organizationId: tenant.organizationId,
+        provider: "jira",
+        status: "connected",
+      });
+    });
+
+    it("lets the member choose when several sites were granted", async () => {
+      vi.mocked(listJiraAccessibleSites).mockResolvedValue([site, otherSite]);
+      vi.mocked(createIntegrationConnectionState).mockResolvedValue("selection-state");
+
+      const callback = await app.request("/api/integrations/jira/callback?state=jira-state&code=jira-code");
+
+      expect(callback.headers.get("location")).toBe(
+        "https://responder.example/signal/setup/context/jira?next=notifications&integration=jira&status=select_site&selection_state=selection-state",
+      );
+      expect(upsertIntegrationAccount).not.toHaveBeenCalled();
+      const selection = { tokens, sites: [site, otherSite] };
+      expect(createIntegrationConnectionState).toHaveBeenCalledWith({
+        organizationId: tenant.organizationId,
+        provider: "jira",
+        userId: tenant.user.id,
+        metadata: { encryptedCredentials: JSON.stringify(selection) },
+        returnTo: "/signal/setup/notifications",
+      });
+
+      const pending = { organizationId: tenant.organizationId, userId: tenant.user.id, returnTo: "/signal/setup/notifications", codeVerifier: null, metadata: { encryptedCredentials: "encrypted-selection" } };
+      vi.mocked(getIntegrationConnectionState).mockResolvedValue(pending);
+      vi.mocked(consumeIntegrationConnectionState).mockResolvedValue(pending);
+      vi.mocked(decryptCredentials).mockReturnValue(selection);
+
+      const sites = await app.request("/api/integrations/jira/sites?state=selection-state");
+      await expect(sites.json()).resolves.toEqual({ sites: [site, otherSite] });
+
+      const choose = (cloudId: string) => app.request("/api/integrations/jira/select-site", {
+        body: JSON.stringify({ cloudId, selectionState: "selection-state" }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      });
+      expect((await choose("cloud-3")).status).toBe(403);
+      expect(upsertIntegrationAccount).not.toHaveBeenCalled();
+
+      const chosen = await choose("cloud-2");
+      expect(chosen.status).toBe(200);
+      await expect(chosen.json()).resolves.toEqual({
+        accountId,
+        redirectUrl: `https://responder.example/signal/setup/notifications?integration=jira&status=connected&integration_account_id=${accountId}`,
+      });
+      expect(upsertIntegrationAccount).toHaveBeenCalledWith(expect.objectContaining({
+        externalAccountId: "example-dev.atlassian.net",
+        metadata: { authType: "jira_oauth", cloudId: "cloud-2", siteUrl: otherSite.siteUrl },
+      }));
+    });
+
+    it("reports a grant with no Jira site", async () => {
+      vi.mocked(listJiraAccessibleSites).mockResolvedValue([]);
+
+      const response = await app.request("/api/integrations/jira/callback?state=jira-state&code=jira-code");
+
+      expect(response.headers.get("location")).toBe(
+        "https://responder.example/signal/setup/notifications?integration=jira&status=error&reason=no_jira_site",
+      );
+      expect(upsertIntegrationAccount).not.toHaveBeenCalled();
+    });
+
+    it("reports a cancelled consent", async () => {
+      const response = await app.request("/api/integrations/jira/callback?state=jira-state&error=access_denied");
+
+      expect(response.headers.get("location")).toBe(
+        "https://responder.example/signal/setup/notifications?integration=jira&status=error&reason=cancelled",
+      );
+      expect(exchangeJiraOAuthCode).not.toHaveBeenCalled();
+    });
   });
 });
 

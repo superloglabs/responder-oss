@@ -1,6 +1,11 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createJiraIssue,
+  jiraAuthorizeUrl,
+  JiraOAuthGrantError,
+  listJiraAccessibleSites,
+  refreshJiraOAuthCredentials,
+  type JiraOAuthCredentials,
   getJiraAccount,
   JiraApiError,
   jiraDocument,
@@ -160,5 +165,90 @@ describe("jiraSummary and jiraTextQuery", () => {
 
   it("keeps plain words", () => {
     expect(jiraTextQuery("checkout 500 errors")).toBe("checkout 500 errors");
+  });
+});
+
+describe("Jira OAuth", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  const oauthCredentials: JiraOAuthCredentials = {
+    authType: "jira_oauth",
+    siteUrl: "https://example.atlassian.net",
+    cloudId: "cloud-1",
+    accessToken: "old-access",
+    refreshToken: "old-refresh",
+    expiresAt: 1,
+    scope: "read:jira-work write:jira-work offline_access",
+  };
+
+  it("parses stored OAuth credentials", () => {
+    expect(parseJiraCredentials(oauthCredentials)).toEqual(oauthCredentials);
+    expect(() => parseJiraCredentials({ ...oauthCredentials, siteUrl: "https://jira.example.com" })).toThrow();
+  });
+
+  it("asks for a refresh token and shows the consent screen", () => {
+    vi.stubEnv("JIRA_CLIENT_ID", "jira-client");
+    vi.stubEnv("JIRA_CLIENT_SECRET", "jira-secret");
+    const url = new URL(jiraAuthorizeUrl({ redirectUri: "https://app.example/api/integrations/jira/callback", state: "state-1" }));
+    expect(url.searchParams.get("scope")).toBe("read:jira-work write:jira-work offline_access");
+    expect(url.searchParams.get("prompt")).toBe("consent");
+    expect(url.searchParams.get("client_id")).toBe("jira-client");
+    expect(url.search).toContain("scope=read%3Ajira-work%20write%3Ajira-work%20offline_access");
+  });
+
+  it("calls the site through api.atlassian.com with the access token", async () => {
+    const fetch = vi.fn(async () => jsonResponse({ values: [], isLast: true }));
+    await listJiraProjects({ siteUrl: "https://example.atlassian.net", cloudId: "cloud-1", accessToken: "access-1" }, fetch);
+    const { url, init } = call(fetch);
+    expect(url).toBe("https://api.atlassian.com/ex/jira/cloud-1/rest/api/3/project/search?action=create&maxResults=100&orderBy=name&startAt=0");
+    expect(init.headers).toMatchObject({ authorization: "Bearer access-1" });
+    expect(init.redirect).toBe("error");
+  });
+
+  it("links issues on the site, not the API host", async () => {
+    const fetch = vi.fn(async () => jsonResponse({ id: "10001", key: "OPS-7" }));
+    const issue = await createJiraIssue({
+      auth: { siteUrl: "https://example.atlassian.net", cloudId: "cloud-1", accessToken: "access-1" },
+      projectId: "10000", issueTypeId: "10004", summary: "Broken", description: jiraDocument([]), fetch,
+    });
+    expect(issue.url).toBe("https://example.atlassian.net/browse/OPS-7");
+  });
+
+  it("keeps the rotated refresh token", async () => {
+    vi.stubEnv("JIRA_CLIENT_ID", "jira-client");
+    vi.stubEnv("JIRA_CLIENT_SECRET", "jira-secret");
+    const fetch = vi.fn(async () => jsonResponse({ access_token: "new-access", refresh_token: "new-refresh", expires_in: 3600, scope: "read:jira-work" }));
+
+    const refreshed = await refreshJiraOAuthCredentials(oauthCredentials, fetch);
+
+    expect(refreshed).toMatchObject({ accessToken: "new-access", refreshToken: "new-refresh", cloudId: "cloud-1", siteUrl: "https://example.atlassian.net" });
+    expect(refreshed.expiresAt).toBeGreaterThan(Date.now());
+    const { url, body } = call(fetch);
+    expect(url).toBe("https://auth.atlassian.com/oauth/token");
+    expect(body).toEqual({ client_id: "jira-client", client_secret: "jira-secret", grant_type: "refresh_token", refresh_token: "old-refresh" });
+  });
+
+  it("reports a refused refresh as a grant error", async () => {
+    vi.stubEnv("JIRA_CLIENT_ID", "jira-client");
+    vi.stubEnv("JIRA_CLIENT_SECRET", "jira-secret");
+    const refused = await refreshJiraOAuthCredentials(oauthCredentials, async () => jsonResponse({ error: "invalid_grant" }, 403)).catch((error: unknown) => error);
+    expect(refused).toBeInstanceOf(JiraOAuthGrantError);
+    const unavailable = await refreshJiraOAuthCredentials(oauthCredentials, async () => jsonResponse({}, 503)).catch((error: unknown) => error);
+    expect(unavailable).not.toBeInstanceOf(JiraOAuthGrantError);
+  });
+
+  it("lists granted Jira sites with Signal's scopes on Atlassian hosts only", async () => {
+    const fetch = vi.fn(async () => jsonResponse([
+      { id: "cloud-1", url: "https://example.atlassian.net", name: "Example", scopes: ["read:jira-work", "write:jira-work"] },
+      { id: "cloud-2", url: "https://read-only.atlassian.net", name: "Read only", scopes: ["read:jira-work"] },
+      { id: "cloud-3", url: "https://evil.example", name: "Elsewhere", scopes: ["read:jira-work", "write:jira-work"] },
+    ]));
+
+    await expect(listJiraAccessibleSites("access-1", fetch)).resolves.toEqual([
+      { cloudId: "cloud-1", siteUrl: "https://example.atlassian.net", name: "Example" },
+    ]);
+    expect(call(fetch).url).toBe("https://api.atlassian.com/oauth/token/accessible-resources");
   });
 });

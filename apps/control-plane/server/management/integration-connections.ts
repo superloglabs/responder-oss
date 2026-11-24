@@ -3,6 +3,7 @@ import { z } from "zod";
 import { organizationHasCapability } from "../../../../packages/core/src/db/organization-capabilities.js";
 import { automationOnlyIntegrationIds, integrationCatalog, integrationIsConfigured, productIntegrationIds, signalOnlyIntegrationIds } from "../integrations/catalog.js";
 import { startIntegrationConnection } from "../integrations/routes.js";
+import { jiraOAuthConfigured } from "../../../../packages/core/src/integrations/jira.js";
 import { controlPlaneBaseUrl } from "../integrations/urls.js";
 import { defineOperation, ManagementError } from "./operation.js";
 
@@ -11,6 +12,12 @@ const consentProviders = new Set([
   "cloudflare", "railway",
 ]);
 const provider = z.enum(productIntegrationIds);
+
+// Jira uses Atlassian's consent screen once its OAuth app is configured, and
+// an API token in Signal's setup otherwise.
+function usesConsent(id: string): boolean {
+  return consentProviders.has(id) || (id === "jira" && jiraOAuthConfigured());
+}
 
 // Where secure setup happens: Signal's own page for Jira, else integrations.
 // The context step works during Signal's setup and once it is complete.
@@ -47,7 +54,7 @@ export const integrationConnectionOperations = [
         .map((item) => ({
           provider: item.id, name: item.name, description: item.description,
           available: integrationIsConfigured(item),
-          connectionType: consentProviders.has(item.id) ? "oauth" as const : "secure_setup" as const,
+          connectionType: usesConsent(item.id) ? "oauth" as const : "secure_setup" as const,
         })) };
     },
   }),
@@ -77,7 +84,7 @@ export const integrationConnectionOperations = [
       if (!integrationIsConfigured(definition)) {
         throw new ManagementError(503, "This integration is not configured on this Superlog server.", "integration_not_configured");
       }
-      if (!consentProviders.has(input.provider)) {
+      if (!usesConsent(input.provider)) {
         return {
           provider: input.provider, connectionType: "secure_setup" as const,
           status: "setup_required" as const, url: new URL(secureSetupPath(input.provider), controlPlaneBaseUrl()).href,
