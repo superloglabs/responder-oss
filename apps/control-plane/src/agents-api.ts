@@ -748,6 +748,8 @@ const signalOnlyProviders: readonly string[] = ["jira"];
 
 export type SignalIntegrationSummary = Omit<IntegrationSummary, "id"> & {
   id: IntegrationSummary["id"] | "jira";
+  // Jira only: Atlassian sign-in, when its OAuth app is configured.
+  oauthConnectUrl?: string | null;
 };
 
 // The integrations Signal's pages offer: the ones above, and Jira.

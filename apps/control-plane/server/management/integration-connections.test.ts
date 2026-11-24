@@ -76,6 +76,20 @@ describe("connections from chat", () => {
     vi.mocked(organizationHasCapability).mockResolvedValue(true);
   });
 
+  it("returns Atlassian consent for Jira once the OAuth app is configured", async () => {
+    vi.stubEnv("JIRA_CLIENT_ID", "jira-client");
+    vi.stubEnv("JIRA_CLIENT_SECRET", "jira-secret");
+    const listed = await executeOperation(list, caller, {});
+    expect(listed.body.integrations).toContainEqual(expect.objectContaining({ provider: "jira", connectionType: "oauth" }));
+
+    const result = await executeOperation(start, caller, { provider: "jira" });
+    expect(result.body).toMatchObject({ provider: "jira", status: "awaiting_consent", connectionType: "oauth" });
+    const url = consentUrl(result.body);
+    expect(`${url.origin}${url.pathname}`).toBe("https://auth.atlassian.com/authorize");
+    expect(url.searchParams.get("state")).toBe("private-state");
+    expect(JSON.stringify(result.body)).not.toContain("jira-secret");
+  });
+
   it("uses GitHub installation consent so repository access can be selected", async () => {
     const result = await executeOperation(start, caller, { provider: "github" });
     expect(result.status).toBe(200);

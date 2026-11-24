@@ -5228,6 +5228,7 @@ describe("Jira connections", () => {
     expect(listed.integrations).toContainEqual(expect.objectContaining({
       connectUrl: "/api/integrations/jira/connect",
       id: "jira",
+      oauthConnectUrl: null,
     }));
 
     vi.mocked(organizationHasCapability).mockImplementation(async (_organizationId, capability) => capability !== "signal");
@@ -5259,8 +5260,9 @@ describe("Jira connections", () => {
       vi.mocked(listOrganizationIntegrationAccounts).mockResolvedValue([]);
       const listed = await (await app.request("/api/integrations")).json();
       expect(listed.integrations).toContainEqual(expect.objectContaining({
-        connectUrl: "/api/integrations/jira/start",
+        connectUrl: "/api/integrations/jira/connect",
         id: "jira",
+        oauthConnectUrl: "/api/integrations/jira/start",
       }));
 
       vi.mocked(createIntegrationConnectionState).mockResolvedValue("jira-state");
@@ -5345,8 +5347,11 @@ describe("Jira connections", () => {
         headers: { "content-type": "application/json" },
         method: "POST",
       });
+      vi.mocked(consumeIntegrationConnectionState).mockClear();
       expect((await choose("cloud-3")).status).toBe(403);
       expect(upsertIntegrationAccount).not.toHaveBeenCalled();
+      // A refused choice leaves the selection for another try.
+      expect(consumeIntegrationConnectionState).not.toHaveBeenCalled();
 
       const chosen = await choose("cloud-2");
       expect(chosen.status).toBe(200);

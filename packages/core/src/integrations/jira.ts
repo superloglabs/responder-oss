@@ -408,6 +408,10 @@ export interface JiraOAuthTokens {
   scope: string;
 }
 
+// Shorter than the 15-second credential refresh lease, so a refresh gives up
+// before another caller can take the lease and redeem the same refresh token.
+const JIRA_TOKEN_TIMEOUT_MS = 8_000;
+
 async function requestJiraToken(
   parameters: Record<string, string>,
   fetchImpl: JiraFetch = fetch,
@@ -418,7 +422,7 @@ async function requestJiraToken(
     headers: { accept: "application/json", "content-type": "application/json" },
     body: JSON.stringify({ client_id: clientId, client_secret: clientSecret, ...parameters }),
     redirect: "error",
-    signal: AbortSignal.timeout(15_000),
+    signal: AbortSignal.timeout(JIRA_TOKEN_TIMEOUT_MS),
   });
   if (!response.ok) {
     const parsed = jiraTokenErrorSchema.safeParse(await response.json().catch(() => null));

@@ -359,8 +359,6 @@ function jiraReturnTo(listPath: string) {
   return new URLSearchParams(window.location.search).get("next") === "notifications" ? "/signal/setup/notifications" : listPath;
 }
 
-const jiraTokenConnectUrl = "/api/integrations/jira/connect";
-
 function JiraConnect(props: PageProps) {
   const selectionState = new URLSearchParams(window.location.search).get("status") === "select_site"
     ? new URLSearchParams(window.location.search).get("selection_state")
@@ -370,9 +368,9 @@ function JiraConnect(props: PageProps) {
 
 function JiraConnectForm({ integration, listPath, onBack }: PageProps) {
   const navigate = useNavigate();
-  // The start URL means the Atlassian OAuth app is configured; otherwise only
-  // an API token can connect.
-  const oauthAvailable = Boolean(integration?.connectUrl?.endsWith("/start"));
+  // Atlassian sign-in when its OAuth app is configured; an API token always.
+  const oauthConnectUrl = integration?.oauthConnectUrl ?? null;
+  const oauthAvailable = Boolean(oauthConnectUrl);
   const [method, setMethod] = useState<"oauth" | "api_token">("oauth");
   const useOAuth = oauthAvailable && method === "oauth";
   const [siteUrl, setSiteUrl] = useState("");
@@ -383,15 +381,17 @@ function JiraConnectForm({ integration, listPath, onBack }: PageProps) {
 
   async function connect(event: FormEvent) {
     event.preventDefault();
-    if (!integration?.connectUrl || submitting) return;
-    setError("");
-    setSubmitting(true);
-    if (useOAuth) {
-      window.location.assign(connectionStartUrl(integration.connectUrl, jiraReturnTo(listPath)));
+    if (submitting) return;
+    if (useOAuth && oauthConnectUrl) {
+      setSubmitting(true);
+      window.location.assign(connectionStartUrl(oauthConnectUrl, jiraReturnTo(listPath)));
       return;
     }
+    if (!integration?.connectUrl) return;
+    setError("");
+    setSubmitting(true);
     try {
-      const body = await postJson(jiraTokenConnectUrl, { siteUrl, email, token, returnTo: jiraReturnTo(listPath) }, "Unable to connect Jira");
+      const body = await postJson(integration.connectUrl, { siteUrl, email, token, returnTo: jiraReturnTo(listPath) }, "Unable to connect Jira");
       if (typeof body.redirectUrl !== "string") throw new Error("Unable to connect Jira");
       window.location.assign(body.redirectUrl);
     } catch (failure) {
@@ -424,7 +424,7 @@ function JiraConnectForm({ integration, listPath, onBack }: PageProps) {
         denied="Never edits, moves, or deletes issues"
       />
       <Actions onBack={back}>
-        <Button type="submit" variant="primary" loading={submitting} disabled={!integration?.connectUrl}><External>Continue to Atlassian</External></Button>
+        <Button type="submit" variant="primary" loading={submitting}><External>Continue to Atlassian</External></Button>
       </Actions>
     </> : <>
       <div className="signalInput">
@@ -495,8 +495,11 @@ function JiraSiteChoice({ listPath, onBack, selectionState }: PageProps & { sele
       setSubmitting(false);
     }
   }
+  const fromNotifications = jiraReturnTo(listPath) !== listPath;
   // Starting over drops the selection from the address.
-  const startOver = () => navigate(`${window.location.pathname}${jiraReturnTo(listPath) === listPath ? "" : "?next=notifications"}`, { replace: true });
+  const startOver = () => navigate(`${window.location.pathname}${fromNotifications ? "?next=notifications" : ""}`, { replace: true });
+  // Back returns where the member came from, like the connect form.
+  const back = fromNotifications ? () => navigate(jiraReturnTo(listPath)) : onBack;
 
   return <form className="signalConnectForm" onSubmit={(event) => void choose(event)}>
     <Intro provider="jira" title="Choose a Jira site">Your Atlassian account has granted Superlog more than one site. Choose the one Signal files findings in.</Intro>
@@ -510,7 +513,7 @@ function JiraSiteChoice({ listPath, onBack, selectionState }: PageProps & { sele
       </div>
     </fieldset>}
     {error && <p className="signalFieldError" role="alert"><IconAlertCircle size={14} />{error}</p>}
-    <Actions onBack={error && !sites ? startOver : onBack}>
+    <Actions onBack={error && !sites ? startOver : back}>
       <Button type="submit" variant="primary" loading={submitting} disabled={!cloudId}>Connect Jira</Button>
     </Actions>
   </form>;

@@ -80,10 +80,35 @@ describe("jiraAccountAuth", () => {
     expect(refreshJiraOAuthCredentials).not.toHaveBeenCalled();
   });
 
+  it("uses a token another caller refreshed when the lease could not be taken", async () => {
+    vi.mocked(getOrganizationIntegrationAccount)
+      .mockResolvedValueOnce({ id: "account-1", encryptedCredentials: JSON.stringify({ ...oauth, expiresAt: Date.now() + 10_000 }), metadata: {}, status: "connected" } as never)
+      .mockResolvedValueOnce({ id: "account-1", encryptedCredentials: JSON.stringify({ ...oauth, accessToken: "new-access" }), metadata: {}, status: "connected" } as never);
+    vi.mocked(withIntegrationAccountCredentialLease).mockResolvedValue(null);
+
+    await expect(jiraAccountAuth(ids)).resolves.toMatchObject({ accessToken: "new-access" });
+  });
+
+  it("reports a refresh that did not finish instead of a missing connection", async () => {
+    stored({ ...oauth, expiresAt: Date.now() + 10_000 });
+    vi.mocked(withIntegrationAccountCredentialLease).mockResolvedValue(null);
+
+    await expect(jiraAccountAuth(ids)).rejects.toThrow("The Jira token could not be refreshed");
+  });
+
+  it("returns nothing when the connection was removed during the refresh", async () => {
+    vi.mocked(getOrganizationIntegrationAccount)
+      .mockResolvedValueOnce({ id: "account-1", encryptedCredentials: JSON.stringify({ ...oauth, expiresAt: Date.now() + 10_000 }), metadata: {}, status: "connected" } as never)
+      .mockResolvedValueOnce(null as never);
+    vi.mocked(withIntegrationAccountCredentialLease).mockResolvedValue(null);
+
+    await expect(jiraAccountAuth(ids)).resolves.toBeNull();
+  });
+
   it("marks the connection failed only when Atlassian refuses the grant", async () => {
     stored({ ...oauth, expiresAt: Date.now() + 10_000 });
     vi.mocked(withIntegrationAccountCredentialLease).mockResolvedValue(null);
-    await jiraAccountAuth(ids);
+    await jiraAccountAuth(ids).catch(() => undefined);
     const { statusOnError } = vi.mocked(withIntegrationAccountCredentialLease).mock.calls[0]![0];
     expect(statusOnError?.(new JiraOAuthGrantError(403, "invalid_grant"))).toBe("error");
     expect(statusOnError?.(new Error("timeout"))).toBeUndefined();

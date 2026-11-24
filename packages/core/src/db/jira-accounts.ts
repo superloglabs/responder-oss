@@ -39,5 +39,14 @@ export async function jiraAccountAuth(input: {
     },
     statusOnError: (error) => (error instanceof JiraOAuthGrantError ? "error" : undefined),
   });
-  return current ? jiraAuthFromCredentials(current) : null;
+  if (current) return jiraAuthFromCredentials(current);
+
+  // No lease result: the connection was removed or changed, another caller's
+  // refresh outlasted the wait, or this refresh's write-back was superseded.
+  // Use what is stored now, if it is still usable.
+  const latest = await getOrganizationIntegrationAccount({ ...input, provider: "jira" });
+  if (!latest?.encryptedCredentials || latest.status !== "connected") return null;
+  const stored = parseJiraCredentials(decryptCredentials<Record<string, unknown>>(latest.encryptedCredentials));
+  if (stored.authType === "api_token" || !jiraAccessTokenNeedsRefresh(stored)) return jiraAuthFromCredentials(stored);
+  throw new Error("The Jira token could not be refreshed. Try again.");
 }

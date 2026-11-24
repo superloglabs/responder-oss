@@ -236,6 +236,7 @@ describe("Jira OAuth", () => {
     const refused = await refreshJiraOAuthCredentials(oauthCredentials, async () => jsonResponse({ error: "invalid_grant" }, 403)).catch((error: unknown) => error);
     expect(refused).toBeInstanceOf(JiraOAuthGrantError);
     const unavailable = await refreshJiraOAuthCredentials(oauthCredentials, async () => jsonResponse({}, 503)).catch((error: unknown) => error);
+    expect(unavailable).toBeInstanceOf(Error);
     expect(unavailable).not.toBeInstanceOf(JiraOAuthGrantError);
   });
 

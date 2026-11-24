@@ -1536,7 +1536,7 @@ export const integrationRoutes = new Hono()
                   definition.id === "signoz" ||
                   definition.id === "honeycomb" ||
                   definition.id === "betterstack" ||
-                  (definition.id === "jira" && !jiraOAuthConfigured())
+                  definition.id === "jira"
                 ? `/api/integrations/${definition.id}/connect`
                 : definition.id === "custom_mcp"
                   ? "/api/integrations/custom-mcp/connect"
@@ -1546,6 +1546,11 @@ export const integrationRoutes = new Hono()
                   ? "/api/integrations/sentry/start"
                   : `/api/integrations/${definition.id}/start`
               : null,
+          // Jira also connects through Atlassian sign-in once its OAuth app
+          // is configured; connectUrl stays the API token endpoint.
+          ...(definition.id === "jira"
+            ? { oauthConnectUrl: jiraOAuthConfigured() ? "/api/integrations/jira/start" : null }
+            : {}),
           configurationUrl:
             definition.id === "github" && configured
               ? "/api/integrations/github/start?mode=install"
@@ -4366,22 +4371,25 @@ export const integrationRoutes = new Hono()
     if (!parsed.success) {
       return context.json({ error: "Choose a Jira site" }, 400);
     }
-    const connectionState = await consumeIntegrationConnectionState(
-      "jira",
-      parsed.data.selectionState,
-      { organizationId: tenant.organizationId, userId: tenant.user.id },
-    );
-    if (!connectionState) {
+    const owner = { organizationId: tenant.organizationId, userId: tenant.user.id };
+    // Read first, so a refused choice leaves the selection for another try.
+    const pending = await getIntegrationConnectionState("jira", parsed.data.selectionState, owner);
+    if (!pending) {
       return context.json({ error: "Site selection expired. Connect Jira again." }, 410);
     }
     try {
-      const metadata = z.object({ encryptedCredentials: z.string().min(1) }).parse(connectionState.metadata);
+      const metadata = z.object({ encryptedCredentials: z.string().min(1) }).parse(pending.metadata);
       const selection = jiraSelectionSchema.parse(
         decryptCredentials<Record<string, unknown>>(metadata.encryptedCredentials),
       );
       const site = selection.sites.find((candidate) => candidate.cloudId === parsed.data.cloudId);
       if (!site) {
         return context.json({ error: "Choose one of the Jira sites you granted" }, 403);
+      }
+      // Consuming makes the selection single-use.
+      const connectionState = await consumeIntegrationConnectionState("jira", parsed.data.selectionState, owner);
+      if (!connectionState) {
+        return context.json({ error: "Site selection expired. Connect Jira again." }, 410);
       }
       const accountId = await saveJiraOAuthConnection({
         organizationId: connectionState.organizationId,
