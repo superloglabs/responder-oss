@@ -63,6 +63,9 @@ export interface SignalSettings {
   // Days Signal keeps findings, investigations, and the data it stored for
   // them. Null keeps them until the workspace is deleted.
   retentionDays: SignalRetentionDays | null;
+  // Whether a Replicas automation webhook is saved, which adds Send to
+  // Replicas to findings in Slack. The URL itself is never sent back.
+  replicas: { connected: boolean };
   limits: { dailyInvestigationCap: number };
 }
 
@@ -148,6 +151,7 @@ export function withSettingsDefaults(settings: Partial<SignalSettings> & Pick<Si
     notes: settings.notes ?? "",
     slackScan: settings.slackScan ?? { enabled: false, channels: [] },
     retentionDays: settings.retentionDays ?? null,
+    replicas: settings.replicas ?? { connected: false },
     limits: settings.limits ?? { dailyInvestigationCap: 50 },
   };
 }
@@ -174,6 +178,11 @@ export async function fetchSignalSettings() {
 
 export async function saveSignalSettings(settings: SignalSettings) {
   return withSettingsDefaults(await signalJson<SignalSettings>("/settings", jsonBody("PUT", settingsBody(settings))));
+}
+
+// Saves the webhook URL of a Replicas automation, or removes it with null.
+export async function saveReplicasWebhook(webhookUrl: string | null) {
+  return withSettingsDefaults(await signalJson<SignalSettings>("/settings/replicas", jsonBody("PUT", { webhookUrl })));
 }
 
 export function fetchSignalBilling() {
