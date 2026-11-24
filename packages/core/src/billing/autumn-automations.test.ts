@@ -20,6 +20,7 @@ vi.mock("autumn-js", () => ({
 
 const {
   automationModelRefusal,
+  changeAutomationPlan,
   checkUsageAllowance,
   checkWorkAllowance,
   creditMachineHours,
@@ -100,6 +101,26 @@ describe("automation billing", () => {
       customerId: "organization-1",
       featureId: "responder_automation_inference",
       requiredBalance: 0.01,
+    });
+  });
+
+  it("lets a paid plan checkout collect business details", async () => {
+    client.customers.getOrCreate.mockResolvedValue(customer(freePlan));
+    client.billing.attach.mockResolvedValueOnce({ paymentUrl: "https://checkout.example/session" });
+
+    await expect(
+      changeAutomationPlan("organization-1", "responder_plan_pro", "https://app.example/billing"),
+    ).resolves.toEqual({ url: "https://checkout.example/session" });
+    expect(client.billing.attach).toHaveBeenCalledWith({
+      customerId: "organization-1",
+      planId: "responder_plan_pro",
+      redirectMode: "if_required",
+      successUrl: "https://app.example/billing",
+      checkoutSessionParams: {
+        billing_address_collection: "required",
+        customer_update: { address: "auto", name: "auto" },
+        tax_id_collection: { enabled: true, required: "never" },
+      },
     });
   });
 
