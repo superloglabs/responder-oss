@@ -2296,15 +2296,21 @@ export const integrationRoutes = new Hono()
     // One connection per site: connecting the same site again replaces the
     // stored token.
     const host = new URL(siteUrl).hostname;
-    const accountId = await upsertIntegrationAccount({
-      organizationId: tenant.organizationId,
-      provider: "jira",
-      externalAccountId: host,
-      displayName: account.siteName,
-      encryptedCredentials: encryptCredentials({ authType: "api_token", ...auth }),
-      credentialKeyVersion: 1,
-      metadata: { siteUrl, accountName: account.displayName, atlassianAccountId: account.accountId },
-    });
+    let accountId: string;
+    try {
+      accountId = await upsertIntegrationAccount({
+        organizationId: tenant.organizationId,
+        provider: "jira",
+        externalAccountId: host,
+        displayName: account.siteName,
+        encryptedCredentials: encryptCredentials({ authType: "api_token", ...auth }),
+        credentialKeyVersion: 1,
+        metadata: { siteUrl, accountName: account.displayName, atlassianAccountId: account.accountId },
+      });
+    } catch (error) {
+      logCallbackError("Jira", error, { organizationId: tenant.organizationId, stage: "save_connection" });
+      return context.json({ error: "Unable to save the Jira connection" }, 502);
+    }
     await captureAnalyticsEvent({
       distinctId: tenant.user.id,
       event: "integration connected",

@@ -61,6 +61,21 @@ describe("connections from chat", () => {
     expect(JSON.stringify(result.body)).not.toContain("private-slack-secret");
   });
 
+  it("offers Jira only to Signal workspaces, through Signal's own setup page", async () => {
+    const listed = await executeOperation(list, caller, {});
+    expect((listed.body.integrations as Array<{ provider: string }>).map((item) => item.provider)).toContain("jira");
+    const started = await executeOperation(start, caller, { provider: "jira" });
+    expect(started.body).toMatchObject({
+      provider: "jira", status: "setup_required", url: "https://superlog.example/signal/setup/sources/jira",
+    });
+
+    vi.mocked(organizationHasCapability).mockImplementation(async (_organizationId, capability) => capability !== "signal");
+    const hidden = await executeOperation(list, caller, {});
+    expect((hidden.body.integrations as Array<{ provider: string }>).map((item) => item.provider)).not.toContain("jira");
+    expect((await executeOperation(start, caller, { provider: "jira" })).status).toBe(404);
+    vi.mocked(organizationHasCapability).mockResolvedValue(true);
+  });
+
   it("uses GitHub installation consent so repository access can be selected", async () => {
     const result = await executeOperation(start, caller, { provider: "github" });
     expect(result.status).toBe(200);
@@ -98,10 +113,12 @@ describe("connections from chat", () => {
   });
 
   it("keeps capability-gated providers out of discovery and connection", async () => {
-    vi.mocked(organizationHasCapability).mockResolvedValueOnce(false).mockResolvedValueOnce(false);
+    // Listing asks for automations and Signal; starting Discord asks for automations.
+    vi.mocked(organizationHasCapability).mockResolvedValueOnce(false).mockResolvedValueOnce(false).mockResolvedValueOnce(false);
     const result = await executeOperation(list, caller, {});
     expect(result.status).toBe(200);
     expect(result.body.integrations).not.toEqual(expect.arrayContaining([expect.objectContaining({ provider: "discord" })]));
+    expect(result.body.integrations).not.toEqual(expect.arrayContaining([expect.objectContaining({ provider: "jira" })]));
     expect((await executeOperation(start, caller, { provider: "discord" })).status).toBe(404);
     expect(createIntegrationConnectionState).not.toHaveBeenCalled();
   });

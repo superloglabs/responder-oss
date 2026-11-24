@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "../design-system";
 import {
@@ -51,14 +51,21 @@ const modeDescriptions: Record<SignalJiraMode | "off", string> = {
 type Loaded<T> = { key: string; items: T[] } | { key: string; error: string };
 
 // Projects or issue types for `key`, loaded again when it changes. Null
-// skips loading.
-function useJiraList<T>(key: string | null, load: () => Promise<T[]>) {
+// skips loading. `onLoad` hears of each list that is still current: an
+// answer for an earlier key is dropped.
+function useJiraList<T>(key: string | null, load: () => Promise<T[]>, onLoad?: (key: string, items: T[]) => void) {
   const [loaded, setLoaded] = useState<Loaded<T> | null>(null);
+  const latestOnLoad = useRef(onLoad);
+  useEffect(() => { latestOnLoad.current = onLoad; });
   useEffect(() => {
     if (key === null) return;
     let current = true;
     load()
-      .then((items) => { if (current) setLoaded({ key, items }); })
+      .then((items) => {
+        if (!current) return;
+        setLoaded({ key, items });
+        latestOnLoad.current?.(key, items);
+      })
       .catch((failure: unknown) => {
         if (current) setLoaded({ key, error: failure instanceof Error ? failure.message : "Could not load from Jira." });
       });
@@ -84,54 +91,52 @@ function JiraSettings({ actions, value, save }: {
   const connected = actions.connected("jira") && accounts.length > 0;
   // The connection in use, else the first one.
   const accountId = accounts.find((account) => account.id === value?.integrationAccountId)?.id ?? accounts[0]?.id ?? null;
-  // Choices made while turning Jira on, before a project and issue type let
-  // them be saved.
-  const [draft, setDraft] = useState<{ mode: SignalJiraMode; project: SignalJiraProject | null; issueTypeId: string | null } | null>(null);
-  const mode = value?.mode ?? draft?.mode ?? "off";
-  const projectId = value?.projectId ?? draft?.project?.id ?? null;
+  // The mode chosen while turning Jira on, before a project lets it be saved.
+  const [draftMode, setDraftMode] = useState<SignalJiraMode | null>(null);
+  // A project chosen but not saved yet. Its issue types load once, and it is
+  // saved with its default type then, unless something newer replaced it.
+  const [pending, setPending] = useState<SignalJiraProject | null>(null);
+  const mode = value?.mode ?? draftMode ?? "off";
+  const projectId = pending?.id ?? value?.projectId ?? null;
   const projects = useJiraList(mode !== "off" && accountId ? accountId : null, () => fetchJiraProjects(accountId!));
   const issueTypes = useJiraList(
     mode !== "off" && accountId && projectId ? `${accountId}/${projectId}` : null,
     () => fetchJiraIssueTypes(accountId!, projectId!),
+    // A chosen project is saved with its default type once its own types
+    // load. Choosing another project or Off first drops this answer.
+    (key, types) => {
+      const issueType = defaultIssueType(types);
+      if (!pending || !accountId || mode === "off" || key !== `${accountId}/${pending.id}` || !issueType) return;
+      saveJira({ integrationAccountId: accountId, projectId: pending.id, projectKey: pending.key, issueTypeId: issueType.id, mode });
+    },
   );
 
   function saveJira(next: SignalJiraSettings | null) {
-    setDraft(null);
+    setDraftMode(null);
+    setPending(null);
     save({ jira: next });
   }
 
   function chooseMode(next: SignalJiraMode | "off") {
     if (next === "off") { saveJira(null); return; }
     if (value) { saveJira({ ...value, mode: next }); return; }
-    setDraft({ mode: next, project: draft?.project ?? null, issueTypeId: draft?.issueTypeId ?? null });
+    setDraftMode(next);
   }
 
-  async function chooseProject(id: string) {
+  function chooseProject(id: string) {
     const project = projects && "items" in projects ? projects.items.find((candidate) => candidate.id === id) : undefined;
     if (!project || !accountId || mode === "off") return;
-    if (!value) setDraft({ mode, project, issueTypeId: null });
-    // A new project has its own issue types, so its default is chosen and
-    // saved with it.
-    let types: SignalJiraIssueType[];
-    try {
-      types = await fetchJiraIssueTypes(accountId, project.id);
-    } catch {
-      return;
-    }
-    const issueType = defaultIssueType(types);
-    if (!issueType) return;
-    saveJira({ integrationAccountId: accountId, projectId: project.id, projectKey: project.key, issueTypeId: issueType.id, mode });
+    setPending(project.id === value?.projectId ? null : project);
   }
 
   function chooseIssueType(issueTypeId: string) {
-    if (value) { saveJira({ ...value, issueTypeId }); return; }
-    const project = draft?.project;
+    const project = pending ?? (value ? { id: value.projectId, key: value.projectKey } : null);
     if (!project || !accountId || mode === "off") return;
     saveJira({ integrationAccountId: accountId, projectId: project.id, projectKey: project.key, issueTypeId, mode });
   }
 
   const site = accounts.map((account) => account.details?.url?.replace(/^https:\/\//u, "") ?? account.displayName).join(", ");
-  const issueTypeId = value?.issueTypeId ?? draft?.issueTypeId ?? "";
+  const issueTypeId = pending ? "" : value?.issueTypeId ?? "";
   return <SettingsGroup title="Jira">
     <div className="signalSettingsCard">
       <SourceRow provider="jira" name="Jira"
@@ -153,7 +158,7 @@ function JiraSettings({ actions, value, save }: {
             : value ? `Issues are created in ${value.projectKey}.` : "Choose where issues are created."}>
             <select className="signalSettingsSelect" aria-label="Jira project" value={projectId ?? ""}
               disabled={!projects || "error" in projects}
-              onChange={(e) => void chooseProject(e.target.value)}>
+              onChange={(e) => chooseProject(e.target.value)}>
               {!projectId && <option value="">{projects ? "Choose a project" : "Loading…"}</option>}
               {projects && "items" in projects
                 ? projects.items.map((project) => <option key={project.id} value={project.id}>{project.name} ({project.key})</option>)

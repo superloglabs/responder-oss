@@ -78,7 +78,10 @@ describe("integrationAccountDetails", () => {
     expect(integrationAccountDetails({
       provider: "jira",
       externalAccountId: "example.atlassian.net",
-      metadata: { siteUrl: "https://example.atlassian.net", accountName: "Dev Example", atlassianAccountId: "account-1" },
+      metadata: {
+        siteUrl: "https://example.atlassian.net", accountName: "Dev Example", atlassianAccountId: "account-1",
+        token: "token-that-must-not-show",
+      },
     })).toEqual({ url: "https://example.atlassian.net", userHandle: "Dev Example" });
   });
 

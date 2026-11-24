@@ -1,7 +1,7 @@
 import { createChatConnectionTicket, chatConnectionHandoffUrl } from "../integrations/chat-connection.js";
 import { z } from "zod";
 import { organizationHasCapability } from "../../../../packages/core/src/db/organization-capabilities.js";
-import { automationOnlyIntegrationIds, integrationCatalog, integrationIsConfigured, productIntegrationIds } from "../integrations/catalog.js";
+import { automationOnlyIntegrationIds, integrationCatalog, integrationIsConfigured, productIntegrationIds, signalOnlyIntegrationIds } from "../integrations/catalog.js";
 import { startIntegrationConnection } from "../integrations/routes.js";
 import { controlPlaneBaseUrl } from "../integrations/urls.js";
 import { defineOperation, ManagementError } from "./operation.js";
@@ -11,6 +11,11 @@ const consentProviders = new Set([
   "cloudflare", "railway",
 ]);
 const provider = z.enum(productIntegrationIds);
+
+// Where secure setup happens: Signal's own page for Jira, else integrations.
+function secureSetupPath(id: z.infer<typeof provider>) {
+  return id === "jira" ? "/signal/setup/sources/jira" : "/settings";
+}
 const connectionType = z.enum(["oauth", "secure_setup"]);
 
 export const integrationConnectionOperations = [
@@ -30,9 +35,14 @@ export const integrationConnectionOperations = [
       available: z.boolean(), connectionType,
     })) }),
     async run(context) {
-      const automations = await organizationHasCapability(context.organizationId, "automations");
+      const [automations, signal] = await Promise.all([
+        organizationHasCapability(context.organizationId, "automations"),
+        organizationHasCapability(context.organizationId, "signal"),
+      ]);
       return { integrations: integrationCatalog
-        .filter((item) => item.implemented && (!automationOnlyIntegrationIds.has(item.id) || automations))
+        .filter((item) => item.implemented &&
+          (!automationOnlyIntegrationIds.has(item.id) || automations) &&
+          (!signalOnlyIntegrationIds.has(item.id) || signal))
         .map((item) => ({
           provider: item.id, name: item.name, description: item.description,
           available: integrationIsConfigured(item),
@@ -58,7 +68,9 @@ export const integrationConnectionOperations = [
     async run(context, input) {
       const definition = integrationCatalog.find((item) => item.id === input.provider)!;
       if (!definition.implemented || (automationOnlyIntegrationIds.has(input.provider) &&
-          !await organizationHasCapability(context.organizationId, "automations"))) {
+          !await organizationHasCapability(context.organizationId, "automations")) ||
+          (signalOnlyIntegrationIds.has(input.provider) &&
+          !await organizationHasCapability(context.organizationId, "signal"))) {
         throw new ManagementError(404, "Integration is not available.", "integration_unavailable");
       }
       if (!integrationIsConfigured(definition)) {
@@ -67,9 +79,11 @@ export const integrationConnectionOperations = [
       if (!consentProviders.has(input.provider)) {
         return {
           provider: input.provider, connectionType: "secure_setup" as const,
-          status: "setup_required" as const, url: new URL("/settings", controlPlaneBaseUrl()).href,
+          status: "setup_required" as const, url: new URL(secureSetupPath(input.provider), controlPlaneBaseUrl()).href,
           expiresAt: null,
-          instructions: `Open integrations and choose Add for ${definition.name} to complete secure setup. Do not enter credentials in chat. Return here afterward to verify the connection.`,
+          instructions: input.provider === "jira"
+            ? "Open Signal's Jira setup to connect Jira Cloud. Do not enter credentials in chat. Return here afterward to verify the connection."
+            : `Open integrations and choose Add for ${definition.name} to complete secure setup. Do not enter credentials in chat. Return here afterward to verify the connection.`,
         };
       }
       const expiresAt = new Date(Date.now() + 10 * 60 * 1_000).toISOString();

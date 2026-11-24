@@ -5187,6 +5187,16 @@ describe("Jira connections", () => {
     });
   });
 
+  it("answers with a connection error when the connection cannot be saved", async () => {
+    vi.mocked(upsertIntegrationAccount).mockRejectedValue(new Error("database unavailable"));
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const response = await connect();
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toEqual({ error: "Unable to save the Jira connection" });
+  });
+
   it("refuses sites that are not Jira Cloud", async () => {
     const response = await connect({ siteUrl: "https://jira.internal.example" });
 

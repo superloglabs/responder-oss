@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   IconAlertCircle,
   IconArrowUpRight,
@@ -359,6 +360,7 @@ function jiraReturnTo(listPath: string) {
 }
 
 function JiraConnect({ integration, listPath, onBack }: PageProps) {
+  const navigate = useNavigate();
   const [siteUrl, setSiteUrl] = useState("");
   const [email, setEmail] = useState("");
   const [token, setToken] = useState("");
@@ -379,6 +381,8 @@ function JiraConnect({ integration, listPath, onBack }: PageProps) {
       setSubmitting(false);
     }
   }
+  // Back returns where the member came from, like a successful connection.
+  const back = jiraReturnTo(listPath) === listPath ? onBack : () => navigate(jiraReturnTo(listPath));
 
   return <form className="signalConnectForm" onSubmit={(event) => void connect(event)}>
     <Intro provider="jira" title="Connect Jira">{jiraSignalUse}</Intro>
@@ -401,7 +405,7 @@ function JiraConnect({ integration, listPath, onBack }: PageProps) {
       {error ? <p className="signalFieldError" role="alert"><IconAlertCircle size={14} />{error}</p>
         : <p>Stored encrypted. Signal uses it only to file findings and search issues.</p>}
     </div>
-    <Actions onBack={onBack}>
+    <Actions onBack={back}>
       <Button type="submit" variant="primary" loading={submitting} disabled={!integration?.connectUrl || !siteUrl.trim() || !email.trim() || !token.trim()}>Connect Jira</Button>
     </Actions>
   </form>;

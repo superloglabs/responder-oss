@@ -152,6 +152,12 @@ describe("jiraSummary and jiraTextQuery", () => {
     expect(jiraSummary("x".repeat(300))).toHaveLength(255);
   });
 
+  it("never splits an emoji when cutting a summary", () => {
+    const summary = jiraSummary(`${"x".repeat(253)}🔥🔥🔥`);
+    expect([...summary]).toHaveLength(255);
+    expect(summary).toBe(`${"x".repeat(253)}🔥…`);
+  });
+
   it("keeps plain words", () => {
     expect(jiraTextQuery("checkout 500 errors")).toBe("checkout 500 errors");
   });

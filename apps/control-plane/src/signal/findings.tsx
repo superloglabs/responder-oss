@@ -168,9 +168,23 @@ export function SignalFindingDetail() {
     setFiling(true);
     setCopyStatus("");
     try {
-      const { issue } = await fileFindingInJira(finding.id);
-      // Filing accepts a new finding.
-      setFinding({ ...finding, status: finding.status === "new" ? "accepted" : finding.status, jira: { ...finding.jira, issue, error: null } });
+      const filedId = finding.id;
+      const { issue } = await fileFindingInJira(filedId);
+      // Merged into the finding shown now, which may have changed while Jira
+      // answered; another finding opened meanwhile is left alone. Filing
+      // accepts a new finding.
+      setLoaded((current) => {
+        const latest = current?.finding;
+        if (!current || !latest || latest.id !== filedId) return current;
+        return {
+          ...current,
+          finding: {
+            ...latest,
+            status: latest.status === "new" ? "accepted" : latest.status,
+            jira: latest.jira ? { ...latest.jira, issue, error: null } : latest.jira,
+          },
+        };
+      });
       setCopyStatus(`Filed as ${issue.key}`);
     } catch (failure) {
       setCopyStatus(failure instanceof Error ? `Could not create the Jira issue. ${failure.message}` : "Could not create the Jira issue.");

@@ -193,10 +193,11 @@ export interface JiraIssue {
   url: string;
 }
 
-// Jira caps a summary at 255 characters.
+// Jira caps a summary at 255 characters. It is cut by code point, so an
+// emoji is never split in half.
 export function jiraSummary(text: string): string {
-  const flat = text.replace(/\s+/gu, " ").trim();
-  return flat.length > 255 ? `${flat.slice(0, 254).trimEnd()}…` : flat;
+  const characters = [...text.replace(/\s+/gu, " ").trim()];
+  return characters.length > 255 ? `${characters.slice(0, 254).join("").trimEnd()}…` : characters.join("");
 }
 
 export async function createJiraIssue(input: {
