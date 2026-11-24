@@ -13,8 +13,9 @@ const consentProviders = new Set([
 const provider = z.enum(productIntegrationIds);
 
 // Where secure setup happens: Signal's own page for Jira, else integrations.
+// The context step works during Signal's setup and once it is complete.
 function secureSetupPath(id: z.infer<typeof provider>) {
-  return id === "jira" ? "/signal/setup/sources/jira" : "/settings";
+  return id === "jira" ? "/signal/setup/context/jira" : "/settings";
 }
 const connectionType = z.enum(["oauth", "secure_setup"]);
 

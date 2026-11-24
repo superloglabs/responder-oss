@@ -40,7 +40,7 @@ export function SettingsNotifications({ data, save, status }: SettingsPageProps)
   </SettingsPage>;
 }
 
-const jiraPath = "/signal/setup/sources/jira";
+const jiraPath = "/signal/setup/context/jira";
 
 const modeDescriptions: Record<SignalJiraMode | "off", string> = {
   off: "Findings are not filed in Jira.",

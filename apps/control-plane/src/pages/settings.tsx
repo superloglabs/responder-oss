@@ -447,7 +447,7 @@ function DefaultIntegrationCard({
     if (!actionUrl || isConnecting) return;
     // Jira is connected and set up from Signal's own pages.
     if (integration.id === "jira") {
-      window.location.assign("/signal/setup/sources/jira");
+      window.location.assign("/signal/setup/context/jira");
       return;
     }
     if (integration.id === "datadog") {

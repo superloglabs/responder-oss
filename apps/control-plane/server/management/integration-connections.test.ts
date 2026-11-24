@@ -66,7 +66,7 @@ describe("connections from chat", () => {
     expect((listed.body.integrations as Array<{ provider: string }>).map((item) => item.provider)).toContain("jira");
     const started = await executeOperation(start, caller, { provider: "jira" });
     expect(started.body).toMatchObject({
-      provider: "jira", status: "setup_required", url: "https://superlog.example/signal/setup/sources/jira",
+      provider: "jira", status: "setup_required", url: "https://superlog.example/signal/setup/context/jira",
     });
 
     vi.mocked(organizationHasCapability).mockImplementation(async (_organizationId, capability) => capability !== "signal");

@@ -398,7 +398,7 @@ function JiraConnect({ integration, listPath, onBack }: PageProps) {
     <div className={`signalInput${error ? " signalInput--error" : ""}`}>
       <label htmlFor="signal-jira-token">API token</label>
       <ol className="signalInstructions">
-        <li>Open <a href="https://id.atlassian.com/manage-profile/security/api-tokens" target="_blank" rel="noreferrer">API tokens</a> in your Atlassian account and create a token. A service account that can create issues in the project works best.</li>
+        <li><span>Open <a href="https://id.atlassian.com/manage-profile/security/api-tokens" target="_blank" rel="noreferrer">API tokens</a> in your Atlassian account and create a token. A service account that can create issues in the project works best.</span></li>
         <li>Paste the token below.</li>
       </ol>
       <input id="signal-jira-token" type="password" autoComplete="off" spellCheck={false} placeholder="Paste your Atlassian API token" required value={token} onChange={(e) => setToken(e.target.value)} />
