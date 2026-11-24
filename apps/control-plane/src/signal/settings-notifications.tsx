@@ -84,7 +84,7 @@ function ReplicasWebhook({ connected, onSaved }: { connected: boolean; onSaved: 
       <div className={`signalInput${error ? " signalInput--error" : ""}`}>
         <div className="signalSecret">
           <input aria-label="Replicas webhook URL" type={show ? "text" : "password"} autoComplete="off" spellCheck={false}
-            placeholder="https://api.replicas.dev/v1/automations/webhook/whtok_…" value={url}
+            disabled={busy} placeholder="https://api.replicas.dev/v1/automations/webhook/whtok_…" value={url}
             onChange={(e) => { setUrl(e.target.value); setError(""); }} />
           <button type="button" aria-label={show ? "Hide URL" : "Show URL"} onClick={() => setShow(!show)}>
             {show ? <IconEyeOff size={14} /> : <IconEye size={14} />}

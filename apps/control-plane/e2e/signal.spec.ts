@@ -125,6 +125,7 @@ async function workspace(page: Page, options: { enabled?: boolean; signal?: Retu
       return route.fulfill({ json: signal.settings });
     }
     if (path === "/settings/replicas" && request.method() === "PUT") {
+      if (signal.saveDelayMs) await new Promise((resolve) => setTimeout(resolve, signal.saveDelayMs));
       const webhookUrl = body!.webhookUrl as string | null;
       if (webhookUrl !== null && !webhookUrl.startsWith("https://api.replicas.dev/v1/automations/webhook/")) {
         return route.fulfill({ status: 400, json: { error: "Paste the webhook URL of a Replicas automation." } });
@@ -712,8 +713,12 @@ test("connects Replicas with a webhook URL and removes it", async ({ page }) => 
   expect(signal.settings.replicas).toEqual({ connected: false });
 
   await url.fill("https://api.replicas.dev/v1/automations/webhook/whtok_abcdef123456");
+  signal.saveDelayMs = 500;
   await page.getByRole("button", { name: "Connect Replicas" }).click();
+  // The URL cannot change while it is being saved, so the saved URL is the one shown.
+  await expect(url).toBeDisabled();
   await expect(page.getByText("have a Send to Replicas button")).toBeVisible();
+  signal.saveDelayMs = 0;
   expect(signal.writes.at(-1)).toEqual({
     method: "PUT", path: "/settings/replicas",
     body: { webhookUrl: "https://api.replicas.dev/v1/automations/webhook/whtok_abcdef123456" },
