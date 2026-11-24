@@ -36,6 +36,7 @@ export function integrationCallbackUrl(
     | "gcp"
     | "github"
     | "grafana"
+    | "jira"
     | "linear"
     | "posthog"
     | "railway"
@@ -115,7 +116,7 @@ export function devrevWebhookUrl(integrationAccountId: string): string {
 export function settingsRedirect(
   returnTo: string,
   provider: string,
-  status: "connected" | "error" | "finishing" | "select_project",
+  status: "connected" | "error" | "finishing" | "select_project" | "select_site",
   reason?: string,
 ): string {
   const baseUrl = new URL(controlPlaneBaseUrl());

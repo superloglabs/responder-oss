@@ -163,9 +163,16 @@ import {
   parseDevRevCredentials,
 } from "../../../../packages/core/src/integrations/devrev.js";
 import {
+  exchangeJiraOAuthCode,
   getJiraAccount,
   JiraApiError,
+  jiraAuthorizeUrl,
+  jiraOAuthConfigured,
+  jiraOAuthCredentials,
+  listJiraAccessibleSites,
   parseJiraSiteUrl,
+  type JiraOAuthTokens,
+  type JiraSite,
 } from "../../../../packages/core/src/integrations/jira.js";
 import {
   AXIOM_MCP_URL,
@@ -436,6 +443,19 @@ const upstashConnectionSchema = z.object({
   email: z.string().trim().email().max(320),
   returnTo: z.string().max(2_048).optional(),
 });
+const jiraSiteSelectionSchema = z.object({
+  cloudId: z.string().min(1).max(256),
+  selectionState: z.string().min(1).max(512),
+});
+const jiraSelectionSchema = z.object({
+  tokens: z.object({
+    accessToken: z.string().min(1),
+    refreshToken: z.string().min(1),
+    expiresAt: z.number().int().positive(),
+    scope: z.string(),
+  }),
+  sites: z.array(z.object({ cloudId: z.string().min(1), siteUrl: z.string().url(), name: z.string() })).min(1),
+});
 const jiraConnectionSchema = z.object({
   email: z.string().trim().email().max(320),
   returnTo: z.string().max(2_048).optional(),
@@ -523,6 +543,7 @@ type BrowserOAuthProvider =
   | "gcp"
   | "github"
   | "grafana"
+  | "jira"
   | "linear"
   | "posthog"
   | "railway"
@@ -934,6 +955,27 @@ export async function startIntegrationConnection(input: {
   if (!integrationIsConfigured(definition)) {
     return Response.json({ error: "Integration application is not configured" }, { status: 503 });
   }
+  // Jira connects through Atlassian's consent screen when the OAuth app is
+  // configured, and with an API token otherwise.
+  if (parsedProvider.data === "jira" && jiraOAuthConfigured()) {
+    try {
+      const state = await createIntegrationConnectionState({
+        organizationId: tenant.organizationId,
+        userId: tenant.user.id,
+        provider: "jira",
+        returnTo: input.returnTo,
+        routingUrl: cellCallbackUrl("jira"),
+      });
+      return Response.redirect(
+        jiraAuthorizeUrl({ redirectUri: integrationCallbackUrl("jira"), state }),
+      );
+    } catch (error) {
+      logCallbackError("Jira", error, { organizationId: tenant.organizationId, stage: "start" });
+      return Response.redirect(
+        settingsRedirect(input.returnTo ?? jiraSetupPath, "jira", "error", "connection_failed"),
+      );
+    }
+  }
   if (
     parsedProvider.data === "aws" ||
     parsedProvider.data === "datadog" ||
@@ -1257,6 +1299,45 @@ export async function startIntegrationConnection(input: {
   return Response.json({ error: "Integration is not available yet" }, { status: 501 });
 }
 
+// Signal's Jira page. The context step works during Signal's setup and once
+// it is complete.
+const jiraSetupPath = "/signal/setup/context/jira";
+
+// Where a member picks one of several granted Jira sites: Signal's Jira page,
+// which returns to the notifications settings when they started there.
+function jiraSiteSelectionPath(returnTo: string): string {
+  return returnTo === "/signal/setup/notifications" ? `${jiraSetupPath}?next=notifications` : jiraSetupPath;
+}
+
+// One connection per site, so an OAuth connection replaces an API token
+// connection to the same site. Only the site is kept, not the Atlassian
+// account that granted it.
+async function saveJiraOAuthConnection(input: {
+  organizationId: string;
+  site: JiraSite;
+  tokens: JiraOAuthTokens;
+  userId: string;
+}): Promise<string> {
+  const accountId = await upsertIntegrationAccount({
+    organizationId: input.organizationId,
+    provider: "jira",
+    externalAccountId: new URL(input.site.siteUrl).hostname,
+    displayName: input.site.name,
+    encryptedCredentials: encryptCredentials(jiraOAuthCredentials(input.tokens, input.site)),
+    credentialKeyVersion: 1,
+    metadata: { authType: "jira_oauth", cloudId: input.site.cloudId, siteUrl: input.site.siteUrl },
+    status: "connected",
+  });
+  await captureAnalyticsEvent({
+    distinctId: input.userId,
+    event: "integration connected",
+    organizationId: input.organizationId,
+    properties: { auth_type: "oauth", integration_account_id: accountId, provider: "jira" },
+  });
+  console.info(JSON.stringify({ accountId, authType: "oauth", event: "jira_connected", organizationId: input.organizationId, provider: "jira" }));
+  return accountId;
+}
+
 // Connections Signal setup can remove. Removing one deletes the stored
 // credentials; it does not revoke access on the provider's side.
 const removableProviderSchema = z.enum(["aws", "axiom", "datadog", "gcp", "grafana", "jira", "langfuse", "linear", "posthog", "railway", "sentry", "vercel"]);
@@ -1465,6 +1546,11 @@ export const integrationRoutes = new Hono()
                   ? "/api/integrations/sentry/start"
                   : `/api/integrations/${definition.id}/start`
               : null,
+          // Jira also connects through Atlassian sign-in once its OAuth app
+          // is configured; connectUrl stays the API token endpoint.
+          ...(definition.id === "jira"
+            ? { oauthConnectUrl: jiraOAuthConfigured() ? "/api/integrations/jira/start" : null }
+            : {}),
           configurationUrl:
             definition.id === "github" && configured
               ? "/api/integrations/github/start?mode=install"
@@ -4188,6 +4274,139 @@ export const integrationRoutes = new Hono()
           browserOAuthErrorReason(context.req.query("error")),
         ),
       );
+    }
+  })
+  .get("/jira/callback", async (context) => {
+    const state = context.req.query("state");
+    if (!state) {
+      return context.redirect(settingsRedirect(jiraSetupPath, "jira", "error", "invalid_state"));
+    }
+    const connectionState = await consumeBrowserOAuthConnectionState({
+      headers: context.req.raw.headers,
+      provider: "jira",
+      state,
+    });
+    if (!connectionState) {
+      return context.redirect(settingsRedirect(jiraSetupPath, "jira", "error", "invalid_state"));
+    }
+    const providerError = context.req.query("error");
+    if (providerError) {
+      return context.redirect(
+        settingsRedirect(connectionState.returnTo, "jira", "error", browserOAuthErrorReason(providerError)),
+      );
+    }
+    try {
+      const code = z.string().min(1).parse(context.req.query("code"));
+      const tokens = await exchangeJiraOAuthCode({ code, redirectUri: integrationCallbackUrl("jira") });
+      const sites = await listJiraAccessibleSites(tokens.accessToken);
+      if (sites.length === 0) {
+        return context.redirect(settingsRedirect(connectionState.returnTo, "jira", "error", "no_jira_site"));
+      }
+      if (sites.length === 1) {
+        const accountId = await saveJiraOAuthConnection({
+          organizationId: connectionState.organizationId,
+          site: sites[0]!,
+          tokens,
+          userId: connectionState.userId,
+        });
+        return context.redirect(
+          withIntegrationAccountId(settingsRedirect(connectionState.returnTo, "jira", "connected"), accountId),
+        );
+      }
+      // The Atlassian account has granted this app more than one site, and
+      // Atlassian does not say which one was just picked, so the member
+      // chooses.
+      const selectionState = await createIntegrationConnectionState({
+        organizationId: connectionState.organizationId,
+        provider: "jira",
+        userId: connectionState.userId,
+        metadata: { encryptedCredentials: encryptCredentials({ tokens, sites }) },
+        returnTo: connectionState.returnTo,
+      });
+      return context.redirect(
+        withSelectionState(
+          settingsRedirect(jiraSiteSelectionPath(connectionState.returnTo), "jira", "select_site"),
+          selectionState,
+        ),
+      );
+    } catch (error) {
+      logCallbackError("Jira", error, { organizationId: connectionState.organizationId, stage: "callback" });
+      return context.redirect(settingsRedirect(connectionState.returnTo, "jira", "error", "connection_failed"));
+    }
+  })
+  .get("/jira/sites", async (context) => {
+    const tenant = await getActiveTenant(context.req.raw.headers);
+    if (tenant.ok === false) {
+      return context.json({ error: tenant.error }, tenant.status);
+    }
+    const state = context.req.query("state");
+    if (!state) {
+      return context.json({ error: "Site selection expired. Connect Jira again." }, 400);
+    }
+    const connectionState = await getIntegrationConnectionState(
+      "jira",
+      state,
+      { organizationId: tenant.organizationId, userId: tenant.user.id },
+    );
+    if (!connectionState) {
+      return context.json({ error: "Site selection expired. Connect Jira again." }, 410);
+    }
+    try {
+      const metadata = z.object({ encryptedCredentials: z.string().min(1) }).parse(connectionState.metadata);
+      const selection = jiraSelectionSchema.parse(
+        decryptCredentials<Record<string, unknown>>(metadata.encryptedCredentials),
+      );
+      return context.json({ sites: selection.sites });
+    } catch (error) {
+      logCallbackError("Jira", error, { organizationId: tenant.organizationId, stage: "list_sites" });
+      return context.json({ error: "Unable to load Jira sites" }, 502);
+    }
+  })
+  .post("/jira/select-site", async (context) => {
+    const tenant = await getActiveTenant(context.req.raw.headers);
+    if (tenant.ok === false) {
+      return context.json({ error: tenant.error }, tenant.status);
+    }
+    const parsed = jiraSiteSelectionSchema.safeParse(await context.req.json().catch(() => null));
+    if (!parsed.success) {
+      return context.json({ error: "Choose a Jira site" }, 400);
+    }
+    const owner = { organizationId: tenant.organizationId, userId: tenant.user.id };
+    // Read first, so a refused choice leaves the selection for another try.
+    const pending = await getIntegrationConnectionState("jira", parsed.data.selectionState, owner);
+    if (!pending) {
+      return context.json({ error: "Site selection expired. Connect Jira again." }, 410);
+    }
+    try {
+      const metadata = z.object({ encryptedCredentials: z.string().min(1) }).parse(pending.metadata);
+      const selection = jiraSelectionSchema.parse(
+        decryptCredentials<Record<string, unknown>>(metadata.encryptedCredentials),
+      );
+      const site = selection.sites.find((candidate) => candidate.cloudId === parsed.data.cloudId);
+      if (!site) {
+        return context.json({ error: "Choose one of the Jira sites you granted" }, 403);
+      }
+      // Consuming makes the selection single-use.
+      const connectionState = await consumeIntegrationConnectionState("jira", parsed.data.selectionState, owner);
+      if (!connectionState) {
+        return context.json({ error: "Site selection expired. Connect Jira again." }, 410);
+      }
+      const accountId = await saveJiraOAuthConnection({
+        organizationId: connectionState.organizationId,
+        site,
+        tokens: selection.tokens,
+        userId: connectionState.userId,
+      });
+      return context.json({
+        accountId,
+        redirectUrl: withIntegrationAccountId(
+          settingsRedirect(connectionState.returnTo, "jira", "connected"),
+          accountId,
+        ),
+      });
+    } catch (error) {
+      logCallbackError("Jira", error, { organizationId: tenant.organizationId, stage: "select_site" });
+      return context.json({ error: "Unable to save the Jira connection" }, 502);
     }
   })
   .post("/clickstack/connect", async (context) => {

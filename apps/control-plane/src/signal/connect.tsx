@@ -359,8 +359,20 @@ function jiraReturnTo(listPath: string) {
   return new URLSearchParams(window.location.search).get("next") === "notifications" ? "/signal/setup/notifications" : listPath;
 }
 
-function JiraConnect({ integration, listPath, onBack }: PageProps) {
+function JiraConnect(props: PageProps) {
+  const selectionState = new URLSearchParams(window.location.search).get("status") === "select_site"
+    ? new URLSearchParams(window.location.search).get("selection_state")
+    : null;
+  return selectionState ? <JiraSiteChoice {...props} selectionState={selectionState} /> : <JiraConnectForm {...props} />;
+}
+
+function JiraConnectForm({ integration, listPath, onBack }: PageProps) {
   const navigate = useNavigate();
+  // Atlassian sign-in when its OAuth app is configured; an API token always.
+  const oauthConnectUrl = integration?.oauthConnectUrl ?? null;
+  const oauthAvailable = Boolean(oauthConnectUrl);
+  const [method, setMethod] = useState<"oauth" | "api_token">("oauth");
+  const useOAuth = oauthAvailable && method === "oauth";
   const [siteUrl, setSiteUrl] = useState("");
   const [email, setEmail] = useState("");
   const [token, setToken] = useState("");
@@ -369,7 +381,13 @@ function JiraConnect({ integration, listPath, onBack }: PageProps) {
 
   async function connect(event: FormEvent) {
     event.preventDefault();
-    if (!integration?.connectUrl || submitting) return;
+    if (submitting) return;
+    if (useOAuth && oauthConnectUrl) {
+      setSubmitting(true);
+      window.location.assign(connectionStartUrl(oauthConnectUrl, jiraReturnTo(listPath)));
+      return;
+    }
+    if (!integration?.connectUrl) return;
     setError("");
     setSubmitting(true);
     try {
@@ -386,27 +404,117 @@ function JiraConnect({ integration, listPath, onBack }: PageProps) {
 
   return <form className="signalConnectForm" onSubmit={(event) => void connect(event)}>
     <Intro provider="jira" title="Connect Jira">{jiraSignalUse}</Intro>
-    <div className="signalInput">
-      <label htmlFor="signal-jira-site">Jira site</label>
-      <input id="signal-jira-site" autoComplete="off" spellCheck={false} placeholder="your-team.atlassian.net" required value={siteUrl} onChange={(e) => setSiteUrl(e.target.value)} />
-      <p>Jira Cloud only. Issues are created as the account that owns the API token.</p>
-    </div>
-    <div className="signalInput">
-      <label htmlFor="signal-jira-email">Atlassian account email</label>
-      <input id="signal-jira-email" type="email" autoComplete="off" spellCheck={false} placeholder="you@company.com" required value={email} onChange={(e) => setEmail(e.target.value)} />
-    </div>
-    <div className={`signalInput${error ? " signalInput--error" : ""}`}>
-      <label htmlFor="signal-jira-token">API token</label>
-      <ol className="signalInstructions">
-        <li><span>Open <a href="https://id.atlassian.com/manage-profile/security/api-tokens" target="_blank" rel="noreferrer">API tokens</a> in your Atlassian account and create a token. A service account that can create issues in the project works best.</span></li>
-        <li>Paste the token below.</li>
-      </ol>
-      <input id="signal-jira-token" type="password" autoComplete="off" spellCheck={false} placeholder="Paste your Atlassian API token" required value={token} onChange={(e) => setToken(e.target.value)} />
-      {error ? <p className="signalFieldError" role="alert"><IconAlertCircle size={14} />{error}</p>
-        : <p>Stored encrypted. Signal uses it only to file findings and search issues.</p>}
-    </div>
-    <Actions onBack={back}>
-      <Button type="submit" variant="primary" loading={submitting} disabled={!integration?.connectUrl || !siteUrl.trim() || !email.trim() || !token.trim()}>Connect Jira</Button>
+    {oauthAvailable && <fieldset className="signalFieldset">
+      <legend>Connect with</legend>
+      <div className="signalOptions">
+        <label className="signalOption">
+          <input type="radio" name="jira-method" checked={method === "oauth"} onChange={() => { setMethod("oauth"); setError(""); }} />
+          <span><strong>Atlassian sign-in</strong><small>Approve access and pick your site. Issues are created as you.</small></span>
+        </label>
+        <label className="signalOption">
+          <input type="radio" name="jira-method" checked={method === "api_token"} onChange={() => { setMethod("api_token"); setError(""); }} />
+          <span><strong>API token</strong><small>Use a site, email, and token, such as a service account's.</small></span>
+        </label>
+      </div>
+    </fieldset>}
+    {useOAuth ? <>
+      <AccessList
+        title="What Signal does"
+        allowed={["Search issues, so it skips problems already filed", "Create issues for findings, from a button or for every finding"]}
+        denied="Never edits, moves, or deletes issues"
+      />
+      <Actions onBack={back}>
+        <Button type="submit" variant="primary" loading={submitting}><External>Continue to Atlassian</External></Button>
+      </Actions>
+    </> : <>
+      <div className="signalInput">
+        <label htmlFor="signal-jira-site">Jira site</label>
+        <input id="signal-jira-site" autoComplete="off" spellCheck={false} placeholder="your-team.atlassian.net" required value={siteUrl} onChange={(e) => setSiteUrl(e.target.value)} />
+        <p>Jira Cloud only. Issues are created as the account that owns the API token.</p>
+      </div>
+      <div className="signalInput">
+        <label htmlFor="signal-jira-email">Atlassian account email</label>
+        <input id="signal-jira-email" type="email" autoComplete="off" spellCheck={false} placeholder="you@company.com" required value={email} onChange={(e) => setEmail(e.target.value)} />
+      </div>
+      <div className={`signalInput${error ? " signalInput--error" : ""}`}>
+        <label htmlFor="signal-jira-token">API token</label>
+        <ol className="signalInstructions">
+          <li><span>Open <a href="https://id.atlassian.com/manage-profile/security/api-tokens" target="_blank" rel="noreferrer">API tokens</a> in your Atlassian account and create a token. A service account that can create issues in the project works best.</span></li>
+          <li>Paste the token below.</li>
+        </ol>
+        <input id="signal-jira-token" type="password" autoComplete="off" spellCheck={false} placeholder="Paste your Atlassian API token" required value={token} onChange={(e) => setToken(e.target.value)} />
+        {error ? <p className="signalFieldError" role="alert"><IconAlertCircle size={14} />{error}</p>
+          : <p>Stored encrypted. Signal uses it only to file findings and search issues.</p>}
+      </div>
+      <Actions onBack={back}>
+        <Button type="submit" variant="primary" loading={submitting} disabled={!integration?.connectUrl || !siteUrl.trim() || !email.trim() || !token.trim()}>Connect Jira</Button>
+      </Actions>
+    </>}
+  </form>;
+}
+
+interface JiraSiteOption { cloudId: string; siteUrl: string; name: string }
+
+// After Atlassian sign-in, when the account has granted Superlog more than one
+// site: Atlassian does not say which one was just picked, so the member does.
+function JiraSiteChoice({ listPath, onBack, selectionState }: PageProps & { selectionState: string }) {
+  const navigate = useNavigate();
+  const [sites, setSites] = useState<JiraSiteOption[] | null>(null);
+  const [cloudId, setCloudId] = useState("");
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch(`/api/integrations/jira/sites?state=${encodeURIComponent(selectionState)}`);
+        const body = (await response.json().catch(() => null)) as { sites?: JiraSiteOption[]; error?: string } | null;
+        if (cancelled) return;
+        if (!response.ok || !body?.sites) throw new Error(body?.error ?? "Unable to load Jira sites");
+        setSites(body.sites);
+        setCloudId(body.sites[0]?.cloudId ?? "");
+      } catch (failure) {
+        if (!cancelled) setError(errorMessage(failure, "Unable to load Jira sites"));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [selectionState]);
+
+  async function choose(event: FormEvent) {
+    event.preventDefault();
+    if (!cloudId || submitting) return;
+    setError("");
+    setSubmitting(true);
+    try {
+      const body = await postJson("/api/integrations/jira/select-site", { cloudId, selectionState }, "Unable to connect Jira");
+      if (typeof body.redirectUrl !== "string") throw new Error("Unable to connect Jira");
+      window.location.assign(body.redirectUrl);
+    } catch (failure) {
+      setError(errorMessage(failure, "Unable to connect Jira"));
+      setSubmitting(false);
+    }
+  }
+  const fromNotifications = jiraReturnTo(listPath) !== listPath;
+  // Starting over drops the selection from the address.
+  const startOver = () => navigate(`${window.location.pathname}${fromNotifications ? "?next=notifications" : ""}`, { replace: true });
+  // Back returns where the member came from, like the connect form.
+  const back = fromNotifications ? () => navigate(jiraReturnTo(listPath)) : onBack;
+
+  return <form className="signalConnectForm" onSubmit={(event) => void choose(event)}>
+    <Intro provider="jira" title="Choose a Jira site">Your Atlassian account has granted Superlog more than one site. Choose the one Signal files findings in.</Intro>
+    {sites && <fieldset className="signalFieldset">
+      <legend>Jira site</legend>
+      <div className="signalChoice">
+        {sites.map((site) => <label key={site.cloudId} className="signalOption">
+          <input type="radio" name="jira-site" checked={cloudId === site.cloudId} onChange={() => setCloudId(site.cloudId)} />
+          <span><strong>{site.name}</strong><small>{new URL(site.siteUrl).hostname}</small></span>
+        </label>)}
+      </div>
+    </fieldset>}
+    {error && <p className="signalFieldError" role="alert"><IconAlertCircle size={14} />{error}</p>}
+    <Actions onBack={error && !sites ? startOver : back}>
+      <Button type="submit" variant="primary" loading={submitting} disabled={!cloudId}>Connect Jira</Button>
     </Actions>
   </form>;
 }

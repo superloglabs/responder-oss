@@ -143,6 +143,30 @@ create a second issue. The agent picks the assignee itself, for example by
 reading a commit's author through `github_api` and matching them to a Linear
 user.
 
+## Jira
+
+Jira is offered only to workspaces with Signal, which files findings as Jira
+issues. It connects in one of two ways:
+
+- **Atlassian sign-in**, when `JIRA_CLIENT_ID` and `JIRA_CLIENT_SECRET` are
+  set. Create an OAuth 2.0 (3LO) app in the Atlassian developer console with
+  resource-level access, the Jira API classic scopes `read:jira-work` and
+  `write:jira-work`, and the callback `<public>/api/integrations/jira/callback`.
+  Responder also requests `offline_access` for a refresh token. Set the app's
+  distribution to Sharing so other Atlassian sites can authorize it. Issues
+  are created as the person who connected, through
+  `https://api.atlassian.com/ex/jira/<cloud ID>`. When the Atlassian account
+  has granted the app more than one site, the member picks one in Signal's
+  Jira page. Atlassian rotates the refresh token on every refresh, so tokens
+  are refreshed under the credential lease, and a refused refresh marks the
+  connection as failed until it is reconnected.
+- **API token**, always available: a `*.atlassian.net` site, an Atlassian
+  email, and an API token. Issues are created as the token's account, which
+  suits a service account.
+
+Each site is one connection, so connecting a site again either way replaces
+its stored credentials.
+
 ## Slack
 
 Configure a distributed Slack app with:
