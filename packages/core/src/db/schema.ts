@@ -121,6 +121,7 @@ export const integrationProvider = pgEnum("integration_provider", [
   "signoz",
   "honeycomb",
   "betterstack",
+  "jira",
 ]);
 
 export const integrationResourceKind = pgEnum("integration_resource_kind", [

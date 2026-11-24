@@ -11,7 +11,7 @@ import {
   IconSearch,
   IconX,
 } from "@tabler/icons-react";
-import type { IntegrationSummary } from "../agents-api";
+import type { SignalIntegrationSummary } from "../agents-api";
 import { langfuseCloudDeployments } from "@responder/core/integrations/langfuse-deployments";
 import { DATADOG_SITES, type DatadogSiteId } from "../components/datadog-sites";
 import { AwsLogStreaming } from "../components/aws-log-streaming";
@@ -27,7 +27,7 @@ import { SignalLogo } from "./shared";
 
 
 interface PageProps {
-  integration: IntegrationSummary | undefined;
+  integration: SignalIntegrationSummary | undefined;
   organizationId: string | undefined;
   // The setup list this page belongs to, e.g. "/signal/setup/telemetry".
   listPath: string;
@@ -40,6 +40,7 @@ export function SignalConnect({ page, ...props }: PageProps & { page: ConnectPag
     case "otel": return <OpenTelemetryConnect {...props} />;
     case "grafana": return <GrafanaConnect {...props} />;
     case "datadog": return <DatadogConnect {...props} />;
+    case "jira": return <JiraConnect {...props} />;
     case "langfuse": return <LangfuseConnect {...props} />;
     case "aws": return <AwsConnect {...props} />;
     case "gcp": return <GcpConnect {...props} />;
@@ -342,6 +343,66 @@ function DatadogConnect({ integration, listPath, onBack }: PageProps) {
     </div>
     <Actions onBack={onBack}>
       <Button type="submit" variant="primary" loading={submitting} disabled={!integration?.connectUrl || !apiKey.trim() || !applicationKey.trim()}>Connect Datadog</Button>
+    </Actions>
+  </form>;
+}
+
+// --- Jira ------------------------------------------------------------------
+
+// What Signal does with Jira, shared by its connect and manage pages.
+export const jiraSignalUse = "Signal files findings as Jira issues, from a button or for every finding, and skips problems already filed.";
+
+// The page to return to after connecting: the notifications settings when
+// they sent the member here to set up filing.
+function jiraReturnTo(listPath: string) {
+  return new URLSearchParams(window.location.search).get("next") === "notifications" ? "/signal/setup/notifications" : listPath;
+}
+
+function JiraConnect({ integration, listPath, onBack }: PageProps) {
+  const [siteUrl, setSiteUrl] = useState("");
+  const [email, setEmail] = useState("");
+  const [token, setToken] = useState("");
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  async function connect(event: FormEvent) {
+    event.preventDefault();
+    if (!integration?.connectUrl || submitting) return;
+    setError("");
+    setSubmitting(true);
+    try {
+      const body = await postJson(integration.connectUrl, { siteUrl, email, token, returnTo: jiraReturnTo(listPath) }, "Unable to connect Jira");
+      if (typeof body.redirectUrl !== "string") throw new Error("Unable to connect Jira");
+      window.location.assign(body.redirectUrl);
+    } catch (failure) {
+      setError(errorMessage(failure, "Unable to connect Jira"));
+      setSubmitting(false);
+    }
+  }
+
+  return <form className="signalConnectForm" onSubmit={(event) => void connect(event)}>
+    <Intro provider="jira" title="Connect Jira">{jiraSignalUse}</Intro>
+    <div className="signalInput">
+      <label htmlFor="signal-jira-site">Jira site</label>
+      <input id="signal-jira-site" autoComplete="off" spellCheck={false} placeholder="your-team.atlassian.net" required value={siteUrl} onChange={(e) => setSiteUrl(e.target.value)} />
+      <p>Jira Cloud only. Issues are created as the account that owns the API token.</p>
+    </div>
+    <div className="signalInput">
+      <label htmlFor="signal-jira-email">Atlassian account email</label>
+      <input id="signal-jira-email" type="email" autoComplete="off" spellCheck={false} placeholder="you@company.com" required value={email} onChange={(e) => setEmail(e.target.value)} />
+    </div>
+    <div className={`signalInput${error ? " signalInput--error" : ""}`}>
+      <label htmlFor="signal-jira-token">API token</label>
+      <ol className="signalInstructions">
+        <li>Open <a href="https://id.atlassian.com/manage-profile/security/api-tokens" target="_blank" rel="noreferrer">API tokens</a> in your Atlassian account and create a token. A service account that can create issues in the project works best.</li>
+        <li>Paste the token below.</li>
+      </ol>
+      <input id="signal-jira-token" type="password" autoComplete="off" spellCheck={false} placeholder="Paste your Atlassian API token" required value={token} onChange={(e) => setToken(e.target.value)} />
+      {error ? <p className="signalFieldError" role="alert"><IconAlertCircle size={14} />{error}</p>
+        : <p>Stored encrypted. Signal uses it only to file findings and search issues.</p>}
+    </div>
+    <Actions onBack={onBack}>
+      <Button type="submit" variant="primary" loading={submitting} disabled={!integration?.connectUrl || !siteUrl.trim() || !email.trim() || !token.trim()}>Connect Jira</Button>
     </Actions>
   </form>;
 }

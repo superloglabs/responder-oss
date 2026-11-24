@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { IconCopy, IconFlag, IconSearch } from "@tabler/icons-react";
+import { IconArrowUpRight, IconCopy, IconFlag, IconSearch } from "@tabler/icons-react";
 import { Button } from "../design-system";
 import { useDocumentTitle } from "../use-document-title";
 import {
   fetchFinding,
   fetchFindings,
+  fileFindingInJira,
   findingStatusLabel,
   foundLabel,
   groupFindingsByDay,
@@ -123,6 +124,7 @@ export function SignalFindingDetail() {
   const [loaded, setLoaded] = useState<{ id: string; finding?: SignalFindingDetail; state: "ready" | "missing" | "error" } | null>(null);
   const [copyStatus, setCopyStatus] = useState("");
   const [saving, setSaving] = useState(false);
+  const [filing, setFiling] = useState(false);
   const finding = loaded?.id === findingId ? loaded.finding ?? null : null;
   const state = loaded?.id === findingId ? loaded.state : "loading";
   const setFinding = (next: SignalFindingDetail) => setLoaded({ id: findingId, finding: next, state: "ready" });
@@ -147,6 +149,7 @@ export function SignalFindingDetail() {
     </section>;
   }
   const irrelevant = finding.status === "irrelevant";
+  const jiraIssue = finding.jira?.issue ?? null;
 
   async function toggleIrrelevant() {
     if (!finding) return;
@@ -158,6 +161,21 @@ export function SignalFindingDetail() {
       setCopyStatus(failure instanceof Error ? `Could not change the status: ${failure.message}` : "Could not change the status.");
     } finally {
       setSaving(false);
+    }
+  }
+  async function fileInJira() {
+    if (!finding?.jira) return;
+    setFiling(true);
+    setCopyStatus("");
+    try {
+      const { issue } = await fileFindingInJira(finding.id);
+      // Filing accepts a new finding.
+      setFinding({ ...finding, status: finding.status === "new" ? "accepted" : finding.status, jira: { ...finding.jira, issue, error: null } });
+      setCopyStatus(`Filed as ${issue.key}`);
+    } catch (failure) {
+      setCopyStatus(failure instanceof Error ? `Could not create the Jira issue. ${failure.message}` : "Could not create the Jira issue.");
+    } finally {
+      setFiling(false);
     }
   }
   async function copyPrompt() {
@@ -179,6 +197,9 @@ export function SignalFindingDetail() {
       <div className="signalDetailHeader"><div><h1>{finding.title}</h1><p>{finding.subtitle}</p></div>
         <div className="signalDetailActions">
           <Button disabled={saving} onClick={() => void toggleIrrelevant()}>{irrelevant ? "Restore finding" : "Mark as irrelevant"}</Button>
+          {jiraIssue
+            ? <a className="dsButton dsButton--secondary dsButton--medium" href={jiraIssue.url} target="_blank" rel="noreferrer">Open {jiraIssue.key}<IconArrowUpRight aria-hidden="true" size={14} /></a>
+            : finding.jira?.enabled && <Button loading={filing} onClick={() => void fileInJira()}>Create Jira issue</Button>}
           <Button variant="primary" onClick={() => void copyPrompt()}><IconCopy size={14} />Copy prompt</Button>
         </div>
       </div><span className="signalCopyStatus" role="status">{copyStatus}</span>
@@ -206,6 +227,9 @@ export function SignalFindingDetail() {
         {finding.affectedUsers !== null && <><dt>Users</dt><dd>{finding.affectedUsers}</dd></>}
         {finding.affectedRequests !== null && <><dt>Requests</dt><dd>{finding.affectedRequests}</dd></>}
         <dt>Found</dt><dd>{foundLabel(new Date(finding.postedAt), new Date())}</dd>
+        {jiraIssue
+          ? <><dt>Jira</dt><dd><a href={jiraIssue.url} target="_blank" rel="noreferrer">{jiraIssue.key}</a></dd></>
+          : finding.jira?.error && <><dt>Jira</dt><dd>Not filed: {finding.jira.error}</dd></>}
       </dl></aside>
     </div>
   </article>;

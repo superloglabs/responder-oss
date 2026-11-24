@@ -848,6 +848,13 @@
       "when": 1794854807871,
       "tag": "0120_handoff_settings",
       "breakpoints": true
+    },
+    {
+      "idx": 121,
+      "version": "7",
+      "when": 1795530380680,
+      "tag": "0121_jira_integration",
+      "breakpoints": true
     }
   ]
 }

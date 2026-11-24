@@ -20,8 +20,7 @@ export function SourceRows({ sources, actions, otelServices }: {
   return <div className="signalConnections signalConnections--compact">{sources.map((source) => <ConnectionRow key={source.provider}
     provider={source.provider}
     name={source.name}
-    description={source.provider === "jira" ? "Coming soon"
-      : source.provider === "otel" && otelServices ? `${otelServices} ${otelServices === 1 ? "service" : "services"} sending data`
+    description={source.provider === "otel" && otelServices ? `${otelServices} ${otelServices === 1 ? "service" : "services"} sending data`
       : source.description}
     connected={actions.connected(source.provider)}
     disabled={actions.unavailable(source.provider)}

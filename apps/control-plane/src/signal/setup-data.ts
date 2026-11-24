@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { fetchAgentOptions, fetchIntegrations, type AgentOptions, type IntegrationSummary } from "../agents-api";
+import { fetchAgentOptions, fetchSignalIntegrations, type AgentOptions, type SignalIntegrationSummary } from "../agents-api";
 import { providerDisplayName } from "../components/provider-glyphs";
 import { fetchServices } from "../telemetry-api";
 import { connectPages, type ConnectPage } from "./connect-pages";
@@ -25,7 +25,7 @@ export const telemetrySources: Source[] = [
 
 export const contextSources: Source[] = [
   { provider: "linear", name: providerDisplayName("linear"), description: "Issues, priorities, and work already in progress" },
-  { provider: "jira", name: "Jira", description: "Tickets, project history, and known issues" },
+  { provider: "jira", name: "Jira", description: "Issues already filed, and a home for findings" },
 ];
 
 export function sourceName(provider: string) {
@@ -37,7 +37,7 @@ export function isConnectPage(value: string | undefined): value is ConnectPage {
 }
 
 export interface SetupData {
-  integrations: IntegrationSummary[];
+  integrations: SignalIntegrationSummary[];
   options: AgentOptions;
   settings: SignalSettings;
 }
@@ -51,7 +51,7 @@ export function useSetupData(organizationId: string | null | undefined) {
   const [loadError, setLoadError] = useState<{ attempt: number; message: string } | null>(null);
   useEffect(() => {
     let current = true;
-    Promise.all([fetchIntegrations(), fetchAgentOptions(), fetchSignalSettings()])
+    Promise.all([fetchSignalIntegrations(), fetchAgentOptions(), fetchSignalSettings()])
       .then(([integrations, options, settings]) => {
         if (!current) return;
         setData({ integrations, options, settings });
@@ -109,7 +109,7 @@ export function useOtelServices(key: string | null) {
 // with a page of their own open it under the list; the others start OAuth
 // and come back to the list.
 export function sourceActions(input: {
-  integrations: IntegrationSummary[];
+  integrations: SignalIntegrationSummary[];
   otelServices: number | null;
   // With a failed services lookup, OpenTelemetry counts as connected, so its
   // manage page can show the failure.
@@ -125,8 +125,8 @@ export function sourceActions(input: {
     summary,
     connected,
     accounts: (provider: string) => manageableAccounts(summary(provider)?.accounts),
-    unavailable: (provider: string) => provider === "jira" ||
-      (!["otel", "gcp"].includes(provider) && !summary(provider)?.connectUrl && !connected(provider)),
+    unavailable: (provider: string) =>
+      !["otel", "gcp"].includes(provider) && !summary(provider)?.connectUrl && !connected(provider),
     connect(provider: string) {
       if (isConnectPage(provider)) { navigate(`${listPath}/${provider}`); return; }
       const connectUrl = summary(provider)?.connectUrl;

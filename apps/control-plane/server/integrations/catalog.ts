@@ -23,6 +23,7 @@ export const productIntegrationIds = [
   "signoz",
   "honeycomb",
   "betterstack",
+  "jira",
 ] as const;
 
 export type ProductIntegrationId = (typeof productIntegrationIds)[number];
@@ -34,6 +35,11 @@ export const automationOnlyIntegrationIds: ReadonlySet<ProductIntegrationId> = n
   "signoz",
   "honeycomb",
   "betterstack",
+]);
+
+// Only Signal uses these, so they are offered only with Signal on.
+export const signalOnlyIntegrationIds: ReadonlySet<ProductIntegrationId> = new Set([
+  "jira",
 ]);
 
 interface IntegrationDefinition {
@@ -240,6 +246,13 @@ export const integrationCatalog: IntegrationDefinition[] = [
     description: "Issue and project context with optional ticket creation.",
     implemented: true,
     requiredEnvironment: ["LINEAR_CLIENT_ID", "LINEAR_CLIENT_SECRET"],
+  },
+  {
+    id: "jira",
+    name: "Jira",
+    description: "Jira Cloud issues for Signal findings, and known issues as context.",
+    implemented: true,
+    requiredEnvironment: [],
   },
 ];
 

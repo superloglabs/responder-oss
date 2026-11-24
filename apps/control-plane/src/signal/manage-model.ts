@@ -113,6 +113,17 @@ export function manageView(provider: string, name: string, account: IntegrationA
         rows: [{ label: "Workspace", value: account.displayName, action: "Reconnect" }],
         disconnect: `Signal deletes its access and stops reading Linear. A connection with Linear ticket records can only be reconnected. To remove the app too, revoke it in Linear's workspace settings. ${pastFindings}`,
       };
+    case "jira": {
+      const site = details.url?.replace(/^https:\/\//u, "") ?? account.displayName;
+      return {
+        connectedTo: site,
+        rows: [
+          { label: "Site", value: site },
+          { label: "API token", value: details.userHandle ? `Owned by ${details.userHandle}` : "Stored encrypted", action: "Replace token" },
+        ],
+        disconnect: `Signal deletes the stored token, stops filing findings in Jira, and stops reading it. To stop the token working, revoke it in your Atlassian account. Issues already filed stay in Jira. ${pastFindings}`,
+      };
+    }
     case "railway":
       return {
         connectedTo: account.displayName.replace(/ · redeploy$/u, ""),
@@ -180,6 +191,7 @@ export function accountSummary(provider: string, account: IntegrationAccount) {
     case "datadog":
       return [account.displayName, details.siteName ?? DATADOG_SITES.find((site) => site.id === details.site)?.name].filter(Boolean).join(" · ");
     case "grafana":
+    case "jira":
       return details.url?.replace(/^https?:\/\//u, "") ?? account.displayName;
     case "sentry":
     case "vercel":

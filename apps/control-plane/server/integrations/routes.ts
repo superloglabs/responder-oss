@@ -96,6 +96,7 @@ import {
   integrationCatalog,
   integrationIsConfigured,
   productIntegrationIds,
+  signalOnlyIntegrationIds,
 } from "./catalog.js";
 import {
   countGitHubUserInstallationRepositories,
@@ -161,6 +162,11 @@ import {
   getDevRevOrganization,
   parseDevRevCredentials,
 } from "../../../../packages/core/src/integrations/devrev.js";
+import {
+  getJiraAccount,
+  JiraApiError,
+  parseJiraSiteUrl,
+} from "../../../../packages/core/src/integrations/jira.js";
 import {
   AXIOM_MCP_URL,
   AXIOM_WEBHOOK_BODY_TEMPLATE,
@@ -429,6 +435,12 @@ const upstashConnectionSchema = z.object({
   apiKey: z.string().trim().min(1).max(4_096),
   email: z.string().trim().email().max(320),
   returnTo: z.string().max(2_048).optional(),
+});
+const jiraConnectionSchema = z.object({
+  email: z.string().trim().email().max(320),
+  returnTo: z.string().max(2_048).optional(),
+  siteUrl: z.string().trim().min(1).max(2_048),
+  token: z.string().trim().min(1).max(4_096),
 });
 const devrevConnectionSchema = z.object({
   returnTo: z.string().max(2_048).optional(),
@@ -913,6 +925,12 @@ export async function startIntegrationConnection(input: {
   ) {
     return Response.json({ error: "Unknown integration provider" }, { status: 404 });
   }
+  if (
+    signalOnlyIntegrationIds.has(parsedProvider.data) &&
+    !(await organizationHasCapability(tenant.organizationId, "signal"))
+  ) {
+    return Response.json({ error: "Unknown integration provider" }, { status: 404 });
+  }
   if (!integrationIsConfigured(definition)) {
     return Response.json({ error: "Integration application is not configured" }, { status: 503 });
   }
@@ -928,7 +946,8 @@ export async function startIntegrationConnection(input: {
     parsedProvider.data === "supabase" ||
     parsedProvider.data === "signoz" ||
     parsedProvider.data === "honeycomb" ||
-    parsedProvider.data === "betterstack"
+    parsedProvider.data === "betterstack" ||
+    parsedProvider.data === "jira"
   ) {
     return Response.json({ error: `Use the ${definition.name} connection endpoint` }, { status: 405 });
   }
@@ -1240,7 +1259,7 @@ export async function startIntegrationConnection(input: {
 
 // Connections Signal setup can remove. Removing one deletes the stored
 // credentials; it does not revoke access on the provider's side.
-const removableProviderSchema = z.enum(["aws", "axiom", "datadog", "gcp", "grafana", "langfuse", "linear", "posthog", "railway", "sentry", "vercel"]);
+const removableProviderSchema = z.enum(["aws", "axiom", "datadog", "gcp", "grafana", "jira", "langfuse", "linear", "posthog", "railway", "sentry", "vercel"]);
 
 async function removeIntegrationAccount(input: {
   headers: Headers;
@@ -1349,15 +1368,17 @@ export const integrationRoutes = new Hono()
       return context.json({ error: tenant.error }, tenant.status);
     }
 
-    const [accounts, automationsEnabled] = await Promise.all([
+    const [accounts, automationsEnabled, signalEnabled] = await Promise.all([
       listOrganizationIntegrationAccounts(tenant.organizationId),
       organizationHasCapability(tenant.organizationId, "automations"),
+      organizationHasCapability(tenant.organizationId, "signal"),
     ]);
 
     return context.json({
       integrations: integrationCatalog
         .filter((definition) =>
-          !automationOnlyIntegrationIds.has(definition.id) || automationsEnabled
+          (!automationOnlyIntegrationIds.has(definition.id) || automationsEnabled) &&
+          (!signalOnlyIntegrationIds.has(definition.id) || signalEnabled)
         )
         .map((definition) => {
         const providerAccounts = accounts.filter(
@@ -1433,7 +1454,8 @@ export const integrationRoutes = new Hono()
                   definition.id === "supabase" ||
                   definition.id === "signoz" ||
                   definition.id === "honeycomb" ||
-                  definition.id === "betterstack"
+                  definition.id === "betterstack" ||
+                  definition.id === "jira"
                 ? `/api/integrations/${definition.id}/connect`
                 : definition.id === "custom_mcp"
                   ? "/api/integrations/custom-mcp/connect"
@@ -2235,6 +2257,72 @@ export const integrationRoutes = new Hono()
       logCallbackError("Better Stack", error, { organizationId: tenant.organizationId });
       return context.json({ error: "Unable to verify the Better Stack connection" }, 502);
     }
+  })
+  .post("/jira/connect", async (context) => {
+    const tenant = await getActiveTenant(context.req.raw.headers);
+    if (tenant.ok === false) {
+      return context.json({ error: tenant.error }, tenant.status);
+    }
+    if (!(await organizationHasCapability(tenant.organizationId, "signal"))) {
+      return context.json({ error: "Unknown integration provider" }, 404);
+    }
+
+    const parsed = jiraConnectionSchema.safeParse(
+      await context.req.json().catch(() => null),
+    );
+    if (!parsed.success) {
+      return context.json({ error: "Enter your Jira site, your Atlassian email, and an API token" }, 400);
+    }
+    const siteUrl = parseJiraSiteUrl(parsed.data.siteUrl);
+    if (!siteUrl) {
+      return context.json(
+        { error: "Enter a Jira Cloud site address, such as https://acme.atlassian.net" },
+        400,
+      );
+    }
+    const auth = { siteUrl, email: parsed.data.email, token: parsed.data.token };
+
+    let account: Awaited<ReturnType<typeof getJiraAccount>>;
+    try {
+      account = await getJiraAccount(auth);
+    } catch (error) {
+      if (error instanceof JiraApiError && (error.unauthorized || error.status === 404)) {
+        return context.json({ error: "Jira rejected the email and API token for this site" }, 401);
+      }
+      logCallbackError("Jira", error, { organizationId: tenant.organizationId });
+      return context.json({ error: `Could not reach Jira at ${new URL(siteUrl).hostname}. Check the site address.` }, 502);
+    }
+
+    // One connection per site: connecting the same site again replaces the
+    // stored token.
+    const host = new URL(siteUrl).hostname;
+    const accountId = await upsertIntegrationAccount({
+      organizationId: tenant.organizationId,
+      provider: "jira",
+      externalAccountId: host,
+      displayName: account.siteName,
+      encryptedCredentials: encryptCredentials({ authType: "api_token", ...auth }),
+      credentialKeyVersion: 1,
+      metadata: { siteUrl, accountName: account.displayName, atlassianAccountId: account.accountId },
+    });
+    await captureAnalyticsEvent({
+      distinctId: tenant.user.id,
+      event: "integration connected",
+      organizationId: tenant.organizationId,
+      properties: {
+        integration_account_id: accountId,
+        provider: "jira",
+      },
+    });
+    console.info(JSON.stringify({ accountId, event: "jira_connected", organizationId: tenant.organizationId, provider: "jira" }));
+    return context.json({
+      accountId,
+      redirectUrl: settingsRedirect(
+        parsed.data.returnTo ?? "/signal/setup/notifications",
+        "jira",
+        "connected",
+      ),
+    });
   })
   .post("/devrev/connect", async (context) => {
     const tenant = await getActiveTenant(context.req.raw.headers);

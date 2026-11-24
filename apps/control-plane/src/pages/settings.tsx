@@ -69,7 +69,8 @@ interface IntegrationSummary {
     | "devrev"
     | "signoz"
     | "honeycomb"
-    | "betterstack";
+    | "betterstack"
+    | "jira";
   name: string;
   description: string;
   state: IntegrationState;
@@ -444,6 +445,11 @@ function DefaultIntegrationCard({
 
   function startConnection() {
     if (!actionUrl || isConnecting) return;
+    // Jira is connected and set up from Signal's own pages.
+    if (integration.id === "jira") {
+      window.location.assign("/signal/setup/sources/jira");
+      return;
+    }
     if (integration.id === "datadog") {
       setChoosingDatadogSite(true);
       return;
