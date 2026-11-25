@@ -8,6 +8,9 @@ import { rpcMessages } from "./mcp-messages.js";
 const TOOL_CACHE_TTL_MS = 10 * 60 * 1_000;
 const MAX_CACHED_LISTINGS = 500;
 export const MAX_TOOL_PAGES = 10;
+// Listings stay cached for ten minutes, so the pages of one listing share one
+// size budget. Each response is also capped by the provider fetch.
+export const MAX_TOOL_LISTING_BYTES = 8 * 1024 * 1024;
 const PROTOCOL_VERSION = "2025-03-26";
 
 // Methods forwarded to the provider. tools/list is answered by the broker
@@ -50,16 +53,41 @@ const rpcResponseSchema = z.object({
   result: z.unknown().optional(),
 });
 
+// Reads at most maxBytes of the body, and cancels the rest of it, so the
+// budget holds even for a provider fetch without its own response cap.
+async function boundedBytes(response: Response, maxBytes: number, label: string): Promise<Buffer> {
+  if (!response.body) return Buffer.alloc(0);
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > maxBytes) {
+      await reader.cancel().catch(() => undefined);
+      throw new Error(`${label} tool listing exceeds the size limit`);
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks);
+}
+
 async function readRpcResponse(
   response: Response,
   id: string,
   label: string,
+  budget: { remaining: number },
 ): Promise<z.infer<typeof rpcResponseSchema>> {
   if (!response.ok) {
+    await response.body?.cancel();
     throw new Error(`${label} returned HTTP ${response.status}`);
   }
+  const bytes = await boundedBytes(response, budget.remaining, label);
+  budget.remaining -= bytes.byteLength;
+  const text = bytes.toString("utf8");
   const messages = rpcMessages(
-    await response.text(),
+    text,
     response.headers.get("content-type") ?? "",
   );
   for (const message of messages) {
@@ -141,7 +169,14 @@ async function listAllowedTools(server: ManagedMcpServer): Promise<McpTool[]> {
     },
   });
   const sessionId = initialize.headers.get("mcp-session-id");
-  const initialized = await readRpcResponse(initialize, "responder-initialize", server.label);
+  // The listing's responses, initialize included, share one size budget.
+  const budget = { remaining: MAX_TOOL_LISTING_BYTES };
+  const initialized = await readRpcResponse(
+    initialize,
+    "responder-initialize",
+    server.label,
+    budget,
+  );
   if (sessionId) headers.set("mcp-session-id", sessionId);
   const protocolVersion = z.object({ protocolVersion: z.string() })
     .safeParse(initialized.result);
@@ -166,6 +201,7 @@ async function listAllowedTools(server: ManagedMcpServer): Promise<McpTool[]> {
       await send({ id, method: "tools/list", params: cursor ? { cursor } : {} }),
       id,
       server.label,
+      budget,
     )).result);
     tools.push(...(listed.tools as McpTool[]));
     cursor = listed.nextCursor || undefined;

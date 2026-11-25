@@ -75,6 +75,40 @@ describe("managed MCP tool listing", () => {
       (JSON.parse(String((init as RequestInit).body)) as { method: string }).method);
     expect(methods.filter((method) => method === "initialize")).toHaveLength(2);
   });
+
+  it("fails instead of caching a listing whose pages together pass the size limit", async () => {
+    // Each page is within one response's limit; together they are not.
+    const description = "x".repeat(3 * 1024 * 1024);
+    const target = server((body) =>
+      result(body.id, body.method === "initialize"
+        ? {}
+        : { nextCursor: "more", tools: [{ ...readOnly, description }] }));
+
+    await expect(allowedManagedMcpTools(target)).rejects.toThrow(/size limit/u);
+
+    const pages = target.fetch.mock.calls.filter(([, init]) =>
+      (JSON.parse(String((init as RequestInit).body)) as { method: string }).method === "tools/list");
+    expect(pages).toHaveLength(3);
+  });
+
+  it("stops reading a listing response once it passes the size limit", async () => {
+    let chunksRead = 0;
+    const chunk = new TextEncoder().encode(" ".repeat(1024 * 1024));
+    const target = server((body) => {
+      if (body.method === "initialize") return result(body.id, {});
+      // A provider fetch without its own response cap.
+      return new Response(new ReadableStream<Uint8Array>({
+        pull(controller) {
+          chunksRead += 1;
+          if (chunksRead > 64) controller.close();
+          else controller.enqueue(chunk);
+        },
+      }), { headers: { "content-type": "application/json" } });
+    });
+
+    await expect(allowedManagedMcpTools(target)).rejects.toThrow(/size limit/u);
+    expect(chunksRead).toBeLessThan(16);
+  });
 });
 
 describe("managed MCP decisions", () => {
