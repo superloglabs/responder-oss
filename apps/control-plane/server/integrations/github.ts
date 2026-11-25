@@ -150,38 +150,99 @@ export async function verifyGitHubUserInstallation(
   throw new Error("GitHub App installation does not belong to the connecting user");
 }
 
-const githubRepositoryCountSchema = z.object({
+const githubUserRepositoriesResponseSchema = z.object({
+  repositories: z.array(
+    z.object({
+      id: z.number().int().positive(),
+      permissions: z
+        .object({
+          admin: z.boolean().optional(),
+          maintain: z.boolean().optional(),
+          push: z.boolean().optional(),
+        })
+        .optional(),
+    }),
+  ),
   total_count: z.number().int().nonnegative(),
 });
 
-// A connection stores every repository its installation covers, so the
-// connecting user must be able to see all of them, not only some.
-export class GitHubPartialInstallationAccessError extends Error {
-  constructor(readonly installationId: number) {
-    super("The GitHub user cannot see every repository of the installation");
-    this.name = "GitHubPartialInstallationAccessError";
+export type GitHubInstallationAccessProblem =
+  | "partial_repository_access"
+  | "read_only_repository_access";
+
+// A connection lets Superlog change code in every repository its installation
+// covers, so the connecting user must be able to see and write to all of
+// them, not only some.
+export class GitHubInstallationAccessError extends Error {
+  constructor(
+    readonly installationId: number,
+    readonly reason: GitHubInstallationAccessProblem,
+  ) {
+    super(
+      reason === "read_only_repository_access"
+        ? "The GitHub user cannot write to every repository of the installation"
+        : "The GitHub user cannot see every repository of the installation",
+    );
+    this.name = "GitHubInstallationAccessError";
   }
 }
 
-// The number of the installation's repositories the user can see. The user
-// token only reaches repositories that both the user and the installation can
-// access, so this equals the installation's own count only when the user sees
-// all of them.
-export async function countGitHubUserInstallationRepositories(
+// The installation's repositories the user can reach, and whether the user
+// can push to each. The user token only reaches repositories that both the
+// user and the installation can access. A repository without permissions in
+// the response counts as read only.
+export async function listGitHubUserInstallationRepositoryAccess(
   userAccessToken: string,
   installationId: number,
-): Promise<number> {
-  const url = new URL(
-    `https://api.github.com/user/installations/${installationId}/repositories`,
-  );
-  url.searchParams.set("per_page", "1");
-  const response = await fetch(url, {
-    headers: githubAppHeaders(userAccessToken),
-  });
-  if (!response.ok) {
-    throw new Error("Unable to list the GitHub user's installation repositories");
+): Promise<Array<{ id: string; write: boolean }>> {
+  const access: Array<{ id: string; write: boolean }> = [];
+  let page = 1;
+  while (true) {
+    const url = new URL(
+      `https://api.github.com/user/installations/${installationId}/repositories`,
+    );
+    url.searchParams.set("per_page", "100");
+    url.searchParams.set("page", String(page));
+    const response = await fetch(url, {
+      headers: githubAppHeaders(userAccessToken),
+    });
+    if (!response.ok) {
+      throw new Error("Unable to list the GitHub user's installation repositories");
+    }
+    const payload = githubUserRepositoriesResponseSchema.parse(await response.json());
+    access.push(
+      ...payload.repositories.map((repository) => ({
+        id: String(repository.id),
+        write: Boolean(
+          repository.permissions?.push ||
+            repository.permissions?.maintain ||
+            repository.permissions?.admin,
+        ),
+      })),
+    );
+    if (payload.repositories.length === 0 || page * 100 >= payload.total_count) break;
+    page += 1;
   }
-  return githubRepositoryCountSchema.parse(await response.json()).total_count;
+  return access;
+}
+
+// Null when the user can write to exactly the repositories the installation
+// covers.
+export function githubInstallationAccessProblem(
+  repositories: ReadonlyArray<{ externalId: string }>,
+  access: ReadonlyArray<{ id: string; write: boolean }>,
+): GitHubInstallationAccessProblem | null {
+  const writable = new Map(access.map((repository) => [repository.id, repository.write]));
+  if (
+    access.length !== repositories.length ||
+    repositories.some((repository) => !writable.has(repository.externalId))
+  ) {
+    return "partial_repository_access";
+  }
+  if (repositories.some((repository) => writable.get(repository.externalId) !== true)) {
+    return "read_only_repository_access";
+  }
+  return null;
 }
 
 export async function listGitHubRepositories(installationId: number) {

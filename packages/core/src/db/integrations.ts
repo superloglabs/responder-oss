@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { and, count, eq, gt, inArray, isNotNull, isNull, like, lt, lte, ne, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
+import { member } from "./auth-schema.js";
 import { getDatabase } from "./client.js";
 import {
   agents,
@@ -1428,6 +1429,39 @@ export function slackAccountOfApp(appId: string | undefined) {
 
 // Every organization connected to a Slack workspace through the same app can
 // write to a person's messages tab with any of their tokens. Oldest first.
+// Whether a user may connect a Slack team to an organization. A team no
+// organization holds may be connected by anyone Slack lets install the app,
+// and the organization that holds it may connect it again. Connecting a team
+// another organization holds needs an owner or admin of a holding
+// organization, so a member of a company's Slack cannot bring that Slack into
+// a workspace of their own. A held connection counts in any status.
+export async function canConnectSlackTeam(input: {
+  organizationId: string;
+  teamId: string;
+  userId: string;
+}): Promise<boolean> {
+  const db = getDatabase();
+  const holders = await db
+    .selectDistinct({ organizationId: integrationAccounts.organizationId })
+    .from(integrationAccounts)
+    .where(
+      and(
+        eq(integrationAccounts.provider, "slack"),
+        eq(integrationAccounts.externalAccountId, input.teamId),
+      ),
+    );
+  if (holders.length === 0) return true;
+  const holderIds = holders.map((holder) => holder.organizationId);
+  if (holderIds.includes(input.organizationId)) return true;
+  const memberships = await db
+    .select({ role: member.role })
+    .from(member)
+    .where(and(eq(member.userId, input.userId), inArray(member.organizationId, holderIds)));
+  return memberships.some(({ role }) =>
+    role.split(",").some((value) => ["owner", "admin"].includes(value.trim())),
+  );
+}
+
 export async function listConnectedSlackAccountsForTeam(teamId: string, appId?: string) {
   return getDatabase()
     .select({
