@@ -22,6 +22,11 @@ export const telemetrySourceOptions = [
     title: "Railway",
   },
   {
+    description: "Read the logs of the Render services or workspaces you choose, every minute, with an API key.",
+    id: "render",
+    title: "Render",
+  },
+  {
     description: "Create drains that stream the traces and logs of your Vercel deployments.",
     id: "vercel",
     title: "Vercel",

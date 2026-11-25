@@ -191,7 +191,7 @@ export function railwayLogBlocks(lines: RailwayLogLine[]): RailwayLogBlock[] {
 const jsErrorLine = /^(?:Uncaught\s+)?([A-Z][\w$]*(?:Error|Exception)|Error)(?:: ([\s\S]*))?$/u;
 const jsFrame = /^\s+at\s/u;
 
-function exceptionAttributes(lines: string[], body: string): Array<OtlpKeyValue | null> {
+export function exceptionAttributes(lines: string[], body: string): Array<OtlpKeyValue | null> {
   const match = jsErrorLine.exec(lines[0] ?? "");
   if (!match || !lines.slice(1).some((line) => jsFrame.test(line))) return [];
   return [

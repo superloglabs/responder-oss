@@ -2,7 +2,7 @@ import { and, asc, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { getDatabase } from "./client.js";
 import { integrationAccounts, integrationResources, telemetryIngestKeys, telemetrySources } from "./schema.js";
 
-export type TelemetrySourceProvider = "aws" | "gcp" | "posthog" | "railway" | "vercel";
+export type TelemetrySourceProvider = "aws" | "gcp" | "posthog" | "railway" | "render" | "vercel";
 export type TelemetrySourceStatus = "active" | "failed" | "pending";
 
 export type TelemetrySourceSummary = {
@@ -181,7 +181,7 @@ export async function revokeTelemetrySourceIngestKey(keyId: string): Promise<voi
     .where(and(eq(telemetryIngestKeys.id, keyId), isNull(telemetryIngestKeys.revokedAt)));
 }
 
-const telemetrySourceAccountProviders = ["gcp", "posthog", "railway", "vercel"] as const;
+const telemetrySourceAccountProviders = ["gcp", "posthog", "railway", "render", "vercel"] as const;
 export type TelemetrySourceAccountProvider = (typeof telemetrySourceAccountProviders)[number];
 
 // Connected accounts a source can use, by provider.
@@ -260,6 +260,45 @@ export async function listRailwayTelemetrySources(): Promise<
     .innerJoin(integrationAccounts, eq(integrationAccounts.id, telemetrySources.integrationAccountId))
     .where(and(eq(telemetrySources.provider, "railway"), eq(integrationAccounts.status, "connected")));
   return rows.flatMap((row) => (row.integrationAccountId ? [{ ...row, integrationAccountId: row.integrationAccountId }] : []));
+}
+
+// Render services and workspaces the worker reads, each with its
+// connection's encrypted API key. The external ID is the Render service ID
+// or workspace ID. Failed sources are read again, so a passing error does
+// not stop them.
+export async function listRenderTelemetrySources(): Promise<
+  Array<{
+    encryptedCredentials: string;
+    externalId: string;
+    id: string;
+    integrationAccountId: string;
+    organizationId: string;
+    state: Record<string, unknown>;
+  }>
+> {
+  const rows = await getDatabase()
+    .select({
+      encryptedCredentials: integrationAccounts.encryptedCredentials,
+      externalId: telemetrySources.externalId,
+      id: telemetrySources.id,
+      integrationAccountId: telemetrySources.integrationAccountId,
+      organizationId: telemetrySources.organizationId,
+      state: telemetrySources.state,
+    })
+    .from(telemetrySources)
+    .innerJoin(integrationAccounts, eq(integrationAccounts.id, telemetrySources.integrationAccountId))
+    .where(
+      and(
+        eq(telemetrySources.provider, "render"),
+        eq(integrationAccounts.status, "connected"),
+        isNotNull(integrationAccounts.encryptedCredentials),
+      ),
+    );
+  return rows.flatMap((row) =>
+    row.integrationAccountId && row.encryptedCredentials
+      ? [{ ...row, encryptedCredentials: row.encryptedCredentials, integrationAccountId: row.integrationAccountId }]
+      : [],
+  );
 }
 
 // PostHog projects the worker reads, each with its connection. The external

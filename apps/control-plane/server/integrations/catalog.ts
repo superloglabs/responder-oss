@@ -24,6 +24,7 @@ export const productIntegrationIds = [
   "honeycomb",
   "betterstack",
   "jira",
+  "render",
 ] as const;
 
 export type ProductIntegrationId = (typeof productIntegrationIds)[number];
@@ -183,6 +184,13 @@ export const integrationCatalog: IntegrationDefinition[] = [
     id: "railway",
     name: "Railway",
     description: "Deployments, logs, and metrics, with optional redeploys.",
+    implemented: true,
+    requiredEnvironment: [],
+  },
+  {
+    id: "render",
+    name: "Render",
+    description: "Service logs read with an API key, so errors become issues and Signal sees them.",
     implemented: true,
     requiredEnvironment: [],
   },

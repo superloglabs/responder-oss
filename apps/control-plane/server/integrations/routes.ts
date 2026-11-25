@@ -2,6 +2,7 @@ import { integrationAccountDetails } from "./account-details.js";
 import { chatConnectionRoutes } from "./chat-connection.js";
 import { customMcpToolRoutes } from "./custom-mcp-tools.js";
 import { awsLogSubscriptionRoutes, removeAwsLogSubscriptionsBeforeDisconnect, restoreAwsLogSubscriptions } from "./aws-log-subscriptions.js";
+import { renderConnectionRoutes } from "./render.js";
 import { createVercelSourceAfterConnect, removeVercelSourcesBeforeDisconnect } from "../telemetry/vercel-sources.js";
 import { awsLogSubscriptionPrincipalArnForStacks } from "../../../../packages/core/src/integrations/aws-log-subscriptions.js";
 import {
@@ -989,7 +990,8 @@ export async function startIntegrationConnection(input: {
     parsedProvider.data === "signoz" ||
     parsedProvider.data === "honeycomb" ||
     parsedProvider.data === "betterstack" ||
-    parsedProvider.data === "jira"
+    parsedProvider.data === "jira" ||
+    parsedProvider.data === "render"
   ) {
     return Response.json({ error: `Use the ${definition.name} connection endpoint` }, { status: 405 });
   }
@@ -1340,7 +1342,7 @@ async function saveJiraOAuthConnection(input: {
 
 // Connections Signal setup can remove. Removing one deletes the stored
 // credentials; it does not revoke access on the provider's side.
-const removableProviderSchema = z.enum(["aws", "axiom", "datadog", "gcp", "grafana", "jira", "langfuse", "linear", "posthog", "railway", "sentry", "vercel"]);
+const removableProviderSchema = z.enum(["aws", "axiom", "datadog", "gcp", "grafana", "jira", "langfuse", "linear", "posthog", "railway", "render", "sentry", "vercel"]);
 
 async function removeIntegrationAccount(input: {
   headers: Headers;
@@ -1443,6 +1445,7 @@ export const integrationRoutes = new Hono()
   .route("/github/pull-request-author", githubPullRequestAuthorRoutes)
   .route("/aws", awsRegistrationRoutes)
   .route("/aws/log-subscriptions", awsLogSubscriptionRoutes)
+  .route("/render", renderConnectionRoutes)
   .get("/", async (context) => {
     const tenant = await getActiveTenant(context.req.raw.headers);
     if (tenant.ok === false) {
@@ -1536,7 +1539,8 @@ export const integrationRoutes = new Hono()
                   definition.id === "signoz" ||
                   definition.id === "honeycomb" ||
                   definition.id === "betterstack" ||
-                  definition.id === "jira"
+                  definition.id === "jira" ||
+                  definition.id === "render"
                 ? `/api/integrations/${definition.id}/connect`
                 : definition.id === "custom_mcp"
                   ? "/api/integrations/custom-mcp/connect"

@@ -29,6 +29,12 @@ import {
   type RailwayEnvironment,
 } from "../../../../packages/core/src/integrations/railway.js";
 import { gcpConnectionCredentialsSchema } from "../../../../packages/core/src/integrations/gcp.js";
+import {
+  RenderApiError,
+  renderCredentialsSchema,
+  type RenderReadable,
+  renderReadables,
+} from "../../../../packages/core/src/integrations/render.js";
 import { telemetryCollectorUrl } from "../../../../packages/core/src/telemetry/client.js";
 import { telemetryUnavailableCode } from "../../../../packages/core/src/telemetry/sources/availability.js";
 import {
@@ -51,7 +57,8 @@ import { getActiveTenant } from "../tenant.js";
 
 // Cloud providers that send telemetry to the workspace: Vercel drains, an AWS
 // stack that streams CloudWatch through Firehose, and Google Cloud projects,
-// Railway environments, and PostHog projects the worker reads. Available
+// Railway environments, PostHog projects, and Render services the worker
+// reads. Available
 // where applications can send telemetry, to workspaces with telemetry or
 // Signal: Signal finds problems in the data these sources send.
 export type SourceRouteDependencies = {
@@ -71,10 +78,13 @@ export type SourceRouteDependencies = {
   // The PostHog projects a connection reads and the region that serves them;
   // null when the connection is gone or not connected.
   postHogProjects: (input: { integrationAccountId: string; organizationId: string }) => Promise<{ host: PostHogApiHost; projects: PostHogProject[] } | null>;
-  providerConfigured: (provider: "gcp" | "posthog" | "railway" | "vercel") => boolean;
+  providerConfigured: (provider: "gcp" | "posthog" | "railway" | "render" | "vercel") => boolean;
   // The Railway environments a connection shares; null when the connection
   // is gone or not connected.
   railwayEnvironments: (input: { integrationAccountId: string; organizationId: string }) => Promise<RailwayEnvironment[] | null>;
+  // The Render workspaces and services a connection's key reads; null when
+  // the connection is gone or not connected.
+  renderReadables: (input: { integrationAccountId: string; organizationId: string }) => Promise<RenderReadable[] | null>;
   revokeKey: typeof revokeTelemetrySourceIngestKey;
   saveSource: typeof saveTelemetrySource;
   tenant: (
@@ -116,6 +126,12 @@ const defaultDependencies: SourceRouteDependencies = {
     const workspaces = railwayWorkspacesSchema.safeParse(account.metadata.workspaces);
     return railwayEnvironments({ accessToken, workspaces: workspaces.success ? workspaces.data : [] });
   },
+  renderReadables: async (input) => {
+    const account = await getOrganizationIntegrationAccount({ ...input, provider: "render" });
+    if (!account?.encryptedCredentials || account.status !== "connected") return null;
+    const credentials = renderCredentialsSchema.safeParse(decryptCredentials(account.encryptedCredentials));
+    return credentials.success ? renderReadables({ apiKey: credentials.data.apiKey }) : null;
+  },
   revokeKey: revokeTelemetrySourceIngestKey,
   saveSource: saveTelemetrySource,
   tenant: getActiveTenant,
@@ -124,6 +140,7 @@ const defaultDependencies: SourceRouteDependencies = {
 
 const accountSchema = z.object({ integrationAccountId: z.uuid() });
 const railwaySchema = z.object({ environmentId: z.string().trim().min(1).max(100), integrationAccountId: z.uuid() });
+const renderSchema = z.object({ integrationAccountId: z.uuid(), resourceId: z.string().trim().min(1).max(100) });
 const postHogSchema = z.object({ integrationAccountId: z.uuid(), projectId: z.string().trim().regex(/^\d{1,20}$/u) });
 const awsSchema = z.object({ region: z.string().refine(isAwsCommercialRegion) });
 function deniedBody(denied: { code?: string; error: string }) {
@@ -168,6 +185,26 @@ export function createSourceRoutes(dependencies: SourceRouteDependencies = defau
     }
   }
 
+  // What the connection's key reads, or a response that says why it could
+  // not be listed.
+  async function renderReadablesFor(organizationId: string, integrationAccountId: string): Promise<
+    | { ok: true; readables: RenderReadable[] }
+    | { error: string; ok: false; status: 404 | 409 | 429 | 502 }
+  > {
+    try {
+      const readables = await dependencies.renderReadables({ integrationAccountId, organizationId });
+      return readables ? { ok: true, readables } : { error: "Connect Render first", ok: false, status: 404 };
+    } catch (error) {
+      if (error instanceof RenderApiError && error.kind === "unauthorized") {
+        return { error: "Render refused the API key. Connect Render again with a new key.", ok: false, status: 409 };
+      }
+      if (error instanceof RenderApiError && error.kind === "retry_later") {
+        return { error: "Render is limiting requests from this key. Try again in a minute.", ok: false, status: 429 };
+      }
+      return { error: `Render could not list the services: ${errorMessage(error)}`, ok: false, status: 502 };
+    }
+  }
+
   // The connection's projects, or a response that says why they could not be
   // read.
   async function postHogProjectsFor(organizationId: string, integrationAccountId: string): Promise<
@@ -202,6 +239,7 @@ export function createSourceRoutes(dependencies: SourceRouteDependencies = defau
           gcp: dependencies.providerConfigured("gcp"),
           posthog: dependencies.providerConfigured("posthog"),
           railway: dependencies.providerConfigured("railway"),
+          render: dependencies.providerConfigured("render"),
           vercel: dependencies.providerConfigured("vercel"),
         },
         sources,
@@ -325,6 +363,67 @@ export function createSourceRoutes(dependencies: SourceRouteDependencies = defau
           projectId: environment.projectId,
           projectName: environment.projectName,
           workspaceId: environment.workspaceId,
+        },
+        status: existing?.status ?? "pending",
+      });
+      return context.json({ sourceId: saved.id }, existing ? 200 : 201);
+    })
+    // Render workspaces and services one connection's key reads, and those
+    // whose logs Superlog reads.
+    .get("/render/:integrationAccountId", async (context) => {
+      const granted = await access(context.req.raw.headers);
+      if (!granted.ok) return context.json(deniedBody(granted), granted.status);
+      const integrationAccountId = z.uuid().safeParse(context.req.param("integrationAccountId"));
+      if (!integrationAccountId.success) return context.json({ error: "Connect Render first" }, 404);
+      const [listed, sources] = await Promise.all([
+        renderReadablesFor(granted.organizationId, integrationAccountId.data),
+        dependencies.listSources(granted.organizationId),
+      ]);
+      if (!listed.ok) return context.json({ error: listed.error }, listed.status);
+      return context.json({
+        readables: listed.readables,
+        sources: sources.filter(
+          (source) => source.provider === "render" && source.integrationAccountId === integrationAccountId.data,
+        ),
+      });
+    })
+    .post("/render", async (context) => {
+      const granted = await access(context.req.raw.headers);
+      if (!granted.ok) return context.json(deniedBody(granted), granted.status);
+      const body = renderSchema.safeParse(await context.req.json().catch(() => null));
+      if (!body.success) return context.json({ error: "Choose a Render service or workspace" }, 400);
+      const listed = await renderReadablesFor(granted.organizationId, body.data.integrationAccountId);
+      if (!listed.ok) return context.json({ error: listed.error }, listed.status);
+      const readable = listed.readables.find((item) => item.id === body.data.resourceId);
+      if (!readable) return context.json({ error: "Choose a service or workspace this Render key reads" }, 404);
+      // A service or workspace already read keeps its cursors, so no line is
+      // sent twice. Added from another connection, it moves to this one.
+      const existing = (await dependencies.listSources(granted.organizationId)).find(
+        (source) => source.provider === "render" && source.externalId === readable.id,
+      );
+      if (existing?.integrationAccountId === body.data.integrationAccountId) {
+        return context.json({ sourceId: existing.id }, 200);
+      }
+      // The worker reads with the connection's key, so no ingest key is made.
+      const saved = await dependencies.saveSource({
+        createdBy: granted.userId,
+        displayName: readable.kind === "workspace"
+          ? `${readable.workspaceName} · All services`
+          : `${readable.workspaceName} · ${readable.serviceName ?? readable.id}`,
+        externalId: readable.id,
+        integrationAccountId: body.data.integrationAccountId,
+        organizationId: granted.organizationId,
+        provider: "render",
+        state: {
+          cursors: {},
+          services: {},
+          ...existing?.state,
+          kind: readable.kind,
+          ownerId: readable.ownerId,
+          workspaceName: readable.workspaceName,
+          ...(readable.kind === "service"
+            ? { region: readable.region ?? null, serviceName: readable.serviceName, serviceType: readable.serviceType }
+            : {}),
         },
         status: existing?.status ?? "pending",
       });

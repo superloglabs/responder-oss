@@ -4,11 +4,12 @@ import { removeIntegrationAccount, type IntegrationAccount, type SignalIntegrati
 import { AwsLogStreaming } from "../components/aws-log-streaming";
 import { PostHogLogReading } from "../components/posthog-log-reading";
 import { RailwayLogReading } from "../components/railway-log-reading";
+import { RenderLogReading } from "../components/render-log-reading";
 import { VercelDrains } from "../components/vercel-drains";
 import { Button } from "../design-system";
 import { CloudSourceSetup } from "../pages/telemetry-source";
 import { fetchServices } from "../telemetry-api";
-import { Actions, axiomSignalReads, Intro, jiraSignalUse, langfuseSignalReads, postHogSignalReads, railwaySignalReads, vercelSignalReads } from "./connect";
+import { Actions, axiomSignalReads, Intro, jiraSignalUse, langfuseSignalReads, postHogSignalReads, railwaySignalReads, renderSignalReads, vercelSignalReads } from "./connect";
 import type { ConnectPage } from "./connect-pages";
 import { manageableAccounts, manageView, type ManageRow } from "./manage-model";
 import { foundLabel } from "./model";
@@ -34,6 +35,7 @@ const descriptions: Record<ConnectPage, string> = {
   aws: "Signal reads CloudWatch logs, metrics, and alarms through a read-only role.",
   gcp: "Signal reads logs and metrics in your project through a read-only service account.",
   railway: `${railwaySignalReads} Superlog reads the logs of the environments you choose every minute, so Signal sees each new error as it happens.`,
+  render: renderSignalReads,
   vercel: `${vercelSignalReads} Drains send your deployments' traces and logs to Superlog, so Signal sees each new error as it happens.`,
   linear: "Signal checks Linear before posting, so it skips problems your team already tracks.",
   jira: jiraSignalUse,
@@ -125,8 +127,8 @@ function ManagedAccount({ provider, name, account, several, awsStreaming, stream
       </Status>
       : <Status title={`Connected to ${view.connectedTo}`}>{updatedLabel(account.updatedAt)}</Status>}
     {/* A Railway connection lists the environments whose logs Superlog
-        reads, a PostHog connection its projects, and a Vercel connection its
-        drains. An AWS account that lost
+        reads, a Render connection its services, a PostHog connection its
+        projects, and a Vercel connection its drains. An AWS account that lost
         access cannot change regions; it keeps the CloudWatch stream
         fallback. */}
     {provider === "vercel" && account.status === "connected"
@@ -145,6 +147,14 @@ function ManagedAccount({ provider, name, account, several, awsStreaming, stream
             {row}
           </div>} />}
       </RailwayLogReading>
+      : provider === "render" && account.status === "connected"
+      ? <RenderLogReading integrationAccountId={account.id}>
+        {({ row }) => <Rows rows={view.rows.map((row) => ({ ...row, onAction: onReconnect }))}
+          extra={row && <div className="signalManageRows__regions">
+            <span className="signalManageRows__label">Telemetry from</span>
+            {row}
+          </div>} />}
+      </RenderLogReading>
       : provider === "posthog" && account.status === "connected"
       ? <PostHogLogReading integrationAccountId={account.id}>
         {({ row }) => <Rows rows={view.rows.map((row) => ({ ...row, onAction: onReconnect }))}

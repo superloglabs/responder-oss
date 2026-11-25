@@ -18,6 +18,7 @@ export const telemetrySources: Source[] = [
   { provider: "aws", name: `${providerDisplayName("aws")} CloudWatch`, description: "Logs, metrics, and resources" },
   { provider: "gcp", name: providerDisplayName("gcp"), description: "Logs, metrics, and resources" },
   { provider: "railway", name: providerDisplayName("railway"), description: "Logs, deployments, and metrics" },
+  { provider: "render", name: providerDisplayName("render"), description: "Service and request logs" },
   { provider: "vercel", name: providerDisplayName("vercel"), description: "Logs, traces, and deployments" },
   { provider: "posthog", name: providerDisplayName("posthog"), description: "Logs, errors, and product usage" },
   { provider: "langfuse", name: providerDisplayName("langfuse"), description: "LLM traces, errors, and scores" },

@@ -11,6 +11,7 @@ export const providerGlyphs = {
   discord: { label: "Discord", logo: "discord" },
   posthog: { label: "PostHog", logo: "posthog" },
   railway: { label: "Railway", logo: "railway" },
+  render: { label: "Render", logo: "render" },
   github: { label: "GitHub", logo: "github" },
   gcp: { label: "Google Cloud", logo: "google" },
   google: { label: "Google", logo: "google" },
@@ -51,7 +52,7 @@ export const contextCategoryDescriptions: Record<ContextCategory, string> = {
 };
 
 export const contextProviderMetadata: Record<
-  Exclude<ProviderGlyphId, "betterstack" | "devrev" | "discord" | "google" | "honeycomb" | "jira" | "scan" | "signoz">,
+  Exclude<ProviderGlyphId, "betterstack" | "devrev" | "discord" | "google" | "honeycomb" | "jira" | "render" | "scan" | "signoz">,
   { category: ContextCategory; searchTerms: string }
 > = {
   sentry: { category: "Observability", searchTerms: "errors exceptions monitoring" },

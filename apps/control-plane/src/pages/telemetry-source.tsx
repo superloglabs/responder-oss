@@ -7,10 +7,11 @@ import { TelemetrySourceSkeleton } from "../components/screen-skeletons";
 import { ProviderGlyph } from "../components/icons";
 import { RailwayConnectionDialog } from "../components/railway-connection-dialog";
 import { RailwayLogReading } from "../components/railway-log-reading";
+import { RenderLogReading } from "../components/render-log-reading";
 import { ScrambleText } from "../components/scramble-text";
 import { useIntegrationConnect } from "../components/use-integration-connect";
 import { copyToClipboard } from "../copy-to-clipboard";
-import { Badge, Button, CodeBlock, DataTable, SelectField } from "../design-system";
+import { Badge, Button, CodeBlock, DataTable, SelectField, TextField } from "../design-system";
 import {
   createIngestKey,
   defaultIngestKeyName,
@@ -22,6 +23,7 @@ import {
   awsRegions,
   awsTelemetryTemplatePath,
   connectGcpSource,
+  connectRender,
   connectVercelSource,
   createAwsStack,
   fetchTelemetrySources,
@@ -164,7 +166,7 @@ function CreatedKeyField({ token }: { token: string }) {
 }
 
 // Also shown on Signal setup's AWS and Google Cloud pages.
-export function CloudSourceSetup({ provider }: { provider: "aws" | "gcp" | "railway" | "vercel" }) {
+export function CloudSourceSetup({ provider }: { provider: "aws" | "gcp" | "railway" | "render" | "vercel" }) {
   // Undefined while loading; null when the cell does not accept telemetry.
   const [overview, setOverview] = useState<TelemetrySourceOverview | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
@@ -193,6 +195,7 @@ export function CloudSourceSetup({ provider }: { provider: "aws" | "gcp" | "rail
   if (provider === "aws") return <AwsSetup list={list} onCreated={load} />;
   const accounts = overview.accounts.filter((account) => account.provider === provider);
   if (provider === "railway") return <RailwaySetup accounts={accounts} configured={overview.providers.railway ?? false} />;
+  if (provider === "render") return <RenderSetup accounts={accounts} configured={overview.providers.render ?? false} onConnected={load} />;
   return provider === "vercel" ? (
     <VercelSetup accounts={accounts} configured={overview.providers.vercel} list={list} reload={load} />
   ) : (
@@ -383,6 +386,103 @@ function RailwaySetup({ accounts, configured }: { accounts: Account[]; configure
         open={connecting}
         returnTo="/telemetry/setup/railway"
       />
+    </>
+  );
+}
+
+// Render connects with an API key. Each key lists the workspaces and
+// services it reaches; adding one starts reading its logs, and removing it
+// stops.
+function RenderSetup({
+  accounts,
+  configured,
+  onConnected,
+}: {
+  accounts: Account[];
+  configured: boolean;
+  onConnected: () => Promise<unknown>;
+}) {
+  const [addingKey, setAddingKey] = useState(false);
+  return (
+    <>
+      <p className="telemetrySetup__intro">
+        Superlog reads the logs of the Render services you choose every minute with a Render API key, so nothing
+        changes in your Render workspace. The lines of one stack trace arrive as one log, and request logs keep
+        their path and status, so requests that fail with a server error become issues. Build logs are left out.
+      </p>
+      <section aria-labelledby="render-connect-title" className="telemetrySetup__section">
+        <h2 id="render-connect-title">Read services</h2>
+        {!configured ? (
+          <p>Render connections are not configured for this installation.</p>
+        ) : accounts.length === 0 ? (
+          <RenderKeyForm onConnected={onConnected} />
+        ) : (
+          <>
+            {accounts.map((account) => (
+              <RenderLogReading integrationAccountId={account.id} key={account.id}>
+                {({ available, row }) => available ? (
+                  <div className="awsLogStreaming__row">
+                    <span className="awsLogStreaming__label">{account.displayName}</span>
+                    {row}
+                  </div>
+                ) : <Unavailable />}
+              </RenderLogReading>
+            ))}
+            {addingKey ? (
+              <RenderKeyForm onConnected={async () => { setAddingKey(false); await onConnected(); }} />
+            ) : (
+              <div className="telemetrySetup__actions">
+                <Button onClick={() => setAddingKey(true)} size="small" variant="ghost">Use another API key</Button>
+              </div>
+            )}
+          </>
+        )}
+      </section>
+    </>
+  );
+}
+
+function RenderKeyForm({ onConnected }: { onConnected: () => Promise<unknown> }) {
+  const [apiKey, setApiKey] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    if (saving || !apiKey.trim()) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await connectRender(apiKey.trim(), "/telemetry/setup/render");
+      setApiKey("");
+      await onConnected();
+    } catch (cause) {
+      setError(errorText(cause, "Unable to connect Render"));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <>
+      <p>
+        Create a key in Render under Account Settings → API Keys (<a href="https://render.com/docs/api" rel="noreferrer"
+        target="_blank">Render's guide</a>). A Render key reaches every workspace you belong to; Superlog only reads
+        services and logs with it, and stores it encrypted.
+      </p>
+      <form className="telemetrySetup__form" onSubmit={(event) => void submit(event)}>
+        <TextField
+          autoComplete="off"
+          label="Render API key"
+          onChange={(event) => setApiKey(event.target.value)}
+          placeholder="rnd_…"
+          spellCheck={false}
+          type="password"
+          value={apiKey}
+        />
+        <Button disabled={!apiKey.trim()} loading={saving} type="submit" variant="primary">Connect Render</Button>
+      </form>
+      {error ? <p className="formError" role="alert">{error}</p> : null}
     </>
   );
 }

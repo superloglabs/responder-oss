@@ -6,6 +6,7 @@ import {
   listGcpTelemetrySources,
   listPostHogTelemetrySources,
   listRailwayTelemetrySources,
+  listRenderTelemetrySources,
   updateTelemetrySource,
 } from "@responder/core/db/telemetry-sources";
 import {
@@ -17,11 +18,13 @@ import {
   type GcpSharedReaderConfig,
 } from "@responder/core/integrations/gcp";
 import { McpOAuthRefreshError } from "@responder/core/integrations/custom-mcp";
+import { renderCredentialsSchema } from "@responder/core/integrations/render";
 import { telemetryCollectorUrl } from "@responder/core/telemetry/client";
 import { forwardToCollector } from "@responder/core/telemetry/forward";
 import { type GcpRequest, pullGcpSource } from "@responder/core/telemetry/sources/gcp-pull";
 import { pullPostHogSource } from "@responder/core/telemetry/sources/posthog-pull";
 import { pullRailwaySource } from "@responder/core/telemetry/sources/railway-pull";
+import { pullRenderAccount } from "@responder/core/telemetry/sources/render-pull";
 
 // Reads every Google Cloud telemetry source once. Sources are read a few at a
 // time; each one's Google client is kept so its token is reused across passes.
@@ -216,6 +219,111 @@ export async function pullRailwayTelemetrySources(
     }),
     refused: "Railway refused the connection's access. Reconnect Railway.",
   });
+}
+
+// Reads every Render source once. A Render API key's log reads share one
+// limit, so each connection's sources are read together, a few connections
+// at a time.
+
+export interface RenderTelemetryPullDependencies {
+  collectorUrl: () => string | null;
+  decrypt: (encrypted: string) => Record<string, unknown>;
+  forward: typeof forwardToCollector;
+  list: typeof listRenderTelemetrySources;
+  now: () => Date;
+  pull: typeof pullRenderAccount;
+  update: typeof updateTelemetrySource;
+}
+
+export const defaultRenderTelemetryPullDependencies: RenderTelemetryPullDependencies = {
+  collectorUrl: telemetryCollectorUrl,
+  decrypt: (encrypted) => decryptCredentials(encrypted),
+  forward: forwardToCollector,
+  list: listRenderTelemetrySources,
+  now: () => new Date(),
+  pull: pullRenderAccount,
+  update: updateTelemetrySource,
+};
+
+export async function pullRenderTelemetrySources(
+  dependencies: RenderTelemetryPullDependencies = defaultRenderTelemetryPullDependencies,
+): Promise<{ failed: number; sources: number }> {
+  const collector = dependencies.collectorUrl();
+  if (!collector) return { failed: 0, sources: 0 };
+  const collectorUrl: string = collector;
+  const listed = await dependencies.list();
+  const accounts = new Map<string, typeof listed>();
+  for (const source of listed) {
+    const group = accounts.get(source.integrationAccountId) ?? [];
+    group.push(source);
+    accounts.set(source.integrationAccountId, group);
+  }
+  const queue = [...accounts.values()];
+  let failed = 0;
+  async function next(): Promise<void> {
+    for (let sources = queue.shift(); sources; sources = queue.shift()) {
+      // A connection belongs to one workspace, and so do its sources.
+      const organizationId = sources[0]!.organizationId;
+      try {
+        const credentials = renderCredentialsSchema.parse(dependencies.decrypt(sources[0]!.encryptedCredentials));
+        const now = dependencies.now();
+        const result = await dependencies.pull({
+          apiKey: credentials.apiKey,
+          forward: async (payload) => {
+            const response = await dependencies.forward({
+              body: JSON.stringify(payload),
+              collectorUrl,
+              contentType: "application/json",
+              organizationId,
+              signal: "logs",
+            });
+            return response.ok;
+          },
+          now,
+          sources,
+        });
+        let logs = 0;
+        const errors: string[] = [];
+        for (const source of sources) {
+          const read = result.sources.get(source.id);
+          if (!read) continue;
+          if (read.error) {
+            failed += 1;
+            errors.push(read.error);
+          }
+          logs += read.logs;
+          await dependencies.update(source.id, {
+            lastError: read.error,
+            state: read.state,
+            status: read.error && !read.received ? "failed" : "active",
+            ...(read.received ? { lastReceivedAt: now } : {}),
+          });
+        }
+        if (logs > 0 || errors.length > 0 || result.behind || result.retryLater) {
+          console.log(JSON.stringify({
+            behind: result.behind,
+            error: errors[0] ?? null,
+            event: "render_telemetry_pulled",
+            integrationAccountId: sources[0]!.integrationAccountId,
+            logs,
+            organizationId,
+            pages: result.pages,
+            retryLater: result.retryLater,
+            sources: sources.length,
+            truncated: [...result.sources.values()].some((read) => read.truncated),
+          }));
+        }
+      } catch (error) {
+        failed += sources.length;
+        const message = error instanceof Error ? error.message : String(error);
+        for (const source of sources) {
+          await dependencies.update(source.id, { lastError: message, status: "failed" }).catch(() => undefined);
+        }
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrentSources, queue.length) }, next));
+  return { failed, sources: listed.length };
 }
 
 export interface PostHogTelemetryPullDependencies {
