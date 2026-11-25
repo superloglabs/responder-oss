@@ -14,10 +14,11 @@ import {
 } from "./model";
 import type { SaveSettings, SettingsPageProps } from "./settings";
 import { sourceActions, type SourceActions } from "./setup-data";
+import { DiscordWebhook } from "./discord";
 import { ChannelSelect } from "./setup-shared";
 import { SettingsGroup, SettingsPage, SettingsRow, SourceRow } from "./shared";
 
-export function SettingsNotifications({ data, save, setSettings, status }: SettingsPageProps) {
+export function SettingsNotifications({ data, save, saved, setSettings, status }: SettingsPageProps) {
   const navigate = useNavigate();
   const { integrations, options, settings } = data;
   const actions = sourceActions({ integrations, otelServices: null, listPath: "/signal/setup/notifications", navigate });
@@ -32,17 +33,25 @@ export function SettingsNotifications({ data, save, setSettings, status }: Setti
             ? <Button aria-label="Manage Slack" onClick={() => actions.manage("slack")}>Manage</Button>
             : <Button disabled={!actions.summary("slack")?.connectUrl} onClick={() => actions.connect("slack")}>Connect Slack</Button>} />
         <div className="signalSettingsCard--rows">
-          <SettingsRow label="Findings channel" description="Every finding is posted here.">
+          <SettingsRow label="Findings channel" description="Findings are posted here.">
             <ChannelSelect options={options} value={settings.slack}
               onChange={(slack) => save({ slack })} />
           </SettingsRow>
         </div>
       </div>
     </SettingsGroup>
+    <SettingsGroup title="Discord">
+      <div className="signalSettingsCard signalSettingsCard--rows">
+        <DiscordWebhook label="Discord channel" connected={settings.discord.connected} delivery={settings.delivery}
+          connectedDescription="Findings are posted to your Discord channel. Feedback, Jira, and coding agents are on each finding's page."
+          // Only the webhook fields change, so changes still saving are kept.
+          onSaved={(next) => saved({ discord: next.discord, delivery: next.delivery })} />
+      </div>
+    </SettingsGroup>
     {actions.summary("jira") && <JiraSettings actions={actions} value={settings.jira} save={save} />}
     <SettingsGroup title="Coding agents">
       <div className="signalSettingsCard signalSettingsCard--rows">
-        <ReplicasWebhook connected={settings.replicas.connected} onSaved={(saved) => setSettings(saved, true)} />
+        <ReplicasWebhook connected={settings.replicas.connected} onSaved={(next) => setSettings(next, true)} />
       </div>
     </SettingsGroup>
   </SettingsPage>;
@@ -187,9 +196,32 @@ function JiraSettings({ actions, value, save }: {
   </SettingsGroup>;
 }
 
-// The webhook URL of a Replicas automation. It is a secret, so once saved
-// it can only be removed or replaced, not shown.
+// The webhook URL of a Replicas automation.
 function ReplicasWebhook({ connected, onSaved }: { connected: boolean; onSaved: (settings: SignalSettings) => void }) {
+  return <WebhookRow connected={connected} onSaved={onSaved} save={saveReplicasWebhook}
+    label="Send to Replicas"
+    connectedDescription="Findings posted to Slack from now on have a Send to Replicas button. It starts your Replicas automation with the finding's prompt."
+    description="Add a Send to Replicas button to findings in Slack. In Replicas, create an automation with a custom webhook trigger, then paste its URL here."
+    inputLabel="Replicas webhook URL"
+    placeholder="https://api.replicas.dev/v1/automations/webhook/whtok_…"
+    note="Stored encrypted. Anyone with the URL can start the automation."
+    connectLabel="Connect Replicas" />;
+}
+
+// A webhook URL. It is a secret, so once saved it can only be removed or
+// replaced, not shown.
+function WebhookRow({ connected, onSaved, save, label, connectedDescription, description, inputLabel, placeholder, note, connectLabel }: {
+  connected: boolean;
+  onSaved: (settings: SignalSettings) => void;
+  save: (webhookUrl: string | null) => Promise<SignalSettings>;
+  label: string;
+  connectedDescription: string;
+  description: string;
+  inputLabel: string;
+  placeholder: string;
+  note: string;
+  connectLabel: string;
+}) {
   const [url, setUrl] = useState("");
   const [show, setShow] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -200,7 +232,7 @@ function ReplicasWebhook({ connected, onSaved }: { connected: boolean; onSaved: 
     setBusy(true);
     setError("");
     try {
-      onSaved(await saveReplicasWebhook(webhookUrl));
+      onSaved(await save(webhookUrl));
       setUrl("");
       setReplacing(false);
     } catch (failure) {
@@ -216,10 +248,8 @@ function ReplicasWebhook({ connected, onSaved }: { connected: boolean; onSaved: 
   }
 
   if (connected && !replacing) {
-    return <SettingsRow label="Send to Replicas"
-      description={error
-        ? <span className="signalError" role="alert">{error}</span>
-        : "Findings posted to Slack from now on have a Send to Replicas button. It starts your Replicas automation with the finding's prompt."}>
+    return <SettingsRow label={label}
+      description={error ? <span className="signalError" role="alert">{error}</span> : connectedDescription}>
       <span className="signalReplicasActions">
         <Button disabled={busy} onClick={() => setReplacing(true)}>Replace URL</Button>
         <Button disabled={busy} loading={busy} onClick={() => void submit(null)}>Remove</Button>
@@ -227,24 +257,22 @@ function ReplicasWebhook({ connected, onSaved }: { connected: boolean; onSaved: 
     </SettingsRow>;
   }
 
-  return <SettingsRow stacked label="Send to Replicas"
-    description="Add a Send to Replicas button to findings in Slack. In Replicas, create an automation with a custom webhook trigger, then paste its URL here.">
+  return <SettingsRow stacked label={label} description={description}>
     <form className="signalReplicasForm" onSubmit={connect}>
       <div className={`signalInput${error ? " signalInput--error" : ""}`}>
         <div className="signalSecret">
-          <input aria-label="Replicas webhook URL" type={show ? "text" : "password"} autoComplete="off" spellCheck={false}
-            disabled={busy} placeholder="https://api.replicas.dev/v1/automations/webhook/whtok_…" value={url}
+          <input aria-label={inputLabel} type={show ? "text" : "password"} autoComplete="off" spellCheck={false}
+            disabled={busy} placeholder={placeholder} value={url}
             onChange={(e) => { setUrl(e.target.value); setError(""); }} />
           <button type="button" aria-label={show ? "Hide URL" : "Show URL"} onClick={() => setShow(!show)}>
             {show ? <IconEyeOff size={14} /> : <IconEye size={14} />}
           </button>
         </div>
-        {error ? <p className="signalFieldError" role="alert"><IconAlertCircle size={14} />{error}</p>
-          : <p>Stored encrypted. Anyone with the URL can start the automation.</p>}
+        {error ? <p className="signalFieldError" role="alert"><IconAlertCircle size={14} />{error}</p> : <p>{note}</p>}
       </div>
       <span className="signalReplicasActions">
         {replacing && <Button disabled={busy} onClick={() => { setReplacing(false); setUrl(""); setError(""); }}>Cancel</Button>}
-        <Button type="submit" variant="primary" loading={busy} disabled={busy || !url.trim()}>Connect Replicas</Button>
+        <Button type="submit" variant="primary" loading={busy} disabled={busy || !url.trim()}>{connectLabel}</Button>
       </span>
     </form>
   </SettingsRow>;

@@ -95,7 +95,21 @@ export interface SignalSettings {
   // Whether a Replicas automation webhook is saved, which adds Send to
   // Replicas to findings in Slack. The URL itself is never sent back.
   replicas: { connected: boolean };
+  // Whether a Discord channel webhook is saved. Findings are posted to it,
+  // and to the Slack channel when one is chosen too. The URL itself is
+  // never sent back.
+  discord: { connected: boolean };
+  // Why Slack or Discord refuses Signal's posts, or null while posts go
+  // through. Findings waiting to be posted expire a day after they were made.
+  delivery: SignalDeliveryProblem | null;
   limits: { dailyInvestigationCap: number };
+}
+
+export interface SignalDeliveryProblem {
+  problem: "not_in_channel" | "channel_gone" | "access_revoked" | "disconnected" | "discord_webhook_gone";
+  since: string;
+  waiting: number;
+  firstExpiresAt: string | null;
 }
 
 export interface SignalPlan {
@@ -202,6 +216,8 @@ export function withSettingsDefaults(settings: Partial<SignalSettings> & Pick<Si
     retentionDays: settings.retentionDays ?? null,
     jira: settings.jira ?? null,
     replicas: settings.replicas ?? { connected: false },
+    discord: settings.discord ?? { connected: false },
+    delivery: settings.delivery ?? null,
     limits: settings.limits ?? { dailyInvestigationCap: 50 },
   };
 }
@@ -234,6 +250,68 @@ export async function saveSignalSettings(settings: SignalSettings) {
 // Saves the webhook URL of a Replicas automation, or removes it with null.
 export async function saveReplicasWebhook(webhookUrl: string | null) {
   return withSettingsDefaults(await signalJson<SignalSettings>("/settings/replicas", jsonBody("PUT", { webhookUrl })));
+}
+
+// Why a Discord webhook was not saved. refused: Discord rejected the test
+// message. unavailable: Discord did not answer, so the URL may be fine.
+export type DiscordSaveErrorCode = "invalid_url" | "refused" | "unavailable" | "last_destination" | "failed";
+
+export class DiscordSaveError extends Error {
+  constructor(message: string, readonly code: DiscordSaveErrorCode) {
+    super(message);
+    this.name = "DiscordSaveError";
+  }
+}
+
+const discordHosts = new Set(["discord.com", "discordapp.com", "canary.discord.com", "ptb.discord.com"]);
+const discordWebhookPath = /^\/api(?:\/v\d{1,2})?\/webhooks\/\d{17,20}\/[A-Za-z0-9_-]{60,100}\/?$/u;
+
+// What is wrong with a pasted Discord webhook URL before it is sent, or
+// null when it has the form Signal accepts. The server checks it again.
+export function discordWebhookUrlProblem(value: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(value.trim());
+  } catch {
+    return "Paste a Discord webhook URL; it starts with https://discord.com/api/webhooks/.";
+  }
+  if (url.hostname === "slack.com" || url.hostname.endsWith(".slack.com")) {
+    return "This is a Slack link. Paste a Discord webhook URL; it starts with https://discord.com/api/webhooks/.";
+  }
+  if (discordHosts.has(url.hostname) && url.pathname.startsWith("/channels/")) {
+    return "This is a link to a Discord channel. Paste the channel's webhook URL; it starts with https://discord.com/api/webhooks/.";
+  }
+  const valid = url.protocol === "https:" && discordHosts.has(url.hostname) && url.port === "" &&
+    url.username === "" && url.password === "" && url.search === "" && url.hash === "" &&
+    discordWebhookPath.test(url.pathname);
+  return valid ? null : "Paste a Discord webhook URL; it starts with https://discord.com/api/webhooks/.";
+}
+
+// Saves the webhook URL of a Discord channel, or removes it with null.
+// Signal posts a short message to the channel to check the URL first.
+export async function saveDiscordWebhook(webhookUrl: string | null) {
+  let response: Response;
+  try {
+    response = await fetch("/api/signal/settings/discord", jsonBody("PUT", { webhookUrl }));
+  } catch {
+    throw new DiscordSaveError("Could not reach Superlog. Try again in a minute.", "unavailable");
+  }
+  const body = await response.json().catch(() => null) as (SignalSettings & { code?: string }) | null;
+  if (!response.ok) {
+    const code = body?.code;
+    throw new DiscordSaveError(
+      apiErrorMessage(body, response.status),
+      code === "invalid_url" || code === "refused" || code === "unavailable" || code === "last_destination"
+        ? code
+        : response.status >= 500 ? "unavailable" : "failed",
+    );
+  }
+  return withSettingsDefaults(body as SignalSettings);
+}
+
+// Where findings are posted: a Slack channel, a Discord webhook, or both.
+export function findingsDestinationChosen(settings: Pick<SignalSettings, "slack" | "discord">) {
+  return Boolean(settings.slack) || settings.discord.connected;
 }
 
 export function fetchSignalBilling() {

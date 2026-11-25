@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { settingsBody, withSettingsDefaults } from "./model";
+import { findingsDestinationChosen, settingsBody, withSettingsDefaults } from "./model";
 import { capOptions, maxSkippedServices, skippedServiceError } from "./settings-model";
 
 describe("Signal settings", () => {
@@ -28,11 +28,19 @@ describe("Signal settings", () => {
     const settings = withSettingsDefaults({ enabled: true, setupComplete: true, slack: null, repositoryIds: ["r"] });
     expect(settings).toMatchObject({
       minimumSeverity: "SEV-3", dailyInvestigationCap: null, dismissalCooldownHours: 24, skippedServices: [], notes: "",
-      slackScan: { enabled: false, channels: [] }, retentionDays: null, replicas: { connected: false }, jira: null,
+      slackScan: { enabled: false, channels: [] }, retentionDays: null, replicas: { connected: false }, discord: { connected: false }, jira: null,
       limits: { dailyInvestigationCap: 50 },
     });
     expect(Object.keys(settingsBody(settings)).sort()).toEqual([
       "dailyInvestigationCap", "dismissalCooldownHours", "enabled", "jira", "minimumSeverity", "notes", "repositoryIds", "retentionDays", "skippedServices", "slack", "slackScan",
     ]);
+  });
+
+  it("lets findings go to a Slack channel, a Discord webhook, or both", () => {
+    const slack = { integrationAccountId: "a", channelId: "C1" };
+    expect(findingsDestinationChosen({ slack: null, discord: { connected: false } })).toBe(false);
+    expect(findingsDestinationChosen({ slack, discord: { connected: false } })).toBe(true);
+    expect(findingsDestinationChosen({ slack: null, discord: { connected: true } })).toBe(true);
+    expect(findingsDestinationChosen({ slack, discord: { connected: true } })).toBe(true);
   });
 });
