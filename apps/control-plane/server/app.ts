@@ -92,6 +92,7 @@ import { managementApiRoutes } from "./management/routes.js";
 import { sourceMapRoutes } from "./source-maps/routes.js";
 import { oauthMetadataRoutes } from "./oauth-metadata-routes.js";
 import { requestMetrics } from "./request-metrics.js";
+import { rejectDotSegments } from "./request-target.js";
 
 const sessionCookiePattern =
   /(?:^|[;,]\s*)(?:__Secure-)?(?:better-auth|responder-auth)\.session_token=/;
@@ -328,6 +329,7 @@ const githubWebhookPaths = new Set([
 ]);
 // Sentry names each middleware span after its function, so middleware here
 // and in mounted routers are named functions rather than arrows.
+instrumentedApp.use("*", rejectDotSegments());
 instrumentedApp.use("*", function bodyLimitByPath(context, next) {
   return githubWebhookPaths.has(context.req.path)
     ? githubWebhookBodyLimit(context, next)
