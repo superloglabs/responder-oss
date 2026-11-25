@@ -1342,9 +1342,11 @@ describe("automation context broker", () => {
       dependencies.providerFetch.mockImplementation(fakeMcp([
         { inputSchema: { type: "object" }, name: "execute_sql" },
         { inputSchema: { type: "object" }, name: "get_logs" },
+        { inputSchema: { type: "object" }, name: "apply_migration" },
       ]));
 
       expect(await listed(app)).toEqual(["execute_sql", "get_logs"]);
+      expect((await call(app, "apply_migration", { query: "drop table t" })).status).toBe(400);
       expect((await call(app, "execute_sql", { query: "select 1" })).status).toBe(200);
       const urls = (dependencies.providerFetch.mock.calls as Array<[string, RequestInit]>).map(([url]) => url);
       expect(urls.length).toBeGreaterThan(0);
@@ -1402,22 +1404,24 @@ describe("automation context broker", () => {
       expect(new Headers(init.headers).get("dd-api-key")).toBe("dd-api-secret");
     });
 
-    it("serves only read-only tools of a custom MCP connection", async () => {
+    it("serves only the tools a custom MCP connection declares read-only", async () => {
       const { app, dependencies } = appFor(withTrigger(claim("custom_mcp", {
         apiToken: "custom-api-token",
         authType: "api_token",
         mcpUrl: "https://mcp.example.test/api",
       }), alertTrigger));
       dependencies.providerFetch.mockImplementation(fakeMcp([
-        { inputSchema: { type: "object" }, name: "list_orders" },
+        { annotations: { readOnlyHint: true }, inputSchema: { type: "object" }, name: "list_orders" },
+        { inputSchema: { type: "object" }, name: "get_order" },
         { inputSchema: { type: "object" }, name: "refund_order" },
-        { inputSchema: { type: "object" }, name: "delete_order" },
+        { annotations: { destructiveHint: true, readOnlyHint: true }, inputSchema: { type: "object" }, name: "purge_orders" },
       ]));
 
-      // refund_order declares nothing and its name does not say it writes,
-      // so only an allowlist on the connection keeps it out.
-      expect(await listed(app)).toEqual(["list_orders", "refund_order"]);
-      expect((await call(app, "delete_order")).status).toBe(400);
+      // A custom server's tool names say nothing reliable, so a tool that
+      // declares nothing is left out, whatever its name.
+      expect(await listed(app)).toEqual(["list_orders"]);
+      expect((await call(app, "refund_order")).status).toBe(400);
+      expect((await call(app, "get_order")).status).toBe(400);
       expect(forwardedMethods(dependencies.providerFetch)).toEqual([]);
     });
 
@@ -1430,7 +1434,7 @@ describe("automation context broker", () => {
       limited.account.metadata = { allowedTools: ["list_orders", "delete_order"] };
       const { app, dependencies } = appFor(limited);
       dependencies.providerFetch.mockImplementation(fakeMcp([
-        { inputSchema: { type: "object" }, name: "list_orders" },
+        { annotations: { readOnlyHint: true }, inputSchema: { type: "object" }, name: "list_orders" },
         { inputSchema: { type: "object" }, name: "delete_order" },
       ]));
 

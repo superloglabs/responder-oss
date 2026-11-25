@@ -23,7 +23,10 @@ import {
   parseBetterStackCredentials,
 } from "../../../../packages/core/src/integrations/betterstack.js";
 import { getDatadogSite } from "../../../../packages/core/src/integrations/datadog.js";
-import { isObservationTool } from "../../../../packages/core/src/integrations/mcp-observation.js";
+import {
+  isDeclaredReadOnlyTool,
+  isObservationTool,
+} from "../../../../packages/core/src/integrations/mcp-observation.js";
 import {
   honeycombAuthorization,
   parseHoneycombCredentials,
@@ -368,7 +371,7 @@ function customMcpContextServer(
       if (!accessToken) throw new McpOAuthRefreshError(true);
       return new Headers({ authorization: `Bearer ${accessToken}` });
     },
-    isAllowed: (tool) => allowed.has(tool.name) && (!observeOnly || isObservationTool(tool)),
+    isAllowed: (tool) => allowed.has(tool.name) && (!observeOnly || isDeclaredReadOnlyTool(tool)),
     label: "Custom MCP",
     now: dependencies.customMcp.now,
     unavailableToolMessage: "Unknown tool or tool not allowed on this connection",
@@ -377,8 +380,9 @@ function customMcpContextServer(
 }
 
 // A proxied provider's MCP server limited to the tools an observer may call:
-// those that declare themselves read-only, or declare nothing and whose
-// names do not say they write.
+// those that declare themselves read-only, or, for a provider whose tools are
+// known, declare nothing and whose names do not say they write. A custom MCP
+// server's tools must declare themselves read-only.
 function observationContextServer(
   claim: AutomationContextBrokerClaim,
   target: { headers: Headers; url: string },
@@ -388,7 +392,7 @@ function observationContextServer(
     cacheKey: `observe:${claim.account.provider}:${claim.account.id}:${target.url}`,
     fetch: dependencies.providerFetch,
     headers: async () => new Headers(target.headers),
-    isAllowed: isObservationTool,
+    isAllowed: claim.account.provider === "custom_mcp" ? isDeclaredReadOnlyTool : isObservationTool,
     label: `${claim.account.provider} MCP`,
     now: Date.now,
     unavailableToolMessage: "This run was started by an alert, so it can only use tools that read",

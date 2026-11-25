@@ -45,7 +45,7 @@ import type {
 } from "@responder/core/jobs";
 import { investigationPrompt, toInvestigationInput } from "@responder/core/investigations/input";
 import { supabaseMcpUrl, type SupabaseAccessMode } from "@responder/core/integrations/supabase";
-import { isObservationTool } from "@responder/core/integrations/mcp-observation";
+import { isDeclaredReadOnlyTool, isObservationTool } from "@responder/core/integrations/mcp-observation";
 import { isSlackAssistantRequest } from "@responder/core/integrations/slack-assistant";
 import { customTagModeInstructions } from "@responder/core/agents/config";
 import { organizationHasCapability } from "@responder/core/db/organization-capabilities";
@@ -958,13 +958,20 @@ export async function runInvestigationAgent(
       upstashConnection,
     });
   // Providers whose servers can list tools that write, and that have no
-  // read-only mode of their own, are limited to the tools that read.
+  // read-only mode of their own, are limited to the tools that read. A
+  // custom server's tools must declare themselves read-only.
   const observedServers = new Set<object>([
     datadogServer,
     sentryServer,
     clickStackServer,
-    ...customMcpServers,
   ].filter((server) => server !== null));
+  const customServers = new Set<object>(customMcpServers);
+  const readOnlyRule = (server: object) =>
+    !readOnlyContext
+      ? undefined
+      : customServers.has(server)
+        ? isDeclaredReadOnlyTool
+        : observedServers.has(server) ? isObservationTool : undefined;
   const contextServers = [
     axiomServer,
     datadogServer,
@@ -989,7 +996,7 @@ export async function runInvestigationAgent(
     .map((server) => new RecoverableMcpServer(
       server,
       describeConnectError,
-      readOnlyContext && observedServers.has(server) ? isObservationTool : undefined,
+      readOnlyRule(server),
     ));
 
   const sandboxName = `responder-investigation-${job.investigationId}`;

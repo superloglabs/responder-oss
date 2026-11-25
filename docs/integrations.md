@@ -70,9 +70,11 @@ Axiom, SigNoz, Honeycomb, Better Stack, the webhook trigger, and Slack
 messages that an app posted, such as telemetry alerts and synthetic checks.
 Such a run:
 
-- gets only the tools of PostHog, custom MCP servers, Datadog, Honeycomb,
-  SigNoz, Better Stack, Axiom, Sentry, and ClickStack that declare themselves
-  read-only, or that declare nothing and whose names do not say they write;
+- gets only the tools of PostHog, Datadog, Honeycomb, SigNoz, Better Stack,
+  Axiom, Sentry, and ClickStack that declare themselves read-only, or that
+  declare nothing and whose names do not say they write;
+- gets only the custom MCP tools that declare themselves read-only
+  (`readOnlyHint`);
 - opens a full-access Supabase project with `read_only=true`;
 - is not offered Railway redeploy or restart;
 - reads its Slack context channels but posts, uploads, and reacts only in the
@@ -81,8 +83,7 @@ Such a run:
 It still reports through the automation's notification channels and can file a
 Linear ticket or open a pull request. Runs a person starts, such as a Slack
 message from a person, tag mode, or a scheduled run, keep each connection's
-access level. A custom MCP tool whose name does not say it writes can still
-write; limit the connection to selected tools for that.
+access level.
 
 ## Linear
 

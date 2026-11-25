@@ -16,3 +16,13 @@ export function isObservationTool(tool: { annotations?: unknown; name: string })
   const words = tool.name.replace(/([a-z0-9])([A-Z])/gu, "$1_$2");
   return !writeVerb.test(words);
 }
+
+// A tool that declares itself read-only and not destructive. Servers whose
+// tool names are not known, such as custom MCP servers, are held to this:
+// a name like refund_order or run_script does not say it writes.
+export function isDeclaredReadOnlyTool(tool: { annotations?: unknown }): boolean {
+  const annotations = tool.annotations && typeof tool.annotations === "object"
+    ? tool.annotations as { destructiveHint?: unknown; readOnlyHint?: unknown }
+    : undefined;
+  return annotations?.readOnlyHint === true && annotations.destructiveHint !== true;
+}

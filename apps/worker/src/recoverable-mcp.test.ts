@@ -137,6 +137,8 @@ describe("recoverable MCP server", () => {
     expect(server.callToolResult).not.toHaveBeenCalled();
     await wrapped.callTool("list_issues", {});
     expect(server.callTool).toHaveBeenCalledOnce();
+    await wrapped.callToolResult("list_issues", {});
+    expect(server.callToolResult).toHaveBeenCalledOnce();
   });
 
   it("falls back to the reconnect tool when listing tools fails", async () => {

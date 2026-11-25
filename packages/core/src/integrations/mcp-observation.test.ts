@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isObservationTool } from "./mcp-observation.js";
+import { isDeclaredReadOnlyTool, isObservationTool } from "./mcp-observation.js";
 
 const tool = (name: string, annotations?: Record<string, unknown>) => ({
   name,
@@ -18,5 +18,14 @@ describe("isObservationTool", () => {
     expect(isObservationTool(tool("createMonitor"))).toBe(false);
     expect(isObservationTool(tool("list_things", { readOnlyHint: false }))).toBe(false);
     expect(isObservationTool(tool("get_things", { destructiveHint: true, readOnlyHint: true }))).toBe(false);
+  });
+});
+
+describe("isDeclaredReadOnlyTool", () => {
+  it("allows only tools that declare themselves read-only and not destructive", () => {
+    expect(isDeclaredReadOnlyTool(tool("list_orders", { readOnlyHint: true }))).toBe(true);
+    expect(isDeclaredReadOnlyTool(tool("get_order"))).toBe(false);
+    expect(isDeclaredReadOnlyTool(tool("run_script"))).toBe(false);
+    expect(isDeclaredReadOnlyTool(tool("purge", { destructiveHint: true, readOnlyHint: true }))).toBe(false);
   });
 });
