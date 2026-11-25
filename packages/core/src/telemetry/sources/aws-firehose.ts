@@ -156,34 +156,15 @@ export type CloudWatchLogsMessage = z.infer<typeof cloudWatchLogsSchema>;
 // with the events of one log stream. Control messages carry no events and are
 // left out, with records that cannot be read counted as skipped.
 // https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/SubscriptionFilters.html
-// The records of one request share this decompressed size budget. A record
-// that would pass it is skipped without being decompressed in full.
-export const MAX_DECODED_CLOUDWATCH_LOGS_BYTES = 64 * 1024 * 1024;
-
-export function decodeCloudWatchLogsRecords(
-  request: FirehoseRequest,
-  maxDecodedBytes = MAX_DECODED_CLOUDWATCH_LOGS_BYTES,
-): { messages: CloudWatchLogsMessage[]; skipped: number } {
+export function decodeCloudWatchLogsRecords(request: FirehoseRequest): { messages: CloudWatchLogsMessage[]; skipped: number } {
   const messages: CloudWatchLogsMessage[] = [];
   let skipped = 0;
-  let remaining = maxDecodedBytes;
   for (const record of request.records) {
     let parsed: CloudWatchLogsMessage;
     try {
-      const head = Buffer.from(record.data.slice(0, 4), "base64");
-      const gzipped = head[0] === 0x1f && head[1] === 0x8b;
-      // Base64 holds 3 bytes in 4 characters, so a plain record's size is
-      // known before it is decoded.
-      if (!gzipped && Math.floor((record.data.length * 3) / 4) > remaining + 2) {
-        throw new RangeError("CloudWatch Logs records exceed the size limit");
-      }
       const bytes = Buffer.from(record.data, "base64");
-      const decoded = gzipped
-        ? gunzipSync(bytes, { maxOutputLength: Math.max(remaining, 1) })
-        : bytes;
-      if (decoded.byteLength > remaining) throw new RangeError("CloudWatch Logs records exceed the size limit");
-      remaining -= decoded.byteLength;
-      parsed = cloudWatchLogsSchema.parse(JSON.parse(decoded.toString("utf8")));
+      const text = (bytes[0] === 0x1f && bytes[1] === 0x8b ? gunzipSync(bytes) : bytes).toString("utf8");
+      parsed = cloudWatchLogsSchema.parse(JSON.parse(text));
     } catch {
       skipped += 1;
       continue;
