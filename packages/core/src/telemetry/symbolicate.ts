@@ -116,7 +116,8 @@ function functionAt(map: TraceMap, source: string, line: number, column: number)
 // frame with neither keeps no function name and groups by its file alone.
 export function symbolicateStack(stacktrace: string, debugIds: Record<string, string>, maps: Map<string, TraceMap>): string | null {
   const lines = stacktrace.split("\n");
-  const parsed = lines.map((line, index) => (index < MAXIMUM_STACK_LINES ? parseLine(line) : null));
+  // Lines past the limit stay as they are.
+  const parsed = lines.slice(0, MAXIMUM_STACK_LINES).map(parseLine);
   const positions = parsed.map((frame) => {
     if (!frame) return null;
     const debugId = debugIds[frame.url];

@@ -71,6 +71,9 @@ export async function loadSourceMaps(organizationId: string, debugIds: string[],
     .update(sourceMaps)
     .set({ lastUsedAt: now })
     .where(and(requested, or(isNull(sourceMaps.lastUsedAt), lt(sourceMaps.lastUsedAt, dayAgo))));
+  // The stack's order decides which maps fit, not the order rows come back in.
+  const order = new Map(debugIds.map((debugId, index) => [debugId, index]));
+  sizes.sort((left, right) => (order.get(left.debugId) ?? 0) - (order.get(right.debugId) ?? 0));
   const chosen = chooseSourceMaps(sizes);
   if (chosen.length === 0) return new Map();
   const rows = await database

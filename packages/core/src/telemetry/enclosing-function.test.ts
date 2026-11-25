@@ -37,8 +37,9 @@ describe("enclosingFunctionName on large sources", () => {
     ["unclosed parameters", `${")".repeat(300_000)}{`],
   ])("returns quickly for %s", (_name, source) => {
     const started = performance.now();
-    enclosingFunctionName(source, source.length);
+    const name = enclosingFunctionName(source, source.length);
     expect(performance.now() - started).toBeLessThan(1_000);
+    expect(name).toBeNull();
   });
 
   it("names no function when the enclosing head is too long to read", () => {
