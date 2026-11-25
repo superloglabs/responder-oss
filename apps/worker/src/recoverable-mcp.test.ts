@@ -120,6 +120,27 @@ describe("recoverable MCP server", () => {
     expect(tools[0]?.description).toContain("HTTP 503");
   });
 
+  it("exposes and calls only the tools a read-only rule allows", async () => {
+    const server = fakeServer({ listTools: vi.fn().mockResolvedValue([readTool, writeTool]) });
+    const wrapped = new RecoverableMcpServer(
+      server,
+      (error) => String(error),
+      (tool) => (tool as { annotations?: { readOnlyHint?: boolean } }).annotations?.readOnlyHint === true,
+    );
+
+    await wrapped.connect();
+
+    expect(await exposedToolNames(wrapped)).toEqual(["mcp_linear__list_issues"]);
+    await expect(wrapped.callTool("save_issue", {})).rejects.toThrow("save_issue is not available");
+    await expect(wrapped.callToolResult("save_issue", {})).rejects.toThrow("save_issue is not available");
+    expect(server.callTool).not.toHaveBeenCalled();
+    expect(server.callToolResult).not.toHaveBeenCalled();
+    await wrapped.callTool("list_issues", {});
+    expect(server.callTool).toHaveBeenCalledOnce();
+    await wrapped.callToolResult("list_issues", {});
+    expect(server.callToolResult).toHaveBeenCalledOnce();
+  });
+
   it("falls back to the reconnect tool when listing tools fails", async () => {
     const server = fakeServer({
       listTools: vi.fn().mockRejectedValueOnce(new Error("HTTP 502")),

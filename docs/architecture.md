@@ -83,7 +83,8 @@ types. `drizzle/` contains the ordered schema history.
   none takes a query from the agent or reads environment variables. A
   read-only connection holds only viewer scopes, checked at connection and
   after every refresh. A redeploy connection holds member access, and its
-  redeploy and restart tools are offered only to tag mode and automations.
+  redeploy and restart tools are offered only to tag mode and to automation
+  runs that a person, not an alert, started.
   Railway has no log drains, so the worker reads the runtime logs of the
   environments a workspace chooses every minute and sends them to the
   collector as OTLP logs. It uses the token of the connection the

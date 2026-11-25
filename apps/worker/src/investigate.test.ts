@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   connectContextServer,
   contextServerConnectFailureEvent,
+  investigationSupabaseConnections,
   initialInvestigationMessage,
   investigationCapabilities,
   investigationMaxTurns,
@@ -1103,5 +1104,34 @@ describe("context server connection", () => {
 
     expect(server.connect).toHaveBeenCalledOnce();
     expect(sleep).not.toHaveBeenCalled();
+  });
+});
+
+describe("alert investigation context access", () => {
+  const projectRef = "abcdefghijklmnopqrst";
+  const readWrite = {
+    accessMode: "read_write" as const,
+    mcpUrl: `https://mcp.supabase.com/mcp?project_ref=${projectRef}&features=debugging%2Cdatabase`,
+    projectRef,
+  };
+  const logs = {
+    accessMode: "logs" as const,
+    mcpUrl: `https://mcp.supabase.com/mcp?project_ref=${projectRef}&features=debugging&read_only=true`,
+    projectRef,
+  };
+
+  it("opens read-write Supabase projects read-only when the request is not a person's", () => {
+    expect(investigationSupabaseConnections([readWrite, logs], { readOnly: true })).toEqual([
+      {
+        accessMode: "read_only",
+        mcpUrl: `https://mcp.supabase.com/mcp?project_ref=${projectRef}&features=debugging%2Cdatabase&read_only=true`,
+        projectRef,
+      },
+      logs,
+    ]);
+  });
+
+  it("keeps each Supabase project's access for a person's request", () => {
+    expect(investigationSupabaseConnections([readWrite, logs], { readOnly: false })).toEqual([readWrite, logs]);
   });
 });

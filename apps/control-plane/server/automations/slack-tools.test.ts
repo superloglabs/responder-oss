@@ -101,6 +101,51 @@ describe("automation Slack tools", () => {
     ]);
   });
 
+  it("lets a run an alert started read context channels but write only in its thread", async () => {
+    const alerted = claim({
+      trigger: {
+        ...slackTrigger,
+        attributes: { ...slackTrigger.attributes, authorId: "B1", authorType: "app", teamId: "T123" },
+      },
+    });
+    const deps = dependencies();
+
+    const tools = slackToolDefinitions(slackToolScope(alerted));
+    const post = tools.find((tool) => tool.name === "slack_post_message")!;
+    expect(post.inputSchema.required).toContain("thread_ts");
+    expect(post.inputSchema.properties.channel_id).toEqual({ enum: ["C999"], type: "string" });
+
+    await call(alerted, deps, "slack_read_channel", { channel_id: "C123" });
+    expect(deps.readChannel).toHaveBeenCalledOnce();
+
+    for (const [name, args] of [
+      ["slack_post_message", { channel_id: "C123", text: "context channel" }],
+      ["slack_post_message", { channel_id: "C123", text: "context thread", thread_ts: "50.000001" }],
+      ["slack_finish_file_upload", { channel_id: "C123", files: [{ file_id: "F0FILE1" }] }],
+      ["slack_add_reaction", { channel_id: "C123", name: "eyes", timestamp: "50.000001" }],
+      ["slack_remove_reaction", { channel_id: "C123", name: "eyes", timestamp: "50.000001" }],
+    ] as const) {
+      await expect(call(alerted, deps, name, args)).resolves.toMatchObject({ isError: true });
+    }
+    expect(deps.postMessage).not.toHaveBeenCalled();
+    expect(deps.finishFileUpload).not.toHaveBeenCalled();
+    expect(deps.addReaction).not.toHaveBeenCalled();
+    expect(deps.removeReaction).not.toHaveBeenCalled();
+
+    await call(alerted, deps, "slack_post_message", {
+      channel_id: "C999",
+      text: "Looking into it.",
+      thread_ts: "100.000001",
+    });
+    expect(deps.postMessage).toHaveBeenCalledOnce();
+  });
+
+  it("gives a run an alert started outside Slack no Slack writes", () => {
+    const names = toolNames(claim({ trigger: { provider: "sentry" } }));
+
+    expect(names).toEqual(["slack_search_channel", "slack_read_channel", "slack_read_thread"]);
+  });
+
   it("limits a trigger-only connection to the thread that started the run", async () => {
     const triggerOnly = claim({ roles: ["trigger"], trigger: slackTrigger });
     const deps = dependencies();
