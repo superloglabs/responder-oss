@@ -19,9 +19,14 @@ function skipSpaceBack(source: string, index: number): number {
   return index;
 }
 
+// The index of the bracket that opens the one at `closeIndex`: -1 when there
+// is none, TOO_FAR when it is further back than the scan reads.
+const TOO_FAR = -2;
+
 function matchingOpen(source: string, closeIndex: number, open: string, close: string): number {
   let depth = 0;
-  for (let i = closeIndex; i >= 0 && i > closeIndex - HEAD_SCAN_LIMIT; i -= 1) {
+  for (let i = closeIndex; i >= 0; i -= 1) {
+    if (i <= closeIndex - HEAD_SCAN_LIMIT) return TOO_FAR;
     if (source[i] === close) depth += 1;
     else if (source[i] === open && --depth === 0) return i;
   }
@@ -57,6 +62,8 @@ function functionHead(source: string, braceIndex: number): string | typeof ANONY
   if (returnType) end = end - returnType[0].length + 1;
   if (source[end] !== ")") return NOT_A_FUNCTION;
   const paramsStart = matchingOpen(source, end, "(", ")");
+  // A head too long to read names no function, rather than an outer one.
+  if (paramsStart === TOO_FAR) return ANONYMOUS;
   if (paramsStart < 0) return NOT_A_FUNCTION;
   let before = source.slice(Math.max(0, paramsStart - 200), paramsStart).replace(/\s*<[^<>]*>\s*$/, "");
   const declared = before.match(/function\s*\*?\s*([A-Za-z_$][\w$]*)?\s*$/);

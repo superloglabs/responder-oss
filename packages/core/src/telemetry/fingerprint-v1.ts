@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import {
   extractPsycopgHeadline,
-  frameLines,
+  MAXIMUM_FRAME_LINE_LENGTH,
   normalizeMessage,
   parsePythonFrames,
   pythonTracebackException,
@@ -93,7 +93,9 @@ function messageBucketFor(message: string | null | undefined): string {
 
 function parseJavaScriptFrames(lines: string[]): Frame[] {
   const out: Frame[] = [];
-  for (const raw of frameLines(lines, "first")) {
+  // The frozen fingerprint reads every line. Only lines too long to be frames
+  // are skipped, which bounds the work on each line.
+  for (const raw of lines.filter((line) => line.length <= MAXIMUM_FRAME_LINE_LENGTH)) {
     const line = raw.trim();
     if (!line.startsWith("at ")) continue;
     const body = line.slice(3);

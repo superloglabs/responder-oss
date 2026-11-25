@@ -58,26 +58,31 @@ export async function saveSourceMap(input: {
 export async function loadSourceMaps(organizationId: string, debugIds: string[], now = new Date()): Promise<Map<string, string>> {
   if (debugIds.length === 0) return new Map();
   const database = getDatabase();
+  const requested = and(eq(sourceMaps.organizationId, organizationId), inArray(sourceMaps.debugId, debugIds.slice(0, maximumRequestedMaps)));
   const sizes = await database
     .select({ debugId: sourceMaps.debugId, size: sourceMaps.size })
     .from(sourceMaps)
-    .where(and(eq(sourceMaps.organizationId, organizationId), inArray(sourceMaps.debugId, debugIds.slice(0, maximumRequestedMaps))));
+    .where(requested);
+  if (sizes.length === 0) return new Map();
+  // Every map an error still names is marked used, read now or not, so
+  // retention keeps it.
+  const dayAgo = new Date(now.getTime() - 86_400_000);
+  await database
+    .update(sourceMaps)
+    .set({ lastUsedAt: now })
+    .where(and(requested, or(isNull(sourceMaps.lastUsedAt), lt(sourceMaps.lastUsedAt, dayAgo))));
   const chosen = chooseSourceMaps(sizes);
   if (chosen.length === 0) return new Map();
-  const matching = and(eq(sourceMaps.organizationId, organizationId), inArray(sourceMaps.debugId, chosen));
   const rows = await database
     .select({ content: sourceMaps.content, debugId: sourceMaps.debugId, size: sourceMaps.size })
     .from(sourceMaps)
-    .where(matching);
-  if (rows.length > 0) {
-    const dayAgo = new Date(now.getTime() - 86_400_000);
-    await database
-      .update(sourceMaps)
-      .set({ lastUsedAt: now })
-      .where(and(matching, or(isNull(sourceMaps.lastUsedAt), lt(sourceMaps.lastUsedAt, dayAgo))));
-  }
+    .where(and(eq(sourceMaps.organizationId, organizationId), inArray(sourceMaps.debugId, chosen)));
+  // An upload between the two reads can replace a chosen map, so the limits
+  // are checked again on the rows read.
+  const kept = new Set(chooseSourceMaps(rows));
   const maps = new Map<string, string>();
   for (const row of rows) {
+    if (!kept.has(row.debugId)) continue;
     // The stored size is the map's size before compression.
     const content = await gunzipAsync(row.content, { maxOutputLength: Math.max(1, row.size) }).catch(() => null);
     if (content) maps.set(row.debugId, content.toString("utf8"));

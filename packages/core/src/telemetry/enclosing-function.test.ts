@@ -41,6 +41,11 @@ describe("enclosingFunctionName on large sources", () => {
     expect(performance.now() - started).toBeLessThan(1_000);
   });
 
+  it("names no function when the enclosing head is too long to read", () => {
+    const source = `function outer() {\n  function inner(${"a, ".repeat(5_000)}b) {\n    fail();\n  }\n}`;
+    expect(enclosingFunctionName(source, source.indexOf("fail()"))).toBeNull();
+  });
+
   it("still names a function whose body is long", () => {
     const source = `function checkout(cart) {\n${"  total += 1;\n".repeat(20_000)}  fail();\n}`;
     expect(enclosingFunctionName(source, source.indexOf("fail()"))).toBe("checkout");
