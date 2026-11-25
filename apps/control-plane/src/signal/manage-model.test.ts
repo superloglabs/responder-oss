@@ -71,6 +71,13 @@ describe("Signal manage pages", () => {
     expect(manageView("railway", "Railway", account({ details: { accessLevel: "read_only" } })).rows[0]?.value).toBe("Read only");
   });
 
+  it("shows a Render key's user and what disconnecting stops", () => {
+    const view = manageView("render", "Render", account({ displayName: "dev@example.com" }));
+    expect(view.connectedTo).toBe("dev@example.com");
+    expect(view.rows).toEqual([{ label: "API key", value: "Stored encrypted, used only to read", action: "Replace key" }]);
+    expect(view.disconnect).toContain("stops reading Render logs");
+  });
+
   it("shows a Vercel team, its projects, and that disconnecting removes the drains", () => {
     const view = manageView("vercel", "Vercel", account({ displayName: "Acme", resourceCount: 3, details: { scope: "team" } }));
     expect(view.connectedTo).toBe("Acme");

@@ -24,6 +24,7 @@ export const productIntegrationIds = [
   "honeycomb",
   "betterstack",
   "jira",
+  "render",
 ] as const;
 
 export type ProductIntegrationId = (typeof productIntegrationIds)[number];
@@ -40,6 +41,7 @@ export const automationOnlyIntegrationIds: ReadonlySet<ProductIntegrationId> = n
 // Only Signal uses these, so they are offered only with Signal on.
 export const signalOnlyIntegrationIds: ReadonlySet<ProductIntegrationId> = new Set([
   "jira",
+  "render",
 ]);
 
 interface IntegrationDefinition {
@@ -183,6 +185,13 @@ export const integrationCatalog: IntegrationDefinition[] = [
     id: "railway",
     name: "Railway",
     description: "Deployments, logs, and metrics, with optional redeploys.",
+    implemented: true,
+    requiredEnvironment: [],
+  },
+  {
+    id: "render",
+    name: "Render",
+    description: "Service logs read with an API key, so Signal sees each new error.",
     implemented: true,
     requiredEnvironment: [],
   },

@@ -134,6 +134,12 @@ export function manageView(provider: string, name: string, account: IntegrationA
         }],
         disconnect: `Signal deletes its access, stops reading Railway, and stops reading its environments' logs. To remove the authorization too, revoke Superlog in your Railway account settings. ${pastFindings}`,
       };
+    case "render":
+      return {
+        connectedTo: account.displayName,
+        rows: [{ label: "API key", value: "Stored encrypted, used only to read", action: "Replace key" }],
+        disconnect: `Signal deletes the stored key and stops reading Render logs. To stop the key working, delete it in Render's Account Settings. ${pastFindings}`,
+      };
     case "vercel":
       return {
         connectedTo: account.displayName,

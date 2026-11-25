@@ -26,6 +26,7 @@ describe("ProviderGlyph", () => {
     ["linear", "Linear", "LI"],
     ["posthog", "PostHog", "PH"],
     ["railway", "Railway", "RW"],
+    ["render", "Render", "RE"],
     ["sentry", "Sentry", "SE"],
     ["signoz", "SigNoz", "SZ"],
     ["slack", "Slack", "SL"],

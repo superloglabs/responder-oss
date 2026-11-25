@@ -45,6 +45,7 @@ export function SignalConnect({ page, ...props }: PageProps & { page: ConnectPag
     case "langfuse": return <LangfuseConnect {...props} />;
     case "aws": return <AwsConnect {...props} />;
     case "gcp": return <GcpConnect {...props} />;
+    case "render": return <RenderConnect {...props} />;
     default: return <OAuthApproval page={page} {...props} />;
   }
 }
@@ -583,6 +584,50 @@ function LangfuseConnect({ integration, listPath, onBack }: PageProps) {
     </div>
     <Actions onBack={onBack}>
       <Button type="submit" variant="primary" loading={submitting} disabled={!integration?.connectUrl || !baseUrl || !publicKey.trim() || !secretKey.trim()}>Connect Langfuse</Button>
+    </Actions>
+  </form>;
+}
+
+// --- Render ------------------------------------------------------------------
+
+// What Signal does with Render, shared by its connect and manage pages.
+export const renderSignalReads = "Superlog reads the logs of the Render services you choose every minute, so Signal sees each new error as it happens.";
+
+function RenderConnect({ integration, listPath, onBack }: PageProps) {
+  const [apiKey, setApiKey] = useState("");
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  async function connect(event: FormEvent) {
+    event.preventDefault();
+    if (!integration?.connectUrl || submitting) return;
+    setError("");
+    setSubmitting(true);
+    try {
+      // Back to this page, which then lists the services to read.
+      const body = await postJson(integration.connectUrl, { apiKey, returnTo: `${listPath}/render` }, "Unable to connect Render");
+      if (typeof body.redirectUrl !== "string") throw new Error("Unable to connect Render");
+      window.location.assign(body.redirectUrl);
+    } catch (failure) {
+      setError(errorMessage(failure, "Unable to connect Render"));
+      setSubmitting(false);
+    }
+  }
+
+  return <form className="signalConnectForm" onSubmit={(event) => void connect(event)}>
+    <Intro provider="render" title="Connect Render">{renderSignalReads} After you connect, choose the services or workspaces to read.</Intro>
+    <div className={`signalInput${error ? " signalInput--error" : ""}`}>
+      <label htmlFor="signal-render-key">API key</label>
+      <ol className="signalInstructions">
+        <li>In Render, open Account Settings → API Keys and create a key.</li>
+        <li>Paste it below. A Render key reaches every workspace you belong to; Superlog only reads services and logs with it.</li>
+      </ol>
+      <input id="signal-render-key" type="password" autoComplete="off" spellCheck={false} placeholder="rnd_…" required value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
+      {error ? <p className="signalFieldError" role="alert"><IconAlertCircle size={14} />{error}</p>
+        : <p>Stored encrypted. Signal never changes anything in Render.</p>}
+    </div>
+    <Actions onBack={onBack}>
+      <Button type="submit" variant="primary" loading={submitting} disabled={!integration?.connectUrl || !apiKey.trim()}>Connect Render</Button>
     </Actions>
   </form>;
 }

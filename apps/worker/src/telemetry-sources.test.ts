@@ -1,12 +1,15 @@
 import { describe, expect, it, vi } from "vitest";
 import { McpOAuthRefreshError } from "@responder/core/integrations/custom-mcp";
+import { renderRefusedKey } from "@responder/core/telemetry/sources/render-pull";
 import {
   type GcpTelemetryPullDependencies,
   type PostHogTelemetryPullDependencies,
   pullGcpTelemetrySources,
   pullPostHogTelemetrySources,
   pullRailwayTelemetrySources,
+  pullRenderTelemetrySources,
   type RailwayTelemetryPullDependencies,
+  type RenderTelemetryPullDependencies,
 } from "./telemetry-sources.js";
 
 const credentials = { projectId: "shop-prod", projectNumber: "123456789", sessionName: `responder-gcp-${"a".repeat(32)}` };
@@ -213,5 +216,125 @@ describe("pullPostHogTelemetrySources", () => {
       lastError: "PostHog refused the connection's access. Reconnect PostHog.",
       status: "failed",
     });
+  });
+});
+
+describe("pullRenderTelemetrySources", () => {
+  const source = (id: string, integrationAccountId: string, organizationId = "org-1") => ({
+    encryptedCredentials: `sealed-${integrationAccountId}`,
+    externalId: `srv-${id}`,
+    id,
+    integrationAccountId,
+    organizationId,
+    state: { kind: "service", ownerId: "tea-1" },
+  });
+
+  function renderDependencies(overrides: Partial<RenderTelemetryPullDependencies> = {}): RenderTelemetryPullDependencies {
+    return {
+      collectorUrl: () => "http://collector:4318",
+      decrypt: (encrypted) => ({ apiKey: `key-for-${encrypted}` }),
+      forward: vi.fn(async () => new Response(null, { status: 200 })),
+      list: vi.fn(async () => [source("a", "account-1"), source("b", "account-1"), source("c", "account-2", "org-2")]),
+      now: () => new Date("2026-11-25T10:00:00Z"),
+      pull: vi.fn<RenderTelemetryPullDependencies["pull"]>(async (input) => {
+        await input.forward({ resourceLogs: [] });
+        return {
+          behind: false,
+          pages: 1,
+          retryLater: false,
+          sources: new Map(input.sources.map((item) => [item.id, {
+            error: item.id === "b" ? "Logs: Render answered 400: bad" : null,
+            logs: item.id === "b" ? 0 : 3,
+            received: item.id !== "b",
+            state: { ...item.state, cursors: { [item.externalId]: { ids: [], ts: "2026-11-25T09:59:40.000Z" } } },
+            truncated: false,
+          }])),
+        };
+      }),
+      update: vi.fn(async () => undefined),
+      ...overrides,
+    };
+  }
+
+  it("reads each connection's sources together with its key, and records each source", async () => {
+    const deps = renderDependencies();
+
+    expect(await pullRenderTelemetrySources(deps)).toEqual({ failed: 1, sources: 3 });
+    expect(deps.pull).toHaveBeenCalledTimes(2);
+    expect(deps.pull).toHaveBeenCalledWith(expect.objectContaining({
+      apiKey: "key-for-sealed-account-1",
+      sources: [expect.objectContaining({ id: "a" }), expect.objectContaining({ id: "b" })],
+    }));
+    expect(deps.forward).toHaveBeenCalledWith(expect.objectContaining({ organizationId: "org-2", signal: "logs" }));
+    expect(deps.update).toHaveBeenCalledWith("a", expect.objectContaining({
+      lastError: null,
+      lastReceivedAt: new Date("2026-11-25T10:00:00Z"),
+      state: expect.objectContaining({ cursors: { "srv-a": { ids: [], ts: "2026-11-25T09:59:40.000Z" } } }),
+      status: "active",
+    }));
+    expect(deps.update).toHaveBeenCalledWith("b", expect.objectContaining({ lastError: "Logs: Render answered 400: bad", status: "failed" }));
+  });
+
+  it("marks a connection's sources failed when its key cannot be read, without logging the key", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const deps = renderDependencies({
+      decrypt: () => { throw new Error("Unable to decrypt credentials"); },
+      list: vi.fn(async () => [source("a", "account-1")]),
+    });
+
+    expect(await pullRenderTelemetrySources(deps)).toEqual({ failed: 1, sources: 1 });
+    expect(deps.pull).not.toHaveBeenCalled();
+    expect(deps.update).toHaveBeenCalledWith("a", { lastError: "Unable to decrypt credentials", status: "failed" });
+    log.mockRestore();
+  });
+
+  it("tells each connection which services another connection's source reads", async () => {
+    const deps = renderDependencies();
+
+    await pullRenderTelemetrySources(deps);
+
+    // Sources a and b (account-1) are service sources in org-1; c is in org-2.
+    expect(deps.pull).toHaveBeenCalledWith(expect.objectContaining({ readElsewhere: new Set(), sources: [expect.objectContaining({ id: "a" }), expect.objectContaining({ id: "b" })] }));
+    const other = renderDependencies({ list: vi.fn(async () => [source("a", "account-1"), { ...source("w", "account-2"), state: { kind: "workspace", ownerId: "tea-1" } }]) });
+    await pullRenderTelemetrySources(other);
+    expect(other.pull).toHaveBeenCalledWith(expect.objectContaining({ readElsewhere: new Set(["srv-a"]), sources: [expect.objectContaining({ id: "w" })] }));
+  });
+
+  it("saves every source even when one save fails, counting each failure once", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const update = vi.fn(async (id: string) => { if (id === "a") throw new Error("database busy"); });
+    const deps = renderDependencies({ list: vi.fn(async () => [source("a", "account-1"), source("b", "account-1")]), update });
+
+    expect(await pullRenderTelemetrySources(deps)).toEqual({ failed: 1, sources: 2 });
+    expect(update).toHaveBeenCalledTimes(2);
+    expect(update).toHaveBeenLastCalledWith("b", expect.objectContaining({ status: "failed" }));
+    error.mockRestore();
+  });
+
+  it("marks sources failed when Render refused the key, keeping the logs that arrived", async () => {
+    const deps = renderDependencies({
+      list: vi.fn(async () => [source("a", "account-1")]),
+      pull: vi.fn<RenderTelemetryPullDependencies["pull"]>(async (input) => ({
+        behind: false,
+        pages: 2,
+        retryLater: false,
+        sources: new Map(input.sources.map((item) => [item.id, { error: renderRefusedKey, logs: 4, received: true, state: item.state, truncated: false }])),
+      })),
+    });
+
+    await pullRenderTelemetrySources(deps);
+
+    expect(deps.update).toHaveBeenCalledWith("a", expect.objectContaining({
+      lastError: renderRefusedKey,
+      lastReceivedAt: new Date("2026-11-25T10:00:00Z"),
+      status: "failed",
+    }));
+  });
+
+  it("does nothing without a collector", async () => {
+    const deps = renderDependencies({ collectorUrl: () => null });
+
+    expect(await pullRenderTelemetrySources(deps)).toEqual({ failed: 0, sources: 0 });
+    expect(deps.list).not.toHaveBeenCalled();
   });
 });

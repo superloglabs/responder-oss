@@ -88,6 +88,11 @@ types. `drizzle/` contains the ordered schema history.
   environments a workspace chooses every minute and sends them to the
   collector as OTLP logs. It uses the token of the connection the
   environment was chosen with, read-only or redeploy, and only reads.
+- Render connects with an encrypted API key, which reaches every workspace
+  its user belongs to. The worker reads only the logs of the services and
+  workspaces a workspace chooses, within one shared budget of 24 log requests
+  a minute per connection, under Render's limit of 30 per user. Render has no investigation
+  tools.
 - Linear context uses its read-only MCP endpoint. Ticket creation goes through
   a separate controlled tool that records a stable request before writing and
   stores the resulting Linear identifier and link. Automations reach Linear

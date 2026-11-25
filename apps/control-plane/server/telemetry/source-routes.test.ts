@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { McpOAuthRefreshError } from "../../../../packages/core/src/integrations/custom-mcp.js";
 import { PostHogApiError } from "../../../../packages/core/src/integrations/posthog-api.js";
+import { RenderApiError } from "../../../../packages/core/src/integrations/render.js";
 import { VercelDrainError } from "../../../../packages/core/src/telemetry/sources/vercel-drains.js";
 import { createSourceRoutes, type SourceRouteDependencies } from "./source-routes.js";
 import { createVercelSourceAfterConnect, removeVercelSourcesBeforeDisconnect } from "./vercel-sources.js";
@@ -19,6 +20,16 @@ const railwayEnvironment = {
 };
 
 const postHogProject = { id: "12345", name: "Web app", organizationName: "Acme" };
+const renderWorkspace = { id: "tea-example", kind: "workspace" as const, ownerId: "tea-example", workspaceName: "Example Team" };
+const renderService = {
+  id: "srv-web",
+  kind: "service" as const,
+  ownerId: "tea-example",
+  region: "oregon",
+  serviceName: "web",
+  serviceType: "web_service",
+  workspaceName: "Example Team",
+};
 
 function routes(overrides: Partial<SourceRouteDependencies> = {}) {
   const dependencies: SourceRouteDependencies = {
@@ -41,6 +52,7 @@ function routes(overrides: Partial<SourceRouteDependencies> = {}) {
     postHogProjects: vi.fn(async () => ({ host: "https://eu.posthog.com" as const, projects: [postHogProject] })),
     providerConfigured: () => true,
     railwayEnvironments: vi.fn(async () => [railwayEnvironment]),
+    renderReadables: vi.fn(async () => [renderWorkspace, renderService]),
     revokeKey: vi.fn(async () => undefined),
     saveSource: vi.fn(async () => ({ id: sourceId, previousIngestKeyId: null, previousState: null })),
     tenant: vi.fn(async () => ({ ok: true as const, organizationId, role: "member", user: { id: "user-1" } })),
@@ -449,6 +461,105 @@ describe("telemetry source routes", () => {
 
     const failing = routes({ railwayEnvironments: vi.fn(async () => { throw new Error("Railway API error: slow down"); }) });
     expect((await post(failing.app, "/railway", { environmentId: "env-prod", integrationAccountId: accountId })).status).toBe(502);
+    expect(failing.dependencies.saveSource).not.toHaveBeenCalled();
+  });
+
+  it("lists what a Render key reads and the sources Superlog reads with it", async () => {
+    const reading = {
+      createdAt: "",
+      displayName: "Example Team · web",
+      externalId: "srv-web",
+      id: sourceId,
+      integrationAccountId: accountId,
+      lastError: null,
+      lastReceivedAt: null,
+      provider: "render" as const,
+      state: {},
+      status: "pending" as const,
+    };
+    const { app } = routes({ listSources: vi.fn(async () => [reading, { ...reading, integrationAccountId: "other", id: "other" }]) });
+
+    const response = await app.request(`/render/${accountId}`);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ readables: [renderWorkspace, renderService], sources: [reading] });
+  });
+
+  it("reads a Render service or a whole workspace with the connection's key, without an ingest key", async () => {
+    const { app, dependencies } = routes();
+
+    expect((await post(app, "/render", { integrationAccountId: accountId, resourceId: "srv-web" })).status).toBe(201);
+    expect(dependencies.createKey).not.toHaveBeenCalled();
+    expect(dependencies.saveSource).toHaveBeenCalledWith({
+      createdBy: "user-1",
+      displayName: "Example Team · web",
+      externalId: "srv-web",
+      integrationAccountId: accountId,
+      organizationId,
+      provider: "render",
+      state: {
+        cursors: {},
+        kind: "service",
+        ownerId: "tea-example",
+        region: "oregon",
+        serviceName: "web",
+        serviceType: "web_service",
+        services: {},
+        workspaceName: "Example Team",
+      },
+      status: "pending",
+    });
+
+    expect((await post(app, "/render", { integrationAccountId: accountId, resourceId: "tea-example" })).status).toBe(201);
+    expect(dependencies.saveSource).toHaveBeenLastCalledWith(expect.objectContaining({
+      displayName: "Example Team · All services",
+      externalId: "tea-example",
+      state: { cursors: {}, kind: "workspace", ownerId: "tea-example", services: {}, workspaceName: "Example Team" },
+    }));
+
+    expect((await post(app, "/render", { integrationAccountId: accountId, resourceId: "srv-elsewhere" })).status).toBe(404);
+    expect(dependencies.saveSource).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps a Render source's cursors when another connection adds it", async () => {
+    const reading = {
+      createdAt: "",
+      displayName: "Example Team · web",
+      externalId: "srv-web",
+      id: sourceId,
+      integrationAccountId: "old-connection",
+      lastError: null,
+      lastReceivedAt: null,
+      provider: "render" as const,
+      state: { cursors: { "srv-web": { ids: [], ts: "2026-11-25T09:59:40.000Z" } } },
+      status: "active" as const,
+    };
+    const { app, dependencies } = routes({ listSources: vi.fn(async () => [reading]) });
+
+    expect((await post(app, "/render", { integrationAccountId: accountId, resourceId: "srv-web" })).status).toBe(200);
+    expect(dependencies.saveSource).toHaveBeenCalledWith(expect.objectContaining({
+      integrationAccountId: accountId,
+      state: expect.objectContaining({ cursors: { "srv-web": { ids: [], ts: "2026-11-25T09:59:40.000Z" } } }),
+      status: "active",
+    }));
+  });
+
+  it("says why a Render key's services could not be listed", async () => {
+    expect((await routes({ renderReadables: vi.fn(async () => null) }).app.request(`/render/${accountId}`)).status).toBe(404);
+
+    const refused = await routes({
+      renderReadables: vi.fn(async () => { throw new RenderApiError("Render answered 401: unauthorized", "unauthorized", 401); }),
+    }).app.request(`/render/${accountId}`);
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toEqual({ error: "Render refused the API key. Connect Render again with a new key." });
+
+    const limited = await routes({
+      renderReadables: vi.fn(async () => { throw new RenderApiError("Render answered 429: rate limit exceeded", "retry_later", 429); }),
+    }).app.request(`/render/${accountId}`);
+    expect(limited.status).toBe(429);
+
+    const failing = routes({ renderReadables: vi.fn(async () => { throw new Error("socket hang up"); }) });
+    expect((await post(failing.app, "/render", { integrationAccountId: accountId, resourceId: "srv-web" })).status).toBe(502);
     expect(failing.dependencies.saveSource).not.toHaveBeenCalled();
   });
 

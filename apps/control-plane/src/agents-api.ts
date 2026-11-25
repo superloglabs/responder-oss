@@ -743,16 +743,17 @@ export async function fetchIntegrations(): Promise<IntegrationSummary[]> {
   );
 }
 
-// Signal also files findings in Jira, which automations do not use.
-const signalOnlyProviders: readonly string[] = ["jira"];
+// Signal also files findings in Jira and reads Render logs, which
+// automations do not use.
+const signalOnlyProviders: readonly string[] = ["jira", "render"];
 
 export type SignalIntegrationSummary = Omit<IntegrationSummary, "id"> & {
-  id: IntegrationSummary["id"] | "jira";
+  id: IntegrationSummary["id"] | "jira" | "render";
   // Jira only: Atlassian sign-in, when its OAuth app is configured.
   oauthConnectUrl?: string | null;
 };
 
-// The integrations Signal's pages offer: the ones above, and Jira.
+// The integrations Signal's pages offer: the ones above, Jira, and Render.
 export async function fetchSignalIntegrations(): Promise<SignalIntegrationSummary[]> {
   const response = await apiJson<{ integrations: SignalIntegrationSummary[] }>(
     "/api/integrations",

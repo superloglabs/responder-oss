@@ -42,6 +42,7 @@ the regions whose CloudWatch error lines Superlog receives (see CloudWatch Logs
 subscriptions), or, where the deployment has no log destinations, adds the
 CloudWatch telemetry source. The Google Cloud page adds the project's
 telemetry source, the Railway page chooses the environments whose logs
+Superlog reads, the Render page chooses the services and workspaces whose logs
 Superlog reads, the PostHog page chooses the projects whose error logs
 Superlog reads, and the Vercel page creates or removes the installation's
 drains (see Telemetry sources). Either way Signal reads new errors as
@@ -49,7 +50,7 @@ they arrive rather than only during an investigation.
 
 **Disconnect** calls `DELETE /api/integrations/<provider>/accounts/<id>`, where
 `<provider>` is `aws`, `axiom`, `datadog`, `gcp`, `grafana`, `langfuse`, `linear`, `posthog`,
-`railway`, `sentry`, or `vercel`. It deletes the stored credentials but does not revoke access on the
+`railway`, `render`, `sentry`, or `vercel`. It deletes the stored credentials but does not revoke access on the
 provider's side; each manage page says what to revoke there. A Vercel
 connection's drains are deleted and their ingest key revoked first; while
 Vercel refuses to delete a drain, the connection stays and the request fails
@@ -734,6 +735,26 @@ lines become error issues, which can trigger automations, alert, and start
 Signal. Signal setup lists Railway with the other telemetry sources; it
 connects read-only and its manage page chooses the environments.
 
+## Render
+
+Render gives Superlog the logs of the services a workspace chooses, so their
+errors become error issues and start Signal. It is offered only with Signal
+on and is set up only in Signal setup, which lists it with the other
+telemetry sources. It is a telemetry source only: investigations get no
+Render tools.
+
+Render has no OAuth for other apps. Connect it with an API key from Render's
+Account Settings → API Keys on Signal setup's Render page (`POST
+/api/integrations/render/connect` with `apiKey`); its manage page chooses the
+services and workspaces to read. Settings sends people there.
+Responder checks the key by listing the workspaces it reaches, stores it
+encrypted, and never returns or logs it. A Render key reaches every workspace
+its user belongs to and cannot be limited; Responder only reads workspaces,
+services, and logs with it, and does not set up Render's log streams. Each
+Render user is one connection, so a new key for the same person replaces the
+old one. From MCP or the management API, Render returns a secure setup link to
+Signal setup's Render page.
+
 ## Axiom
 
 Connect Axiom from Settings through the hosted MCP server's browser OAuth flow.
@@ -1331,6 +1352,43 @@ option needs a cell with a collector
   `level=`). Logs carry the Railway service name as `service.name` and the
   environment as `deployment.environment.name`. Removing the Railway
   connection removes its sources.
+- **Render**: on its Signal setup manage page, choose services, or whole
+  workspaces, among the first 50 workspaces a connected Render API key
+  reaches (`GET /api/telemetry/sources/render/<connection>`; `POST
+  /api/telemetry/sources/render` with `integrationAccountId` and
+  `resourceId`, a service or workspace ID). A workspace source reads every
+  running service in it, including services added later; a service with a
+  source of its own belongs to that source. Every minute the worker lists each
+  workspace's services and reads their logs through Render's logs API
+  (`GET /v1/logs`, forward, 100 lines a page), one read per workspace and
+  region, as Render requires, in batches of up to 50 services. Render allows
+  30 log requests a minute per user, so one pass spends at most 24 pages per
+  connection, split across its reads, and starts at a different read each
+  minute when there are more reads than pages. A pass that runs out keeps the
+  pages it read and the next continues there, and the worker logs
+  `render_telemetry_pulled` with `behind`. The same key connected in several
+  workspaces has a budget in each; Render's `rate limit exceeded` then slows
+  the reads as below. When Render
+  answers `rate limit exceeded` or `log retrieval is currently unavailable`,
+  the pass keeps what it read, stops reading with that key, and tries again
+  next minute without marking the source failed. Each service keeps its own
+  cursor: a time and the IDs of up to 1,000 lines at that time, so a line is
+  not sent twice. Delivery is at least once: when ingest refuses part of a
+  read, the whole read is sent again. A service that gets a source of its own
+  takes its workspace source's cursor, and the workspace source keeps that
+  cursor moving for when the service's source is removed. A service with a
+  source of its own under another Render connection is left to that source,
+  but its cursor is not handed over between connections. Reads stop 20 seconds behind the present, start five minutes back for
+  a new service, and skip ahead when more than an hour behind
+  (`truncated`). Build logs are left out. Lines of one stack trace from the
+  same instance join into one log, as for Railway, and request logs keep their
+  method, path, and status as `http.request.method`, `url.path`, and
+  `http.response.status_code`, so a request that failed with a server error
+  becomes an error issue. Logs carry the Render service name as
+  `service.name` and its region as `cloud.region`. A refused key marks every
+  source of the connection failed until it is connected again. Postgres and
+  Key Value logs are not read. Removing the Render connection removes its
+  sources.
 - **PostHog**: choose projects of a connected PostHog account on its Signal
   manage page (`GET /api/telemetry/sources/posthog/<connection>`; `POST
   /api/telemetry/sources/posthog` with `integrationAccountId` and

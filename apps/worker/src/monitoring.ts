@@ -25,6 +25,7 @@ export interface WorkerErrorContext {
     | "gcp_telemetry_pull"
     | "posthog_telemetry_pull"
     | "railway_telemetry_pull"
+    | "render_telemetry_pull"
     | "investigation"
     | "linear_ticket"
     | "remediation"

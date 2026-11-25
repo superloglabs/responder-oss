@@ -122,6 +122,7 @@ export const integrationProvider = pgEnum("integration_provider", [
   "honeycomb",
   "betterstack",
   "jira",
+  "render",
 ]);
 
 export const integrationResourceKind = pgEnum("integration_resource_kind", [
@@ -974,10 +975,11 @@ export const telemetryIngestKeys = pgTable(
 
 // A cloud provider that sends telemetry to the workspace:
 // Vercel drains, an AWS CloudFormation stack that streams through Firehose,
-// or a Google Cloud project, Railway environment, or PostHog project that the
-// worker reads. The external ID is the Vercel installation, the AWS stack's
-// resource prefix, the Google Cloud project ID, the Railway environment ID,
-// or the PostHog project ID. State holds what the provider needs, such as
+// or a Google Cloud project, Railway environment, PostHog project, or Render
+// service or workspace that the worker reads. The external ID is the Vercel
+// installation, the AWS stack's resource prefix, the Google Cloud project
+// ID, the Railway environment ID, the PostHog project ID, or the Render
+// service or workspace ID. State holds what the provider needs, such as
 // drain IDs or read cursors.
 export const telemetrySources = pgTable(
   "telemetry_sources",
@@ -986,7 +988,7 @@ export const telemetrySources = pgTable(
     organizationId: uuid("organization_id")
       .notNull()
       .references(() => organization.id, { onDelete: "cascade" }),
-    provider: text("provider").$type<"aws" | "gcp" | "posthog" | "railway" | "vercel">().notNull(),
+    provider: text("provider").$type<"aws" | "gcp" | "posthog" | "railway" | "render" | "vercel">().notNull(),
     externalId: text("external_id").notNull(),
     displayName: text("display_name").notNull(),
     integrationAccountId: uuid("integration_account_id").references(() => integrationAccounts.id, {

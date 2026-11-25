@@ -1,6 +1,7 @@
 import { apiErrorMessage } from "./agents-api";
 import type { TelemetrySourceAccountProvider, TelemetrySourceSummary } from "../../../packages/core/src/db/telemetry-sources";
 import type { PostHogProject } from "../../../packages/core/src/integrations/posthog-api";
+import type { RenderReadable } from "../../../packages/core/src/integrations/render";
 import { telemetryUnavailableCode } from "../../../packages/core/src/telemetry/sources/availability";
 
 export type { TelemetrySourceSummary };
@@ -75,6 +76,26 @@ export async function fetchRailwayLogReading(integrationAccountId: string): Prom
 
 export function readRailwayEnvironment(integrationAccountId: string, environmentId: string): Promise<{ sourceId: string }> {
   return request("/railway", { body: JSON.stringify({ environmentId, integrationAccountId }), method: "POST" });
+}
+
+// The Render workspaces and services one connection's key reads, and the
+// ones whose logs Superlog reads. Null when this workspace or cell cannot
+// receive telemetry.
+export type RenderLogReading = {
+  readables: RenderReadable[];
+  sources: TelemetrySourceSummary[];
+};
+
+export async function fetchRenderLogReading(integrationAccountId: string): Promise<RenderLogReading | null> {
+  const response = await fetch(`${base}/render/${encodeURIComponent(integrationAccountId)}`);
+  const body = (await response.json().catch(() => null)) as (RenderLogReading & { code?: string; error?: string }) | null;
+  if (response.status === 404 && body?.code === telemetryUnavailableCode) return null;
+  if (!response.ok || !body) throw new Error(apiErrorMessage(body, response.status));
+  return { readables: body.readables ?? [], sources: body.sources ?? [] };
+}
+
+export function readRenderResource(integrationAccountId: string, resourceId: string): Promise<{ sourceId: string }> {
+  return request("/render", { body: JSON.stringify({ integrationAccountId, resourceId }), method: "POST" });
 }
 
 // The projects one PostHog connection reads, and the ones whose error logs
