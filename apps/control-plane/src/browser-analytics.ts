@@ -20,8 +20,8 @@ async function getBrowserAnalyticsClient() {
   const projectToken = import.meta.env.VITE_POSTHOG_PROJECT_TOKEN?.trim();
   if (!projectToken) return null;
 
-  // The session recorder ships in our bundle and PostHog may not load any
-  // script at runtime, so no third-party code runs on signed-in pages.
+  // The session recorder ships in our bundle, and PostHog may not inject
+  // any script at runtime.
   clientPromise = import("posthog-js/dist/lazy-recorder")
     .then(() => import("posthog-js"))
     .then(({ default: client }) => {
