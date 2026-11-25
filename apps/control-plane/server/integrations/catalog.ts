@@ -41,6 +41,7 @@ export const automationOnlyIntegrationIds: ReadonlySet<ProductIntegrationId> = n
 // Only Signal uses these, so they are offered only with Signal on.
 export const signalOnlyIntegrationIds: ReadonlySet<ProductIntegrationId> = new Set([
   "jira",
+  "render",
 ]);
 
 interface IntegrationDefinition {
@@ -190,7 +191,7 @@ export const integrationCatalog: IntegrationDefinition[] = [
   {
     id: "render",
     name: "Render",
-    description: "Service logs read with an API key, so errors become issues and Signal sees them.",
+    description: "Service logs read with an API key, so Signal sees each new error.",
     implemented: true,
     requiredEnvironment: [],
   },

@@ -451,10 +451,10 @@ function DefaultIntegrationCard({
       window.location.assign("/signal/setup/context/jira");
       return;
     }
-    // Render is connected with an API key on its telemetry page, which also
-    // chooses the services to read.
+    // Render is connected and set up from Signal's own pages, which also
+    // choose the services to read.
     if (integration.id === "render") {
-      window.location.assign("/telemetry/setup/render");
+      window.location.assign("/signal/setup/telemetry/render");
       return;
     }
     if (integration.id === "datadog") {

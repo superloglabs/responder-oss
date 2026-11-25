@@ -19,12 +19,12 @@ function usesConsent(id: string): boolean {
   return consentProviders.has(id) || (id === "jira" && jiraOAuthConfigured());
 }
 
-// Where secure setup happens: Signal's own page for Jira, the Render
-// telemetry page for Render, else integrations. The context step works
-// during Signal's setup and once it is complete.
+// Where secure setup happens: Signal's own pages for Jira and Render, else
+// integrations. Signal's setup steps work during setup and once it is
+// complete.
 function secureSetupPath(id: z.infer<typeof provider>) {
   if (id === "jira") return "/signal/setup/context/jira";
-  return id === "render" ? "/telemetry/setup/render" : "/settings";
+  return id === "render" ? "/signal/setup/telemetry/render" : "/settings";
 }
 const connectionType = z.enum(["oauth", "secure_setup"]);
 
@@ -94,7 +94,7 @@ export const integrationConnectionOperations = [
           instructions: input.provider === "jira"
             ? "Open Signal's Jira setup to connect Jira Cloud. Do not enter credentials in chat. Return here afterward to verify the connection."
             : input.provider === "render"
-              ? "Open Render telemetry setup, paste a Render API key, and choose the services whose logs Superlog reads. Do not enter credentials in chat. Return here afterward to verify the connection."
+              ? "Open Signal's Render setup, paste a Render API key, and choose the services whose logs Superlog reads. Do not enter credentials in chat. Return here afterward to verify the connection."
               : `Open integrations and choose Add for ${definition.name} to complete secure setup. Do not enter credentials in chat. Return here afterward to verify the connection.`,
         };
       }

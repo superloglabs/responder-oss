@@ -78,7 +78,7 @@ export type SourceRouteDependencies = {
   // The PostHog projects a connection reads and the region that serves them;
   // null when the connection is gone or not connected.
   postHogProjects: (input: { integrationAccountId: string; organizationId: string }) => Promise<{ host: PostHogApiHost; projects: PostHogProject[] } | null>;
-  providerConfigured: (provider: "gcp" | "posthog" | "railway" | "render" | "vercel") => boolean;
+  providerConfigured: (provider: "gcp" | "posthog" | "railway" | "vercel") => boolean;
   // The Railway environments a connection shares; null when the connection
   // is gone or not connected.
   railwayEnvironments: (input: { integrationAccountId: string; organizationId: string }) => Promise<RailwayEnvironment[] | null>;
@@ -239,7 +239,6 @@ export function createSourceRoutes(dependencies: SourceRouteDependencies = defau
           gcp: dependencies.providerConfigured("gcp"),
           posthog: dependencies.providerConfigured("posthog"),
           railway: dependencies.providerConfigured("railway"),
-          render: dependencies.providerConfigured("render"),
           vercel: dependencies.providerConfigured("vercel"),
         },
         sources,

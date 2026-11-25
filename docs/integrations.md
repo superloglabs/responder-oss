@@ -738,19 +738,22 @@ connects read-only and its manage page chooses the environments.
 ## Render
 
 Render gives Superlog the logs of the services a workspace chooses, so their
-errors become error issues and start Signal. It is a telemetry source only:
-investigations get no Render tools.
+errors become error issues and start Signal. It is offered only with Signal
+on and is set up only in Signal setup, which lists it with the other
+telemetry sources. It is a telemetry source only: investigations get no
+Render tools.
 
 Render has no OAuth for other apps. Connect it with an API key from Render's
-Account Settings → API Keys, on **Add telemetry → Render** or on Signal
-setup's Render page (`POST /api/integrations/render/connect` with `apiKey`).
+Account Settings → API Keys on Signal setup's Render page (`POST
+/api/integrations/render/connect` with `apiKey`); its manage page chooses the
+services and workspaces to read. Settings sends people there.
 Responder checks the key by listing the workspaces it reaches, stores it
 encrypted, and never returns or logs it. A Render key reaches every workspace
 its user belongs to and cannot be limited; Responder only reads workspaces,
 services, and logs with it, and does not set up Render's log streams. Each
 Render user is one connection, so a new key for the same person replaces the
 old one. From MCP or the management API, Render returns a secure setup link to
-its telemetry page.
+Signal setup's Render page.
 
 ## Axiom
 
@@ -1349,8 +1352,8 @@ option needs a cell with a collector
   `level=`). Logs carry the Railway service name as `service.name` and the
   environment as `deployment.environment.name`. Removing the Railway
   connection removes its sources.
-- **Render**: choose services, or whole workspaces, that a connected Render
-  API key reaches (`GET /api/telemetry/sources/render/<connection>`; `POST
+- **Render**: on its Signal setup manage page, choose services, or whole
+  workspaces, that a connected Render API key reaches (`GET /api/telemetry/sources/render/<connection>`; `POST
   /api/telemetry/sources/render` with `integrationAccountId` and
   `resourceId`, a service or workspace ID). A workspace source reads every
   running service in it, including services added later; a service with a

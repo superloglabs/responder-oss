@@ -76,6 +76,21 @@ describe("connections from chat", () => {
     vi.mocked(organizationHasCapability).mockResolvedValue(true);
   });
 
+  it("offers Render only to Signal workspaces, through Signal's own setup page", async () => {
+    const listed = await executeOperation(list, caller, {});
+    expect(listed.body.integrations).toContainEqual(expect.objectContaining({ provider: "render", connectionType: "secure_setup" }));
+    const started = await executeOperation(start, caller, { provider: "render" });
+    expect(started.body).toMatchObject({
+      provider: "render", status: "setup_required", url: "https://superlog.example/signal/setup/telemetry/render",
+    });
+
+    vi.mocked(organizationHasCapability).mockImplementation(async (_organizationId, capability) => capability !== "signal");
+    const hidden = await executeOperation(list, caller, {});
+    expect((hidden.body.integrations as Array<{ provider: string }>).map((item) => item.provider)).not.toContain("render");
+    expect((await executeOperation(start, caller, { provider: "render" })).status).toBe(404);
+    vi.mocked(organizationHasCapability).mockResolvedValue(true);
+  });
+
   it("returns Atlassian consent for Jira once the OAuth app is configured", async () => {
     vi.stubEnv("JIRA_CLIENT_ID", "jira-client");
     vi.stubEnv("JIRA_CLIENT_SECRET", "jira-secret");

@@ -73,7 +73,7 @@ describe("telemetry source routes", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
       accounts: [{ displayName: "Acme", id: accountId, provider: "vercel" }],
-      providers: { gcp: true, posthog: true, railway: true, render: true, vercel: true },
+      providers: { gcp: true, posthog: true, railway: true, vercel: true },
       sources: [],
     });
   });

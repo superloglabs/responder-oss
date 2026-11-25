@@ -18,7 +18,8 @@ import { settingsRedirect } from "./urls.js";
 // used only to read workspaces, services, and logs, and is never logged or
 // returned.
 
-export const renderSetupPath = "/telemetry/setup/render";
+// Render is set up only in Signal setup, which also chooses the services.
+export const renderSetupPath = "/signal/setup/telemetry/render";
 
 export type RenderConnectionDependencies = {
   capture: typeof captureAnalyticsEvent;
