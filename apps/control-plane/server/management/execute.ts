@@ -1,4 +1,5 @@
 import * as Sentry from "@sentry/hono/node";
+import { createConcurrencyLimiter, WorkspaceBusyError, workspaceOperations } from "../workspace-limits.js";
 import { authenticateApiKey } from "../../../../packages/core/src/db/api-keys.js";
 import { authenticateOAuthAccessToken } from "../../../../packages/core/src/db/oauth-access-tokens.js";
 import { organizationHasCapability } from "../../../../packages/core/src/db/organization-capabilities.js";
@@ -75,6 +76,7 @@ export async function executeOperation(
   operation: ManagementOperation,
   context: ManagementContext,
   rawInput: unknown,
+  limiter: Pick<ReturnType<typeof createConcurrencyLimiter>, "run"> = workspaceOperations,
 ): Promise<ManagementResult> {
   const started = Date.now();
   let result: ManagementResult;
@@ -93,8 +95,10 @@ export async function executeOperation(
     if (!input.success) {
       throw new ManagementError(400, "Invalid request", "invalid_request", input.error.issues);
     }
+    // One workspace runs a bounded number of operations at once, so a burst
+    // of calls cannot take the process's shared capacity from the others.
     const value: unknown = JSON.parse(
-      JSON.stringify(await operation.run(context, input.data)),
+      JSON.stringify(await limiter.run(context.organizationId, () => operation.run(context, input.data))),
     );
     const output = operation.output.safeParse(value);
     if (!output.success) {
@@ -115,6 +119,11 @@ export async function executeOperation(
   } catch (error) {
     if (error instanceof ManagementError) {
       result = { body: errorBody(error), status: error.status };
+    } else if (error instanceof WorkspaceBusyError) {
+      result = {
+        body: { code: "workspace_busy", error: error.message, retryAfterSeconds: error.retryAfterSeconds },
+        status: 429,
+      };
     } else {
       Sentry.captureException(error);
       console.error(JSON.stringify({

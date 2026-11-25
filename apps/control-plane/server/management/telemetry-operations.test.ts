@@ -51,6 +51,8 @@ const app = new Hono()
   .route("/api/v1", managementApiRoutes)
   .route("/api/mcp", managementMcpRoutes);
 const clickhouse = { query: vi.fn() };
+// Operations query through the workspace's limited view of the store.
+const workspaceClient = expect.objectContaining({ query: expect.any(Function) });
 
 function api(path: string, body?: unknown) {
   return app.request(`/api/v1${path}`, {
@@ -161,7 +163,7 @@ describe("telemetry operations", () => {
     });
 
     expect(result.isError).toBeUndefined();
-    expect(mocks.queryLogs).toHaveBeenCalledWith(clickhouse, organizationId, {
+    expect(mocks.queryLogs).toHaveBeenCalledWith(workspaceClient, organizationId, {
       limit: 50,
       logAttrs: [{ key: "event.name", value: "payment.failed" }],
       range: { since: "2026-10-16T04:00:00.000Z", until: "2026-10-16T10:00:00.000Z" },
@@ -205,7 +207,7 @@ describe("telemetry operations", () => {
       statusCode: "STATUS_CODE_ERROR",
     });
 
-    expect(mocks.queryTraces).toHaveBeenCalledWith(clickhouse, organizationId, {
+    expect(mocks.queryTraces).toHaveBeenCalledWith(workspaceClient, organizationId, {
       limit: 50,
       minDurationMs: 500,
       range: { since: "2026-10-16T09:00:00.000Z", until: "2026-10-16T10:00:00.000Z" },
@@ -230,7 +232,7 @@ describe("telemetry operations", () => {
     const body = await response.json() as { logs: unknown[]; spans: unknown[] };
 
     expect(response.status).toBe(200);
-    expect(mocks.getTraceDetail).toHaveBeenCalledWith(clickhouse, organizationId, traceId);
+    expect(mocks.getTraceDetail).toHaveBeenCalledWith(workspaceClient, organizationId, traceId);
     expect(body.spans).toHaveLength(1);
     expect(body.logs).toHaveLength(1);
   });
@@ -266,7 +268,7 @@ describe("telemetry operations", () => {
     const body = await response.json() as { points: unknown[] };
 
     expect(response.status).toBe(200);
-    expect(mocks.queryMetrics).toHaveBeenCalledWith(clickhouse, organizationId, expect.objectContaining({
+    expect(mocks.queryMetrics).toHaveBeenCalledWith(workspaceClient, organizationId, expect.objectContaining({
       limit: 100,
       metricName: "http.server.duration",
     }));
@@ -334,5 +336,21 @@ describe("telemetry operations", () => {
       },
       isError: true,
     });
+  });
+});
+
+describe("MCP batches", () => {
+  it("refuses a JSON-RPC batch larger than 20 messages", async () => {
+    const message = (id: number) => ({ id, jsonrpc: "2.0", method: "tools/list", params: {} });
+    const send = (count: number) => app.request("/api/mcp", {
+      body: JSON.stringify(Array.from({ length: count }, (_, index) => message(index))),
+      headers: { accept: "application/json, text/event-stream", authorization: `Bearer ${token}`, "content-type": "application/json" },
+      method: "POST",
+    });
+
+    const refused = await send(21);
+    expect(refused.status).toBe(400);
+    expect(await refused.json()).toMatchObject({ error: { code: -32600 }, jsonrpc: "2.0" });
+    expect((await send(2)).status).toBe(200);
   });
 });

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { limitedTelemetryClient } from "../workspace-limits.js";
 import { organizationHasCapability } from "../../../../packages/core/src/db/organization-capabilities.js";
 import {
   createTelemetryAlert,
@@ -133,7 +134,7 @@ async function requireAlerts(context: ManagementContext): Promise<TelemetryClien
   if (!client || !telemetry || !alerts) {
     throw new ManagementError(404, "Alerts are not available in this workspace.", "alerts_unavailable");
   }
-  return client;
+  return limitedTelemetryClient(client, context.organizationId);
 }
 
 // Checks a whole alert with the rules the Alerts page applies.

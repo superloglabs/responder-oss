@@ -319,3 +319,37 @@ describe("CloudWatch Logs subscriptions through Superlog's Firehose stream", () 
     expect((await deliver(off.app, [{ data: message() }])).status).toBe(404);
   });
 });
+
+describe("ingest requests in flight per workspace", () => {
+  it("refuses a workspace's request past its limit and frees the slot when done", async () => {
+    let held = 0;
+    const inFlight = {
+      tryAcquire: vi.fn(() => {
+        if (held >= 1) return null;
+        held += 1;
+        return () => { held -= 1; };
+      }),
+    };
+    let finish!: () => void;
+    const forward = vi.fn(() => new Promise<Response>((resolve) => {
+      finish = () => resolve(new Response("{}", { status: 200 }));
+    }));
+    const { app } = routes({ forward, inFlight });
+
+    const first = send(app, "/v1/logs");
+    await vi.waitFor(() => expect(forward).toHaveBeenCalledTimes(1));
+    const refused = await send(app, "/v1/logs");
+    expect(refused.status).toBe(429);
+    expect(refused.headers.get("retry-after")).toBe("1");
+    const firehoseRefused = await app.request("/aws/firehose/logs", {
+      body: JSON.stringify({ records: [], requestId: "r" }),
+      headers: { "content-type": "application/json", "x-amz-firehose-access-key": token },
+      method: "POST",
+    });
+    expect(firehoseRefused.status).toBe(503);
+
+    finish();
+    expect((await first).status).toBe(200);
+    expect(held).toBe(0);
+  });
+});

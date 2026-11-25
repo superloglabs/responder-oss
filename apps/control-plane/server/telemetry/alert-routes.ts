@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { limitedTelemetryClient } from "../workspace-limits.js";
 import { z } from "zod";
 import { organizationHasCapability } from "../../../../packages/core/src/db/organization-capabilities.js";
 import {
@@ -101,7 +102,7 @@ export function createAlertRoutes(dependencies: AlertRouteDependencies = default
       dependencies.hasCapability(tenant.organizationId, "alerts"),
     ]);
     if (!client || !telemetry || !alerts) return { error: "Alerts are not available", ok: false, status: 404 };
-    return { client, ok: true, organizationId: tenant.organizationId, userId: tenant.user.id };
+    return { client: limitedTelemetryClient(client, tenant.organizationId), ok: true, organizationId: tenant.organizationId, userId: tenant.user.id };
   }
 
   // A channel the workspace can post alerts to, or null when there is none.

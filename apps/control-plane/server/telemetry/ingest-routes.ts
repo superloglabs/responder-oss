@@ -21,6 +21,7 @@ import {
   metricStreamRequest,
 } from "../../../../packages/core/src/telemetry/sources/aws-firehose.js";
 import { parseVercelLogs, vercelLogsToOtlp } from "../../../../packages/core/src/telemetry/sources/vercel-logs.js";
+import { workspaceIngestRequests } from "../workspace-limits.js";
 
 // OTLP over HTTP from applications, at /api/ingest/v1/{logs,traces,metrics}.
 // The key decides the workspace. Its organization ID is stamped as the
@@ -45,6 +46,8 @@ export type IngestRouteDependencies = {
   collectorUrl: () => string | null;
   findKey: typeof findTelemetryIngestKey;
   forward: typeof fetch;
+  // Requests one workspace may have in flight; see workspace-limits.ts.
+  inFlight?: { tryAcquire(organizationId: string): (() => void) | null };
   logSubscriptionWorkspace?: (awsAccountId: string, region: string) => Promise<string | null>;
   now: () => number;
   recordUse: (keyId: string) => Promise<void>;
@@ -69,6 +72,7 @@ const defaultDependencies: IngestRouteDependencies = {
 };
 
 const signals = new Set(["logs", "metrics", "traces"]);
+const busyBody = { error: "This workspace has too many ingest requests in progress. Retry shortly." };
 // How long a key lookup is reused. A revoked key stops working within it.
 const keyCacheMs = 60_000;
 const keyCacheLimit = 10_000;
@@ -97,6 +101,7 @@ export function createIngestRoutes(dependencies: IngestRouteDependencies = defau
   const subscriptionWorkspaces = new Map<string, { expires: number; organizationId: string | null }>();
   const logSubscriptionWorkspace = dependencies.logSubscriptionWorkspace ?? findAwsLogSubscriptionWorkspace;
   const cloudWatchLogsToken = dependencies.cloudWatchLogsToken ?? cloudWatchLogsIngestToken;
+  const inFlight = dependencies.inFlight ?? workspaceIngestRequests;
 
   // The workspace an AWS account's logs from a region belong to, cached like
   // ingest keys. A removed subscription stops being accepted within the cache
@@ -149,6 +154,52 @@ export function createIngestRoutes(dependencies: IngestRouteDependencies = defau
     }
   }
 
+  // One Firehose delivery of CloudWatch metrics or logs, converted to OTLP and
+  // forwarded to the workspace's collector.
+  async function deliverFirehose(
+    signal: "logs" | "metrics",
+    collector: string,
+    key: { keyId: string; organizationId: string },
+    reply: (status: 200 | 400 | 401 | 503, errorMessage?: string, requestId?: string) => Response,
+    headerRequestId: string,
+    raw: Request,
+    sourceArn: string | undefined,
+  ): Promise<Response> {
+    let request: ReturnType<typeof firehoseRequestSchema.parse>;
+    try {
+      request = firehoseRequestSchema.parse(JSON.parse((await requestBody(raw)).toString("utf8")));
+    } catch {
+      return reply(400, "Invalid Firehose request body");
+    }
+    const requestId = headerRequestId || request.requestId;
+    let response: Response | null = null;
+    try {
+      if (signal === "metrics") {
+        const body = metricStreamRequest(request);
+        if (body.length > 0) {
+          response = await forward({ body, collector, contentType: "application/x-protobuf", organizationId: key.organizationId, signal });
+          if (!response) return reply(503, "Telemetry ingest is unavailable", requestId);
+        }
+      } else {
+        const logs = await cloudWatchLogsToOtlp(request, firehoseSource(sourceArn), dependencies.now());
+        if (logs.records > 0) {
+          response = await forward({ body: JSON.stringify(logs.payload), collector, contentType: "application/json", organizationId: key.organizationId, signal });
+          if (!response) return reply(503, "Telemetry ingest is unavailable", requestId);
+        }
+      }
+    } catch (error) {
+      return reply(400, error instanceof Error ? error.message : "Invalid Firehose records", requestId);
+    }
+    // A rejected payload will not succeed on retry; a busy collector will.
+    if (response && !response.ok) {
+      return response.status >= 500 || response.status === 429
+        ? reply(503, `Telemetry ingest answered HTTP ${response.status}`, requestId)
+        : reply(400, `Telemetry ingest rejected the records with HTTP ${response.status}`, requestId);
+    }
+    void dependencies.recordUse(key.keyId).catch(() => undefined);
+    return reply(200, undefined, requestId);
+  }
+
   return new Hono()
     .use(
       "/v1/*",
@@ -167,15 +218,22 @@ export function createIngestRoutes(dependencies: IngestRouteDependencies = defau
       const token = bearerToken(context.req.raw.headers);
       const key = token ? await workspaceFor(token) : null;
       if (!key) return context.json({ error: "Send a valid ingest key as Authorization: Bearer <key>" }, 401);
+      const release = inFlight.tryAcquire(key.organizationId);
+      if (!release) return context.json(busyBody, 429, { "retry-after": "1" });
 
-      const response = await forward({
-        body: await context.req.arrayBuffer(),
-        collector,
-        contentEncoding: context.req.header("content-encoding"),
-        contentType: context.req.header("content-type") ?? "application/x-protobuf",
-        organizationId: key.organizationId,
-        signal,
-      });
+      let response: Response | null;
+      try {
+        response = await forward({
+          body: await context.req.arrayBuffer(),
+          collector,
+          contentEncoding: context.req.header("content-encoding"),
+          contentType: context.req.header("content-type") ?? "application/x-protobuf",
+          organizationId: key.organizationId,
+          signal,
+        });
+      } finally {
+        release();
+      }
       if (!response) return context.json({ error: "Telemetry ingest is unavailable" }, 503);
       void dependencies.recordUse(key.keyId).catch(() => undefined);
       // The collector's answer, such as a partial success or a retry hint.
@@ -191,16 +249,22 @@ export function createIngestRoutes(dependencies: IngestRouteDependencies = defau
       const token = bearerToken(context.req.raw.headers);
       const key = token ? await workspaceFor(token) : null;
       if (!key) return context.json({ error: "Send a valid ingest key as x-api-key" }, 401);
-      let payload: ReturnType<typeof vercelLogsToOtlp>;
+      const release = inFlight.tryAcquire(key.organizationId);
+      if (!release) return context.json(busyBody, 429, { "retry-after": "1" });
       try {
-        const body = await requestBody(context.req.raw);
-        payload = vercelLogsToOtlp(parseVercelLogs(body.toString("utf8"), context.req.header("content-type") ?? ""));
-      } catch {
-        return context.json({ error: "Send Vercel log drain records as JSON or NDJSON" }, 400);
-      }
-      if (payload.resourceLogs.length > 0) {
-        const response = await forward({ body: JSON.stringify(payload), collector, contentType: "application/json", organizationId: key.organizationId, signal: "logs" });
-        if (!response?.ok) return context.json({ error: "Telemetry ingest is unavailable" }, 503);
+        let payload: ReturnType<typeof vercelLogsToOtlp>;
+        try {
+          const body = await requestBody(context.req.raw);
+          payload = vercelLogsToOtlp(parseVercelLogs(body.toString("utf8"), context.req.header("content-type") ?? ""));
+        } catch {
+          return context.json({ error: "Send Vercel log drain records as JSON or NDJSON" }, 400);
+        }
+        if (payload.resourceLogs.length > 0) {
+          const response = await forward({ body: JSON.stringify(payload), collector, contentType: "application/json", organizationId: key.organizationId, signal: "logs" });
+          if (!response?.ok) return context.json({ error: "Telemetry ingest is unavailable" }, 503);
+        }
+      } finally {
+        release();
       }
       void dependencies.recordUse(key.keyId).catch(() => undefined);
       return context.body(null, 200);
@@ -217,39 +281,14 @@ export function createIngestRoutes(dependencies: IngestRouteDependencies = defau
       const token = context.req.header("x-amz-firehose-access-key")?.trim();
       const key = token ? await workspaceFor(token) : null;
       if (!key) return reply(401, "Invalid Superlog ingest key in the Firehose access key");
-      let request: ReturnType<typeof firehoseRequestSchema.parse>;
+      // Firehose retries any answer other than 200.
+      const release = inFlight.tryAcquire(key.organizationId);
+      if (!release) return reply(503, busyBody.error);
       try {
-        request = firehoseRequestSchema.parse(JSON.parse((await requestBody(context.req.raw)).toString("utf8")));
-      } catch {
-        return reply(400, "Invalid Firehose request body");
+        return await deliverFirehose(signal as "logs" | "metrics", collector, key, reply, headerRequestId, context.req.raw, context.req.header("x-amz-firehose-source-arn"));
+      } finally {
+        release();
       }
-      const requestId = headerRequestId || request.requestId;
-      let response: Response | null = null;
-      try {
-        if (signal === "metrics") {
-          const body = metricStreamRequest(request);
-          if (body.length > 0) {
-            response = await forward({ body, collector, contentType: "application/x-protobuf", organizationId: key.organizationId, signal });
-            if (!response) return reply(503, "Telemetry ingest is unavailable", requestId);
-          }
-        } else {
-          const logs = await cloudWatchLogsToOtlp(request, firehoseSource(context.req.header("x-amz-firehose-source-arn")), dependencies.now());
-          if (logs.records > 0) {
-            response = await forward({ body: JSON.stringify(logs.payload), collector, contentType: "application/json", organizationId: key.organizationId, signal });
-            if (!response) return reply(503, "Telemetry ingest is unavailable", requestId);
-          }
-        }
-      } catch (error) {
-        return reply(400, error instanceof Error ? error.message : "Invalid Firehose records", requestId);
-      }
-      // A rejected payload will not succeed on retry; a busy collector will.
-      if (response && !response.ok) {
-        return response.status >= 500 || response.status === 429
-          ? reply(503, `Telemetry ingest answered HTTP ${response.status}`, requestId)
-          : reply(400, `Telemetry ingest rejected the records with HTTP ${response.status}`, requestId);
-      }
-      void dependencies.recordUse(key.keyId).catch(() => undefined);
-      return reply(200, undefined, requestId);
     })
     // Superlog's own Firehose stream of customers' CloudWatch Logs
     // subscriptions. Records from accounts or regions without a subscription
