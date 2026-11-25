@@ -130,10 +130,14 @@ function SignalWizard({ data, organizationId, reload, setSettings, setOptions }:
     {step === "slack" && <FindingsDestinationPicker choice={destination} onChoose={setDestination}
       actions={actions} options={options} onOptions={setOptions} draft={draft} onDraft={setDraft}
       slackFailure={failedProvider === "slack" ? slackSignInProblem(searchParams.get("reason")) : null}
-      // Saved at once, since Signal checks the URL with a post. Unsaved choices are kept.
+      // Saved at once, since Signal checks the URL with a post. Choices made
+      // while it was checking are kept: they are read from the latest edit.
       onDiscordSaved={(saved) => {
         setSettings(saved, true);
-        setEdit({ base: saved, draft: { ...draft, discord: saved.discord, delivery: saved.delivery } });
+        setEdit((previous) => ({
+          base: saved,
+          draft: { ...(previous?.base === settings ? previous.draft : settings), discord: saved.discord, delivery: saved.delivery },
+        }));
       }} />}
 
     {step === "context" && <>

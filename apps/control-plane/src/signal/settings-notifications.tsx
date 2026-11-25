@@ -33,7 +33,7 @@ export function SettingsNotifications({ data, save, setSettings, status }: Setti
             ? <Button aria-label="Manage Slack" onClick={() => actions.manage("slack")}>Manage</Button>
             : <Button disabled={!actions.summary("slack")?.connectUrl} onClick={() => actions.connect("slack")}>Connect Slack</Button>} />
         <div className="signalSettingsCard--rows">
-          <SettingsRow label="Findings channel" description="Every finding is posted here.">
+          <SettingsRow label="Findings channel" description="Findings are posted here.">
             <ChannelSelect options={options} value={settings.slack}
               onChange={(slack) => save({ slack })} />
           </SettingsRow>
@@ -43,7 +43,7 @@ export function SettingsNotifications({ data, save, setSettings, status }: Setti
     <SettingsGroup title="Discord">
       <div className="signalSettingsCard signalSettingsCard--rows">
         <DiscordWebhook label="Discord channel" connected={settings.discord.connected} delivery={settings.delivery}
-          connectedDescription="Every finding is posted to your Discord channel. Feedback, Jira, and coding agents are on each finding's page."
+          connectedDescription="Findings are posted to your Discord channel. Feedback, Jira, and coding agents are on each finding's page."
           onSaved={(saved) => setSettings(saved, true)} />
       </div>
     </SettingsGroup>

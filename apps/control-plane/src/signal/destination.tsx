@@ -32,7 +32,7 @@ export function FindingsDestinationPicker({ choice, onChoose, actions, options, 
       description="Post each finding to a channel through a webhook. Actions stay on the finding's page.">
       <div className="signalDestination__details">
         <DiscordWebhook label="Webhook" connected={draft.discord.connected} delivery={draft.delivery}
-          connectedDescription="We posted a test message to the channel. Every finding goes there from now on."
+          connectedDescription="We posted a test message to the channel. Findings go there from now on."
           onSaved={onDiscordSaved} />
       </div>
     </Option>
@@ -96,7 +96,7 @@ function SlackDetails({ actions, options, onOptions, draft, onDraft, failure }: 
     </SettingsRow>
     {connected && <SettingsRow label="Findings channel"
       description={refreshError ? <RowError>Could not reload Slack's channels. Try again.</RowError>
-        : hasChannels ? "Every finding is posted here."
+        : hasChannels ? "Findings are posted here."
         : <RowError>The Slack app is not in any channel yet. In Slack, open the channel and invite the app, then refresh.</RowError>}>
       {hasChannels
         ? <ChannelSelect options={options} value={draft.slack} onChange={(slack) => onDraft({ ...draft, slack })} />
