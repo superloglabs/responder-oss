@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
-import { and, desc, eq, isNull, lt, or } from "drizzle-orm";
-import { member, user } from "./auth-schema.js";
+import { and, desc, eq, isNull, lt, lte, or } from "drizzle-orm";
+import { member, session, user } from "./auth-schema.js";
 import { getDatabase } from "./client.js";
 import { apiKeys } from "./schema.js";
 
@@ -44,30 +44,49 @@ export function apiKeyDisplayPrefix(token: string): string {
   return token.slice(0, displayedPrefixLength);
 }
 
-// Returns the key once. Only its digest is stored.
+export class EndedSessionError extends Error {
+  constructor() {
+    super("The session has ended");
+    this.name = "EndedSessionError";
+  }
+}
+
+// Returns the key once. Only its digest is stored. The key is created while
+// the session that asked for it is locked and still exists, so it cannot
+// slip in after a password reset or ban ends that session: revocation
+// deletes sessions first, waits for this lock, then revokes keys.
 export async function createApiKey(input: {
   name: string;
   organizationId: string;
+  sessionId: string;
   user: { email: string; id: string; name: string };
 }): Promise<{ key: ApiKeySummary; token: string }> {
   const token = generateApiKeyToken();
-  const rows = await getDatabase()
-    .insert(apiKeys)
-    .values({
-      createdBy: input.user.id,
-      name: input.name,
-      organizationId: input.organizationId,
-      prefix: apiKeyDisplayPrefix(token),
-      tokenHash: hashApiKeyToken(token),
-    })
-    .returning({
-      createdAt: apiKeys.createdAt,
-      id: apiKeys.id,
-      lastUsedAt: apiKeys.lastUsedAt,
-      name: apiKeys.name,
-      prefix: apiKeys.prefix,
-    });
-  const row = rows[0];
+  const row = await getDatabase().transaction(async (tx) => {
+    const sessions = await tx
+      .select({ id: session.id })
+      .from(session)
+      .where(and(eq(session.id, input.sessionId), eq(session.userId, input.user.id)))
+      .for("share");
+    if (sessions.length === 0) throw new EndedSessionError();
+    const rows = await tx
+      .insert(apiKeys)
+      .values({
+        createdBy: input.user.id,
+        name: input.name,
+        organizationId: input.organizationId,
+        prefix: apiKeyDisplayPrefix(token),
+        tokenHash: hashApiKeyToken(token),
+      })
+      .returning({
+        createdAt: apiKeys.createdAt,
+        id: apiKeys.id,
+        lastUsedAt: apiKeys.lastUsedAt,
+        name: apiKeys.name,
+        prefix: apiKeys.prefix,
+      });
+    return rows[0];
+  });
   if (!row) throw new Error("Unable to create API key");
   return { key: { ...row, createdBy: input.user }, token };
 }
@@ -124,7 +143,8 @@ export async function revokeApiKey(input: {
   return rows.length > 0;
 }
 
-// Resolves an active key whose creator is still a member of its workspace.
+// Resolves an active key whose creator is still a member of its workspace
+// and is not banned.
 export async function authenticateApiKey(
   token: string,
   now = new Date(),
@@ -155,6 +175,11 @@ export async function authenticateApiKey(
       and(
         eq(apiKeys.tokenHash, hashApiKeyToken(token)),
         isNull(apiKeys.revokedAt),
+        or(
+          isNull(user.banned),
+          eq(user.banned, false),
+          lte(user.banExpires, now),
+        ),
       ),
     )
     .limit(1);
