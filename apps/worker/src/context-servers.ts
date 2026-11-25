@@ -20,6 +20,7 @@ import {
   type ContextConnectionLoadOptions,
 } from "@responder/core/db/investigations";
 import { isAwsSessionLimitedMcpTool } from "@responder/core/integrations/aws-mcp";
+import { isObservationTool } from "@responder/core/integrations/mcp-observation";
 import { supabaseMcpUrl } from "@responder/core/integrations/supabase";
 import { createAwsMcpServer } from "./aws.js";
 import { createAwsInspectionTools } from "./aws-inspection-tools.js";
@@ -43,22 +44,7 @@ import { createVercelTools } from "./vercel.js";
 
 export type ContextMcpTool = Awaited<ReturnType<MCPServer["listTools"]>>[number];
 
-// Names that say a tool changes something. A tool that does not declare
-// itself read-only is left out when its name says it writes.
-const writeVerb = /(?:^|[_.\-\s])(?:create|update|delete|remove|edit|add|set|put|patch|post|write|mute|unmute|resolve|unresolve|assign|unassign|archive|unarchive|cancel|trigger|restart|redeploy|deploy|rollback|scale|enable|disable|install|uninstall|invite|link|unlink|merge|close|reopen|acknowledge|ack|snooze|silence|start|stop|pause|resume|apply|import|upload|send|notify|execute_sql|apply_migration)(?:$|[_.\-\s])/iu;
-
-// A tool an observer may call: it declares itself read-only, or declares nothing
-// and its name does not say it writes. A tool declared destructive or not
-// read-only is never allowed.
-export function isObservationTool(tool: ContextMcpTool): boolean {
-  const annotations = (tool as { annotations?: { readOnlyHint?: unknown; destructiveHint?: unknown } }).annotations;
-  if (annotations?.destructiveHint === true) return false;
-  if (annotations?.readOnlyHint === true) return true;
-  if (annotations?.readOnlyHint === false) return false;
-  // camelCase names, such as createMonitor, are split into words first.
-  const words = tool.name.replace(/([a-z0-9])([A-Z])/gu, "$1_$2");
-  return !writeVerb.test(words);
-}
+export { isObservationTool };
 
 async function passesFilter(
   filter: MCPToolFilterCallable | MCPToolFilterStatic | undefined,

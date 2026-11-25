@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { decryptCredentials, encryptCredentials } from "../../../../packages/core/src/credentials/encryption.js";
@@ -6,6 +7,7 @@ import {
   POSTHOG_MCP_URL,
   POSTHOG_READ_WRITE_MCP_URL,
 } from "../../../../packages/core/src/integrations/posthog.js";
+import { supabaseMcpUrl } from "../../../../packages/core/src/integrations/supabase.js";
 import { createAutomationContextBrokerRoutes } from "./context-broker.js";
 import { selfHostedGrafanaAnswer } from "./grafana-context.js";
 
@@ -1235,6 +1237,204 @@ describe("automation context broker", () => {
         rpcRequest({ id: 4, jsonrpc: "2.0", method: "resources/list" }),
       );
       expect(resources.status).toBe(404);
+    });
+  });
+
+  describe("a run an alert started", () => {
+    const alertTrigger = { provider: "sentry", title: "Checkout returns 503" };
+    const personTrigger = {
+      attributes: { authorId: "U1", authorType: "person", channelId: "C999", teamId: "T1", threadTimestamp: "1.000001", timestamp: "1.000001" },
+      provider: "slack",
+    };
+
+    beforeEach(() => {
+      vi.stubEnv("CREDENTIAL_ENCRYPTION_KEY", Buffer.alloc(32, 4).toString("base64"));
+    });
+
+    // Each test gets its own account, so the broker's tool listing cache does
+    // not carry tools over from another test.
+    function withTrigger(base: ReturnType<typeof claim>, trigger: Record<string, unknown>) {
+      return { ...base, account: { ...base.account, id: randomUUID() }, trigger } as ReturnType<typeof claim>;
+    }
+
+    // An MCP server with one read tool, one declared write, and one write
+    // that only its name reveals.
+    function fakeMcp(tools: Array<Record<string, unknown>>) {
+      return vi.fn(async (_url: string, init: RequestInit) => {
+        const body = JSON.parse(String(init.body)) as { id?: string; method: string };
+        if (body.method === "notifications/initialized") {
+          return new Response(null, { status: 202 });
+        }
+        const result = body.method === "initialize"
+          ? { capabilities: { tools: {} }, protocolVersion: "2025-06-18" }
+          : body.method === "tools/list"
+            ? { tools }
+            : { content: [{ text: "{\"ok\":true}", type: "text" }] };
+        return Response.json({ id: body.id, jsonrpc: "2.0", result });
+      });
+    }
+
+    async function listed(app: Hono) {
+      const response = await app.request(
+        `/api/automation-context-broker/v1/${accountId}`,
+        rpcRequest({ id: 1, jsonrpc: "2.0", method: "tools/list" }),
+      );
+      expect(response.status).toBe(200);
+      const body = await response.json() as { result: { tools: Array<{ name: string }> } };
+      return body.result.tools.map((tool) => tool.name);
+    }
+
+    function call(app: Hono, name: string, args: Record<string, unknown> = {}) {
+      return app.request(
+        `/api/automation-context-broker/v1/${accountId}`,
+        rpcRequest({ id: 2, jsonrpc: "2.0", method: "tools/call", params: { arguments: args, name } }),
+      );
+    }
+
+    const mixedTools = [
+      { annotations: { readOnlyHint: true }, inputSchema: { type: "object" }, name: "search_logs" },
+      { annotations: { readOnlyHint: false }, inputSchema: { type: "object" }, name: "mute_monitor" },
+      { inputSchema: { type: "object" }, name: "create_monitor" },
+    ];
+
+    function forwardedMethods(fetchMock: ReturnType<typeof vi.fn>) {
+      return (fetchMock.mock.calls as Array<[string, RequestInit]>)
+        .map(([, init]) => JSON.parse(String(init.body)) as { method: string; params?: { name?: string } })
+        .filter((body) => body.method === "tools/call")
+        .map((body) => body.params?.name);
+    }
+
+    it("serves only read-only tools of a read-write PostHog connection", async () => {
+      const { app, dependencies } = appFor(withTrigger(claim("posthog", {
+        accessLevel: "read_write",
+        authType: "oauth",
+        mcpUrl: POSTHOG_READ_WRITE_MCP_URL,
+        oauth: { tokens: { access_token: "posthog-token", refresh_token: "posthog-refresh" } },
+      }), alertTrigger));
+      dependencies.providerFetch.mockImplementation(fakeMcp(mixedTools));
+
+      expect(await listed(app)).toEqual(["search_logs"]);
+      expect((await call(app, "create_monitor")).status).toBe(400);
+      expect(forwardedMethods(dependencies.providerFetch)).toEqual([]);
+    });
+
+    it("still serves every tool of a read-write PostHog connection to a person's request", async () => {
+      const { app, dependencies } = appFor(withTrigger(claim("posthog", {
+        accessLevel: "read_write",
+        authType: "oauth",
+        mcpUrl: POSTHOG_READ_WRITE_MCP_URL,
+        oauth: { tokens: { access_token: "posthog-token", refresh_token: "posthog-refresh" } },
+      }), personTrigger));
+      dependencies.providerFetch.mockImplementation(fakeMcp(mixedTools));
+
+      expect(await listed(app)).toEqual(["search_logs", "mute_monitor", "create_monitor"]);
+    });
+
+    it("opens a read-write Supabase connection read-only", async () => {
+      const projectRef = "abcdefghijklmnopqrst";
+      const { app, dependencies } = appFor(withTrigger(claim("supabase", {
+        accessMode: "read_write",
+        authType: "oauth",
+        mcpUrl: supabaseMcpUrl({ accessMode: "read_write", projectRef }),
+        oauth: { tokens: { access_token: "supabase-token", refresh_token: "supabase-refresh" } },
+        projectRef,
+      }), alertTrigger));
+      dependencies.providerFetch.mockImplementation(fakeMcp([
+        { inputSchema: { type: "object" }, name: "execute_sql" },
+        { inputSchema: { type: "object" }, name: "get_logs" },
+      ]));
+
+      expect(await listed(app)).toEqual(["execute_sql", "get_logs"]);
+      expect((await call(app, "execute_sql", { query: "select 1" })).status).toBe(200);
+      const urls = (dependencies.providerFetch.mock.calls as Array<[string, RequestInit]>).map(([url]) => url);
+      expect(urls.length).toBeGreaterThan(0);
+      expect(urls.every((url) => url === supabaseMcpUrl({ accessMode: "read_only", projectRef }))).toBe(true);
+    });
+
+    it("offers no Railway redeploy or restart with redeploy access", async () => {
+      const base = claim("railway", {
+        accessLevel: "redeploy",
+        authType: "oauth",
+        oauth: {
+          tokens: {
+            access_token: "railway-token",
+            expires_in: 3600,
+            refresh_token: "railway-refresh",
+            scope: "openid offline_access workspace:member",
+            token_type: "bearer",
+          },
+        },
+        tokenIssuedAt: Date.now(),
+      });
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+      try {
+        const { app } = appFor(withTrigger({
+          ...base,
+          account: { ...base.account, metadata: { accessLevel: "redeploy", workspaces: [{ id: "w1", name: "Acme" }] } },
+        }, alertTrigger));
+
+        const names = await listed(app);
+        expect(names).not.toContain("redeploy_railway_deployment");
+        expect(names).not.toContain("restart_railway_deployment");
+        expect((await call(app, "redeploy_railway_deployment", { deploymentId: "d1" })).status).toBe(400);
+        expect(fetchMock).not.toHaveBeenCalled();
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
+    it("serves only read-only tools of a proxied provider such as Datadog", async () => {
+      const { app, dependencies } = appFor(withTrigger(claim("datadog", {
+        apiKey: "dd-api-secret",
+        applicationKey: "dd-app-secret",
+        authType: "api_keys",
+        site: "datadoghq.com",
+      }), alertTrigger));
+      dependencies.providerFetch.mockImplementation(fakeMcp(mixedTools));
+
+      expect(await listed(app)).toEqual(["search_logs"]);
+      expect((await call(app, "mute_monitor")).status).toBe(400);
+      expect((await call(app, "create_monitor")).status).toBe(400);
+      expect((await call(app, "search_logs")).status).toBe(200);
+      expect(forwardedMethods(dependencies.providerFetch)).toEqual(["search_logs"]);
+      const [, init] = (dependencies.providerFetch.mock.calls as Array<[string, RequestInit]>).at(-1)!;
+      expect(new Headers(init.headers).get("dd-api-key")).toBe("dd-api-secret");
+    });
+
+    it("serves only read-only tools of a custom MCP connection", async () => {
+      const { app, dependencies } = appFor(withTrigger(claim("custom_mcp", {
+        apiToken: "custom-api-token",
+        authType: "api_token",
+        mcpUrl: "https://mcp.example.test/api",
+      }), alertTrigger));
+      dependencies.providerFetch.mockImplementation(fakeMcp([
+        { inputSchema: { type: "object" }, name: "list_orders" },
+        { inputSchema: { type: "object" }, name: "refund_order" },
+        { inputSchema: { type: "object" }, name: "delete_order" },
+      ]));
+
+      // refund_order declares nothing and its name does not say it writes,
+      // so only an allowlist on the connection keeps it out.
+      expect(await listed(app)).toEqual(["list_orders", "refund_order"]);
+      expect((await call(app, "delete_order")).status).toBe(400);
+      expect(forwardedMethods(dependencies.providerFetch)).toEqual([]);
+    });
+
+    it("keeps a custom MCP connection's allowlist and drops its writes", async () => {
+      const limited = withTrigger(claim("custom_mcp", {
+        apiToken: "custom-api-token",
+        authType: "api_token",
+        mcpUrl: "https://mcp.example.test/limited",
+      }), alertTrigger);
+      limited.account.metadata = { allowedTools: ["list_orders", "delete_order"] };
+      const { app, dependencies } = appFor(limited);
+      dependencies.providerFetch.mockImplementation(fakeMcp([
+        { inputSchema: { type: "object" }, name: "list_orders" },
+        { inputSchema: { type: "object" }, name: "delete_order" },
+      ]));
+
+      expect(await listed(app)).toEqual(["list_orders"]);
     });
   });
 

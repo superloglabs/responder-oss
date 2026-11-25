@@ -61,6 +61,29 @@ records of Linear tickets created with it remain. OpenTelemetry has no connectio
 remove: services send data with ingest keys, managed in **Settings → Ingest
 keys**.
 
+## Runs that alerts start
+
+An alert's text comes from outside the workspace, so a run or investigation
+that an alert started only reads its connections, whatever access level they
+were connected with. Alerts here are runs started by Sentry, error issues,
+Axiom, SigNoz, Honeycomb, Better Stack, the webhook trigger, and Slack
+messages that an app posted, such as telemetry alerts and synthetic checks.
+Such a run:
+
+- gets only the tools of PostHog, custom MCP servers, Datadog, Honeycomb,
+  SigNoz, Better Stack, Axiom, Sentry, and ClickStack that declare themselves
+  read-only, or that declare nothing and whose names do not say they write;
+- opens a full-access Supabase project with `read_only=true`;
+- is not offered Railway redeploy or restart;
+- reads its Slack context channels but posts, uploads, and reacts only in the
+  thread that started it.
+
+It still reports through the automation's notification channels and can file a
+Linear ticket or open a pull request. Runs a person starts, such as a Slack
+message from a person, tag mode, or a scheduled run, keep each connection's
+access level. A custom MCP tool whose name does not say it writes can still
+write; limit the connection to selected tools for that.
+
 ## Linear
 
 Create a Responder-owned Linear OAuth app. Responder requests the `read`,
@@ -588,7 +611,8 @@ Automations reach PostHog through the run-scoped context broker at
 `/api/automation-context-broker/v1/<connection>`. The broker refreshes the
 OAuth token and lists tools itself. On a read-only connection it serves and
 forwards only tools annotated read-only; on a read-write connection it serves
-every tool the read-write MCP URL lists. PostHog is context only for
+every tool the read-write MCP URL lists, except to a run an alert started (see
+[Runs that alerts start](#runs-that-alerts-start)). PostHog is context only for
 automations. Runs start from another trigger, such as a watched Slack channel
 or a schedule.
 
@@ -698,8 +722,8 @@ editor, and choose an access level:
 
 - **Read only** requests `workspace:viewer`.
 - **Read and redeploy** requests `workspace:member`. Tag mode and automations
-  can then redeploy or restart a deployment when asked. Alert investigations
-  and scans still only read.
+  can then redeploy or restart a deployment when asked. Alert investigations,
+  automation runs that alerts start, and scans still only read.
 
 Railway does not register OAuth clients dynamically. Its client ID is the URL
 of a client metadata document that Responder serves, so no deployment-level
@@ -1006,7 +1030,8 @@ remain encrypted outside the repository investigation sandbox.
 For read-only data access, Supabase's handling of the MCP `read_only` parameter
 is the database mutation boundary: Responder cannot independently determine
 whether arbitrary SQL is read-only. Treat full database SQL access as production
-write access and grant it only to agents whose investigation workflow needs it.
+write access and grant it only to agents whose workflow needs it. Alert
+investigations open it read-only.
 Supabase recommends using its MCP server with development or test projects; if
 you connect production, prefer logs-only or read-only access.
 
@@ -1014,7 +1039,7 @@ Automations reach Supabase through the run-scoped context broker at
 `/api/automation-context-broker/v1/<connection>`. The broker refreshes the
 OAuth session, lists tools itself, and forwards calls only to the same
 allowlist, so a full-access connection can change data and schema from an
-automation too. Each project and access level is one server, and the run is
+automation too, unless an alert started the run. Each project and access level is one server, and the run is
 told which project and access level each server has. The OAuth tokens stay
 outside the sandbox.
 

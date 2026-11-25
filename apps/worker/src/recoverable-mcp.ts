@@ -50,6 +50,9 @@ export class RecoverableMcpServer implements MCPServer {
   constructor(
     private readonly server: MCPServer,
     private readonly describeError: (error: unknown) => string,
+    // When set, only the tools it allows are listed or called, such as the
+    // read-only tools of an investigation that an alert started.
+    private readonly allowTool?: (tool: McpTool) => boolean,
   ) {
     this.name = server.name;
     this.useStructuredContent = server.useStructuredContent;
@@ -58,9 +61,11 @@ export class RecoverableMcpServer implements MCPServer {
     this.errorFunction = server.errorFunction;
     // The server's own filter still decides which real tools are exposed.
     const filter = server.toolFilter;
-    this.toolFilter = filter
+    this.toolFilter = filter || allowTool
       ? async (context, tool) =>
-          tool === this.placeholder || allowedByFilter(filter, context, tool)
+          tool === this.placeholder ||
+          ((!allowTool || allowTool(tool)) &&
+            (!filter || await allowedByFilter(filter, context, tool)))
       : undefined;
   }
 
@@ -105,6 +110,7 @@ export class RecoverableMcpServer implements MCPServer {
     if (this.unavailableReason !== null) {
       return (await this.reconnect(toolName)).content;
     }
+    await this.assertAllowed(toolName);
     return this.server.callTool(toolName, args, meta, options);
   }
 
@@ -115,6 +121,7 @@ export class RecoverableMcpServer implements MCPServer {
     options?: MCPCallToolOptions,
   ): Promise<CallToolResult> {
     if (this.unavailableReason !== null) return this.reconnect(toolName);
+    await this.assertAllowed(toolName);
     if (this.server.callToolResult) {
       return this.server.callToolResult(toolName, args, meta, options);
     }
@@ -124,6 +131,14 @@ export class RecoverableMcpServer implements MCPServer {
   async invalidateToolsCache(): Promise<void> {
     this.tools = null;
     await this.server.invalidateToolsCache();
+  }
+
+  private async assertAllowed(toolName: string): Promise<void> {
+    if (!this.allowTool) return;
+    const tool = (await this.listTools()).find((candidate) => candidate.name === toolName);
+    if (!tool || !this.allowTool(tool)) {
+      throw new Error(`${toolName} is not available on ${this.name}`);
+    }
   }
 
   private reconnectTool(): McpTool {

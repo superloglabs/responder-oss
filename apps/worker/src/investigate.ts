@@ -44,7 +44,8 @@ import type {
   SlackThreadInvestigationJob,
 } from "@responder/core/jobs";
 import { investigationPrompt, toInvestigationInput } from "@responder/core/investigations/input";
-import { supabaseMcpUrl } from "@responder/core/integrations/supabase";
+import { supabaseMcpUrl, type SupabaseAccessMode } from "@responder/core/integrations/supabase";
+import { isObservationTool } from "@responder/core/integrations/mcp-observation";
 import { isSlackAssistantRequest } from "@responder/core/integrations/slack-assistant";
 import { customTagModeInstructions } from "@responder/core/agents/config";
 import { organizationHasCapability } from "@responder/core/db/organization-capabilities";
@@ -386,6 +387,25 @@ export function investigationCapabilities(replay: boolean) {
 export const investigationMaxTurns = 400;
 
 // Where a Slack assistant sends people to connect integrations.
+// Supabase projects as an investigation opens them: read-write projects are
+// opened read-only unless a person asked for the investigation.
+export function investigationSupabaseConnections<T extends {
+  accessMode: SupabaseAccessMode;
+  mcpUrl: string;
+  projectRef: string;
+}>(connections: T[], options: { readOnly: boolean }): T[] {
+  if (!options.readOnly) return connections;
+  return connections.map((connection) =>
+    connection.accessMode === "read_write"
+      ? {
+          ...connection,
+          accessMode: "read_only" as const,
+          mcpUrl: supabaseMcpUrl({ accessMode: "read_only", projectRef: connection.projectRef }),
+        }
+      : connection,
+  );
+}
+
 export function responderIntegrationsUrl(
   environment: NodeJS.ProcessEnv = process.env,
 ): string {
@@ -850,6 +870,9 @@ export async function runInvestigationAgent(
   const gcpServers = gcpConnections.flatMap((connection) =>
     createGcpMcpServers(connection, environment)
   );
+  // Investigations a person asked for in Slack keep each connection's own
+  // access. The rest, started by alerts or scans, only read.
+  const readOnlyContext = !threadMode;
   const datadogServer = datadogConnection
     ? createDatadogMcpServer(datadogConnection)
     : null;
@@ -870,7 +893,8 @@ export async function runInvestigationAgent(
       })
     : null;
   // Custom MCP contracts cannot guarantee observation-only tools, so scans do
-  // not attach them. Interactive investigations retain the configured server.
+  // not attach them. Alert investigations get only the tools that read, and
+  // Slack threads retain the configured server.
   const customMcpServers = scanMode
     ? []
     : customMcpConnections.map(createCustomMcpServer);
@@ -890,20 +914,9 @@ export async function runInvestigationAgent(
     ? createUpstashCliTools(upstashConnection)
     : [];
   const langfuseServers = langfuseConnections.map(createLangfuseMcpServer);
-  const effectiveSupabaseConnections = scanMode
-    ? supabaseConnections.map((connection) =>
-        connection.accessMode === "read_write"
-          ? {
-              ...connection,
-              accessMode: "read_only" as const,
-              mcpUrl: supabaseMcpUrl({
-                accessMode: "read_only",
-                projectRef: connection.projectRef,
-              }),
-            }
-          : connection,
-      )
-    : supabaseConnections;
+  const effectiveSupabaseConnections = investigationSupabaseConnections(supabaseConnections, {
+    readOnly: readOnlyContext,
+  });
   const supabaseServers = effectiveSupabaseConnections.map(createSupabaseMcpServer);
   const secrets = connectionSecrets([
     ...awsConnections,
@@ -944,6 +957,14 @@ export async function runInvestigationAgent(
       supabaseConnections,
       upstashConnection,
     });
+  // Providers whose servers can list tools that write, and that have no
+  // read-only mode of their own, are limited to the tools that read.
+  const observedServers = new Set<object>([
+    datadogServer,
+    sentryServer,
+    clickStackServer,
+    ...customMcpServers,
+  ].filter((server) => server !== null));
   const contextServers = [
     axiomServer,
     datadogServer,
@@ -965,7 +986,11 @@ export async function runInvestigationAgent(
     .filter((server): server is NonNullable<typeof server> => server !== null)
     // A provider outage should not stop the investigation. The agent sees the
     // error and decides whether to reconnect.
-    .map((server) => new RecoverableMcpServer(server, describeConnectError));
+    .map((server) => new RecoverableMcpServer(
+      server,
+      describeConnectError,
+      readOnlyContext && observedServers.has(server) ? isObservationTool : undefined,
+    ));
 
   const sandboxName = `responder-investigation-${job.investigationId}`;
   const sandbox = await workspaceSandbox(job.config.organizationId, config);

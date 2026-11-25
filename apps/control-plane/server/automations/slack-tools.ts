@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
+import { automationTriggerIsAlert } from "../../../../packages/core/src/automations/alert-trigger.js";
 import type { AutomationContextBrokerClaim } from "../../../../packages/core/src/db/automation-model-broker.js";
 import {
   appendAutomationRunEvent,
@@ -76,8 +77,11 @@ interface SlackTriggerThread {
 }
 
 interface SlackToolScope {
-  // Channels with full access, by ID.
+  // Context channels, by ID.
   channels: Map<string, string>;
+  // Whether the run may post and react in its context channels. A run an
+  // alert started only reads them and writes in its own thread.
+  channelWrites: boolean;
   thread: SlackTriggerThread | null;
 }
 
@@ -110,7 +114,11 @@ export function slackToolScope(claim: AutomationContextBrokerClaim): SlackToolSc
         timestamp: trigger.data.attributes.timestamp,
       }
     : null;
-  return { channels, thread };
+  return { channelWrites: !automationTriggerIsAlert(claim.trigger), channels, thread };
+}
+
+function canWriteChannel(scope: SlackToolScope, channelId: string): boolean {
+  return scope.channelWrites && scope.channels.has(channelId);
 }
 
 function inTriggerThread(
@@ -235,7 +243,7 @@ export function slackToolDefinitions(scope: SlackToolScope) {
     },
   ];
   const onlyThread = fullChannels.length === 0;
-  return [
+  const readTools = [
     ...channelTools,
     {
       annotations: { readOnlyHint: true },
@@ -253,6 +261,15 @@ export function slackToolDefinitions(scope: SlackToolScope) {
       },
       name: "slack_read_thread",
     },
+  ];
+  // A run an alert started writes only in the thread that started it.
+  const writeChannels = scope.channelWrites
+    ? allChannels
+    : scope.thread ? [scope.thread.channelId] : [];
+  if (writeChannels.length === 0) return readTools;
+  const writesOnlyThread = fullChannels.length === 0 || !scope.channelWrites;
+  return [
+    ...readTools,
     {
       annotations: {
         destructiveHint: false,
@@ -260,16 +277,16 @@ export function slackToolDefinitions(scope: SlackToolScope) {
         openWorldHint: true,
         readOnlyHint: false,
       },
-      description: `Post a message to a Slack channel as the Responder app. Set thread_ts to reply in a thread. Uses Slack mrkdwn formatting. A message with buttons holds at most ${maxSectionTextLength.toLocaleString("en-US")} characters of text.${onlyThread ? " Only replies in the thread that started this run are allowed." : ""}${threadNote(scope)}`,
+      description: `Post a message to a Slack channel as the Responder app. Set thread_ts to reply in a thread. Uses Slack mrkdwn formatting. A message with buttons holds at most ${maxSectionTextLength.toLocaleString("en-US")} characters of text.${writesOnlyThread ? " Only replies in the thread that started this run are allowed." : ""}${threadNote(scope)}`,
       inputSchema: {
         additionalProperties: false,
         properties: {
           buttons: automationButtonsInputSchema,
-          channel_id: { enum: allChannels, type: "string" },
+          channel_id: { enum: writeChannels, type: "string" },
           text: { maxLength: 40_000, minLength: 1, type: "string" },
           thread_ts: timestamp,
         },
-        required: onlyThread ? ["channel_id", "text", "thread_ts"] : ["channel_id", "text"],
+        required: writesOnlyThread ? ["channel_id", "text", "thread_ts"] : ["channel_id", "text"],
         type: "object",
       },
       name: "slack_post_message",
@@ -300,11 +317,11 @@ export function slackToolDefinitions(scope: SlackToolScope) {
         openWorldHint: true,
         readOnlyHint: false,
       },
-      description: `Post files uploaded with slack_start_file_upload to a Slack channel, or a thread with thread_ts, as one message with an optional comment. Up to ${maxSlackUploadFiles} files at once.${onlyThread ? " Only replies in the thread that started this run are allowed." : ""}${threadNote(scope)}`,
+      description: `Post files uploaded with slack_start_file_upload to a Slack channel, or a thread with thread_ts, as one message with an optional comment. Up to ${maxSlackUploadFiles} files at once.${writesOnlyThread ? " Only replies in the thread that started this run are allowed." : ""}${threadNote(scope)}`,
       inputSchema: {
         additionalProperties: false,
         properties: {
-          channel_id: { enum: allChannels, type: "string" },
+          channel_id: { enum: writeChannels, type: "string" },
           files: {
             items: {
               additionalProperties: false,
@@ -322,7 +339,7 @@ export function slackToolDefinitions(scope: SlackToolScope) {
           initial_comment: { description: "Text posted with the files. Uses Slack mrkdwn formatting.", maxLength: 4_000, minLength: 1, type: "string" },
           thread_ts: timestamp,
         },
-        required: onlyThread ? ["channel_id", "files", "thread_ts"] : ["channel_id", "files"],
+        required: writesOnlyThread ? ["channel_id", "files", "thread_ts"] : ["channel_id", "files"],
         type: "object",
       },
       name: "slack_finish_file_upload",
@@ -334,11 +351,11 @@ export function slackToolDefinitions(scope: SlackToolScope) {
         openWorldHint: true,
         readOnlyHint: false,
       },
-      description: `Add an emoji reaction to a Slack message, for example "eyes" or "white_check_mark".${onlyThread ? " Only the message that started this run and its thread's first message are allowed." : ""}${scope.thread ? ` The message that started this run is channel_id ${scope.thread.channelId}, timestamp ${scope.thread.timestamp}.` : ""}`,
+      description: `Add an emoji reaction to a Slack message, for example "eyes" or "white_check_mark".${writesOnlyThread ? " Only the message that started this run and its thread's first message are allowed." : ""}${scope.thread ? ` The message that started this run is channel_id ${scope.thread.channelId}, timestamp ${scope.thread.timestamp}.` : ""}`,
       inputSchema: {
         additionalProperties: false,
         properties: {
-          channel_id: { enum: allChannels, type: "string" },
+          channel_id: { enum: writeChannels, type: "string" },
           name: { maxLength: 100, minLength: 1, type: "string" },
           timestamp,
         },
@@ -354,11 +371,11 @@ export function slackToolDefinitions(scope: SlackToolScope) {
         openWorldHint: true,
         readOnlyHint: false,
       },
-      description: `Remove an emoji reaction that the Responder app added to a Slack message, for example "eyes" once the work is done.${onlyThread ? " Only the message that started this run and its thread's first message are allowed." : ""}${scope.thread ? ` The message that started this run is channel_id ${scope.thread.channelId}, timestamp ${scope.thread.timestamp}.` : ""}`,
+      description: `Remove an emoji reaction that the Responder app added to a Slack message, for example "eyes" once the work is done.${writesOnlyThread ? " Only the message that started this run and its thread's first message are allowed." : ""}${scope.thread ? ` The message that started this run is channel_id ${scope.thread.channelId}, timestamp ${scope.thread.timestamp}.` : ""}`,
       inputSchema: {
         additionalProperties: false,
         properties: {
-          channel_id: { enum: allChannels, type: "string" },
+          channel_id: { enum: writeChannels, type: "string" },
           name: { maxLength: 100, minLength: 1, type: "string" },
           timestamp,
         },
@@ -472,7 +489,7 @@ async function runTool(
     if (!parsed.success) return failure("Invalid tool arguments");
     const { buttons, channel_id: channelId, text, thread_ts: threadTimestamp } = parsed.data;
     if (
-      !scope.channels.has(channelId) &&
+      !canWriteChannel(scope, channelId) &&
       !inTriggerThread(scope, channelId, threadTimestamp)
     ) {
       return notAllowed;
@@ -543,7 +560,7 @@ async function runTool(
       thread_ts: threadTimestamp,
     } = parsed.data;
     if (
-      !scope.channels.has(channelId) &&
+      !canWriteChannel(scope, channelId) &&
       !inTriggerThread(scope, channelId, threadTimestamp)
     ) {
       return notAllowed;
@@ -584,7 +601,7 @@ async function runTool(
     const { channel_id: channelId, name: reaction, timestamp } = parsed.data;
     const triggerMessage = scope.thread?.channelId === channelId &&
       (scope.thread.timestamp === timestamp || scope.thread.threadTimestamp === timestamp);
-    if (!scope.channels.has(channelId) && !triggerMessage) return notAllowed;
+    if (!canWriteChannel(scope, channelId) && !triggerMessage) return notAllowed;
     const adding = name === "slack_add_reaction";
     await recordedWrite({
       claim,

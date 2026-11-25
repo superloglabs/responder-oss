@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { Hono } from "hono";
 import { z } from "zod";
+import { automationTriggerIsAlert } from "../../../../packages/core/src/automations/alert-trigger.js";
 import {
   automationModelBrokerTokenHash,
   readAutomationModelBrokerBearerToken,
@@ -22,6 +23,7 @@ import {
   parseBetterStackCredentials,
 } from "../../../../packages/core/src/integrations/betterstack.js";
 import { getDatadogSite } from "../../../../packages/core/src/integrations/datadog.js";
+import { isObservationTool } from "../../../../packages/core/src/integrations/mcp-observation.js";
 import {
   honeycombAuthorization,
   parseHoneycombCredentials,
@@ -55,6 +57,7 @@ import {
 } from "../../../../packages/core/src/integrations/railway.js";
 import {
   parseSupabaseCredentials,
+  supabaseMcpUrl,
   type SupabaseCredentials,
 } from "../../../../packages/core/src/integrations/supabase.js";
 import {
@@ -347,6 +350,7 @@ function customMcpContextServer(
   claim: AutomationContextBrokerClaim,
   allowedTools: string[],
   dependencies: ContextBrokerDependencies,
+  observeOnly: boolean,
 ): ManagedMcpServer | null {
   if (!claim.account.encryptedCredentials) return null;
   const { mcpUrl } = parseCustomMcpCredentials(
@@ -354,7 +358,7 @@ function customMcpContextServer(
   );
   const allowed = new Set(allowedTools);
   return {
-    cacheKey: `custom_mcp:${claim.account.id}:${createHash("sha256")
+    cacheKey: `custom_mcp:${claim.account.id}:${observeOnly ? "observe:" : ""}${createHash("sha256")
       .update(JSON.stringify([...allowed].sort()))
       .digest("hex")}`,
     fetch: dependencies.providerFetch,
@@ -364,11 +368,31 @@ function customMcpContextServer(
       if (!accessToken) throw new McpOAuthRefreshError(true);
       return new Headers({ authorization: `Bearer ${accessToken}` });
     },
-    isAllowed: (tool) => allowed.has(tool.name),
+    isAllowed: (tool) => allowed.has(tool.name) && (!observeOnly || isObservationTool(tool)),
     label: "Custom MCP",
     now: dependencies.customMcp.now,
     unavailableToolMessage: "Unknown tool or tool not allowed on this connection",
     url: mcpUrl,
+  };
+}
+
+// A proxied provider's MCP server limited to the tools an observer may call:
+// those that declare themselves read-only, or declare nothing and whose
+// names do not say they write.
+function observationContextServer(
+  claim: AutomationContextBrokerClaim,
+  target: { headers: Headers; url: string },
+  dependencies: ContextBrokerDependencies,
+): ManagedMcpServer {
+  return {
+    cacheKey: `observe:${claim.account.provider}:${claim.account.id}:${target.url}`,
+    fetch: dependencies.providerFetch,
+    headers: async () => new Headers(target.headers),
+    isAllowed: isObservationTool,
+    label: `${claim.account.provider} MCP`,
+    now: Date.now,
+    unavailableToolMessage: "This run was started by an alert, so it can only use tools that read",
+    url: target.url,
   };
 }
 
@@ -544,15 +568,17 @@ async function postHogAccessToken(
 
 // A read-only PostHog connection exposes only the tools PostHog marks as
 // read-only, as in investigations. A read-write connection exposes every tool
-// its MCP URL lists.
+// its MCP URL lists, except to a run an alert started.
 function postHogContextServer(
   claim: AutomationContextBrokerClaim,
   dependencies: ContextBrokerDependencies,
+  observeOnly: boolean,
 ): ManagedMcpServer | null {
   if (!claim.account.encryptedCredentials) return null;
-  const { accessLevel, mcpUrl } = parsePostHogCredentials(
+  const { accessLevel: connectionAccessLevel, mcpUrl } = parsePostHogCredentials(
     decryptCredentials<Record<string, unknown>>(claim.account.encryptedCredentials),
   );
+  const accessLevel = observeOnly ? "read_only" : connectionAccessLevel;
   return {
     cacheKey: `posthog:${claim.account.id}:${accessLevel}`,
     fetch: dependencies.providerFetch,
@@ -614,6 +640,7 @@ async function railwayResponse(
   request: z.infer<typeof requestSchema>,
   signal: AbortSignal,
   dependencies: ContextBrokerDependencies,
+  observeOnly: boolean,
 ): Promise<Response> {
   if (request.method.startsWith("notifications/")) {
     return new Response(null, { status: 202 });
@@ -639,9 +666,12 @@ async function railwayResponse(
       status: 404,
     });
   }
-  const { accessLevel } = parseRailwayCredentials(
-    decryptCredentials<Record<string, unknown>>(claim.account.encryptedCredentials),
-  );
+  // A run an alert started never redeploys or restarts.
+  const accessLevel = observeOnly
+    ? "read_only"
+    : parseRailwayCredentials(
+        decryptCredentials<Record<string, unknown>>(claim.account.encryptedCredentials),
+      ).accessLevel;
   const tools = railwayToolDefinitions(accessLevel);
   if (request.method === "tools/list") {
     return Response.json(rpcResult(request.id, { tools }));
@@ -656,7 +686,7 @@ async function railwayResponse(
   return Response.json(rpcResult(request.id, await callRailwayContextTool({
     args: request.params?.arguments,
     connection: {
-      accessLevel: credentials.accessLevel,
+      accessLevel: observeOnly ? "read_only" : credentials.accessLevel,
       accessToken: credentials.oauth.tokens!.access_token,
       workspaces: railwayClaimWorkspaces(claim),
     },
@@ -1018,6 +1048,8 @@ export function createAutomationContextBrokerRoutes(
     if (!parsed.success) {
       return context.json(rpcError(undefined, -32700, "Invalid MCP request"), 400);
     }
+    // A run an alert started only reads, whatever the connection allows.
+    const observeOnly = automationTriggerIsAlert(claim.trigger);
     // Only Google Cloud splits a connection into one endpoint per service.
     if (service && claim.account.provider !== "gcp") {
       return context.json(rpcError(parsed.data.id, -32601, "Connection does not expose context tools"), 404);
@@ -1048,6 +1080,7 @@ export function createAutomationContextBrokerRoutes(
           parsed.data,
           context.req.raw.signal,
           dependencies,
+          observeOnly,
         );
       }
       if (claim.account.provider === "aws" || claim.account.provider === "gcp") {
@@ -1094,23 +1127,28 @@ export function createAutomationContextBrokerRoutes(
         const credentials = parseSupabaseCredentials(
           decryptCredentials<Record<string, unknown>>(claim.account.encryptedCredentials),
         );
+        // A run an alert started opens a read-write project read-only.
+        const readOnly = observeOnly && credentials.accessMode === "read_write";
+        const accessMode = readOnly ? "read_only" : credentials.accessMode;
         return await managedServerResponse({
           dependencies,
           rawBody,
           request: context.req.raw,
           rpc: parsed.data,
           server: supabaseContextServer({
-            accessMode: credentials.accessMode,
+            accessMode,
             accessToken: () => supabaseAccessToken(claim, dependencies),
             accountId: claim.account.id,
             fetch: dependencies.providerFetch,
-            mcpUrl: credentials.mcpUrl,
+            mcpUrl: readOnly
+              ? supabaseMcpUrl({ accessMode, projectRef: credentials.projectRef })
+              : credentials.mcpUrl,
             now: dependencies.supabase.now,
           }),
         });
       }
       if (claim.account.provider === "posthog") {
-        const server = postHogContextServer(claim, dependencies);
+        const server = postHogContextServer(claim, dependencies, observeOnly);
         if (!server) {
           return context.json(rpcError(parsed.data.id, -32601, "Connection does not expose context tools"), 404);
         }
@@ -1135,7 +1173,7 @@ export function createAutomationContextBrokerRoutes(
         ? customMcpAllowedTools(claim.account.metadata)
         : null;
       if (customMcpTools) {
-        const server = customMcpContextServer(claim, customMcpTools, dependencies);
+        const server = customMcpContextServer(claim, customMcpTools, dependencies, observeOnly);
         if (!server) {
           return context.json(rpcError(parsed.data.id, -32601, "Connection does not expose context tools"), 404);
         }
@@ -1150,6 +1188,17 @@ export function createAutomationContextBrokerRoutes(
       const target = await providerTarget(claim, dependencies);
       if (!target) {
         return context.json(rpcError(parsed.data.id, -32601, "Connection does not expose context tools"), 404);
+      }
+      // The other providers' tools are forwarded as they are, except to a
+      // run an alert started, which gets the ones that only read.
+      if (observeOnly) {
+        return await managedServerResponse({
+          dependencies,
+          rawBody,
+          request: context.req.raw,
+          rpc: parsed.data,
+          server: observationContextServer(claim, target, dependencies),
+        });
       }
       return await proxyMcpRequest({
         dependencies,
