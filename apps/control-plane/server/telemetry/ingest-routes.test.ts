@@ -276,6 +276,20 @@ describe("CloudWatch Logs subscriptions through Superlog's Firehose stream", () 
     expect(second.resourceLogs[0].resource.attributes).toContainEqual({ key: "cloud.region", value: { stringValue: "us-east-1" } });
   });
 
+  it("sends the other workspaces' logs and asks for a retry when one workspace is at its limit", async () => {
+    const inFlight = { tryAcquire: vi.fn((id: string) => (id === organizationId ? null : () => undefined)) };
+    const { app, dependencies } = subscriptionRoutes({ inFlight });
+
+    const response = await deliver(app, [
+      { data: message() },
+      { data: message({ owner: "222233334444", subscriptionFilters: ["superlog-us-east-1"] }) },
+    ]);
+
+    expect(response.status).toBe(503);
+    const calls = vi.mocked(dependencies.forward).mock.calls;
+    expect(calls.map(([, init]) => (init!.headers as Headers).get("x-superlog-project-id"))).toEqual([otherOrganizationId]);
+  });
+
   it("drops accounts and regions without a subscription, and policies that are not Superlog's", async () => {
     const { app, dependencies } = subscriptionRoutes();
     const response = await deliver(app, [
@@ -317,5 +331,54 @@ describe("CloudWatch Logs subscriptions through Superlog's Firehose stream", () 
 
     const off = routes({ cloudWatchLogsToken: () => null });
     expect((await deliver(off.app, [{ data: message() }])).status).toBe(404);
+  });
+});
+
+describe("ingest requests in flight per workspace", () => {
+  it("refuses a workspace's request past its limit and frees the slot when done", async () => {
+    let held = 0;
+    const inFlight = {
+      tryAcquire: vi.fn(() => {
+        if (held >= 1) return null;
+        held += 1;
+        return () => { held -= 1; };
+      }),
+    };
+    let finish!: () => void;
+    const forward = vi.fn(() => new Promise<Response>((resolve) => {
+      finish = () => resolve(new Response("{}", { status: 200 }));
+    }));
+    const { app } = routes({ forward, inFlight });
+
+    const first = send(app, "/v1/logs");
+    await vi.waitFor(() => expect(forward).toHaveBeenCalledTimes(1));
+    const refused = await send(app, "/v1/logs");
+    expect(refused.status).toBe(429);
+    expect(refused.headers.get("retry-after")).toBe("1");
+    const firehoseRefused = await app.request("/aws/firehose/logs", {
+      body: JSON.stringify({ records: [], requestId: "r" }),
+      headers: { "content-type": "application/json", "x-amz-firehose-access-key": token },
+      method: "POST",
+    });
+    expect(firehoseRefused.status).toBe(503);
+
+    finish();
+    expect((await first).status).toBe(200);
+    expect(held).toBe(0);
+  });
+});
+
+describe("ingest key lookups", () => {
+  it("shares one lookup among requests that miss the cache together", async () => {
+    let finish!: (value: { keyId: string; lastUsedAt: null; organizationId: string }) => void;
+    const findKey = vi.fn(() => new Promise<{ keyId: string; lastUsedAt: null; organizationId: string }>((resolve) => { finish = resolve; }));
+    const { app } = routes({ findKey });
+
+    const requests = Array.from({ length: 5 }, () => send(app, "/v1/logs"));
+    await vi.waitFor(() => expect(findKey).toHaveBeenCalled());
+    finish({ keyId: "key-1", lastUsedAt: null, organizationId });
+
+    expect((await Promise.all(requests)).map((response) => response.status)).toEqual([200, 200, 200, 200, 200]);
+    expect(findKey).toHaveBeenCalledTimes(1);
   });
 });

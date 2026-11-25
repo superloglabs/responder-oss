@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { limitedTelemetryClient } from "../workspace-limits.js";
 import { agentEvents } from "../../../../packages/core/src/agent-events.js";
 import {
   createLogWatch,
@@ -126,7 +127,7 @@ async function telemetryClient(context: ManagementContext): Promise<TelemetryCli
   if (!client || !(await organizationReceivesTelemetry(context.organizationId))) {
     throw new ManagementError(404, "Telemetry is not available in this workspace.", "telemetry_unavailable");
   }
-  return client;
+  return limitedTelemetryClient(client, context.organizationId);
 }
 
 const errorStatus = { invalid_window: 400, telemetry_query_timeout: 503, trace_not_found: 404 } as const;

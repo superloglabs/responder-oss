@@ -218,11 +218,26 @@ export const mcpUnauthorizedBody = {
   error: "Connect with OAuth, or send a valid API key as `Authorization: Bearer <key>`. Create keys in Superlog under Settings → API keys.",
 };
 
+// JSON-RPC messages one request may carry. Each tool call in a batch runs at
+// once, so a large batch would be a burst of work from one request.
+export const maximumMcpBatchMessages = 20;
+
 async function handleMcpRequest(
   request: Request,
   caller: ManagementContext,
   options: { readOnly?: boolean } = {},
 ): Promise<Response> {
+  const parsedBody: unknown = await request.clone().json().catch(() => undefined);
+  if (Array.isArray(parsedBody) && parsedBody.length > maximumMcpBatchMessages) {
+    return Response.json(
+      {
+        error: { code: -32600, message: `Send at most ${maximumMcpBatchMessages} messages in one batch.` },
+        id: null,
+        jsonrpc: "2.0",
+      },
+      { status: 400 },
+    );
+  }
   const server = createManagementMcpServer(caller, {
     ...options,
     capabilities: await listEnabledOrganizationCapabilities(caller.organizationId),
@@ -233,7 +248,7 @@ async function handleMcpRequest(
   });
   await server.connect(transport);
   try {
-    return await transport.handleRequest(request);
+    return await transport.handleRequest(request, parsedBody === undefined ? undefined : { parsedBody });
   } finally {
     await server.close().catch(() => undefined);
   }

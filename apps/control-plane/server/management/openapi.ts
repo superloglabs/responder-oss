@@ -137,6 +137,7 @@ function openApiOperation(operation: ManagementOperation) {
       ...(operation.effect !== "read"
         ? { "409": errorResponse("The request conflicts with the current state, such as a name already in use.") }
         : {}),
+      "429": errorResponse("The workspace has too many requests in progress (`workspace_busy`). Retry after the `Retry-After` header's seconds."),
     },
     security: [{ bearerAuth: [] }],
     summary: operation.summary,

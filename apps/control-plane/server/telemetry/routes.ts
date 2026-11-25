@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { limitedTelemetryClient } from "../workspace-limits.js";
 import { z } from "zod";
 import { organizationHasCapability, organizationReceivesTelemetry } from "../../../../packages/core/src/db/organization-capabilities.js";
 import {
@@ -593,7 +594,7 @@ export function createTelemetryRoutes(
     if (!client || !(await allowed(tenant.organizationId))) {
       return { error: "Telemetry is not available", ok: false, status: 404 };
     }
-    return { client, ok: true, organizationId: tenant.organizationId };
+    return { client: limitedTelemetryClient(client, tenant.organizationId), ok: true, organizationId: tenant.organizationId };
   }
 
   type ExplorerFilter = SeriesFilter & { range: Required<TimeRange>; resourceAttrs: ResourceAttrFilter[] };
