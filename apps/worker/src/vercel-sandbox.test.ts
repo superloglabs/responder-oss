@@ -13,6 +13,7 @@ import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { encryptCredentials } from "@responder/core/credentials/encryption";
 import type { VercelSandboxConfig } from "@responder/core/sandbox-config";
+import { sandboxNetworkFor } from "@responder/core/sandbox-network";
 import { resumeSandbox, serializeSandboxSession } from "./sandbox-runtime.js";
 import { miseVersionsHost, vercelSandboxPath } from "./sandbox-snapshot.js";
 import { containsDaytonaSecretPlaceholder } from "./secret-safety.js";
@@ -65,10 +66,7 @@ describe("secretNetworkPolicy", () => {
   });
 });
 
-const application = {
-  brokerPathPattern: "^/api/automation-(?:model|context)-broker/(?:[A-Za-z0-9_~-][A-Za-z0-9._~-]*/?)*(?:\\?.*)?$",
-  host: "superlog.sh",
-};
+const { application } = sandboxNetworkFor({ allowedDomains: [], restricted: true }, "https://superlog.sh")!;
 
 interface FirewallRule {
   forwardURL?: string;
@@ -209,6 +207,18 @@ describe("secretNetworkPolicy for a restricted workspace", () => {
         path: "/api/automation-model-broker/v1/messages",
       });
       expect(headers).toMatchObject({ authorization: "Bearer run-token", cookie: "", "x-api-key": "run-token" });
+    });
+
+    it("follows a path prefix on the application URL", () => {
+      const prefixed = secretNetworkPolicy([], {
+        ...sandboxNetworkFor({ allowedDomains: [], restricted: true }, "https://superlog.sh/app")!,
+        brokerToken: "run-token",
+      });
+      const headers = { authorization: "Bearer run-token" };
+      expect(throughFirewall(prefixed, "superlog.sh", { headers, path: "/app/api/automation-model-broker/v1/messages" }).refused)
+        .toBe(false);
+      expect(throughFirewall(prefixed, "superlog.sh", { headers, path: "/api/automation-model-broker/v1/messages" }).refused)
+        .toBe(true);
     });
 
     it("refuses other paths, other tokens, and paths that resolve elsewhere", () => {
