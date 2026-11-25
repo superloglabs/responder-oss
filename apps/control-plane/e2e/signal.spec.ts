@@ -726,6 +726,32 @@ test("chooses the coding agents findings open in and sends a test message", asyn
   await page.getByRole("button", { name: /^Move Capy/u }).press("ArrowUp");
   await expect.poll(() => signal.settings.codingAgents.agents).toEqual(["capy", "claude"]);
 
+  // Dragging a handle onto another agent's row moves it there, with a mouse
+  // and with a finger.
+  const center = async (name: RegExp) => {
+    const box = (await page.getByRole("button", { name }).boundingBox())!;
+    return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  };
+  const claude = await center(/^Move Claude Code/u);
+  const capy = await center(/^Move Capy/u);
+  await page.mouse.move(claude.x, claude.y);
+  await page.mouse.down();
+  await page.mouse.move(capy.x, capy.y, { steps: 5 });
+  await page.mouse.up();
+  await expect.poll(() => signal.settings.codingAgents.agents).toEqual(["claude", "capy"]);
+
+  const touch = await page.context().newCDPSession(page);
+  const from = await center(/^Move Capy/u);
+  const to = await center(/^Move Claude Code/u);
+  await touch.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [from] });
+  for (const step of [0.25, 0.5, 0.75, 1]) {
+    await touch.send("Input.dispatchTouchEvent", {
+      type: "touchMove", touchPoints: [{ x: from.x, y: from.y + (to.y - from.y) * step }],
+    });
+  }
+  await touch.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await expect.poll(() => signal.settings.codingAgents.agents).toEqual(["capy", "claude"]);
+
   await page.getByLabel("Claude Code app").selectOption("web");
   await expect.poll(() => signal.settings.codingAgents.claudeSurface).toBe("web");
   await expect(page.getByText("Opens a new session in Claude Code on the web.")).toBeVisible();

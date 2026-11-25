@@ -1,4 +1,4 @@
-import { useState, type DragEvent, type KeyboardEvent } from "react";
+import { useState, type KeyboardEvent, type PointerEvent } from "react";
 import { IconCheck, IconGripVertical, IconSend } from "@tabler/icons-react";
 import { codingAgentMarks } from "../coding-agent-marks";
 import { Button, Switch } from "../design-system";
@@ -19,45 +19,68 @@ const claudeDescriptions: Record<SignalClaudeSurface, string> = {
 
 // The coding agents a finding's Slack message opens in. Each button fills
 // in a prompt about the finding; nothing runs until the person sends it.
+// An agent turned on is moved by dragging its handle, with a mouse, a
+// finger, or a pen, or with the arrow keys on the handle.
 export function CodingAgentRows({ value, onChange }: {
   value: SignalCodingAgents;
   onChange: (next: SignalCodingAgents) => void;
 }) {
-  const [dragging, setDragging] = useState<number | null>(null);
+  // The order while a handle is dragged; it is saved when the drag ends.
+  const [dragOrder, setDragOrder] = useState<SignalCodingAgent[] | null>(null);
+  const [dragged, setDragged] = useState<SignalCodingAgent | null>(null);
+  const shown = dragOrder ?? value.agents;
 
   function toggle(agent: SignalCodingAgent, on: boolean) {
     const agents = on ? [...value.agents, agent] : value.agents.filter((candidate) => candidate !== agent);
     onChange({ ...value, agents });
   }
 
-  function move(from: number, to: number) {
-    const agents = moveAgent(value.agents, from, to);
+  function save(agents: SignalCodingAgent[]) {
     if (agents.some((agent, index) => agent !== value.agents[index])) onChange({ ...value, agents });
   }
 
-  function drop(event: DragEvent, to: number) {
+  function key(event: KeyboardEvent, index: number) {
+    const to = event.key === "ArrowUp" ? index - 1 : event.key === "ArrowDown" ? index + 1 : null;
+    if (to === null) return;
     event.preventDefault();
-    if (dragging !== null) move(dragging, to);
-    setDragging(null);
+    save(moveAgent(value.agents, index, to));
   }
 
-  function key(event: KeyboardEvent, index: number) {
-    if (event.key === "ArrowUp") { event.preventDefault(); move(index, index - 1); }
-    if (event.key === "ArrowDown") { event.preventDefault(); move(index, index + 1); }
+  function startDrag(event: PointerEvent<HTMLButtonElement>, agent: SignalCodingAgent) {
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setDragged(agent);
+    setDragOrder(value.agents);
+  }
+
+  // Moves the dragged agent to the row under the pointer.
+  function drag(event: PointerEvent<HTMLButtonElement>) {
+    const agent = dragged;
+    if (!agent || !dragOrder) return;
+    const row = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>("[data-agent]");
+    const to = dragOrder.indexOf(row?.dataset.agent as SignalCodingAgent);
+    const from = dragOrder.indexOf(agent);
+    if (to >= 0 && to !== from) setDragOrder(moveAgent(dragOrder, from, to));
+  }
+
+  function endDrag() {
+    if (dragOrder) save(dragOrder);
+    setDragged(null);
+    setDragOrder(null);
   }
 
   return <ul className="signalAgents" aria-label="Coding agents">
-    {agentRows(value).map(({ agent, on }) => {
+    {agentRows({ ...value, agents: shown }).map(({ agent, on }) => {
       const details = agentDetails[agent];
-      const index = value.agents.indexOf(agent);
-      return <li key={agent} className={`signalAgent${dragging === index && on ? " signalAgent--dragging" : ""}`}
-        draggable={on}
-        onDragStart={() => setDragging(index)}
-        onDragEnd={() => setDragging(null)}
-        onDragOver={(event) => { if (on && dragging !== null) event.preventDefault(); }}
-        onDrop={(event) => drop(event, index)}>
+      const index = shown.indexOf(agent);
+      return <li key={agent} data-agent={agent}
+        className={`signalAgent${dragged === agent ? " signalAgent--dragging" : ""}`}>
         <span className="signalAgent__handle">
-          {on && <button type="button" aria-label={`Move ${details.name}. Use the up and down arrow keys.`} onKeyDown={(event) => key(event, index)}>
+          {on && <button type="button" aria-label={`Move ${details.name}. Use the up and down arrow keys.`}
+            onKeyDown={(event) => key(event, index)}
+            onPointerDown={(event) => startDrag(event, agent)}
+            onPointerMove={drag}
+            onPointerUp={endDrag}
+            onPointerCancel={endDrag}>
             <IconGripVertical size={14} />
           </button>}
         </span>

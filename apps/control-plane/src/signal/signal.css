@@ -432,9 +432,8 @@
 .signalAgent { display: flex; align-items: center; gap: 12px; padding: 16px 0; }
 .signalAgent + .signalAgent { border-top: .5px solid #00000014; }
 .signalAgent--dragging { opacity: .5; }
-.signalAgent[draggable="true"] { cursor: grab; }
 .signalAgent__handle { display: flex; width: 20px; flex-shrink: 0; justify-content: center; }
-.signalAgent__handle button { display: flex; padding: 2px; border: 0; border-radius: 4px; background: none; color: #a0a0a0; cursor: grab; }
+.signalAgent__handle button { display: flex; padding: 2px; border: 0; border-radius: 4px; background: none; color: #a0a0a0; cursor: grab; touch-action: none; }
 .signalAgent__handle button:hover, .signalAgent__handle button:focus-visible { color: #444; }
 .signalAgent__logo { width: 24px; height: 24px; flex-shrink: 0; border-radius: 5px; object-fit: contain; }
 .signal .signalAgent__surface { width: 140px; }
