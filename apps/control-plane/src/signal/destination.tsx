@@ -24,6 +24,8 @@ export function FindingsDestinationPicker({ choice, onChoose, actions, options, 
   slackFailure: string | null;
 }) {
   return <div className="signalDestinations" role="radiogroup" aria-label="Where Signal posts findings">
+    {/* Native radios, so arrow keys move between the options. Both panels
+        stay mounted, so a Discord check in flight keeps its state. */}
     <Option provider="slack" name="Slack" selected={choice === "slack"} onSelect={() => onChoose("slack")}
       description="Post each finding to a channel, with Helpful, Jira, and coding agent buttons.">
       <SlackDetails actions={actions} options={options} onOptions={onOptions} draft={draft} onDraft={onDraft} failure={slackFailure} />
@@ -48,12 +50,14 @@ function Option({ provider, name, description, selected, onSelect, children }: {
   children: ReactNode;
 }) {
   return <div className={`signalDestination${selected ? " signalDestination--selected" : ""}`}>
-    <button type="button" role="radio" aria-checked={selected} className="signalDestination__option" onClick={onSelect}>
+    <label className="signalDestination__option">
+      <input type="radio" name="signal-findings-destination" value={provider} className="srOnly"
+        checked={selected} onChange={onSelect} aria-describedby={`signal-destination-${provider}`} />
       <span className="signalRadio" aria-hidden="true" />
       <span className="signalLogoSlot"><SignalLogo provider={provider} /></span>
-      <span className="signalDestination__label"><strong>{name}</strong><span>{description}</span></span>
-    </button>
-    {selected && children}
+      <span className="signalDestination__label"><strong>{name}</strong><span id={`signal-destination-${provider}`}>{description}</span></span>
+    </label>
+    <div hidden={!selected}>{children}</div>
   </div>;
 }
 

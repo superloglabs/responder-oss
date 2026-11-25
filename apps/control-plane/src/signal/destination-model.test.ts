@@ -17,6 +17,8 @@ describe("findings destination", () => {
     expect(destinationBlocker("slack", none, false)).toBe("Connect Slack to continue.");
     expect(destinationBlocker("slack", none, true)).toBe("Choose a findings channel to continue.");
     expect(destinationBlocker("slack", { slack, discord: { connected: false } }, true)).toBeNull();
+    // A channel saved before Slack was disconnected does not count.
+    expect(destinationBlocker("slack", { slack, discord: { connected: false } }, false)).toBe("Connect Slack to continue.");
     expect(destinationBlocker("discord", none, true)).toBe("Connect Discord to continue.");
     expect(destinationBlocker("discord", { slack: null, discord: { connected: true } }, false)).toBeNull();
     // A Slack channel does not count once Discord is chosen.

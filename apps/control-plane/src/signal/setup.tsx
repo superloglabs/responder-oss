@@ -3,7 +3,7 @@ import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-r
 import { authClient } from "../auth-client";
 import { Button } from "../design-system";
 import { useDocumentTitle } from "../use-document-title";
-import { findingsDestinationChosen, saveSignalSettings, type SignalSettings } from "./model";
+import { findingsDestinationChosen, saveDiscordWebhook, saveSignalSettings, type SignalSettings } from "./model";
 import { SignalPlanStep } from "./plan";
 import { contextSources, isConnectPage, slackScanReady, sourceActions, sourceName, telemetrySources, useOtelServices, useSetupData, type SetupData } from "./setup-data";
 import { RepositoryPicker, SlackChannelChecklist, slackScanLabel, SlackScanSwitch, SourcePage, SourceRows } from "./setup-shared";
@@ -100,6 +100,23 @@ function SignalWizard({ data, organizationId, reload, setSettings, setOptions }:
     }
   }
 
+  // Findings go to the one destination chosen: choosing Slack removes a
+  // Discord webhook saved earlier in this step, and choosing Discord drops
+  // the Slack channel.
+  async function continueFromDestination() {
+    if (destination === "slack" && draft.discord.connected) {
+      setSaving(true);
+      try {
+        setSettings(await saveDiscordWebhook(null), true);
+      } catch (failure) {
+        setError(failure instanceof Error ? failure.message : "Could not remove the Discord webhook.");
+        setSaving(false);
+        return;
+      }
+    }
+    await save({ ...draft, slack: destination === "slack" ? draft.slack : null, discord: { connected: destination === "discord" } }, "context");
+  }
+
   // A provider's own site sends people back here with the outcome.
   const failedProvider = searchParams.get("status") === "error" ? searchParams.get("integration") : null;
   const header = <header className="signalWelcome"><h1>Welcome to Superlog</h1><p>Step {stepNumber[step]} out of 5</p></header>;
@@ -172,7 +189,7 @@ function SignalWizard({ data, organizationId, reload, setSettings, setOptions }:
         </Button>
         : step === "slack" ? <DestinationContinue blocker={destinationBlocker(destination, draft, actions.connected("slack"))} saving={saving}
           // Only the chosen destination is kept, so findings go where the person picked.
-          onContinue={() => void save({ ...draft, slack: destination === "slack" ? draft.slack : null }, "context")} />
+          onContinue={() => void continueFromDestination()} />
         : step === "context" ? <ContextContinue draft={draft} saving={saving}
           anyConnected={contextSources.some((source) => actions.connected(source.provider))}
           onContinue={() => void save(draft, "plan")} />

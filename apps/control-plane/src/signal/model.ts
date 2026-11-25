@@ -290,7 +290,12 @@ export function discordWebhookUrlProblem(value: string): string | null {
 // Saves the webhook URL of a Discord channel, or removes it with null.
 // Signal posts a short message to the channel to check the URL first.
 export async function saveDiscordWebhook(webhookUrl: string | null) {
-  const response = await fetch("/api/signal/settings/discord", jsonBody("PUT", { webhookUrl }));
+  let response: Response;
+  try {
+    response = await fetch("/api/signal/settings/discord", jsonBody("PUT", { webhookUrl }));
+  } catch {
+    throw new DiscordSaveError("Could not reach Superlog. Try again in a minute.", "unavailable");
+  }
   const body = await response.json().catch(() => null) as (SignalSettings & { code?: string }) | null;
   if (!response.ok) {
     const code = body?.code;

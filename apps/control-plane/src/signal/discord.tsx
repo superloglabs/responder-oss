@@ -77,9 +77,9 @@ export function DiscordWebhook({ label, connected, delivery, connectedDescriptio
     </SettingsRow>;
   }
 
-  // The URL may be fine when Discord did not answer, so the field is not
-  // marked wrong then.
-  const invalid = error !== null && error.code !== "unavailable";
+  // Only errors about the URL itself mark the field; the URL may be fine
+  // when Discord did not answer or the save failed for another reason.
+  const invalid = error?.code === "invalid_url" || error?.code === "refused";
   return <SettingsRow stacked label="Webhook URL" description={discordInstructions}>
     <form className="signalWebhookForm" onSubmit={submit}>
       <div className="signalWebhookForm__field">

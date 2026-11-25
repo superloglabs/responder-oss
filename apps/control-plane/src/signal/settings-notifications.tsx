@@ -18,7 +18,7 @@ import { DiscordWebhook } from "./discord";
 import { ChannelSelect } from "./setup-shared";
 import { SettingsGroup, SettingsPage, SettingsRow, SourceRow } from "./shared";
 
-export function SettingsNotifications({ data, save, setSettings, status }: SettingsPageProps) {
+export function SettingsNotifications({ data, save, saved, setSettings, status }: SettingsPageProps) {
   const navigate = useNavigate();
   const { integrations, options, settings } = data;
   const actions = sourceActions({ integrations, otelServices: null, listPath: "/signal/setup/notifications", navigate });
@@ -44,13 +44,14 @@ export function SettingsNotifications({ data, save, setSettings, status }: Setti
       <div className="signalSettingsCard signalSettingsCard--rows">
         <DiscordWebhook label="Discord channel" connected={settings.discord.connected} delivery={settings.delivery}
           connectedDescription="Findings are posted to your Discord channel. Feedback, Jira, and coding agents are on each finding's page."
-          onSaved={(saved) => setSettings(saved, true)} />
+          // Only the webhook fields change, so changes still saving are kept.
+          onSaved={(next) => saved({ discord: next.discord, delivery: next.delivery })} />
       </div>
     </SettingsGroup>
     {actions.summary("jira") && <JiraSettings actions={actions} value={settings.jira} save={save} />}
     <SettingsGroup title="Coding agents">
       <div className="signalSettingsCard signalSettingsCard--rows">
-        <ReplicasWebhook connected={settings.replicas.connected} onSaved={(saved) => setSettings(saved, true)} />
+        <ReplicasWebhook connected={settings.replicas.connected} onSaved={(next) => setSettings(next, true)} />
       </div>
     </SettingsGroup>
   </SettingsPage>;

@@ -498,7 +498,7 @@
 .signalDestination--selected { background: #fff; }
 .signalDestination__option { display: flex; align-items: center; gap: 16px; width: 100%; padding: 20px; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .signalDestination--selected .signalDestination__option { cursor: default; }
-.signalDestination__option:focus-visible { outline: none; box-shadow: inset 0 0 0 2px #a5a9ed; }
+.signalDestination__option:has(input:focus-visible) { box-shadow: inset 0 0 0 2px #a5a9ed; }
 .signalRadio { width: 16px; height: 16px; flex: 0 0 16px; border-radius: 999px; background: #fff; box-shadow: 0 1px 1.5px #0000001a, 0 0 0 .5px #00000033; }
 .signalDestination--selected .signalRadio { box-shadow: inset 0 0 0 5px #4e58f9; }
 .signalDestination__label { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 2px; }
@@ -515,7 +515,7 @@
 .signalWebhookForm { display: flex; flex-direction: column; gap: 6px; }
 .signalWebhookForm__field { display: flex; align-items: center; gap: 8px; }
 .signalWebhookForm__field .signalSecret { flex: 1; min-width: 0; }
-.signalSecret--error { box-shadow: 0 0 0 1px #b33d43, 0 0 0 3px #b33d431a; }
+.signal .signalSecret--error, .signal .signalSecret--error:focus-within { box-shadow: 0 0 0 1px #b33d43, 0 0 0 3px #b33d431a; }
 .signal .signalWebhookForm__note { margin: 0; color: #666; font-size: 12px; line-height: 20px; }
 .signalWebhookForm .signalRowError { font-size: 12px; line-height: 20px; }
 .signalSetupHint { align-self: center; color: #666; font-size: 12px; line-height: 20px; }

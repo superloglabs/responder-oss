@@ -16,8 +16,8 @@ export function destinationBlocker(
   slackConnected: boolean,
 ): string | null {
   if (choice === "slack") {
-    if (settings.slack) return null;
-    return slackConnected ? "Choose a findings channel to continue." : "Connect Slack to continue.";
+    if (!slackConnected) return "Connect Slack to continue.";
+    return settings.slack ? null : "Choose a findings channel to continue.";
   }
   if (choice === "discord") return settings.discord.connected ? null : "Connect Discord to continue.";
   return "Choose Slack or Discord to continue.";
