@@ -4,12 +4,13 @@ import { authClient } from "../auth-client";
 import { providerDisplayName } from "../components/provider-glyphs";
 import { Button } from "../design-system";
 import { useDocumentTitle } from "../use-document-title";
-import { saveSignalSettings, type SignalSettings } from "./model";
+import { findingsDestinationChosen, saveSignalSettings, type SignalSettings } from "./model";
 import { SignalPlanStep } from "./plan";
 import { contextSources, isConnectPage, slackScanReady, sourceActions, sourceName, telemetrySources, useOtelServices, useSetupData, type SetupData } from "./setup-data";
 import { ChannelSelect, RepositoryPicker, SlackChannelChecklist, slackScanLabel, SlackScanSwitch, SourcePage, SourceRows } from "./setup-shared";
 import { useSignalSetupState } from "./setup-state";
 import { SignalSettingsView } from "./settings";
+import { DiscordWebhook } from "./settings-notifications";
 import { ConnectionRow, SettingsRow, SignalLogo } from "./shared";
 
 const steps = ["telemetry", "code", "repositories", "slack", "context", "plan"] as const;
@@ -18,17 +19,17 @@ const headings: Record<Step, string> = {
   telemetry: "Connect your telemetry",
   code: "Connect your GitHub organization",
   repositories: "Select your repositories",
-  slack: "Connect Slack",
+  slack: "Connect Slack or Discord",
   context: "Add more context",
   plan: "Choose your plan",
 };
 const descriptions: Record<Step, string> = {
-  telemetry: "Signal investigates your telemetry and sends issues with real impact to Slack.",
+  telemetry: "Signal investigates your telemetry and sends issues with real impact to Slack or Discord.",
   code: "Connect GitHub to choose the repositories Signal can read.",
   repositories: "Signal reads these repositories to find the cause of a problem. It never changes them.",
   slack: "Choose where Signal sends findings.",
   context: "Signal skips problems already tracked in tickets, alerts, or Slack.",
-  plan: "Start a monthly subscription to receive investigated findings in Slack.",
+  plan: "Start a monthly subscription to receive investigated findings.",
 };
 const stepNumber: Record<Step, number> = { telemetry: 1, code: 2, repositories: 2, slack: 3, context: 4, plan: 5 };
 
@@ -132,6 +133,14 @@ function SignalWizard({ data, organizationId, reload, setSettings }: SetupViewPr
       </div></div>
     </div>}
 
+    {step === "slack" && <div className="signalSettingsCard signalSettingsCard--rows">
+      {/* Saved at once, since Signal checks the URL with a post. Unsaved choices above are kept. */}
+      <DiscordWebhook connected={draft.discord.connected} onSaved={(saved) => {
+        setSettings(saved, true);
+        setEdit({ base: saved, draft: { ...draft, discord: saved.discord } });
+      }} />
+    </div>}
+
     {step === "context" && <>
       <SourceRows sources={contextSources} actions={actions} otelServices={otel.count} />
       <div className="signalSettingsCard signalSettingsCard--rows">
@@ -146,7 +155,7 @@ function SignalWizard({ data, organizationId, reload, setSettings }: SetupViewPr
       </div>
     </>}
 
-    {step === "plan" && <SignalPlanStep settings={settings} slackChosen={Boolean(draft.slack)} saving={saving}
+    {step === "plan" && <SignalPlanStep settings={settings} destinationChosen={findingsDestinationChosen(draft)} saving={saving}
       onBack={() => go("context")}
       onTurnOn={() => save({ ...draft, enabled: true }, "findings")}
       onTurnOff={() => save({ ...draft, enabled: false })} />}
@@ -162,7 +171,7 @@ function SignalWizard({ data, organizationId, reload, setSettings }: SetupViewPr
         : step === "repositories" ? <Button variant={draft.repositoryIds.length ? "primary" : "secondary"} disabled={saving} onClick={() => void save(draft, "slack")}>
           {draft.repositoryIds.length ? "Continue" : "Skip for now"}
         </Button>
-        : step === "slack" ? <Button variant="primary" disabled={saving || !draft.slack} onClick={() => void save(draft, "context")}>Continue</Button>
+        : step === "slack" ? <Button variant="primary" disabled={saving || !findingsDestinationChosen(draft)} onClick={() => void save(draft, "context")}>Continue</Button>
         : step === "context" ? <ContextContinue draft={draft} saving={saving}
           anyConnected={contextSources.some((source) => actions.connected(source.provider))}
           onContinue={() => void save(draft, "plan")} />

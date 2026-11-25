@@ -95,6 +95,10 @@ export interface SignalSettings {
   // Whether a Replicas automation webhook is saved, which adds Send to
   // Replicas to findings in Slack. The URL itself is never sent back.
   replicas: { connected: boolean };
+  // Whether a Discord channel webhook is saved. Findings are posted to it,
+  // and to the Slack channel when one is chosen too. The URL itself is
+  // never sent back.
+  discord: { connected: boolean };
   limits: { dailyInvestigationCap: number };
 }
 
@@ -202,6 +206,7 @@ export function withSettingsDefaults(settings: Partial<SignalSettings> & Pick<Si
     retentionDays: settings.retentionDays ?? null,
     jira: settings.jira ?? null,
     replicas: settings.replicas ?? { connected: false },
+    discord: settings.discord ?? { connected: false },
     limits: settings.limits ?? { dailyInvestigationCap: 50 },
   };
 }
@@ -234,6 +239,17 @@ export async function saveSignalSettings(settings: SignalSettings) {
 // Saves the webhook URL of a Replicas automation, or removes it with null.
 export async function saveReplicasWebhook(webhookUrl: string | null) {
   return withSettingsDefaults(await signalJson<SignalSettings>("/settings/replicas", jsonBody("PUT", { webhookUrl })));
+}
+
+// Saves the webhook URL of a Discord channel, or removes it with null.
+// Signal posts a short message to the channel to check the URL first.
+export async function saveDiscordWebhook(webhookUrl: string | null) {
+  return withSettingsDefaults(await signalJson<SignalSettings>("/settings/discord", jsonBody("PUT", { webhookUrl })));
+}
+
+// Where findings are posted: a Slack channel, a Discord webhook, or both.
+export function findingsDestinationChosen(settings: Pick<SignalSettings, "slack" | "discord">) {
+  return Boolean(settings.slack) || settings.discord.connected;
 }
 
 export function fetchSignalBilling() {
