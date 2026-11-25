@@ -664,16 +664,32 @@ describe("fresh automation sandbox", () => {
       serializeSessionState: vi.fn().mockResolvedValue({ sandboxId: "sandbox-1" }),
     });
 
-    const network = { allowedDomains: ["superlog.sh"] };
+    const network = { allowedDomains: ["superlog.sh"], application: { brokerPathPattern: "^/api/", host: "superlog.sh" } };
     await runInFreshAutomationSandbox({ ...input, keepPaused: true, network, resumeState: { sandboxId: "sandbox-1" }, secrets: [...secrets].reverse() }, resumed.dependencies);
 
     expect(resumed.dependencies.replaceSecrets).not.toHaveBeenCalled();
-    // The workspace's current allowlist still reaches the resumed sandbox.
+    // The workspace's current allowlist still reaches the resumed sandbox,
+    // which reaches Superlog's host only with this turn's broker token.
     expect(resumed.dependencies.applyNetwork).toHaveBeenCalledWith(
       resumed.session,
       input.config,
       [...secrets].reverse(),
-      network,
+      { ...network, brokerToken: input.brokerToken },
+    );
+  });
+
+  it("lets a fresh sandbox reach Superlog's host only with the run's broker token", async () => {
+    const { dependencies, session } = harness();
+    const network = { allowedDomains: ["superlog.sh"], application: { brokerPathPattern: "^/api/", host: "superlog.sh" } };
+
+    await runInFreshAutomationSandbox({ ...input, network }, dependencies);
+
+    expect(dependencies.configure).toHaveBeenCalledWith(
+      session,
+      input.config,
+      [],
+      0,
+      { ...network, brokerToken: "short-lived-run-token" },
     );
   });
 

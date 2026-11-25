@@ -593,11 +593,12 @@ export async function replaceDaytonaSandboxSecrets(
 // Daytona keeps the allowlist across a stop and start, but it is applied on
 // every start and resume too, so a change to the workspace's list reaches a
 // paused sandbox. A sandbox whose workspace lifted the restriction gets open
-// access back.
+// access back. Daytona enforces only the domains, not the per-request rules
+// Vercel's firewall applies.
 export async function applyDaytonaSandboxNetwork(
   session: DaytonaSandboxSession,
   config: DaytonaCleanupConfig,
-  network: SandboxNetwork | null,
+  network: Pick<SandboxNetwork, "allowedDomains"> | null,
   secrets: ReadonlyArray<{ allowedHosts?: string[] }>,
   dependencies: DaytonaCleanupDependencies = defaultCleanupDependencies,
 ): Promise<void> {

@@ -140,9 +140,16 @@ types. `drizzle/` contains the ordered schema history.
   `mise-versions.jdx.dev`, where mise looks up the runtime versions that
   repositories ask for in their version files. Vercel enforces
   this with a custom firewall policy; Daytona with a domain allowlist, which
-  needs Daytona Tier 3 or higher and holds at most 100 domains. The worker
-  applies the list after every sandbox start and resume, so a change reaches
-  a paused sandbox on its next turn. A run fails if the provider rejects the
+  needs Daytona Tier 3 or higher and holds at most 100 domains. On Vercel the
+  firewall also limits what a restricted sandbox can do on the domains it
+  reaches. On the public application host it reaches only the model broker
+  and context servers, and only with its own run's token; other requests are
+  refused. On the starting list's domains and mise's, a request that carries
+  any credential other than a mounted secret's placeholder has its credential
+  headers emptied, so code in the sandbox cannot publish, push, or upload
+  there as an account of its own. Domains a workspace adds are not changed.
+  The worker applies the list after every sandbox start and resume, so a
+  change reaches a paused sandbox on its next turn. A run fails if the provider rejects the
   list.
 - Workspace memories are facts members save for agents, in Claude Code's
   memory format: a name, one-line description, and type in front matter, and
