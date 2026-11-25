@@ -48,5 +48,8 @@ describe("database connection configuration", () => {
     expect(
       databasePoolOptions({ DATABASE_POOL_SIZE: "0", DATABASE_QUERY_TIMEOUT_MS: "soon" }),
     ).toMatchObject({ max: 5, query_timeout: 120_000 });
+    expect(
+      databasePoolOptions({ DATABASE_QUERY_TIMEOUT_MS: "9999999999" }),
+    ).toMatchObject({ query_timeout: 2_147_483_647, statement_timeout: 2_147_483_647 });
   });
 });

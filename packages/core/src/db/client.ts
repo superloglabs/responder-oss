@@ -63,7 +63,8 @@ export function databasePoolOptions(
   query_timeout: number;
   statement_timeout: number;
 } {
-  const queryTimeout = positiveInteger(environment.DATABASE_QUERY_TIMEOUT_MS, 120_000);
+  // Postgres takes a statement timeout of at most 2^31 - 1 milliseconds.
+  const queryTimeout = Math.min(positiveInteger(environment.DATABASE_QUERY_TIMEOUT_MS, 120_000), 2_147_483_647);
   return {
     connectionTimeoutMillis: 10_000,
     keepAlive: true,
