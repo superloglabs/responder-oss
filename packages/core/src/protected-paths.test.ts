@@ -36,6 +36,8 @@ describe("protected repository paths", () => {
     "services/api/Dockerfile.prod",
     "web.dockerfile",
     "Containerfile",
+    "Containerfile.simple",
+    "cloudbuild.json",
   ])("treats %s as CI configuration", (path) => {
     expect(protectedPathCategory(path)).toBe("ci");
   });
@@ -125,6 +127,9 @@ describe("protected repository paths", () => {
     "GEMINI.md",
     ".windsurfrules",
     ".clinerules",
+    ".clinerules/style.md",
+    ".windsurf/rules/main.md",
+    ".gemini/settings.json",
   ])("treats %s as agent instructions", (path) => {
     // The Copilot file sits under .github but is named for what it is.
     expect(protectedPathCategory(path)).toBe("agent_instructions");

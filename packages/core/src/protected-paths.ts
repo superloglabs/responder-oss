@@ -18,7 +18,7 @@ const categoryLabels: Record<ProtectedPathCategory, string> = {
 
 // Directories whose every file is protected, as lower-case path segments.
 const ciDirectories = [".github", ".gitlab", ".circleci", ".buildkite", ".husky", ".semaphore", ".woodpecker"];
-const agentInstructionDirectories = [".claude", ".cursor", ".agents"];
+const agentInstructionDirectories = [".claude", ".cursor", ".agents", ".clinerules", ".windsurf", ".gemini"];
 
 const ciFileNames = new Set([
   ".gitlab-ci.yml",
@@ -36,10 +36,9 @@ const ciFileNames = new Set([
   "appveyor.yml",
   "cloudbuild.yaml",
   "cloudbuild.yml",
+  "cloudbuild.json",
   "buildspec.yml",
   "buildspec.yaml",
-  // Container builds run their steps in CI.
-  "containerfile",
 ]);
 
 const agentInstructionFileNames = new Set([
@@ -139,8 +138,11 @@ function isRequirementsFile(segments: string[]): boolean {
   return segments.length >= 2 && segments.at(-2) === "requirements" && /\.(txt|in)$/u.test(name);
 }
 
+// Container builds run their steps in CI.
 function isDockerfile(name: string): boolean {
-  return name === "dockerfile" || name.startsWith("dockerfile.") || name.endsWith(".dockerfile");
+  return ["dockerfile", "containerfile"].some((base) =>
+    name === base || name.startsWith(`${base}.`) || name.endsWith(`.${base}`)
+  );
 }
 
 // What kind of protected file the repository path is, or null when the agent

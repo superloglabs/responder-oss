@@ -1,3 +1,4 @@
+import { pullRequestApprovalRequired } from "@responder/core/db/pull-request-approval";
 import { outsideDataRule } from "@responder/core/untrusted-text";
 import { renderInvestigationPromptPart, type InvestigationPromptParts } from "@responder/core/investigations/prompt-parts";
 import {
@@ -1222,6 +1223,8 @@ export async function runInvestigationAgent(
                 repositories,
                 session,
                 slackInvestigationSessionId: job.slackInvestigationSessionId,
+                awaitingApproval: outsideEvent &&
+                  await pullRequestApprovalRequired(job.config.organizationId),
                 untrustedTrigger: outsideEvent,
               })]
             : []),

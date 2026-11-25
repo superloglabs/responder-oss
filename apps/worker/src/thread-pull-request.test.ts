@@ -16,6 +16,7 @@ const checkout = {
 
 function pullRequestTool(overrides: {
   repositories?: Array<{ fullName: string; installationId: number }>;
+  awaitingApproval?: boolean;
   untrustedTrigger?: boolean;
 } = {}) {
   const recordOrigin = vi.fn().mockResolvedValue(undefined);
@@ -32,6 +33,7 @@ function pullRequestTool(overrides: {
     repositories: [checkout],
     session: {} as DaytonaSandboxSession,
     slackInvestigationSessionId: "session-1",
+    awaitingApproval: overrides.awaitingApproval ?? false,
     untrustedTrigger: overrides.untrustedTrigger ?? false,
   }, {
     captureEvent: vi.fn().mockResolvedValue(undefined),
@@ -68,6 +70,13 @@ describe("Slack thread pull requests", () => {
       untrustedTrigger: false,
       workspaceBaseSha: checkout.workspaceBaseSha,
     }), expect.anything());
+  });
+
+  it("does not open a pull request from a review-started turn while the workspace asks a person first", async () => {
+    const { createPullRequest, tool } = pullRequestTool({ awaitingApproval: true, untrustedTrigger: true });
+
+    await expect(tool.invoke(undefined as never, request)).resolves.toMatch(/needs a person in the workspace to ask for it/u);
+    expect(createPullRequest).not.toHaveBeenCalled();
   });
 
   it("marks a pull request from a turn a review started as written from outside text", async () => {

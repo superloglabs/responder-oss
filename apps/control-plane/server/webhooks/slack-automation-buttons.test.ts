@@ -36,7 +36,7 @@ async function press(overrides: Record<string, unknown> = {}) {
     response_url: responseUrl,
     team: { id: "T123" },
     type: "block_actions",
-    user: { id: "U123", name: "ada" },
+    user: { id: "U123", name: "ada", team_id: "T123" },
     ...overrides,
   };
   const body = new URLSearchParams({ payload: JSON.stringify(payload) }).toString();
@@ -130,6 +130,11 @@ describe("automation buttons in Slack", () => {
     }]);
   });
 
+  it("refuses a press whose Slack team is unknown", async () => {
+    await press({ user: { id: "U999", name: "eve" } });
+    expect(mocks.queueReply).not.toHaveBeenCalled();
+  });
+
   it("continues the run that posted the message and replaces its buttons", async () => {
     const response = await press();
 
@@ -150,7 +155,7 @@ describe("automation buttons in Slack", () => {
           integrationAccountId,
           label: "Create PR",
           messageTimestamp: "1790000001.000100",
-          pressedByTeamMember: false,
+          pressedByTeamMember: true,
           threadTimestamp: "1790000001.000100",
         },
         source: "slack",

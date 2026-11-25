@@ -1001,7 +1001,8 @@ async function pressAutomationRunButton(
   }
   // A press continues the run as an instruction, so a person from another
   // Slack team in a shared channel cannot press, nor use up the one press.
-  if (payload.user.team_id && payload.user.team_id !== payload.team.id) {
+  // A press without a team is refused too.
+  if (payload.user.team_id !== payload.team.id) {
     return slackEphemeralResponse("Only members of this Slack workspace can use these buttons.");
   }
   const outcome = await queueAutomationRunReply({
@@ -1014,8 +1015,7 @@ async function pressAutomationRunButton(
         integrationAccountId: run.integrationAccountId,
         label,
         messageTimestamp: message.ts,
-        // A press without a team is not counted as a member's.
-        pressedByTeamMember: payload.user.team_id === payload.team.id,
+        pressedByTeamMember: true,
         threadTimestamp: message.thread_ts ?? message.ts,
       },
       source: "slack",
