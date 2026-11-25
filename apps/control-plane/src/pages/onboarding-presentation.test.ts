@@ -60,6 +60,16 @@ describe("returnedConnectionError", () => {
       .toMatch(/organization owner or admin, or someone with access to every repository of that installation/u);
   });
 
+  it("tells the person who can connect a GitHub installation they can only partly write to", () => {
+    expect(returnedConnectionError("?integration=github&status=error&reason=read_only_repository_access", "github"))
+      .toMatch(/write access to every repository of that installation/u);
+  });
+
+  it("tells the person who can connect a Slack workspace another Superlog workspace holds", () => {
+    expect(returnedConnectionError("?integration=slack&status=error&reason=slack_team_connected_elsewhere", "slack"))
+      .toMatch(/owner or admin of that Superlog workspace/u);
+  });
+
   it("ignores other providers, successful connections, and plain visits", () => {
     expect(returnedConnectionError("?integration=datadog&status=error", "posthog")).toBeNull();
     expect(returnedConnectionError("?integration=posthog&status=connected", "posthog")).toBeNull();

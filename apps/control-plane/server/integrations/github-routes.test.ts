@@ -19,7 +19,7 @@ import { getGitHubUser } from "../../../../packages/core/src/integrations/github
 import { getActiveTenant } from "../tenant.js";
 import { organizationHasCapability } from "../../../../packages/core/src/db/organization-capabilities.js";
 import {
-  countGitHubUserInstallationRepositories,
+  listGitHubUserInstallationRepositoryAccess,
   exchangeGitHubCode,
   listGitHubRepositories,
   listGitHubUserInstallations,
@@ -66,13 +66,17 @@ vi.mock("../tenant.js", () => ({
   getActiveTenant: vi.fn(),
 }));
 
+vi.mock("../../../../packages/core/src/db/organizations.js", () => ({
+  getOrganizationName: vi.fn(async () => "Acme"),
+}));
+
 vi.mock("../../../../packages/core/src/db/organization-capabilities.js", () => ({
   organizationHasCapability: vi.fn(),
 }));
 
 vi.mock("./github.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./github.js")>()),
-  countGitHubUserInstallationRepositories: vi.fn(),
+  listGitHubUserInstallationRepositoryAccess: vi.fn(),
   exchangeGitHubCode: vi.fn(),
   listGitHubRepositories: vi.fn(),
   listGitHubUserInstallations: vi.fn(),
@@ -80,6 +84,8 @@ vi.mock("./github.js", async (importOriginal) => ({
 }));
 
 const app = new Hono().route("/api/integrations", integrationRoutes);
+// Responder's own pages open connection links from the same origin.
+const sameOrigin = { headers: { "sec-fetch-site": "same-origin" } };
 const tenant = {
   ok: true as const,
   organizationId: "10000000-0000-4000-8000-000000000000",
@@ -104,10 +110,12 @@ describe("GitHub integration routing", () => {
   beforeEach(() => {
     vi.mocked(getActiveTenant).mockResolvedValue(tenant);
     vi.mocked(organizationHasCapability).mockResolvedValue(true);
-    // By default the user sees every repository the callback just listed.
-    vi.mocked(countGitHubUserInstallationRepositories).mockImplementation(
+    // By default the user can write to every repository the callback just
+    // listed.
+    vi.mocked(listGitHubUserInstallationRepositoryAccess).mockImplementation(
       async () =>
-        (await vi.mocked(listGitHubRepositories).mock.results.at(-1)?.value)?.length ?? 0,
+        ((await vi.mocked(listGitHubRepositories).mock.results.at(-1)?.value) ?? [])
+          .map((repository: { externalId: string }) => ({ id: repository.externalId, write: true })),
     );
   });
 
@@ -451,7 +459,7 @@ describe("GitHub integration routing", () => {
         repository("1", "acme/widgets"),
         repository("2", "acme/gadgets"),
       ]);
-      vi.mocked(countGitHubUserInstallationRepositories).mockResolvedValue(1);
+      vi.mocked(listGitHubUserInstallationRepositoryAccess).mockResolvedValue([{ id: "1", write: true }]);
 
       const response = await app.request(
         "/api/integrations/github/callback?code=one-time-code&state=authorization-state",
@@ -463,7 +471,7 @@ describe("GitHub integration routing", () => {
           "&status=error" +
           "&reason=partial_repository_access",
       );
-      expect(countGitHubUserInstallationRepositories).toHaveBeenCalledWith("user-token", 12345);
+      expect(listGitHubUserInstallationRepositoryAccess).toHaveBeenCalledWith("user-token", 12345);
       expect(upsertGitHubInstallationAccount).not.toHaveBeenCalled();
       expect(replaceRepositories).not.toHaveBeenCalled();
     });
@@ -485,7 +493,10 @@ describe("GitHub integration routing", () => {
         repository("1", "acme/widgets"),
         repository("2", "acme/gadgets"),
       ]);
-      vi.mocked(countGitHubUserInstallationRepositories).mockResolvedValue(2);
+      vi.mocked(listGitHubUserInstallationRepositoryAccess).mockResolvedValue([
+        { id: "1", write: true },
+        { id: "2", write: true },
+      ]);
 
       const response = await app.request(
         "/api/integrations/github/callback?code=one-time-code&state=authorization-state",
@@ -518,7 +529,9 @@ describe("GitHub integration routing", () => {
           : [repository("3", "octo/tools")],
       );
       // The user sees one repository of each installation.
-      vi.mocked(countGitHubUserInstallationRepositories).mockResolvedValue(1);
+      vi.mocked(listGitHubUserInstallationRepositoryAccess).mockImplementation(async (_token, installationId) =>
+        installationId === 111 ? [{ id: "1", write: true }] : [{ id: "3", write: true }],
+      );
 
       const response = await app.request(
         "/api/integrations/github/callback?code=one-time-code&state=authorization-state",
@@ -536,8 +549,8 @@ describe("GitHub integration routing", () => {
         "30000000-0000-4000-8000-000000000000",
         [repository("3", "octo/tools")],
       );
-      expect(countGitHubUserInstallationRepositories).toHaveBeenCalledWith("user-token", 111);
-      expect(countGitHubUserInstallationRepositories).toHaveBeenCalledWith("user-token", 222);
+      expect(listGitHubUserInstallationRepositoryAccess).toHaveBeenCalledWith("user-token", 111);
+      expect(listGitHubUserInstallationRepositoryAccess).toHaveBeenCalledWith("user-token", 222);
     });
 
     it("refuses when none of the user's installations are fully visible to them", async () => {
@@ -555,7 +568,7 @@ describe("GitHub integration routing", () => {
         repository("1", "acme/widgets"),
         repository("2", "acme/gadgets"),
       ]);
-      vi.mocked(countGitHubUserInstallationRepositories).mockResolvedValue(0);
+      vi.mocked(listGitHubUserInstallationRepositoryAccess).mockResolvedValue([]);
 
       const response = await app.request(
         "/api/integrations/github/callback?code=one-time-code&state=authorization-state",
@@ -579,7 +592,10 @@ describe("GitHub integration routing", () => {
       ]);
       vi.mocked(listGitHubRepositories).mockResolvedValue([repository("1", "acme/widgets")]);
       // A repository was added between the two GitHub calls.
-      vi.mocked(countGitHubUserInstallationRepositories).mockResolvedValue(2);
+      vi.mocked(listGitHubUserInstallationRepositoryAccess).mockResolvedValue([
+        { id: "1", write: true },
+        { id: "2", write: true },
+      ]);
 
       const response = await app.request(
         "/api/integrations/github/callback?code=one-time-code&state=authorization-state",
@@ -588,6 +604,100 @@ describe("GitHub integration routing", () => {
       expect(response.headers.get("location")).toContain("reason=partial_repository_access");
       expect(upsertGitHubInstallationAccount).not.toHaveBeenCalled();
       expect(replaceRepositories).not.toHaveBeenCalled();
+    });
+
+    it("refuses an installation when the user can only read one of its repositories", async () => {
+      vi.mocked(consumeIntegrationConnectionState).mockResolvedValue({
+        codeVerifier: null,
+        metadata: { installationId: 12345 },
+        organizationId: tenant.organizationId,
+        returnTo: "/settings",
+        userId: tenant.user.id,
+      });
+      vi.mocked(verifyGitHubUserInstallation).mockResolvedValue({
+        account: { id: 98, login: "acme", type: "Organization" },
+        id: 12345,
+        repository_selection: "all",
+      });
+      vi.mocked(listGitHubRepositories).mockResolvedValue([
+        repository("1", "acme/widgets"),
+        repository("2", "acme/gadgets"),
+      ]);
+      vi.mocked(listGitHubUserInstallationRepositoryAccess).mockResolvedValue([
+        { id: "1", write: true },
+        { id: "2", write: false },
+      ]);
+
+      const response = await app.request(
+        "/api/integrations/github/callback?code=one-time-code&state=authorization-state",
+      );
+
+      expect(response.headers.get("location")).toBe(
+        "https://responder.example/settings" +
+          "?integration=github" +
+          "&status=error" +
+          "&reason=read_only_repository_access",
+      );
+      expect(upsertGitHubInstallationAccount).not.toHaveBeenCalled();
+      expect(replaceRepositories).not.toHaveBeenCalled();
+    });
+
+    it("refuses when the user sees as many repositories as the installation but not the same ones", async () => {
+      vi.mocked(consumeIntegrationConnectionState).mockResolvedValue({
+        codeVerifier: null,
+        metadata: {},
+        organizationId: tenant.organizationId,
+        returnTo: "/settings",
+        userId: tenant.user.id,
+      });
+      vi.mocked(listGitHubUserInstallations).mockResolvedValue([
+        { account: { id: 98, login: "acme", type: "Organization" }, id: 111, repository_selection: "all" },
+      ]);
+      vi.mocked(listGitHubRepositories).mockResolvedValue([
+        repository("1", "acme/widgets"),
+        repository("2", "acme/gadgets"),
+      ]);
+      vi.mocked(listGitHubUserInstallationRepositoryAccess).mockResolvedValue([
+        { id: "1", write: true },
+        { id: "3", write: true },
+      ]);
+
+      const response = await app.request(
+        "/api/integrations/github/callback?code=one-time-code&state=authorization-state",
+      );
+
+      expect(response.headers.get("location")).toContain("reason=partial_repository_access");
+      expect(upsertGitHubInstallationAccount).not.toHaveBeenCalled();
+    });
+
+    it("connects only the user's installations they can write to in full", async () => {
+      vi.mocked(consumeIntegrationConnectionState).mockResolvedValue({
+        codeVerifier: null,
+        metadata: {},
+        organizationId: tenant.organizationId,
+        returnTo: "/settings",
+        userId: tenant.user.id,
+      });
+      vi.mocked(listGitHubUserInstallations).mockResolvedValue([
+        { account: { id: 98, login: "acme", type: "Organization" }, id: 111, repository_selection: "all" },
+        { account: { id: 99, login: "octo", type: "User" }, id: 222, repository_selection: "selected" },
+      ]);
+      vi.mocked(listGitHubRepositories).mockImplementation(async (installationId) =>
+        installationId === 111 ? [repository("1", "acme/widgets")] : [repository("3", "octo/tools")],
+      );
+      vi.mocked(listGitHubUserInstallationRepositoryAccess).mockImplementation(async (_token, installationId) =>
+        installationId === 111 ? [{ id: "1", write: false }] : [{ id: "3", write: true }],
+      );
+
+      const response = await app.request(
+        "/api/integrations/github/callback?code=one-time-code&state=authorization-state",
+      );
+
+      expect(response.headers.get("location")).toContain("status=connected");
+      expect(upsertGitHubInstallationAccount).toHaveBeenCalledOnce();
+      expect(upsertGitHubInstallationAccount).toHaveBeenCalledWith(
+        expect.objectContaining({ installationId: 222 }),
+      );
     });
   });
 });
@@ -615,7 +725,7 @@ describe("GitHub pull request author", () => {
   it("asks the member to authorize the GitHub App", async () => {
     vi.mocked(createIntegrationConnectionState).mockResolvedValue("author-state");
 
-    const response = await app.request("/api/integrations/github/pull-request-author/start");
+    const response = await app.request("/api/integrations/github/pull-request-author/start", sameOrigin);
 
     expect(response.status).toBe(302);
     const location = new URL(response.headers.get("location")!);
@@ -627,6 +737,36 @@ describe("GitHub pull request author", () => {
       returnTo: "/settings/workspace",
       userId: tenant.user.id,
     }));
+  });
+
+  it("asks before authorizing from a link opened outside Superlog", async () => {
+    const response = await app.request("/api/integrations/github/pull-request-author/start", {
+      headers: { "sec-fetch-site": "cross-site" },
+    });
+
+    expect(response.status).toBe(200);
+    const page = await response.text();
+    expect(page).toContain("Connect GitHub?");
+    expect(page).toContain('action="/api/integrations/github/pull-request-author/start"');
+    expect(createIntegrationConnectionState).not.toHaveBeenCalled();
+  });
+
+  it("authorizes from the confirmation page's same-origin post and refuses other posts", async () => {
+    vi.mocked(createIntegrationConnectionState).mockResolvedValue("author-state");
+
+    const refused = await app.request("/api/integrations/github/pull-request-author/start", {
+      headers: { "sec-fetch-site": "cross-site" },
+      method: "POST",
+    });
+    expect(refused.status).toBe(403);
+    expect(createIntegrationConnectionState).not.toHaveBeenCalled();
+
+    const response = await app.request("/api/integrations/github/pull-request-author/start", {
+      headers: { "sec-fetch-site": "same-origin" },
+      method: "POST",
+    });
+    expect(response.status).toBe(302);
+    expect(new URL(response.headers.get("location")!).searchParams.get("state")).toBe("author-state");
   });
 
   it("saves the member's token when their account reaches the workspace's installation", async () => {

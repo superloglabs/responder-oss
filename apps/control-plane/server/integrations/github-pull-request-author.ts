@@ -18,6 +18,11 @@ import {
   githubAuthorizeUrl,
   listGitHubUserInstallations,
 } from "./github.js";
+import {
+  connectionStartConfirmation,
+  openedFromSameOrigin,
+  postedFromSameOrigin,
+} from "./start-confirmation.js";
 import { cellCallbackUrl, integrationCallbackUrl, settingsRedirect } from "./urls.js";
 
 // GitHub authorization started from the pull request author setting returns
@@ -72,6 +77,30 @@ export async function completeGitHubPullRequestAuthorConnection(
   return { githubLogin: githubUser.login };
 }
 
+async function startPullRequestAuthor(
+  tenant: { organizationId: string; user: { id: string } },
+  requestedReturnTo: string | undefined,
+): Promise<Response> {
+  const returnTo = requestedReturnTo ?? "/settings/workspace";
+  try {
+    const state = await createIntegrationConnectionState({
+      metadata: { purpose: githubPullRequestAuthorPurpose },
+      organizationId: tenant.organizationId,
+      provider: "github",
+      returnTo,
+      routingUrl: cellCallbackUrl("github"),
+      userId: tenant.user.id,
+    });
+    return Response.redirect(githubAuthorizeUrl(state), 302);
+  } catch (error) {
+    console.error(JSON.stringify({
+      error: error instanceof Error ? error.message : "Unknown error",
+      event: "github_pull_request_author_start_failed",
+    }));
+    return Response.redirect(settingsRedirect(returnTo, "github", "error", "connection_failed"), 302);
+  }
+}
+
 export const githubPullRequestAuthorRoutes = new Hono()
   .get("/", async (context) => {
     const tenant = await getActiveTenant(context.req.raw.headers);
@@ -95,28 +124,28 @@ export const githubPullRequestAuthorRoutes = new Hono()
     });
   })
   // Any member may open pull requests as themselves. Authorizing on GitHub is
-  // their consent.
+  // their consent. A link opened from outside Superlog's own pages asks
+  // first; see start-confirmation.ts.
   .get("/start", async (context) => {
     const tenant = await getActiveTenant(context.req.raw.headers);
     if (tenant.ok === false) return context.json({ error: tenant.error }, tenant.status);
-    const returnTo = context.req.query("returnTo") ?? "/settings/workspace";
-    try {
-      const state = await createIntegrationConnectionState({
-        metadata: { purpose: githubPullRequestAuthorPurpose },
+    if (!openedFromSameOrigin(context.req.raw.headers)) {
+      const url = new URL(context.req.url);
+      return connectionStartConfirmation({
+        action: `${url.pathname}${url.search}`,
         organizationId: tenant.organizationId,
-        provider: "github",
-        returnTo,
-        routingUrl: cellCallbackUrl("github"),
-        userId: tenant.user.id,
+        providerName: "GitHub",
       });
-      return context.redirect(githubAuthorizeUrl(state));
-    } catch (error) {
-      console.error(JSON.stringify({
-        error: error instanceof Error ? error.message : "Unknown error",
-        event: "github_pull_request_author_start_failed",
-      }));
-      return context.redirect(settingsRedirect(returnTo, "github", "error", "connection_failed"));
     }
+    return startPullRequestAuthor(tenant, context.req.query("returnTo"));
+  })
+  .post("/start", async (context) => {
+    const tenant = await getActiveTenant(context.req.raw.headers);
+    if (tenant.ok === false) return context.json({ error: tenant.error }, tenant.status);
+    if (!postedFromSameOrigin(context.req.raw.headers)) {
+      return context.json({ error: "Start the connection from Superlog" }, 403);
+    }
+    return startPullRequestAuthor(tenant, context.req.query("returnTo"));
   })
   // The member themselves or a workspace admin can stop it. Pull requests
   // are then opened by the GitHub App again.

@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { and, count, eq, gt, inArray, isNotNull, isNull, like, lt, lte, ne, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
+import { member } from "./auth-schema.js";
 import { getDatabase } from "./client.js";
 import {
   agents,
@@ -203,7 +204,7 @@ export async function updateIntegrationConnectionStateMetadata(input: {
   return rows.length > 0;
 }
 
-export async function upsertIntegrationAccount(input: {
+type IntegrationAccountInput = {
   organizationId: string;
   provider: IntegrationProvider;
   externalAccountId: string;
@@ -212,8 +213,16 @@ export async function upsertIntegrationAccount(input: {
   credentialKeyVersion?: number | null;
   metadata?: Record<string, unknown>;
   status?: "connected" | "error" | "pending";
-}): Promise<string> {
-  const db = getDatabase();
+};
+
+export async function upsertIntegrationAccount(input: IntegrationAccountInput): Promise<string> {
+  return upsertIntegrationAccountWith(getDatabase(), input);
+}
+
+async function upsertIntegrationAccountWith(
+  db: ReturnType<typeof getDatabase> | IntegrationTransaction,
+  input: IntegrationAccountInput,
+): Promise<string> {
   const inserted = await db
     .insert(integrationAccounts)
     .values({
@@ -1424,6 +1433,46 @@ export function slackAccountOfApp(appId: string | undefined) {
       sql`${integrationAccounts.metadata}->>'appId' is null`,
     )
     : undefined;
+}
+
+// Stores a Slack team's connection for an organization when the user may
+// connect it, and returns null otherwise. A team no organization holds may be
+// connected by anyone Slack lets install the app, and the organization that
+// holds it may connect it again. Connecting a team another organization holds
+// needs an owner or admin of a holding organization, so a member of a
+// company's Slack cannot bring that Slack into a workspace of their own. A
+// held connection counts in any status. The check and the write hold a lock
+// on the team, so two first connections cannot both pass.
+export async function connectSlackTeamAccount(
+  input: Omit<IntegrationAccountInput, "provider"> & { userId: string },
+): Promise<string | null> {
+  const { userId, ...account } = input;
+  return getDatabase().transaction(async (tx) => {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtext(${`slack_team:${account.externalAccountId}`}))`,
+    );
+    const holders = await tx
+      .selectDistinct({ organizationId: integrationAccounts.organizationId })
+      .from(integrationAccounts)
+      .where(
+        and(
+          eq(integrationAccounts.provider, "slack"),
+          eq(integrationAccounts.externalAccountId, account.externalAccountId),
+        ),
+      );
+    const holderIds = holders.map((holder) => holder.organizationId);
+    if (holderIds.length > 0 && !holderIds.includes(account.organizationId)) {
+      const memberships = await tx
+        .select({ role: member.role })
+        .from(member)
+        .where(and(eq(member.userId, userId), inArray(member.organizationId, holderIds)));
+      const allowed = memberships.some(({ role }) =>
+        role.split(",").some((value) => ["owner", "admin"].includes(value.trim())),
+      );
+      if (!allowed) return null;
+    }
+    return upsertIntegrationAccountWith(tx, { ...account, provider: "slack" });
+  });
 }
 
 // Every organization connected to a Slack workspace through the same app can

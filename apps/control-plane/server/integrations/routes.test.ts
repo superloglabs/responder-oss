@@ -6,6 +6,7 @@ import {
   encryptCredentials,
 } from "../../../../packages/core/src/credentials/encryption.js";
 import {
+  connectSlackTeamAccount,
   consumeIntegrationConnectionState,
   createIntegrationConnectionState,
   deleteIntegrationAccount,
@@ -101,6 +102,7 @@ vi.mock("../../../../packages/core/src/credentials/encryption.js", () => ({
 }));
 
 vi.mock("../../../../packages/core/src/db/integrations.js", () => ({
+  connectSlackTeamAccount: vi.fn(),
   claimIntegrationRegistration: vi.fn(),
   consumeIntegrationConnectionState: vi.fn(),
   createIntegrationConnectionState: vi.fn(),
@@ -252,6 +254,10 @@ vi.mock("../tenant.js", () => ({
   getActiveTenant: vi.fn(),
 }));
 
+vi.mock("../../../../packages/core/src/db/organizations.js", () => ({
+  getOrganizationName: vi.fn(async () => "Acme <Ops>"),
+}));
+
 vi.mock("./slack.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./slack.js")>()),
   exchangeSlackCode: vi.fn(),
@@ -263,6 +269,8 @@ vi.mock("../../../../packages/core/src/db/organization-capabilities.js", () => (
 }));
 
 const app = new Hono().route("/api/integrations", integrationRoutes);
+// Responder's own pages open connection links from the same origin.
+const sameOrigin = { headers: { "sec-fetch-site": "same-origin" } };
 
 const tenant = {
   ok: true as const,
@@ -320,7 +328,7 @@ describe("integration callback routing", () => {
     });
     vi.mocked(createIntegrationConnectionState).mockResolvedValue("routed-state");
 
-    const response = await app.request("/api/integrations/sentry/start");
+    const response = await app.request("/api/integrations/sentry/start", sameOrigin);
 
     expect(response.status).toBe(302);
     expect(new URL(response.headers.get("location")!).searchParams.get("state"))
@@ -343,6 +351,7 @@ describe("integration callback routing", () => {
 
     const response = await app.request(
       "/api/integrations/sentry/start?mode=reconnect",
+      sameOrigin,
     );
 
     expect(response.status).toBe(302);
@@ -390,7 +399,7 @@ describe("integration callback routing", () => {
         .mockResolvedValueOnce(new Response(null, { status: 200 })),
     );
 
-    const response = await app.request("/api/integrations/sentry/start");
+    const response = await app.request("/api/integrations/sentry/start", sameOrigin);
 
     expect(response.status).toBe(302);
     expect(new URL(response.headers.get("location")!).searchParams.get("status"))
@@ -421,7 +430,7 @@ describe("integration callback routing", () => {
     vi.mocked(createIntegrationConnectionState).mockResolvedValue("fresh-state");
     vi.spyOn(console, "error").mockImplementation(() => {});
 
-    const response = await app.request("/api/integrations/sentry/start");
+    const response = await app.request("/api/integrations/sentry/start", sameOrigin);
 
     expect(response.status).toBe(302);
     expect(new URL(response.headers.get("location")!).searchParams.get("state"))
@@ -676,7 +685,7 @@ describe("integration callback routing", () => {
     vi.mocked(getActiveTenant).mockResolvedValue(tenant);
     vi.mocked(createIntegrationConnectionState).mockResolvedValue("routed-state");
 
-    const response = await app.request("/api/integrations/vercel/start");
+    const response = await app.request("/api/integrations/vercel/start", sameOrigin);
 
     expect(response.status).toBe(302);
     const location = new URL(response.headers.get("location")!);
@@ -693,7 +702,7 @@ describe("integration callback routing", () => {
     });
   });
 
-  function connectSlack() {
+  function connectSlack(options: { allowed?: boolean } = {}) {
     vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
     vi.mocked(consumeIntegrationConnectionState).mockResolvedValue({
       organizationId: tenant.organizationId,
@@ -717,14 +726,33 @@ describe("integration callback routing", () => {
       token_type: "bot",
     } as never);
     vi.mocked(encryptCredentials).mockReturnValue("encrypted-credentials");
-    vi.mocked(upsertIntegrationAccount).mockResolvedValue(
-      "30000000-0000-4000-8000-000000000000",
+    vi.mocked(connectSlackTeamAccount).mockResolvedValue(
+      options.allowed === false ? null : "30000000-0000-4000-8000-000000000000",
     );
     vi.mocked(listSlackChannels).mockResolvedValue([]);
     return app.request(
       "/api/integrations/slack/callback?state=oauth-state&code=oauth-code",
     );
   }
+
+  it("refuses a Slack team another workspace holds unless the user may connect it", async () => {
+    vi.spyOn(console, "info").mockImplementation(() => undefined);
+
+    const response = await connectSlack({ allowed: false });
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(
+      "https://responder.example/settings" +
+        "?integration=slack&status=error&reason=slack_team_connected_elsewhere",
+    );
+    expect(connectSlackTeamAccount).toHaveBeenCalledWith(expect.objectContaining({
+      externalAccountId: "T123",
+      organizationId: tenant.organizationId,
+      userId: tenant.user.id,
+    }));
+    expect(listSlackChannels).not.toHaveBeenCalled();
+    expect(startDefaultSlackThreadMode).not.toHaveBeenCalled();
+  });
 
   it("turns tag mode on when Slack connects", async () => {
     vi.mocked(startDefaultSlackThreadMode).mockResolvedValue();
@@ -1037,7 +1065,7 @@ describe("integration callback routing", () => {
   it("does not expose the Discord installation route without the capability", async () => {
     vi.mocked(organizationHasCapability).mockResolvedValue(false);
 
-    const response = await app.request("/api/integrations/discord/start");
+    const response = await app.request("/api/integrations/discord/start", sameOrigin);
 
     expect(response.status).toBe(404);
     await expect(response.json()).resolves.toEqual({
@@ -1061,6 +1089,7 @@ describe("integration callback routing", () => {
 
     const response = await app.request(
       "/api/integrations/linear/start?returnTo=%2Fagents%2Fnew",
+      sameOrigin,
     );
 
     expect(response.status).toBe(302);
@@ -1960,6 +1989,7 @@ describe("integration callback routing", () => {
 
     const response = await app.request(
       "/api/integrations/gcp/start?returnTo=%2Fagents%2Fnew",
+      sameOrigin,
     );
 
     expect(response.status).toBe(302);
@@ -3389,6 +3419,7 @@ describe("integration callback routing", () => {
 
     const response = await app.request(
       "/api/integrations/axiom/start?returnTo=%2Fagents%2Fnew",
+      sameOrigin,
     );
 
     expect(response.status).toBe(302);
@@ -3431,7 +3462,7 @@ describe("integration callback routing", () => {
     vi.mocked(createIntegrationConnectionState).mockResolvedValue("oauth-state");
     vi.mocked(beginCustomMcpOAuth).mockRejectedValue(new Error("OAuth failed"));
 
-    const response = await app.request("/api/integrations/axiom/start");
+    const response = await app.request("/api/integrations/axiom/start", sameOrigin);
 
     expect(response.status).toBe(302);
     expect(upsertIntegrationAccount).not.toHaveBeenCalled();
@@ -3694,6 +3725,7 @@ describe("integration callback routing", () => {
 
     const response = await app.request(
       "/api/integrations/posthog/start?returnTo=%2Fagents%2Fnew",
+      sameOrigin,
     );
 
     expect(upsertIntegrationAccount).not.toHaveBeenCalled();
@@ -3738,6 +3770,7 @@ describe("integration callback routing", () => {
 
     const response = await app.request(
       "/api/integrations/posthog/start?returnTo=%2Fautomations%2Fnew&mode=read_write",
+      sameOrigin,
     );
 
     expect(response.status).toBe(302);
@@ -3767,6 +3800,7 @@ describe("integration callback routing", () => {
 
     const response = await app.request(
       "/api/integrations/posthog/start?returnTo=%2Fsignal%2Fsetup%2Fposthog&mode=signal",
+      sameOrigin,
     );
 
     expect(response.status).toBe(302);
@@ -3905,6 +3939,7 @@ describe("integration callback routing", () => {
 
     const response = await app.request(
       "/api/integrations/cloudflare/start?returnTo=%2Fautomations%2Fnew",
+      sameOrigin,
     );
 
     expect(upsertIntegrationAccount).not.toHaveBeenCalled();
@@ -3997,8 +4032,9 @@ describe("integration callback routing", () => {
 
     const redeploy = await app.request(
       "/api/integrations/railway/start?mode=redeploy&returnTo=%2Fsettings%2Ftag-mode",
+      sameOrigin,
     );
-    const readOnly = await app.request("/api/integrations/railway/start?mode=admin");
+    const readOnly = await app.request("/api/integrations/railway/start?mode=admin", sameOrigin);
 
     expect(redeploy.status).toBe(302);
     expect(readOnly.status).toBe(302);
@@ -5266,7 +5302,7 @@ describe("Jira connections", () => {
       }));
 
       vi.mocked(createIntegrationConnectionState).mockResolvedValue("jira-state");
-      const response = await app.request("/api/integrations/jira/start?returnTo=%2Fsignal%2Fsetup%2Fnotifications");
+      const response = await app.request("/api/integrations/jira/start?returnTo=%2Fsignal%2Fsetup%2Fnotifications", sameOrigin);
 
       expect(response.status).toBe(302);
       const location = new URL(response.headers.get("location")!);
@@ -5822,5 +5858,102 @@ describe("Better Stack connections", () => {
     expect(hidden.integrations).not.toContainEqual(expect.objectContaining({ id: "betterstack" }));
     expect((await connect()).status).toBe(404);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("connection start links", () => {
+  beforeEach(() => {
+    vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
+    vi.stubEnv("SLACK_CLIENT_ID", "slack-client");
+    vi.stubEnv("SLACK_CLIENT_SECRET", "slack-secret");
+    vi.stubEnv("SLACK_SIGNING_SECRET", "slack-signing-secret");
+    vi.mocked(getActiveTenant).mockResolvedValue(tenant);
+    vi.mocked(organizationHasCapability).mockResolvedValue(true);
+    vi.mocked(createIntegrationConnectionState).mockResolvedValue("slack-state");
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it.each([
+    ["another site", { "sec-fetch-site": "cross-site" }],
+    ["a sibling address", { "sec-fetch-site": "same-site" }],
+    ["outside a browser page", { "sec-fetch-site": "none" }],
+    ["a browser that does not say", {}],
+  ])("asks before connecting from a link opened from %s", async (_from, headers) => {
+    const response = await app.request(
+      "/api/integrations/slack/start?returnTo=%2Fsettings%3Ftab%3D1",
+      { headers },
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/html");
+    expect(response.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
+    expect(response.headers.get("x-frame-options")).toBe("DENY");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    const page = await response.text();
+    expect(page).toContain("Connect Slack?");
+    expect(page).toContain("Acme &lt;Ops&gt;");
+    expect(page).toContain(
+      '<form method="post" action="/api/integrations/slack/start?returnTo=%2Fsettings%3Ftab%3D1">',
+    );
+    expect(createIntegrationConnectionState).not.toHaveBeenCalled();
+  });
+
+  it("starts right away from Superlog's own pages", async () => {
+    const response = await app.request("/api/integrations/slack/start", sameOrigin);
+
+    expect(response.status).toBe(302);
+    expect(new URL(response.headers.get("location")!).origin).toBe("https://slack.com");
+    expect(createIntegrationConnectionState).toHaveBeenCalledOnce();
+  });
+
+  it("starts from the confirmation page's same-origin post", async () => {
+    const response = await app.request("/api/integrations/slack/start?returnTo=%2Fsettings", {
+      headers: { "sec-fetch-site": "same-origin" },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(302);
+    expect(new URL(response.headers.get("location")!).searchParams.get("state")).toBe("slack-state");
+    expect(createIntegrationConnectionState).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: "slack", returnTo: "/settings" }),
+    );
+  });
+
+  it("starts from a post that names this application's origin when the browser does not say where it came from", async () => {
+    const response = await app.request("/api/integrations/slack/start", {
+      headers: { origin: "https://responder.example" },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(302);
+  });
+
+  it.each([
+    ["another site", { "sec-fetch-site": "cross-site", origin: "https://attacker.example" }],
+    ["a sibling address", { "sec-fetch-site": "same-site", origin: "https://docs.responder.example" }],
+    ["an unknown origin", { origin: "https://attacker.example" }],
+    ["no origin at all", {}],
+  ])("refuses a post from %s", async (_from, headers) => {
+    const response = await app.request("/api/integrations/slack/start", {
+      headers,
+      method: "POST",
+    });
+
+    expect(response.status).toBe(403);
+    expect(createIntegrationConnectionState).not.toHaveBeenCalled();
+  });
+
+  it("still asks signed-out visitors to sign in first", async () => {
+    vi.mocked(getActiveTenant).mockResolvedValue({ ok: false, error: "Unauthorized", status: 401 });
+
+    const response = await app.request("/api/integrations/slack/start", {
+      headers: { "sec-fetch-site": "cross-site" },
+    });
+
+    expect(response.status).toBe(401);
   });
 });

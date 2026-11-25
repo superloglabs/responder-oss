@@ -19,6 +19,7 @@ import {
   encryptCredentials,
 } from "../../../../packages/core/src/credentials/encryption.js";
 import {
+  connectSlackTeamAccount,
   consumeIntegrationConnectionState,
   createIntegrationConnectionState,
   deleteIntegrationAccount,
@@ -100,16 +101,22 @@ import {
   signalOnlyIntegrationIds,
 } from "./catalog.js";
 import {
-  countGitHubUserInstallationRepositories,
   exchangeGitHubCode,
+  GitHubInstallationAccessError,
+  githubInstallationAccessProblem,
   GitHubOAuthError,
-  GitHubPartialInstallationAccessError,
   githubAuthorizeUrl,
   githubInstallUrl,
+  listGitHubUserInstallationRepositoryAccess,
   listGitHubUserInstallations,
   listGitHubRepositories,
   verifyGitHubUserInstallation,
 } from "./github.js";
+import {
+  connectionStartConfirmation,
+  openedFromSameOrigin,
+  postedFromSameOrigin,
+} from "./start-confirmation.js";
 import {
   completeGitHubPullRequestAuthorConnection,
   GitHubPullRequestAuthorError,
@@ -585,9 +592,7 @@ async function consumeBrowserOAuthConnectionState(input: {
 
 function callbackErrorReason(error: unknown): string {
   if (error instanceof GitHubPullRequestAuthorError) return error.reason;
-  if (error instanceof GitHubPartialInstallationAccessError) {
-    return "partial_repository_access";
-  }
+  if (error instanceof GitHubInstallationAccessError) return error.reason;
   if (error instanceof GitHubOAuthError) {
     if (error.githubCode === "incorrect_client_credentials") {
       return "integration_misconfigured";
@@ -1663,9 +1668,34 @@ export const integrationRoutes = new Hono()
 
     return context.json({ accounts: checkedAccounts });
   })
+  // A start link opened from outside Superlog's own pages asks before it
+  // connects anything; see start-confirmation.ts.
   .get("/:provider/start", async (context) => {
     const tenant = await getActiveTenant(context.req.raw.headers);
     if (!tenant.ok) return context.json({ error: tenant.error }, tenant.status);
+    const provider = providerSchema.safeParse(context.req.param("provider"));
+    const definition = provider.success ? getIntegrationDefinition(provider.data) : null;
+    if (definition && !openedFromSameOrigin(context.req.raw.headers)) {
+      const url = new URL(context.req.url);
+      return connectionStartConfirmation({
+        action: `${url.pathname}${url.search}`,
+        organizationId: tenant.organizationId,
+        providerName: definition.name,
+      });
+    }
+    return startIntegrationConnection({
+      ...tenant,
+      provider: context.req.param("provider"),
+      returnTo: context.req.query("returnTo"),
+      mode: context.req.query("mode"),
+    });
+  })
+  .post("/:provider/start", async (context) => {
+    const tenant = await getActiveTenant(context.req.raw.headers);
+    if (!tenant.ok) return context.json({ error: tenant.error }, tenant.status);
+    if (!postedFromSameOrigin(context.req.raw.headers)) {
+      return context.json({ error: "Start the connection from Superlog" }, 403);
+    }
     return startIntegrationConnection({
       ...tenant,
       provider: context.req.param("provider"),
@@ -4985,9 +5015,8 @@ export const integrationRoutes = new Hono()
         userAccessToken: installation.authed_user.access_token,
         userTokenType: installation.authed_user.token_type,
       });
-      const accountId = await upsertIntegrationAccount({
+      const accountId = await connectSlackTeamAccount({
         organizationId: connectionState.organizationId,
-        provider: "slack",
         externalAccountId: installation.team.id,
         displayName: installation.team.name,
         encryptedCredentials,
@@ -5000,7 +5029,22 @@ export const integrationRoutes = new Hono()
           scopes: installation.scope.split(",").filter(Boolean),
           userScopes: installation.authed_user.scope.split(",").filter(Boolean),
         },
+        userId: connectionState.userId,
       });
+      if (!accountId) {
+        console.info(JSON.stringify({
+          event: "slack_team_connection_refused",
+          organizationId: connectionState.organizationId,
+        }));
+        return context.redirect(
+          settingsRedirect(
+            connectionState.returnTo,
+            "slack",
+            "error",
+            "slack_team_connected_elsewhere",
+          ),
+        );
+      }
       const channels = await listSlackChannels(installation.access_token);
       await replaceIntegrationResources(accountId, "slack_channel", channels);
       // Slack stays connected when tag mode can't start; it can be turned on
@@ -5290,31 +5334,37 @@ export const integrationRoutes = new Hono()
         throw new Error("No GitHub App installations are available to this user");
       }
 
-      // A connection stores every repository the installation covers, so
-      // only installations whose repositories the user can all see are
-      // connected. Unequal counts in either direction mean the two lists
-      // disagree, so the installation is skipped.
+      // A connection lets Superlog change code in every repository the
+      // installation covers, so only installations whose repositories the
+      // user can all see and write to are connected. When the two lists
+      // disagree in any way, the installation is skipped.
       const installations: Array<{
         installation: (typeof candidates)[number];
         repositories: Awaited<ReturnType<typeof listGitHubRepositories>>;
       }> = [];
+      let refusal: GitHubInstallationAccessError | null = null;
       for (const installation of candidates) {
         const repositories = await listGitHubRepositories(installation.id);
-        const visibleCount = await countGitHubUserInstallationRepositories(
-          userToken.access_token,
-          installation.id,
+        const problem = githubInstallationAccessProblem(
+          repositories,
+          await listGitHubUserInstallationRepositoryAccess(
+            userToken.access_token,
+            installation.id,
+          ),
         );
-        if (visibleCount !== repositories.length) {
+        if (problem) {
           console.info(JSON.stringify({
-            event: "github_installation_partial_access",
+            event: "github_installation_access_refused",
             installationId: installation.id,
+            reason: problem,
           }));
+          refusal ??= new GitHubInstallationAccessError(installation.id, problem);
           continue;
         }
         installations.push({ installation, repositories });
       }
       if (installations.length === 0) {
-        throw new GitHubPartialInstallationAccessError(candidates[0]!.id);
+        throw refusal ?? new Error("No GitHub App installations are available to this user");
       }
 
       const connectedAccounts: Array<{
