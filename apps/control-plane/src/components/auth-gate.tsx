@@ -789,6 +789,15 @@ function WorkspaceSetup({ onCreating, onReady }: WorkspaceSetupProps) {
   );
 }
 
+// The link confirms an email only in the browser signed in to that account.
+function confirmationLinkError(code: string | null): string | null {
+  if (!code) return null;
+  if (code === "SIGN_IN_REQUIRED") {
+    return "Open the confirmation link in this browser, where you're signed in. Send a new one if it expired.";
+  }
+  return "That confirmation link is invalid or expired. Send a new one.";
+}
+
 function InvitationGate({
   email,
   emailVerified,
@@ -802,9 +811,7 @@ function InvitationGate({
 }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(() =>
-    new URL(window.location.href).searchParams.get("error")
-      ? "That confirmation link is invalid or expired. Send a new one."
-      : null,
+    confirmationLinkError(new URL(window.location.href).searchParams.get("error")),
   );
   const [verificationSent, setVerificationSent] = useState(false);
 
@@ -916,7 +923,7 @@ function InvitationGate({
           <h1>Confirm your email</h1>
           <p>
             {verificationSent
-              ? `We sent a link to ${email}. Open it to come back here and join the workspace.`
+              ? `We sent a link to ${email}. Open it in this browser to come back here and join the workspace.`
               : `To join this workspace, confirm that you own ${email}. We'll email you a link.`}
           </p>
         </div>

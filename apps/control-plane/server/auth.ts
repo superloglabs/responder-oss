@@ -31,6 +31,12 @@ import {
   adminAc as organizationAdminAc,
   memberAc as organizationMemberAc,
 } from "better-auth/plugins/organization/access";
+import {
+  accountSecurityAfterHook,
+  accountSecurityBeforeHook,
+  afterPasswordReset,
+  revokeCredentialsFor,
+} from "./account-security.js";
 import { assertWorkspaceCanInvite } from "./billing/invitations.js";
 import { allowsMarketing } from "./consent-policy.js";
 import { sendEmail } from "@responder/core/email";
@@ -172,13 +178,17 @@ export function createResponderAuth() {
       enabled: true,
       resetPasswordTokenExpiresIn: 60 * 60,
       revokeSessionsOnPasswordReset: true,
+      onPasswordReset: async ({ user }) => {
+        await afterPasswordReset(user);
+      },
       // Not awaited, so the response time does not reveal whether the
       // email belongs to an account.
       sendResetPassword: async ({ token, url, user }) => {
         void sendPasswordResetEmail({ token, url, userId: user.id, email: user.email });
       },
     },
-    // Sent only on request, from the invitation page.
+    // Sent only on request, from the invitation page. See
+    // accountSecurityBeforeHook for who may ask for and use a link.
     emailVerification: {
       expiresIn: 60 * 60,
       sendVerificationEmail: async ({ token, url, user }) => {
@@ -213,8 +223,19 @@ export function createResponderAuth() {
         },
       },
     },
+    hooks: {
+      after: accountSecurityAfterHook,
+      before: accountSecurityBeforeHook,
+    },
     databaseHooks: {
       user: {
+        // A ban ends the person's API keys and app connections along with
+        // their sessions.
+        update: {
+          after: async (user) => {
+            if (user.banned) await revokeCredentialsFor(user.id, "ban");
+          },
+        },
         create: {
           after: async (user, context) => {
             await synchronizeSuperuserRole(

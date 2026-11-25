@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { and, desc, eq, isNull, lt, or } from "drizzle-orm";
+import { and, desc, eq, isNull, lt, lte, or } from "drizzle-orm";
 import { member, user } from "./auth-schema.js";
 import { getDatabase } from "./client.js";
 import { apiKeys } from "./schema.js";
@@ -124,7 +124,8 @@ export async function revokeApiKey(input: {
   return rows.length > 0;
 }
 
-// Resolves an active key whose creator is still a member of its workspace.
+// Resolves an active key whose creator is still a member of its workspace
+// and is not banned.
 export async function authenticateApiKey(
   token: string,
   now = new Date(),
@@ -155,6 +156,11 @@ export async function authenticateApiKey(
       and(
         eq(apiKeys.tokenHash, hashApiKeyToken(token)),
         isNull(apiKeys.revokedAt),
+        or(
+          isNull(user.banned),
+          eq(user.banned, false),
+          lte(user.banExpires, now),
+        ),
       ),
     )
     .limit(1);

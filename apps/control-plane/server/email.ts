@@ -42,8 +42,8 @@ export function emailVerificationEmailBody(args: { verifyUrl: string }): {
   const safeUrl = escapeHtml(args.verifyUrl);
 
   return {
-    text: `Confirm this email address for your Superlog account.\n\nConfirm email: ${args.verifyUrl}\n\nThis link expires in one hour. If you didn't ask for this, you can ignore this email.`,
-    html: `<p>Confirm this email address for your Superlog account.</p>
+    text: `Confirm this email address for your Superlog account. Open the link in the browser where you're signed in to Superlog.\n\nConfirm email: ${args.verifyUrl}\n\nThis link expires in one hour. If you didn't ask for this, you can ignore this email.`,
+    html: `<p>Confirm this email address for your Superlog account. Open the link in the browser where you're signed in to Superlog.</p>
 <p><a href="${safeUrl}">Confirm email</a></p>
 <p style="color:#888">This link expires in one hour. If you didn't ask for this, you can ignore this email.</p>`,
   };
