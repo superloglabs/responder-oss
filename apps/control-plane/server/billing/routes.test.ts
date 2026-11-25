@@ -7,6 +7,7 @@ import {
 } from "./routes.js";
 
 const mocks = vi.hoisted(() => ({
+  cancelAutomationPlan: vi.fn(),
   changeAutomationPlan: vi.fn(),
   createBillingPortal: vi.fn(),
   createPayAsYouGoCheckout: vi.fn(),
@@ -21,7 +22,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("../tenant.js", () => ({ getActiveTenant: mocks.tenant }));
 vi.mock("../../../../packages/core/src/billing/autumn.js", () => ({
-  cancelAutomationPlan: vi.fn(),
+  cancelAutomationPlan: mocks.cancelAutomationPlan,
   changeAutomationPlan: mocks.changeAutomationPlan,
   createBillingPortal: mocks.createBillingPortal,
   createPayAsYouGoCheckout: mocks.createPayAsYouGoCheckout,
@@ -55,13 +56,13 @@ const summary = { enabled: true, usage: 3 };
 
 // Cache and rate-limit state outlive a test, so each test uses its own workspace.
 let workspaceCount = 0;
-function signIn() {
+function signIn(role = "admin") {
   workspaceCount += 1;
   const id = `workspace-${workspaceCount}`;
   mocks.tenant.mockResolvedValue({
     ok: true,
     organizationId: id,
-    role: "admin",
+    role,
     user: { email: "rob@example.com", id: `user-${workspaceCount}`, name: "Rob" },
   });
 }
@@ -219,6 +220,58 @@ describe("billing routes", () => {
     expect(await response.json()).toMatchObject({
       invitationsNeedTeamPlan: needsTeamPlan,
       usageBased: true,
+    });
+  });
+
+  describe("plan and payment changes", () => {
+    const changes = [
+      ["/api/billing/checkout", undefined],
+      ["/api/billing/automations/plan", { planId: "free" }],
+      ["/api/billing/automations/plan", { planId: "automation_pro" }],
+      ["/api/billing/portal", undefined],
+    ] as const;
+
+    function request(path: string, body: unknown) {
+      return app.request(path, {
+        ...(body ? { body: JSON.stringify(body), headers: { "content-type": "application/json" } } : {}),
+        method: "POST",
+      });
+    }
+
+    it.each(changes)("refuses %s from a member", async (path, body) => {
+      signIn("member");
+      mocks.organizationHasCapability.mockResolvedValue(true);
+
+      const response = await request(path, body);
+
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual({ error: "Only workspace owners and admins can change billing" });
+      expect(mocks.createPayAsYouGoCheckout).not.toHaveBeenCalled();
+      expect(mocks.cancelAutomationPlan).not.toHaveBeenCalled();
+      expect(mocks.changeAutomationPlan).not.toHaveBeenCalled();
+      expect(mocks.createBillingPortal).not.toHaveBeenCalled();
+    });
+
+    it.each(["owner", "admin", "member,admin"])("lets a workspace %s change the plan", async (role) => {
+      signIn(role);
+      mocks.organizationHasCapability.mockResolvedValue(true);
+      mocks.changeAutomationPlan.mockResolvedValue({ url: null });
+
+      const response = await request("/api/billing/automations/plan", { planId: "automation_pro" });
+
+      expect(response.status).toBe(200);
+      expect(mocks.changeAutomationPlan).toHaveBeenCalledOnce();
+    });
+
+    it("still shows billing, seats, and usage to a member", async () => {
+      signIn("member");
+      mocks.getBillingSummary.mockResolvedValue(summary);
+      mocks.organizationHasCapability.mockResolvedValue(true);
+      mocks.getUsageHistory.mockResolvedValue({ days: [] });
+
+      for (const path of ["/api/billing", "/api/billing/seats", "/api/billing/usage"]) {
+        expect((await app.request(path)).status, path).toBe(200);
+      }
     });
   });
 

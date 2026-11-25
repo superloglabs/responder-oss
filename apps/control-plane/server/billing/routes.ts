@@ -133,6 +133,10 @@ const billingRequests = createRateLimiter({
   windowMs: 60_000,
 });
 
+function isWorkspaceAdmin(role: string): boolean {
+  return role.split(",").some((value) => ["owner", "admin"].includes(value.trim()));
+}
+
 export const billingRoutes = new Hono<{ Variables: { tenant: ActiveTenant } }>()
   .use("*", async function billingAccess(context, next) {
     const tenant = await getActiveTenant(context.req.raw.headers);
@@ -156,6 +160,14 @@ export const billingRoutes = new Hono<{ Variables: { tenant: ActiveTenant } }>()
       return context.json({ error: "Too many requests" }, 429);
     }
     context.set("tenant", tenant);
+    await next();
+  })
+  // Every member can see billing. Only owners and admins can start a
+  // checkout, change or cancel the plan, or open the payment portal.
+  .use("*", async function billingChanges(context, next) {
+    if (!["GET", "HEAD"].includes(context.req.method) && !isWorkspaceAdmin(context.get("tenant").role)) {
+      return context.json({ error: "Only workspace owners and admins can change billing" }, 403);
+    }
     await next();
   })
   .get("/", async (context) => {

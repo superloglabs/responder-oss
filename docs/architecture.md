@@ -245,6 +245,8 @@ investigation credits.
   machine hours when the plan includes them. A balance whose plan bills usage
   past it does not stop work. Work already running finishes and is charged
   even if it goes past a balance. Operator replays are not charged.
+- Every member can see billing. Only workspace owners and admins can start a
+  checkout, change or cancel the plan, or open the payment portal.
 - On plans without machine hours, the billing page splits the period's charges
   into model usage and sandbox time from these rows. Autumn's balance remains
   the total.
