@@ -235,6 +235,18 @@ describe("sandbox image build", () => {
     );
   });
 
+  it("leaves the image building when the worker stops during the allowance check", async () => {
+    const shutdown = new AbortController();
+    const dependencies = buildDependencies({});
+    dependencies.checkAllowance.mockImplementationOnce(async () => {
+      shutdown.abort();
+      return { allowed: false, exhausted: "machine_hours" };
+    });
+    await expect(buildSandboxImage(organizationId, { signal: shutdown.signal }, environment, dependencies))
+      .resolves.toBe("interrupted");
+    expect(dependencies.fail).not.toHaveBeenCalled();
+  });
+
   it("records a failing setup script without throwing", async () => {
     const { sandbox } = fakeSandbox("responder-setup.sh");
     const dependencies = buildDependencies({ sandbox });

@@ -104,6 +104,7 @@ describe("getUsageHistory", () => {
       [
         { endedAt: "2026-10-08T11:30:00Z", source: "automation-1", startedAt: new Date("2026-10-08T10:00:00Z") },
         { endedAt: new Date("2026-10-09T00:30:00Z"), source: "tag_mode", startedAt: new Date("2026-10-09T00:00:00Z") },
+        { endedAt: new Date("2026-10-09T02:15:00Z"), source: "sandbox_image", startedAt: new Date("2026-10-09T02:00:00Z") },
       ],
       [{ day: "2026-10-08", micros: "1250000", source: "automation-1" }],
       [
@@ -124,11 +125,13 @@ describe("getUsageHistory", () => {
     expect(history.points).toEqual([
       { aiCharge: 1.25, day: "2026-10-08", machineHours: 1.5, source: "automation-1" },
       { aiCharge: 0.25, day: "2026-10-09", machineHours: 0, source: "pull_requests" },
+      { aiCharge: 0, day: "2026-10-09", machineHours: 0.25, source: "sandbox_image" },
       { aiCharge: 0.5, day: "2026-10-09", machineHours: 0.5, source: "tag_mode" },
     ]);
     expect(history.sources).toEqual({
       "automation-1": { automationId: "automation-1", kind: "automation", name: "Sentry triage" },
       pull_requests: { kind: "pull_requests" },
+      sandbox_image: { kind: "sandbox_image" },
       tag_mode: { kind: "tag_mode" },
     });
     // Only what billing charges: billable, settled, Responder-funded, not waived.

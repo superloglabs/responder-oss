@@ -246,6 +246,7 @@ export async function buildSandboxImage(
   // A build runs the workspace's own script, so it needs machine time left
   // like any other work, and its sandbox time is charged.
   const access = await dependencies.checkAllowance(organizationId, { responderModels: false });
+  if (options.signal?.aborted) return "interrupted";
   if (!access.allowed) {
     await dependencies.fail(
       organizationId,
