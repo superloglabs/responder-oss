@@ -157,6 +157,25 @@ describe("pull request follow-up", () => {
     expect(changedFiles).not.toHaveBeenCalled();
   });
 
+  it("checks changed files with the automation's dependency setting", async () => {
+    vi.mocked(changedFiles).mockResolvedValue([]);
+    const fetchImpl = vi.fn().mockResolvedValueOnce(json(pullRequest));
+    await updatePullRequest({
+      allowDependencyChanges: true,
+      commitMessage: "Bump the client",
+      repositories: [checkout()],
+      session: session("e".repeat(40)),
+      target,
+    }, dependencies(fetchImpl));
+    expect(changedFiles).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(String),
+      expect.any(String),
+      true,
+      { allowDependencyChanges: true },
+    );
+  });
+
   it("pushes the changes onto the head without force and moves the baseline", async () => {
     vi.mocked(changedFiles).mockResolvedValue([
       { content: new TextEncoder().encode("fixed\n"), mode: "100644", path: "tests/test_schema.py" },

@@ -1,3 +1,5 @@
+import { pullRequestApprovalRequired } from "@responder/core/db/pull-request-approval";
+import { outsideDataRule } from "@responder/core/untrusted-text";
 import { renderInvestigationPromptPart, type InvestigationPromptParts } from "@responder/core/investigations/prompt-parts";
 import {
   run,
@@ -688,6 +690,7 @@ export function investigationInstructions(input: {
       ? null
       : prompt("reportResponse"),
     prompt(assistant ? "assistantUnverified" : "insufficientEvidence"),
+    outsideDataRule,
   ]
     .filter((instruction): instruction is string => Boolean(instruction))
     .join("\n\n");
@@ -697,8 +700,11 @@ export function initialInvestigationMessage(
   input: InvestigationInput,
   at = new Date(),
   threadContext: string | null = null,
+  // Set when the event comes from outside the workspace, such as an alert,
+  // rather than from a person asking in a thread.
+  outsideEvent = false,
 ): { message: string; traceEvent: InvestigationTraceEvent } {
-  const message = [threadContext, investigationPrompt(input)]
+  const message = [threadContext, investigationPrompt(input, { outsideEvent })]
     .filter((part): part is string => Boolean(part))
     .join("\n\n");
   return {
@@ -777,10 +783,16 @@ export async function runInvestigationAgent(
         sessionId: job.slackInvestigationSessionId,
       })
     : null;
+  // A thread turn answers a person in the workspace, unless a pull request
+  // review started it. Alerts, tickets, and error reports come from outside.
+  const outsideEvent = threadMode
+    ? Boolean(investigationInput.attributes?.githubReviewUrl)
+    : !scanMode;
   const initialMessage = initialInvestigationMessage(
     investigationInput,
     new Date(),
     threadContext?.context ?? null,
+    outsideEvent,
   );
   await writeTrace(traceEvent("session.started"));
   await writeTrace(initialMessage.traceEvent);
@@ -1211,6 +1223,9 @@ export async function runInvestigationAgent(
                 repositories,
                 session,
                 slackInvestigationSessionId: job.slackInvestigationSessionId,
+                awaitingApproval: outsideEvent &&
+                  await pullRequestApprovalRequired(job.config.organizationId),
+                untrustedTrigger: outsideEvent,
               })]
             : []),
           ...(pullRequestFollowUp?.tools ?? []),

@@ -54,6 +54,11 @@ export function createThreadPullRequestTool(input: {
   repositories: CheckedOutRepository[];
   session: SandboxSession;
   slackInvestigationSessionId: string;
+  // Set when a pull request review, not a person, started this turn and the
+  // workspace asks a person before such pull requests are opened.
+  awaitingApproval: boolean;
+  // Set when a pull request review, not a person, started this turn.
+  untrustedTrigger: boolean;
 }, dependencies: ThreadPullRequestDependencies = defaultDependencies) {
   const repositoryNames = [
     ...new Set(input.repositories.map(({ repository }) => repository)),
@@ -96,6 +101,9 @@ export function createThreadPullRequestTool(input: {
       title: z.string().trim().min(1).max(240),
     }),
     async execute(request) {
+      if (input.awaitingApproval) {
+        return "Opening this pull request needs a person in the workspace to ask for it, because a pull request review started this turn. Nothing was published. Describe the change in your reply; a person can ask for the pull request in this thread.";
+      }
       const key = `${request.repository}\0${request.title}`;
       const existing = opened.get(key);
       if (existing) {
@@ -124,6 +132,7 @@ export function createThreadPullRequestTool(input: {
         repositoryPath: checkout.path,
         requestId: requestId(input.investigationId, request.repository, request.title),
         title: request.title,
+        untrustedTrigger: input.untrustedTrigger,
         workspaceBaseSha: checkout.workspaceBaseSha,
       }, input.session);
       opened.set(key, pullRequest);

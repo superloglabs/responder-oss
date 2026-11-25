@@ -126,6 +126,8 @@ const configurationShape = automationConfigurationSchema.shape;
 
 export const automationConfigurationOutputSchema = z
   .object({
+    allowDependencyChanges: z.boolean()
+      .describe("Whether pull requests the agent opens may change dependency manifests and lockfiles."),
     contextAccountIds: z.array(z.uuid())
       .describe("Integration accounts the agent can read from, besides GitHub."),
     harness: automationConfigurationHarnessSchema.describe("The agent program that runs the model."),
@@ -202,6 +204,7 @@ function changed<Schema extends z.ZodType>(schema: Schema) {
 const shape = describedConfigurationShape;
 export const automationConfigurationChangesSchema = z
   .object({
+    allowDependencyChanges: changed(shape.allowDependencyChanges),
     contextAccountIds: changed(shape.contextAccountIds),
     harness: changed(shape.harness),
     maxModelRequests: changed(shape.maxModelRequests),

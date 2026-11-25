@@ -187,6 +187,9 @@ const slackBlockActionsSchema = z.object({
   user: z.object({
     id: z.string().min(1),
     name: z.string().min(1).optional(),
+    // The Slack team of the person who pressed, which differs from the
+    // event's team for someone in a channel shared with another team.
+    team_id: z.string().min(1).optional(),
     username: z.string().min(1).optional(),
   }),
   response_url: z.string().url(),
@@ -996,6 +999,12 @@ async function pressAutomationRunButton(
   if (!run.automationEnabled) {
     return slackEphemeralResponse("This automation is turned off. Turn it on in Responder, then press the button again.");
   }
+  // A press continues the run as an instruction, so a person from another
+  // Slack team in a shared channel cannot press, nor use up the one press.
+  // A press without a team is refused too.
+  if (payload.user.team_id !== payload.team.id) {
+    return slackEphemeralResponse("Only members of this Slack workspace can use these buttons.");
+  }
   const outcome = await queueAutomationRunReply({
     message: {
       authorId: payload.user.id,
@@ -1006,6 +1015,7 @@ async function pressAutomationRunButton(
         integrationAccountId: run.integrationAccountId,
         label,
         messageTimestamp: message.ts,
+        pressedByTeamMember: true,
         threadTimestamp: message.thread_ts ?? message.ts,
       },
       source: "slack",

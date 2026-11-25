@@ -1,4 +1,5 @@
 import { tool } from "@openai/agents";
+import { pullRequestApprovalRequired } from "@responder/core/db/pull-request-approval";
 import { createSuggestionIfMissing, getSuggestionSettings } from "@responder/core/db/suggestions";
 import { queueSuggestionPullRequests } from "@responder/core/db/suggestion-pull-requests";
 import { suggestionSubmissionSchema } from "@responder/core/suggestions/model";
@@ -68,7 +69,13 @@ export function createSuggestionTool(input: {
       let automaticPullRequestRequestIds: string[] = [];
       if (result.created && suggestion.codeChange) {
         const settings = await getSuggestionSettings(input.organizationId);
-        if (settings.autoOpenPullRequests) {
+        // Suggestions come from investigations of outside events, so a
+        // workspace that asks before such pull requests leaves them to a
+        // person.
+        if (
+          settings.autoOpenPullRequests &&
+          !(await pullRequestApprovalRequired(input.organizationId))
+        ) {
           const requests = await queueSuggestionPullRequests({
             organizationId: input.organizationId,
             suggestionId: result.suggestion.id,

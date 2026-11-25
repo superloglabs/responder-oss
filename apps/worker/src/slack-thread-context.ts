@@ -1,3 +1,4 @@
+import { fenceUntrusted } from "@responder/core/untrusted-text";
 import { z } from "zod";
 import { decryptCredentials } from "@responder/core/credentials/encryption";
 import { getSlackThreadSessionContext } from "@responder/core/db/investigations";
@@ -90,14 +91,21 @@ export function formatSlackThreadContext(input: {
     length += line.length;
   }
   const omitted = (input.omitted ?? 0) + candidates.length - kept.length;
+  // Alerts, apps, guests, and people from other teams in a shared channel
+  // write here too, so the earlier messages are fenced as data.
   return [
     "# Earlier messages in this Slack thread",
     "",
     "Oldest first. The request below is the newest message in the thread.",
     "",
-    ...(parent ? [parent] : []),
-    ...(omitted > 0 ? [`(${omitted} more ${omitted === 1 ? "message" : "messages"} omitted)`] : []),
-    ...kept,
+    fenceUntrusted(
+      "the earlier messages in the Slack thread, which apps and anyone in the channel can write",
+      [
+        ...(parent ? [parent] : []),
+        ...(omitted > 0 ? [`(${omitted} more ${omitted === 1 ? "message" : "messages"} omitted)`] : []),
+        ...kept,
+      ].join("\n"),
+    ),
   ].join("\n");
 }
 

@@ -6,6 +6,7 @@ describe("management schemas", () => {
   it("returns an automation on the plan's model", () => {
     const configuration = {
       ...defaultAutomationModelSettings,
+      allowDependencyChanges: false,
       contextAccountIds: [],
       harness: "plan",
       model: "default",

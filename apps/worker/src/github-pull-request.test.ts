@@ -270,6 +270,112 @@ describe("GitHub pull requests from Daytona", () => {
   });
 });
 
+describe("protected files in agent pull requests", () => {
+  const input = {
+    baseBranch: "main",
+    baseSha: "a".repeat(40),
+    body: "Pull request body",
+    installationId: 123,
+    organizationId: "org-1",
+    repository: "acme/app",
+    repositoryPath: "/home/daytona/workspace/repositories/acme/app",
+    requestId: "12345678-1234-1234-1234-123456789012",
+    title: "Fix: Broken route",
+    workspaceBaseSha: "b".repeat(40),
+  };
+
+  function sessionWith(listed: string[]) {
+    const execCommand = vi.fn().mockResolvedValueOnce(commandResult(0, listed.map((path) => `${path}\0`).join("")));
+    listed.forEach(() => {
+      execCommand.mockResolvedValueOnce(commandResult(0, "present")).mockResolvedValueOnce(commandResult(1));
+    });
+    return {
+      execCommand,
+      session: {
+        execCommand,
+        readFile: vi.fn().mockResolvedValue(new TextEncoder().encode("changed\n")),
+      } as unknown as DaytonaSandboxSession,
+    };
+  }
+
+  function publishedFetch() {
+    return vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ tree: { sha: "base-tree-sha" } }))
+      .mockResolvedValueOnce(Response.json({ sha: "blob-sha" }))
+      .mockResolvedValueOnce(Response.json({ sha: "blob-sha-2" }))
+      .mockResolvedValueOnce(Response.json({ sha: "tree-sha" }))
+      .mockResolvedValueOnce(Response.json({ sha: "commit-sha" }))
+      .mockResolvedValueOnce(Response.json({ ref: "refs/heads/fix" }))
+      .mockResolvedValueOnce(Response.json({ number: 42, html_url: "https://github.com/acme/app/pull/42" }));
+  }
+
+  it("refuses CI, dependency, and agent instruction changes before publishing anything", async () => {
+    const { execCommand, session } = sessionWith([
+      "src/route.ts",
+      ".github/workflows/ci.yml",
+      "package.json",
+      "AGENTS.md",
+    ]);
+    const fetchMock = vi.fn<typeof fetch>();
+
+    await expect(
+      createPullRequestFromSandbox(input, session, { ...dependencies(), fetch: fetchMock }),
+    ).rejects.toThrow(
+      "Agents cannot change these files: .github/workflows/ci.yml (CI configuration), package.json (dependencies), AGENTS.md (agent instructions).",
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+    // Refused before any file is read.
+    expect(execCommand).toHaveBeenCalledTimes(1);
+  });
+
+  it("lists renamed files under both names so a rename cannot hide a protected file", async () => {
+    // A workflow moved out of .github is listed under its old path too.
+    const { execCommand, session } = sessionWith([".github/workflows/ci.yml", "ci.yml"]);
+    await expect(
+      createPullRequestFromSandbox(input, session, { ...dependencies(), fetch: vi.fn<typeof fetch>() }),
+    ).rejects.toThrow(".github/workflows/ci.yml (CI configuration)");
+    expect(String(execCommand.mock.calls[0]?.[0]?.cmd)).toContain("git diff --no-renames --name-only");
+  });
+
+  it("publishes dependency changes when the automation allows them", async () => {
+    const { session } = sessionWith(["src/route.ts", "package.json"]);
+    await expect(
+      createPullRequestFromSandbox(
+        { ...input, allowDependencyChanges: true },
+        session,
+        { ...dependencies(), fetch: publishedFetch() },
+      ),
+    ).resolves.toMatchObject({ changedFiles: ["src/route.ts", "package.json"] });
+  });
+
+  it("never publishes CI changes, even when dependency changes are allowed", async () => {
+    const { session } = sessionWith([".github/actions/setup/action.yml"]);
+    await expect(
+      createPullRequestFromSandbox(
+        { ...input, allowDependencyChanges: true },
+        session,
+        { ...dependencies(), fetch: vi.fn<typeof fetch>() },
+      ),
+    ).rejects.toThrow(".github/actions/setup/action.yml (CI configuration)");
+  });
+
+  it("notes in the body when an outside event started the run", async () => {
+    const { session } = sessionWith(["src/route.ts", "src/other.ts"]);
+    const fetchMock = publishedFetch();
+    await createPullRequestFromSandbox(
+      { ...input, untrustedTrigger: true },
+      session,
+      { ...dependencies(), fetch: fetchMock },
+    );
+    const pullRequestCall = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/pulls"));
+    const body = JSON.parse(String(pullRequestCall?.[1]?.body)) as { body: string };
+    expect(body.body.startsWith("Pull request body")).toBe(true);
+    expect(body.body).toContain("written from an event sent from outside this workspace");
+    expect(body.body).toContain("review it as untrusted input");
+  });
+});
+
 describe("pull request opener", () => {
   const target = { installationId: 123, organizationId: "org-1", repository: "acme/app" };
 

@@ -1,5 +1,6 @@
 import { ideHandoffRoutes } from "./ide-handoff.js";
 import { createHandoffSettingsRoutes } from "./handoff-settings-routes.js";
+import { createPullRequestApprovalRoutes } from "./pull-request-approval-routes.js";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import * as Sentry from "@sentry/hono/node";
@@ -619,6 +620,7 @@ export const app = instrumentedApp
   .route("/api/terraform", terraformRoutes)
   .route("/api/error-notifications", createErrorNotificationRoutes())
   .route("/api/handoff-settings", createHandoffSettingsRoutes())
+  .route("/api/pull-request-approval", createPullRequestApprovalRoutes())
   .route("/api/sandbox-network", createSandboxNetworkRoutes())
   .route("/api/sandbox-settings", createSandboxImageRoutes())
   .route("/api/error-issues", createErrorIssueRoutes())

@@ -928,6 +928,7 @@ async function insertAutomationVersion(
   const rows = await tx
     .insert(automationVersions)
     .values({
+      allowDependencyChanges: input.configuration.allowDependencyChanges,
       automationId: input.automationId,
       connectionMode: "all_selected",
       createdBy: input.createdBy,
@@ -1232,6 +1233,7 @@ export async function getAutomation(
   const rows = await db
     .select({
       configuration: {
+        allowDependencyChanges: automationVersions.allowDependencyChanges,
         harness: automationVersions.harness,
         maxModelRequests: automationVersions.maxModelRequests,
         maxOutputTokensPerRequest:
@@ -2112,6 +2114,7 @@ export async function claimAutomationRun(runId: string) {
 
   const rows = await db
     .select({
+      allowDependencyChanges: automationVersions.allowDependencyChanges,
       cancelRequestedAt: automationRuns.cancelRequestedAt,
       harness: automationVersions.harness,
       maxModelRequests: automationVersions.maxModelRequests,

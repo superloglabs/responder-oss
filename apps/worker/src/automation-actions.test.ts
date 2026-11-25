@@ -83,6 +83,7 @@ function handler(
       checkedOutRepositories: [checkout],
       onAction,
       organizationId: "organization-1",
+      pullRequestPolicy: { allowDependencyChanges: false, awaitingApproval: false, untrustedTrigger: true },
       runId,
       session,
       ...overrides,
@@ -216,6 +217,67 @@ describe("automation pull request tool", () => {
       attemptId: "attempt-1",
       failureMessage: "run cancelled",
     });
+  });
+});
+
+describe("pull request safeguards in automation runs", () => {
+  const outside = { allowDependencyChanges: false, awaitingApproval: false, untrustedTrigger: true };
+
+  it("passes the dependency setting and the trigger's trust to the pull request", async () => {
+    const deps = dependencies();
+    const { handle } = handler(deps, { pullRequestPolicy: { ...outside, allowDependencyChanges: true } });
+
+    await handle(openPullRequest);
+
+    expect(deps.createPullRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ allowDependencyChanges: true, untrustedTrigger: true }),
+      session,
+    );
+  });
+
+  it("passes a policy that refuses dependency changes from an outside event", async () => {
+    const deps = dependencies();
+    const { handle } = handler(deps);
+
+    await handle(openPullRequest);
+
+    expect(deps.createPullRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ allowDependencyChanges: false, untrustedTrigger: true }),
+      session,
+    );
+  });
+
+  it("passes the dependency setting to pushes on the run's pull request", async () => {
+    const deps = dependencies();
+    const { handle } = handler(deps, { pullRequestPolicy: { ...outside, allowDependencyChanges: true } });
+
+    await handle({
+      arguments: { commitMessage: "Bump the client", pullRequestNumber: 1, repository: "acme/app" },
+      name: "update_pull_request",
+    });
+
+    expect(deps.updatePullRequest).toHaveBeenCalledWith(expect.objectContaining({ allowDependencyChanges: true }));
+  });
+
+  it("does not open a pull request while the run waits for a workspace member", async () => {
+    const deps = dependencies();
+    const { handle, onAction } = handler(deps, { pullRequestPolicy: { ...outside, awaitingApproval: true } });
+
+    const result = await handle(openPullRequest);
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toContain("needs a workspace member's approval");
+    expect(deps.beginAttempt).not.toHaveBeenCalled();
+    expect(deps.createPullRequest).not.toHaveBeenCalled();
+    expect(onAction).not.toHaveBeenCalled();
+  });
+
+  it("tells the agent how to ask for approval", () => {
+    expect(automationActionInstructions(["#alerts"], undefined, false, true))
+      .toMatch(/add a button such as "Open pull request".*end your turn/su);
+    expect(automationActionInstructions([], undefined, false, true))
+      .toContain("run page");
+    expect(automationActionInstructions(["#alerts"])).not.toContain("approval");
   });
 });
 

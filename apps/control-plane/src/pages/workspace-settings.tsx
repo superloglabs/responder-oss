@@ -578,6 +578,7 @@ export function WorkspaceSettingsPage() {
         {!signal && <>
           <HandoffButtonsSection />
           <PullRequestAuthorSection currentUserId={session.data?.user.id} />
+          <PullRequestApprovalSection />
           <SandboxImageSection />
           <SandboxNetworkSection />
         </>}
@@ -689,6 +690,93 @@ function HandoffButtonsSection() {
                   ))
                 : <span className="handoffPreview__empty">No buttons</span>}
             </div>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// Whether pull requests from runs that an alert, a webhook request, or a
+// channel message started wait for a workspace member to approve them.
+function PullRequestApprovalSection() {
+  const [state, setState] = useState<{ canEdit: boolean; requireApproval: boolean } | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void fetch("/api/pull-request-approval")
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Could not load the pull request approval setting");
+        return (await response.json()) as { canEdit: boolean; requireApproval: boolean };
+      })
+      .then((next) => { if (active) setState(next); })
+      .catch((cause: unknown) => { if (active) setError(cause instanceof Error ? cause.message : "Could not load the pull request approval setting"); });
+    return () => { active = false; };
+  }, []);
+
+  async function toggle() {
+    if (!state) return;
+    const previous = state;
+    const requireApproval = !state.requireApproval;
+    setState({ ...state, requireApproval });
+    setError(null);
+    setSaving(true);
+    try {
+      const response = await fetch("/api/pull-request-approval", {
+        body: JSON.stringify({ requireApproval }),
+        headers: { "content-type": "application/json" },
+        method: "PUT",
+      });
+      const body = (await response.json().catch(() => null)) as { error?: string; requireApproval?: boolean } | null;
+      if (!response.ok || typeof body?.requireApproval !== "boolean") {
+        throw new Error(body?.error ?? "Could not save the pull request approval setting");
+      }
+      setState({ canEdit: true, requireApproval: body.requireApproval });
+    } catch (cause) {
+      setState(previous);
+      setError(cause instanceof Error ? cause.message : "Could not save the pull request approval setting");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="memberSection pullRequestApproval">
+      <div className="memberSection__heading">
+        <h3>Pull request approval</h3>
+        <p>
+          Alerts, webhook requests and channel messages can carry text from
+          anyone who can send them.
+          {state && !state.canEdit ? " Admins can change this." : null}
+        </p>
+      </div>
+      {error ? <p className="settingsNotice settingsNotice--error">{error}</p> : null}
+      {state ? (
+        <div className="memberList">
+          <div className="memberRow">
+            <span className="memberIdentity">
+              <strong>Ask before opening pull requests from outside events</strong>
+              <span>
+                Covers runs started by alerts, error issues, webhooks,
+                schedules, channel messages and GitHub events. The agent posts
+                its fix with a button, or waits for a message on the run page,
+                and opens the pull request once a workspace member answers.
+                Runs a member starts are not affected.
+              </span>
+            </span>
+            <button
+              aria-checked={state.requireApproval}
+              aria-label="Ask before opening pull requests from outside events"
+              className="dsSwitch handoffRow__switch"
+              disabled={!state.canEdit || saving}
+              onClick={() => void toggle()}
+              role="switch"
+              type="button"
+            >
+              <span aria-hidden="true" className="dsSwitch__track"><span /></span>
+            </button>
           </div>
         </div>
       ) : null}

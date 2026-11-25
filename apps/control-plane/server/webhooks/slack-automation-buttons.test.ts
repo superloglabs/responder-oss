@@ -36,7 +36,7 @@ async function press(overrides: Record<string, unknown> = {}) {
     response_url: responseUrl,
     team: { id: "T123" },
     type: "block_actions",
-    user: { id: "U123", name: "ada" },
+    user: { id: "U123", name: "ada", team_id: "T123" },
     ...overrides,
   };
   const body = new URLSearchParams({ payload: JSON.stringify(payload) }).toString();
@@ -106,6 +106,43 @@ describe("automation buttons in Slack", () => {
     }]);
   });
 
+  it("records a press by a member of the connected Slack team", async () => {
+    await press({ user: { id: "U123", name: "ada", team_id: "T123" } });
+    expect(mocks.queueReply).toHaveBeenLastCalledWith(expect.objectContaining({
+      message: expect.objectContaining({
+        slackButton: expect.objectContaining({ pressedByTeamMember: true }),
+      }),
+    }));
+  });
+
+  it("refuses a press from another Slack team in a shared channel and keeps the buttons", async () => {
+    const response = await press({ user: { id: "U999", name: "eve", team_id: "T999" } });
+
+    expect(response.status).toBe(200);
+    expect(mocks.queueReply).not.toHaveBeenCalled();
+    expect(responses(fetchMock)).toEqual([{
+      body: {
+        replace_original: false,
+        response_type: "ephemeral",
+        text: "Only members of this Slack workspace can use these buttons.",
+      },
+      url: responseUrl,
+    }]);
+  });
+
+  it("refuses a press whose Slack team is unknown", async () => {
+    await press({ user: { id: "U999", name: "eve" } });
+    expect(mocks.queueReply).not.toHaveBeenCalled();
+    expect(responses(fetchMock)).toEqual([{
+      body: {
+        replace_original: false,
+        response_type: "ephemeral",
+        text: "Only members of this Slack workspace can use these buttons.",
+      },
+      url: responseUrl,
+    }]);
+  });
+
   it("continues the run that posted the message and replaces its buttons", async () => {
     const response = await press();
 
@@ -126,6 +163,7 @@ describe("automation buttons in Slack", () => {
           integrationAccountId,
           label: "Create PR",
           messageTimestamp: "1790000001.000100",
+          pressedByTeamMember: true,
           threadTimestamp: "1790000001.000100",
         },
         source: "slack",

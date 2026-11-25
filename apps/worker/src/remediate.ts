@@ -245,6 +245,8 @@ export async function runProposedRemediation(
         // touched file is safe and must not block publication.
         scanChangedFileContents: false,
         title: pullRequest.title,
+        // Investigations answer alerts, tickets, and channel messages.
+        untrustedTrigger: true,
         workspaceBaseSha: checkout.workspaceBaseSha,
       },
       session,

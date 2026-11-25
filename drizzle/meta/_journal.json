@@ -883,6 +883,13 @@
       "when": 1795625549587,
       "tag": "0125_legacy_mcp_forwards",
       "breakpoints": true
+    },
+    {
+      "idx": 126,
+      "version": "7",
+      "when": 1795628349256,
+      "tag": "0126_agent_pull_request_safeguards",
+      "breakpoints": true
     }
   ]
 }

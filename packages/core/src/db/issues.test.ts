@@ -6,11 +6,16 @@ import {
   searchIssuesByText,
   submitInvestigationReport,
 } from "./issues.js";
+import { pullRequestApprovalRequired } from "./pull-request-approval.js";
 import { queueAutomaticIssuePullRequests } from "./pull-requests.js";
 import { agents, investigations, issues } from "./schema.js";
 
 vi.mock("./client.js", () => ({
   getDatabase: vi.fn(),
+}));
+
+vi.mock("./pull-request-approval.js", () => ({
+  pullRequestApprovalRequired: vi.fn(async () => false),
 }));
 
 vi.mock("./pull-requests.js", () => ({
@@ -152,6 +157,39 @@ describe("automatic pull requests from investigation reports", () => {
     expect(result.automaticPullRequestIssueIds).toEqual([secondIssueId]);
     expect(result.automaticPullRequestRequestIds).toEqual([requestId]);
     expect(forUpdate).toHaveBeenCalledWith("update", { of: investigations });
+  });
+
+  it("waits for a person instead of publishing when the workspace asks before pull requests", async () => {
+    const { tx } = databaseDouble();
+    vi.mocked(pullRequestApprovalRequired).mockResolvedValueOnce(true);
+    const evidence = [{
+      source: "other" as const,
+      title: "Observed failure",
+      detail: "The failure recurred during this investigation.",
+    }];
+
+    const result = await submitInvestigationReport({
+      investigationId,
+      organizationId,
+      submission: {
+        newIssueEmbeddings: [],
+        report: {
+          schemaVersion: 1,
+          headline: "An issue recurred",
+          summary: "The workspace reviews pull requests first.",
+          issues: [firstIssueId, secondIssueId].map((issueId) => ({
+            evidence,
+            issueId,
+            resolution: "existing" as const,
+          })),
+        },
+      },
+    });
+
+    expect(pullRequestApprovalRequired).toHaveBeenCalledWith(organizationId, tx);
+    expect(queueAutomaticIssuePullRequests).not.toHaveBeenCalled();
+    expect(result.automaticPullRequestIssueIds).toEqual([]);
+    expect(result.automaticPullRequestRequestIds).toEqual([]);
   });
 
   it("rejects a second report after the locked investigation is resolved", async () => {

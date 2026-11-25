@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { InvestigationInput } from "../db/schema.js";
+import { fenceUntrusted } from "../untrusted-text.js";
 
 export const investigationRequestSchema = z.object({
   agentId: z.uuid(),
@@ -57,16 +58,26 @@ export function toInvestigationInput(request: InvestigationRequest): Investigati
   };
 }
 
-export function investigationPrompt(input: InvestigationInput): string {
+// The event as the agent reads it. Every field of an event from outside the
+// workspace, such as an alert, an error report, or a review, is fenced as
+// data. A request from a person in the workspace is not.
+export function investigationPrompt(
+  input: InvestigationInput,
+  // Every caller says whether the event came from outside the workspace.
+  options: { outsideEvent: boolean },
+): string {
   const awsAlarmContext = awsAlarmPromptContext(input);
-  return [
-    `# ${input.provider} event`,
-    "",
+  const event = [
     `Title: ${input.title}`,
     input.sourceUrl ? `Source: ${input.sourceUrl}` : null,
     ...(awsAlarmContext.length > 0 ? ["", ...awsAlarmContext] : []),
     "",
     input.body,
+  ].filter((line): line is string => line !== null).join("\n");
+  return [
+    `# ${input.provider} event`,
+    "",
+    options.outsideEvent ? fenceUntrusted("the event, as its sender wrote it", event) : event,
   ]
     .filter((line): line is string => line !== null)
     .join("\n");
