@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { member, organization, user } from "./auth-schema.js";
 import { closeDatabase, getDatabase } from "./client.js";
-import { canConnectSlackTeam } from "./integrations.js";
+import { connectSlackTeamAccount } from "./integrations.js";
 import { integrationAccounts } from "./schema.js";
 
 // Run against a disposable, migrated PostgreSQL database only.
@@ -22,7 +22,7 @@ describe.skipIf(!testUrl)("Slack team connections (PostgreSQL)", () => {
 
   beforeAll(async () => {
     vi.stubEnv("DATABASE_URL", testUrl!);
-    vi.stubEnv("DATABASE_POOL_SIZE", "2");
+    vi.stubEnv("DATABASE_POOL_SIZE", "10");
     const db = getDatabase();
     const createdAt = new Date();
     await db.insert(organization).values([
@@ -43,7 +43,7 @@ describe.skipIf(!testUrl)("Slack team connections (PostgreSQL)", () => {
       externalAccountId: teamId,
       organizationId: holder,
       provider: "slack",
-      status: "error",
+      status: "connected",
     });
   });
   afterAll(async () => {
@@ -54,25 +54,48 @@ describe.skipIf(!testUrl)("Slack team connections (PostgreSQL)", () => {
     vi.unstubAllEnvs();
   });
 
+  const connect = (organizationId: string, team: string, userId: string) =>
+    connectSlackTeamAccount({ displayName: "Acme", externalAccountId: team, organizationId, userId });
+  const holdersOf = async (team: string) =>
+    (await getDatabase()
+      .select({ organizationId: integrationAccounts.organizationId })
+      .from(integrationAccounts)
+      .where(and(eq(integrationAccounts.provider, "slack"), eq(integrationAccounts.externalAccountId, team))))
+      .map((row) => row.organizationId)
+      .sort();
+
   it("lets anyone connect a Slack team no workspace holds", async () => {
-    await expect(canConnectSlackTeam({ organizationId: other, teamId: `T${randomUUID()}`, userId: people.stranger }))
-      .resolves.toBe(true);
+    const team = `T${randomUUID()}`;
+    await expect(connect(other, team, people.stranger)).resolves.toEqual(expect.any(String));
+    await expect(holdersOf(team)).resolves.toEqual([other]);
   });
 
   it("lets the workspace that holds a Slack team connect it again", async () => {
-    await expect(canConnectSlackTeam({ organizationId: holder, teamId, userId: people.member }))
-      .resolves.toBe(true);
-  });
-
-  it("lets an owner or admin of a holding workspace connect it to another", async () => {
-    for (const userId of [people.owner, people.admin]) {
-      await expect(canConnectSlackTeam({ organizationId: other, teamId, userId })).resolves.toBe(true);
-    }
+    await expect(connect(holder, teamId, people.member)).resolves.toEqual(expect.any(String));
+    await expect(holdersOf(teamId)).resolves.toEqual([holder]);
   });
 
   it("refuses everyone else, even while the held connection has failed", async () => {
+    await getDatabase().update(integrationAccounts).set({ status: "error" })
+      .where(eq(integrationAccounts.externalAccountId, teamId));
     for (const userId of [people.member, people.stranger]) {
-      await expect(canConnectSlackTeam({ organizationId: other, teamId, userId })).resolves.toBe(false);
+      await expect(connect(other, teamId, userId)).resolves.toBeNull();
     }
+    await expect(holdersOf(teamId)).resolves.toEqual([holder]);
+  });
+
+  it("lets an owner or admin of a holding workspace connect it to another", async () => {
+    await expect(connect(other, teamId, people.admin)).resolves.toEqual(expect.any(String));
+    await expect(holdersOf(teamId)).resolves.toEqual([holder, other].sort());
+  });
+
+  it("lets only one of two simultaneous first connections through", async () => {
+    const teams = Array.from({ length: 20 }, () => `T${randomUUID()}`);
+    const results = await Promise.all(teams.flatMap((team) => [
+      connect(holder, team, people.stranger),
+      connect(other, team, people.stranger),
+    ]));
+    expect(results.filter((result) => result !== null)).toHaveLength(teams.length);
+    for (const team of teams) await expect(holdersOf(team)).resolves.toHaveLength(1);
   });
 });

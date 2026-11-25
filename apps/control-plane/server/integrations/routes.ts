@@ -19,7 +19,7 @@ import {
   encryptCredentials,
 } from "../../../../packages/core/src/credentials/encryption.js";
 import {
-  canConnectSlackTeam,
+  connectSlackTeamAccount,
   consumeIntegrationConnectionState,
   createIntegrationConnectionState,
   deleteIntegrationAccount,
@@ -5009,13 +5009,29 @@ export const integrationRoutes = new Hono()
 
     try {
       const installation = await exchangeSlackCode(code);
-      if (
-        !(await canConnectSlackTeam({
-          organizationId: connectionState.organizationId,
-          teamId: installation.team.id,
-          userId: connectionState.userId,
-        }))
-      ) {
+      const encryptedCredentials = encryptCredentials({
+        accessToken: installation.access_token,
+        tokenType: installation.token_type,
+        userAccessToken: installation.authed_user.access_token,
+        userTokenType: installation.authed_user.token_type,
+      });
+      const accountId = await connectSlackTeamAccount({
+        organizationId: connectionState.organizationId,
+        externalAccountId: installation.team.id,
+        displayName: installation.team.name,
+        encryptedCredentials,
+        credentialKeyVersion: 1,
+        metadata: {
+          appId: installation.app_id,
+          botUserId: installation.bot_user_id,
+          connectedBySlackUserId: installation.authed_user.id,
+          enterpriseId: installation.enterprise?.id ?? null,
+          scopes: installation.scope.split(",").filter(Boolean),
+          userScopes: installation.authed_user.scope.split(",").filter(Boolean),
+        },
+        userId: connectionState.userId,
+      });
+      if (!accountId) {
         console.info(JSON.stringify({
           event: "slack_team_connection_refused",
           organizationId: connectionState.organizationId,
@@ -5029,28 +5045,6 @@ export const integrationRoutes = new Hono()
           ),
         );
       }
-      const encryptedCredentials = encryptCredentials({
-        accessToken: installation.access_token,
-        tokenType: installation.token_type,
-        userAccessToken: installation.authed_user.access_token,
-        userTokenType: installation.authed_user.token_type,
-      });
-      const accountId = await upsertIntegrationAccount({
-        organizationId: connectionState.organizationId,
-        provider: "slack",
-        externalAccountId: installation.team.id,
-        displayName: installation.team.name,
-        encryptedCredentials,
-        credentialKeyVersion: 1,
-        metadata: {
-          appId: installation.app_id,
-          botUserId: installation.bot_user_id,
-          connectedBySlackUserId: installation.authed_user.id,
-          enterpriseId: installation.enterprise?.id ?? null,
-          scopes: installation.scope.split(",").filter(Boolean),
-          userScopes: installation.authed_user.scope.split(",").filter(Boolean),
-        },
-      });
       const channels = await listSlackChannels(installation.access_token);
       await replaceIntegrationResources(accountId, "slack_channel", channels);
       // Slack stays connected when tag mode can't start; it can be turned on

@@ -6,7 +6,7 @@ import {
   encryptCredentials,
 } from "../../../../packages/core/src/credentials/encryption.js";
 import {
-  canConnectSlackTeam,
+  connectSlackTeamAccount,
   consumeIntegrationConnectionState,
   createIntegrationConnectionState,
   deleteIntegrationAccount,
@@ -102,7 +102,7 @@ vi.mock("../../../../packages/core/src/credentials/encryption.js", () => ({
 }));
 
 vi.mock("../../../../packages/core/src/db/integrations.js", () => ({
-  canConnectSlackTeam: vi.fn(),
+  connectSlackTeamAccount: vi.fn(),
   claimIntegrationRegistration: vi.fn(),
   consumeIntegrationConnectionState: vi.fn(),
   createIntegrationConnectionState: vi.fn(),
@@ -704,7 +704,6 @@ describe("integration callback routing", () => {
 
   function connectSlack(options: { allowed?: boolean } = {}) {
     vi.stubEnv("BETTER_AUTH_URL", "https://responder.example");
-    vi.mocked(canConnectSlackTeam).mockResolvedValue(options.allowed ?? true);
     vi.mocked(consumeIntegrationConnectionState).mockResolvedValue({
       organizationId: tenant.organizationId,
       userId: tenant.user.id,
@@ -727,8 +726,8 @@ describe("integration callback routing", () => {
       token_type: "bot",
     } as never);
     vi.mocked(encryptCredentials).mockReturnValue("encrypted-credentials");
-    vi.mocked(upsertIntegrationAccount).mockResolvedValue(
-      "30000000-0000-4000-8000-000000000000",
+    vi.mocked(connectSlackTeamAccount).mockResolvedValue(
+      options.allowed === false ? null : "30000000-0000-4000-8000-000000000000",
     );
     vi.mocked(listSlackChannels).mockResolvedValue([]);
     return app.request(
@@ -746,12 +745,11 @@ describe("integration callback routing", () => {
       "https://responder.example/settings" +
         "?integration=slack&status=error&reason=slack_team_connected_elsewhere",
     );
-    expect(canConnectSlackTeam).toHaveBeenCalledWith({
+    expect(connectSlackTeamAccount).toHaveBeenCalledWith(expect.objectContaining({
+      externalAccountId: "T123",
       organizationId: tenant.organizationId,
-      teamId: "T123",
       userId: tenant.user.id,
-    });
-    expect(upsertIntegrationAccount).not.toHaveBeenCalled();
+    }));
     expect(listSlackChannels).not.toHaveBeenCalled();
     expect(startDefaultSlackThreadMode).not.toHaveBeenCalled();
   });

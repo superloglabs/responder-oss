@@ -13,8 +13,9 @@ describe("listGitHubUserInstallationRepositoryAccess", () => {
         { id: 2, permissions: { admin: true, pull: true, push: false } },
         { id: 3, permissions: { admin: false, pull: true, push: false, triage: true } },
         { id: 4 },
+        { id: 5, permissions: { admin: false, maintain: true, pull: true, push: false } },
       ],
-      total_count: 4,
+      total_count: 5,
     }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -23,6 +24,7 @@ describe("listGitHubUserInstallationRepositoryAccess", () => {
       { id: "2", write: true },
       { id: "3", write: false },
       { id: "4", write: false },
+      { id: "5", write: true },
     ]);
 
     const [url, init] = fetchMock.mock.calls[0] as unknown as [URL, RequestInit];
