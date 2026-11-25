@@ -35,6 +35,7 @@ import { agentRoutes } from "./agents/routes.js";
 import {
   authHandlerErrorMessage,
   canImpersonateSupportUser,
+  configuredAuthTrustedOrigins,
   configuredSuperuserEmails,
   getAuth,
   platformRoleForIdentity,
@@ -93,6 +94,7 @@ import { sourceMapRoutes } from "./source-maps/routes.js";
 import { oauthMetadataRoutes } from "./oauth-metadata-routes.js";
 import { requestMetrics } from "./request-metrics.js";
 import { rejectDotSegments } from "./request-target.js";
+import { cookieWriteOriginGuard } from "./cookie-write-origin.js";
 
 const sessionCookiePattern =
   /(?:^|[;,]\s*)(?:__Secure-)?(?:better-auth|responder-auth)\.session_token=/;
@@ -352,6 +354,9 @@ if (Sentry.isInitialized()) {
   });
 }
 instrumentedApp.use("/api/*", requestMetrics());
+// Writes that carry a session cookie must come from a trusted origin. See
+// cookie-write-origin.ts.
+instrumentedApp.use("*", cookieWriteOriginGuard(configuredAuthTrustedOrigins()));
 // After the body limits and monitoring, before the webhook and OAuth callback
 // handlers.
 instrumentedApp.use("/api/webhooks/*", legacyWebhookForwarder());
