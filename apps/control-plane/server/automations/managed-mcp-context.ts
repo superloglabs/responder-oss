@@ -55,8 +55,8 @@ const rpcResponseSchema = z.object({
 
 // Reads at most maxBytes of the body, and cancels the rest of it, so the
 // budget holds even for a provider fetch without its own response cap.
-async function boundedText(response: Response, maxBytes: number, label: string): Promise<string> {
-  if (!response.body) return "";
+async function boundedBytes(response: Response, maxBytes: number, label: string): Promise<Buffer> {
+  if (!response.body) return Buffer.alloc(0);
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let size = 0;
@@ -70,7 +70,7 @@ async function boundedText(response: Response, maxBytes: number, label: string):
     }
     chunks.push(value);
   }
-  return Buffer.concat(chunks).toString("utf8");
+  return Buffer.concat(chunks);
 }
 
 async function readRpcResponse(
@@ -83,8 +83,9 @@ async function readRpcResponse(
     await response.body?.cancel();
     throw new Error(`${label} returned HTTP ${response.status}`);
   }
-  const text = await boundedText(response, budget.remaining, label);
-  budget.remaining -= Buffer.byteLength(text);
+  const bytes = await boundedBytes(response, budget.remaining, label);
+  budget.remaining -= bytes.byteLength;
+  const text = bytes.toString("utf8");
   const messages = rpcMessages(
     text,
     response.headers.get("content-type") ?? "",

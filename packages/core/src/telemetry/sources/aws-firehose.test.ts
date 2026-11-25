@@ -1,5 +1,5 @@
 import { gunzipSync, gzipSync } from "node:zlib";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 import {
   cloudWatchLogsToOtlp,
   decodeCloudWatchLogsRecords,
@@ -74,12 +74,12 @@ describe("decodeCloudWatchLogsRecords", () => {
   it("skips an uncompressed record larger than the remaining budget without decoding it", () => {
     const plain = { data: Buffer.from(JSON.stringify(message)).toString("base64") };
     const from = vi.spyOn(Buffer, "from");
+    onTestFinished(() => from.mockRestore());
 
     const result = decodeCloudWatchLogsRecords({ records: [plain], requestId: "r" }, 100);
 
     expect(result.skipped).toBe(1);
     expect(from).not.toHaveBeenCalledWith(plain.data, "base64");
-    from.mockRestore();
   });
 });
 
