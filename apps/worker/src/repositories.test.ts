@@ -333,6 +333,7 @@ describe("Daytona repository checkout", () => {
     const gitPath = join(binDirectory, "git");
     const callsPath = join(temporaryDirectory, "git-calls");
     const authPath = join(temporaryDirectory, "git-auth");
+    const homesPath = join(temporaryDirectory, "git-homes");
     let uploadedEntries = "";
     await mkdir(binDirectory);
     await writeFile(
@@ -342,6 +343,7 @@ describe("Daytona repository checkout", () => {
         // written into the script.
         "#!/bin/sh",
         `printf '%s\\n' "$*" >> '${callsPath}'`,
+        `printf '%s\\n' "\${HOME:-}" >> '${homesPath}'`,
         "case \" $* \" in",
         `  *" fetch "*) printf '%s\\n' "$GIT_CONFIG_VALUE_0" > '${authPath}' ;;`,
         `  *" rev-parse "*) printf '%s\\n' '${sha}' ;;`,
@@ -382,6 +384,11 @@ describe("Daytona repository checkout", () => {
       expect(gitCalls).toContain(
         "submodule update --init --recursive --depth=1",
       );
+      // Every Git call runs with the isolated environment, whose home is the
+      // scratch directory rather than the worker's.
+      const homes = (await readFile(homesPath, "utf8")).trim().split("\n");
+      expect(homes).toHaveLength(gitCalls.trim().split("\n").length);
+      for (const home of homes) expect(home.startsWith(temporaryDirectory)).toBe(true);
       expect(await readFile(authPath, "utf8")).toBe(
         `Authorization: Basic ${Buffer.from(
           "x-access-token:github-secret",
@@ -653,7 +660,7 @@ describe("Daytona repository checkout", () => {
       [
         "#!/bin/sh",
         "case \" $* \" in",
-        "  *\" rev-parse \"*) printf '%s\\n' \"$RESPONDER_TEST_GIT_SHA\" ;;",
+        `  *" rev-parse "*) printf '%s\\n' '${sha}' ;;`,
         "  *\" worktree add \"*)",
         "    for argument do destination=\"${previous:-}\"; previous=\"$argument\"; done",
         "    mkdir -p \"$destination\"",
@@ -674,7 +681,6 @@ describe("Daytona repository checkout", () => {
       { mode: 0o755 },
     );
     vi.stubEnv("PATH", `${binDirectory}:${process.env.PATH ?? ""}`);
-    vi.stubEnv("RESPONDER_TEST_GIT_SHA", sha);
     vi.stubEnv("RESPONDER_TEST_GIT_COMPLETED", completionMarker);
 
     try {

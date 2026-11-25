@@ -266,6 +266,7 @@ async function downloadRepositorySnapshotWithGit(
   try {
     await mkdir(gitDirectory);
     await execFileAsync("git", ["-C", gitDirectory, "init", "--bare", "--quiet"], {
+      env: gitEnvironment,
       timeout: 30_000,
     });
     await execFileAsync(
@@ -278,7 +279,7 @@ async function downloadRepositorySnapshotWithGit(
         "origin",
         repositoryUrl,
       ],
-      { timeout: 30_000 },
+      { env: gitEnvironment, timeout: 30_000 },
     );
     await execFileAsync(
       "git",
@@ -296,7 +297,7 @@ async function downloadRepositorySnapshotWithGit(
     const { stdout } = await execFileAsync(
       "git",
       ["-C", gitDirectory, "rev-parse", "FETCH_HEAD"],
-      { timeout: 30_000 },
+      { env: gitEnvironment, timeout: 30_000 },
     );
     const sha = stdout.trim();
     if (!/^[a-f0-9]{40}$/i.test(sha)) {
