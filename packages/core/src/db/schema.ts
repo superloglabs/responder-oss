@@ -928,6 +928,32 @@ export const telemetryNotificationPauses = pgTable("telemetry_notification_pause
     .defaultNow(),
 });
 
+// Projects of the old Superlog product whose MCP requests the old server may
+// forward to a workspace in this cell, and the workspace each one moved to.
+// A forwarded request for a project without a row is refused. Operators add
+// a row when they cut a project over; there is no app setting for it.
+export const legacyMcpForwards = pgTable("legacy_mcp_forwards", {
+  legacyProjectId: uuid("legacy_project_id").primaryKey(),
+  organizationId: uuid("organization_id")
+    .notNull()
+    .unique()
+    .references(() => organization.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+// The IDs of forwarded MCP assertions already accepted, kept until each
+// expires, so a captured assertion cannot be used a second time.
+export const legacyMcpForwardAssertions = pgTable(
+  "legacy_mcp_forward_assertions",
+  {
+    jti: text("jti").primaryKey(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [index("legacy_mcp_forward_assertions_expires_at_idx").on(table.expiresAt)],
+);
+
 // A workspace that pays a price per run instead of a usage plan. Until it
 // moves to a paid plan, its automations run only on this model and harness,
 // which they name only as the plan's model; each
