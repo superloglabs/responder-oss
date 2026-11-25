@@ -37,15 +37,19 @@ describe("database connection configuration", () => {
       keepAliveInitialDelayMillis: 10_000,
       max: 5,
       query_timeout: 120_000,
+      statement_timeout: 120_000,
     });
   });
 
   it("reads the pool size and query timeout from the environment", () => {
     expect(
       databasePoolOptions({ DATABASE_POOL_SIZE: "8", DATABASE_QUERY_TIMEOUT_MS: "30000" }),
-    ).toMatchObject({ max: 8, query_timeout: 30_000 });
+    ).toMatchObject({ max: 8, query_timeout: 30_000, statement_timeout: 30_000 });
     expect(
       databasePoolOptions({ DATABASE_POOL_SIZE: "0", DATABASE_QUERY_TIMEOUT_MS: "soon" }),
     ).toMatchObject({ max: 5, query_timeout: 120_000 });
+    expect(
+      databasePoolOptions({ DATABASE_QUERY_TIMEOUT_MS: "9999999999" }),
+    ).toMatchObject({ query_timeout: 2_147_483_647, statement_timeout: 2_147_483_647 });
   });
 });

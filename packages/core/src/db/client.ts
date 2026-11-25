@@ -49,6 +49,10 @@ function positiveInteger(value: string | undefined, fallback: number): number {
 // would otherwise wait forever and hold its pool slot. Keepalive probes find
 // those sockets, the query timeout fails a query that gets no answer, and the
 // connection timeout stops callers queueing forever for a free connection.
+// The query timeout only stops waiting: the server keeps running the query and
+// the connection stays busy with it. The statement timeout, set to the same
+// length, makes the server stop the query, so a slow query frees its
+// connection.
 export function databasePoolOptions(
   environment: NodeJS.ProcessEnv = process.env,
 ): {
@@ -57,13 +61,17 @@ export function databasePoolOptions(
   keepAliveInitialDelayMillis: number;
   max: number;
   query_timeout: number;
+  statement_timeout: number;
 } {
+  // Postgres takes a statement timeout of at most 2^31 - 1 milliseconds.
+  const queryTimeout = Math.min(positiveInteger(environment.DATABASE_QUERY_TIMEOUT_MS, 120_000), 2_147_483_647);
   return {
     connectionTimeoutMillis: 10_000,
     keepAlive: true,
     keepAliveInitialDelayMillis: 10_000,
     max: positiveInteger(environment.DATABASE_POOL_SIZE, 5),
-    query_timeout: positiveInteger(environment.DATABASE_QUERY_TIMEOUT_MS, 120_000),
+    query_timeout: queryTimeout,
+    statement_timeout: queryTimeout,
   };
 }
 
