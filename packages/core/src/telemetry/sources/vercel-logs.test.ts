@@ -18,6 +18,13 @@ const record = {
 };
 
 describe("parseVercelLogs", () => {
+  it("refuses a delivery with more records than a drain sends at once", () => {
+    const body = "{}\n".repeat(50_001);
+
+    expect(() => parseVercelLogs(body, "application/x-ndjson")).toThrow("Too many");
+    expect(() => parseVercelLogs(`[${Array(50_001).fill("{}").join(",")}]`, "application/json")).toThrow("Too many");
+  });
+
   it("reads an array, one record, or NDJSON", () => {
     expect(parseVercelLogs(JSON.stringify([record, record]), "application/json")).toHaveLength(2);
     expect(parseVercelLogs(JSON.stringify(record), "application/json")).toHaveLength(1);

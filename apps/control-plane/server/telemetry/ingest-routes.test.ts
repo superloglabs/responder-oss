@@ -130,6 +130,20 @@ describe("Vercel log drain ingest", () => {
     expect((await valid.app.request("/vercel/logs", { body: "{", headers: { "x-api-key": token }, method: "POST" })).status).toBe(400);
     expect(dependencies.forward).not.toHaveBeenCalled();
   });
+
+  it("refuses a body that decompresses past 16 MiB", async () => {
+    const { app, dependencies } = routes();
+    const record = JSON.stringify({ message: "x".repeat(17 * 1024 * 1024), projectName: "shop", timestamp: 1 });
+
+    const response = await app.request("/vercel/logs", {
+      body: gzipSync(record),
+      headers: { "content-encoding": "gzip", "content-type": "application/x-ndjson", "x-api-key": token },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(400);
+    expect(dependencies.forward).not.toHaveBeenCalled();
+  });
 });
 
 describe("AWS Firehose ingest", () => {

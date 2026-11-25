@@ -1,4 +1,5 @@
-import { gunzipSync } from "node:zlib";
+import { promisify } from "node:util";
+import { gunzip } from "node:zlib";
 import { z } from "zod";
 import {
   attribute,
@@ -54,23 +55,32 @@ function readVarint(bytes: Uint8Array, offset: number): { next: number; value: n
 // merges concatenated messages by appending their repeated fields, so the
 // messages without their prefixes join into one request.
 // https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-metric-streams-formats-opentelemetry-100.html
+// More messages than a metric stream puts in one delivery. Firehose buffers 1
+// to 64 MiB, and every message carries at least one metric.
+const maxMetricStreamMessages = 100_000;
+
 export function metricStreamRequest(request: FirehoseRequest): Uint8Array<ArrayBuffer> {
-  const parts: Buffer[] = [];
-  for (const record of request.records) {
-    const bytes = Buffer.from(record.data, "base64");
+  const records = request.records.map((record) => Buffer.from(record.data, "base64"));
+  const output = Buffer.allocUnsafe(records.reduce((total, bytes) => total + bytes.length, 0));
+  let length = 0;
+  let messages = 0;
+  for (const bytes of records) {
     let offset = 0;
     while (offset < bytes.length) {
       const { next, value } = readVarint(bytes, offset);
       if (next + value > bytes.length) throw new Error("Truncated message in a metric stream record");
-      parts.push(bytes.subarray(next, next + value));
+      messages += 1;
+      if (messages > maxMetricStreamMessages) throw new Error("Too many messages in the metric stream records");
+      length += bytes.copy(output, length, next, next + value);
       offset = next + value;
     }
   }
-  return Buffer.concat(parts);
+  return new Uint8Array(output.buffer, output.byteOffset, length) as Uint8Array<ArrayBuffer>;
 }
 
 const cloudWatchLogsSchema = z.object({
-  logEvents: z.array(z.object({ id: z.string().optional(), message: z.string(), timestamp: z.number() })).default([]),
+  // One PutLogEvents batch holds at most 10,000 events.
+  logEvents: z.array(z.object({ id: z.string().optional(), message: z.string(), timestamp: z.number() })).max(10_000).default([]),
   logGroup: z.string().default(""),
   logStream: z.string().default(""),
   messageType: z.string(),
@@ -152,19 +162,41 @@ export function logGroupService(logGroup: string, logStream = ""): string {
 
 export type CloudWatchLogsMessage = z.infer<typeof cloudWatchLogsSchema>;
 
+const gunzipAsync = promisify(gunzip);
+
+// A CloudWatch Logs subscription record holds one PutLogEvents batch, which is
+// at most 1 MiB of events. Records are inflated off the event loop and only up
+// to these sizes, so a small, highly compressed record cannot take the
+// process's memory.
+export const cloudWatchLogsRecordLimits = {
+  maxRecordBytes: 8 * 1024 * 1024,
+  maxTotalBytes: 32 * 1024 * 1024,
+};
+
 // CloudWatch Logs subscriptions write each record as gzip-compressed JSON
 // with the events of one log stream. Control messages carry no events and are
-// left out, with records that cannot be read counted as skipped.
+// left out, with records that cannot be read, or that are larger than the
+// limits, counted as skipped.
 // https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/SubscriptionFilters.html
-export function decodeCloudWatchLogsRecords(request: FirehoseRequest): { messages: CloudWatchLogsMessage[]; skipped: number } {
+export async function decodeCloudWatchLogsRecords(
+  request: FirehoseRequest,
+  limits: { maxRecordBytes: number; maxTotalBytes: number } = cloudWatchLogsRecordLimits,
+): Promise<{ messages: CloudWatchLogsMessage[]; skipped: number }> {
   const messages: CloudWatchLogsMessage[] = [];
+  let remaining = limits.maxTotalBytes;
   let skipped = 0;
   for (const record of request.records) {
     let parsed: CloudWatchLogsMessage;
     try {
+      const limit = Math.min(limits.maxRecordBytes, remaining);
+      if (limit <= 0) throw new Error("The request's records are too large");
       const bytes = Buffer.from(record.data, "base64");
-      const text = (bytes[0] === 0x1f && bytes[1] === 0x8b ? gunzipSync(bytes) : bytes).toString("utf8");
-      parsed = cloudWatchLogsSchema.parse(JSON.parse(text));
+      const text = bytes[0] === 0x1f && bytes[1] === 0x8b
+        ? await gunzipAsync(bytes, { maxOutputLength: limit })
+        : bytes;
+      if (text.length > limit) throw new Error("The record is too large");
+      remaining -= text.length;
+      parsed = cloudWatchLogsSchema.parse(JSON.parse(text.toString("utf8")));
     } catch {
       skipped += 1;
       continue;
@@ -215,11 +247,11 @@ export function cloudWatchLogsMessagesToOtlp(
   return { payload, records };
 }
 
-export function cloudWatchLogsToOtlp(
+export async function cloudWatchLogsToOtlp(
   request: FirehoseRequest,
   source: { accountId: string; region: string } | null,
   now: number = Date.now(),
-): { payload: OtlpLogsRequest; records: number; skipped: number } {
-  const { messages, skipped } = decodeCloudWatchLogsRecords(request);
+): Promise<{ payload: OtlpLogsRequest; records: number; skipped: number }> {
+  const { messages, skipped } = await decodeCloudWatchLogsRecords(request);
   return { ...cloudWatchLogsMessagesToOtlp(messages, source, now), skipped };
 }
