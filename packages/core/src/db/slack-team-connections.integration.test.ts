@@ -85,8 +85,14 @@ describe.skipIf(!testUrl)("Slack team connections (PostgreSQL)", () => {
   });
 
   it("lets an owner or admin of a holding workspace connect it to another", async () => {
-    await expect(connect(other, teamId, people.admin)).resolves.toEqual(expect.any(String));
-    await expect(holdersOf(teamId)).resolves.toEqual([holder, other].sort());
+    for (const userId of [people.owner, people.admin]) {
+      const team = `T${randomUUID()}`;
+      await getDatabase().insert(integrationAccounts).values({
+        displayName: "Acme", externalAccountId: team, organizationId: holder, provider: "slack",
+      });
+      await expect(connect(other, team, userId)).resolves.toEqual(expect.any(String));
+      await expect(holdersOf(team)).resolves.toEqual([holder, other].sort());
+    }
   });
 
   it("lets only one of two simultaneous first connections through", async () => {
