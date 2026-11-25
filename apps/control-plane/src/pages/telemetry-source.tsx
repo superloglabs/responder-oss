@@ -1,4 +1,5 @@
 import { CodeIcon } from "@phosphor-icons/react";
+import { IconAlertCircle } from "@tabler/icons-react";
 import { type FormEvent, type ReactNode, useCallback, useEffect, useState } from "react";
 import { Link, Navigate, useParams } from "react-router-dom";
 import { relativeTime } from "../agents-api";
@@ -472,9 +473,14 @@ function RenderKeyForm({ onConnected }: { onConnected: () => Promise<unknown> })
       </p>
       <form className="telemetrySetup__form" onSubmit={(event) => void submit(event)}>
         <TextField
+          aria-describedby={error ? "render-key-error" : undefined}
+          aria-invalid={error ? true : undefined}
           autoComplete="off"
           label="Render API key"
-          onChange={(event) => setApiKey(event.target.value)}
+          onChange={(event) => {
+            setApiKey(event.target.value);
+            setError(null);
+          }}
           placeholder="rnd_…"
           spellCheck={false}
           type="password"
@@ -482,7 +488,13 @@ function RenderKeyForm({ onConnected }: { onConnected: () => Promise<unknown> })
         />
         <Button disabled={!apiKey.trim()} loading={saving} type="submit" variant="primary">Connect Render</Button>
       </form>
-      {error ? <p className="formError" role="alert">{error}</p> : null}
+      {/* Field errors sit under the field they belong to, as in Signal setup. */}
+      {error ? (
+        <p className="telemetrySetup__fieldError" id="render-key-error" role="alert">
+          <IconAlertCircle aria-hidden="true" size={14} />
+          {error}
+        </p>
+      ) : null}
     </>
   );
 }

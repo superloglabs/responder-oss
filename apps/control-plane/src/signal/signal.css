@@ -331,7 +331,7 @@
 .signalSecret button { display: flex; padding: 2px; border: 0; background: transparent; color: #666; cursor: pointer; }
 .signal .signalInput > p { font-size: 12px; color: #666; }
 .signalInput--error :is(input, .signalSecret) { box-shadow: 0 0 0 1px #b33d43, 0 0 0 3px #b33d431a; }
-.signal .signalFieldError { display: flex; align-items: center; gap: 6px; color: #b33d43; }
+.signal .signalFieldError, .signal .signalInput > .signalFieldError { display: flex; align-items: center; gap: 6px; color: #b33d43; }
 .signalStepCard li { display: flex; align-items: center; gap: 16px; padding: 16px 20px; }
 .signalStepCard li + li { border-top: .5px solid #00000014; }
 .signalStepCard li > div { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 2px; }

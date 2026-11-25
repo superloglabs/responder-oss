@@ -109,6 +109,9 @@ button.traceWaterfall__track { cursor: pointer; background-image: linear-gradien
 .telemetrySetup__created p { margin: 0; color: var(--ds-text-muted); font-size: 12px; }
 .telemetrySetup__form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; }
 .telemetrySetup__form > .dsField { flex: 1 1 240px; }
+.telemetrySetup__form .dsField__control[aria-invalid="true"] { border-color: #b33d43; box-shadow: 0 0 0 3px #b33d431a; }
+.telemetrySetup .telemetrySetup__fieldError { display: flex; align-items: flex-start; gap: 6px; margin: -4px 0 0; color: #b33d43; font-size: 12px; line-height: 20px; }
+.telemetrySetup .telemetrySetup__fieldError svg { flex-shrink: 0; margin-top: 3px; }
 .telemetrySetup--aws > .telemetrySetup__section { margin-top: 18px; }
 .telemetrySetup--aws .telemetrySetup__form { gap: 8px; }
 .telemetrySetup--aws .telemetrySetup__form > .dsField { flex: 0 1 240px; min-width: 0; max-width: 100%; }
