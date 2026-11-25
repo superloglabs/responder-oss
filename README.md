@@ -182,13 +182,11 @@ execution restrictions; configurable wording does not change tool permissions.
 In organizations with simplified navigation, Slack threads work as a general
 assistant. They use the `assistant*` prompt sections in place of the runtime
 system prompt and the investigation sections. They can open pull requests in the
-repositories selected for tag mode. They can also read and change the
-workspace's automations and tag mode settings, saving those changes as the member
-who last saved tag mode, or else the oldest owner.
-Automation runs in these organizations get the same workspace tools through
-their sandbox tool server. They save changes as the member who saved the run's
-automation version, or else the oldest owner, and are told not to change the
-workspace because a trigger payload asks.
+repositories selected for tag mode. They can also read the workspace's
+automations and tag mode settings. Automation runs in these organizations get
+the same read-only workspace tools through their sandbox tool server. Agents
+cannot change automations or tag mode; a member makes those changes in the app
+or through the management MCP server.
 
 Linear mentions and delegated issues run as tag mode turns in a Linear agent
 session. They use the `linear*` prompt sections in place of the Slack wording,

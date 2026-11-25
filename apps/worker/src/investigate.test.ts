@@ -381,8 +381,9 @@ describe("sandbox agent configuration", () => {
     expect(instructions).toContain("the Slack assistant for this workspace");
     expect(instructions).toContain("Reply in French.");
     expect(instructions).toContain("call open_pull_request");
-    expect(instructions).toContain("Call get_workspace before changing anything");
-    expect(instructions).toContain("share https://app.example.com/settings");
+    expect(instructions).toContain("The workspace tools read this Responder workspace");
+    expect(instructions).toContain("You cannot change them.");
+    expect(instructions).toContain("New integrations are connected at https://app.example.com/settings");
     expect(instructions).not.toContain("incident investigation agent");
     expect(instructions).not.toContain("Investigate only the alert");
     expect(instructions).not.toContain("ad-hoc Slack thread investigation");

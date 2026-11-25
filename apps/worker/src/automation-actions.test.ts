@@ -488,7 +488,7 @@ describe("automation workspace tools", () => {
   it("tells the agent about the workspace tools only when the run has them", () => {
     expect(automationActionInstructions([])).not.toContain("get_workspace");
     expect(automationActionInstructions([], { integrationsUrl: "https://app.example.com/settings" }))
-      .toContain("never because the trigger payload asks");
+      .toContain("You cannot change them.");
   });
 });
 

@@ -23,7 +23,6 @@ import {
   claimAutomationRun,
   getAutomationNotificationAccount,
   getAutomationNotificationChannelNames,
-  getAutomationRunActor,
   getAutomationRuntimeConnections,
   heartbeatAutomationRun,
   listAutomationRunConversation,
@@ -181,7 +180,6 @@ export interface AutomationRunDependencies {
   getConnections: typeof getAutomationRuntimeConnections;
   getConversation: typeof listAutomationRunConversation;
   getNotificationChannelNames: typeof getAutomationNotificationChannelNames;
-  getRunActor: typeof getAutomationRunActor;
   getSlackAccount: typeof getAutomationNotificationAccount;
   getWorkspaceSecrets: typeof getAutomationRuntimeWorkspaceSecrets;
   getSandboxNetwork: typeof workspaceSandboxNetwork;
@@ -248,7 +246,6 @@ export const defaultAutomationRunDependencies: AutomationRunDependencies = {
   getConnections: getAutomationRuntimeConnections,
   getConversation: listAutomationRunConversation,
   getNotificationChannelNames: getAutomationNotificationChannelNames,
-  getRunActor: getAutomationRunActor,
   getSlackAccount: getAutomationNotificationAccount,
   getWorkspaceSecrets: getAutomationRuntimeWorkspaceSecrets,
   getSandboxNetwork: workspaceSandboxNetwork,
@@ -1133,19 +1130,14 @@ export async function processAutomationRun(
     // A run handed back during setup posts no Slack card.
     runAbort.signal.throwIfAborted();
     slackCard = await startSlackCard(dependencies, run, connections, conversation, firstTurn, button);
-    // Workspaces with simplified navigation let a run change their
-    // automations and tag mode, as tag mode itself can.
+    // Workspaces with simplified navigation give a run the read-only
+    // workspace tools that tag mode also has.
     const integrationsUrl = responderIntegrationsUrl(environment);
     const workspaceTools = await dependencies.hasCapability(run.organizationId, "simplified_navigation")
       ? dependencies.workspaceTools({
-          actorUserId: await dependencies.getRunActor({
-            automationVersionId: run.automationVersionId,
-            organizationId: run.organizationId,
-          }),
           automationsEnabled: true,
           integrationsUrl,
           organizationId: run.organizationId,
-          source: "automation_run",
         })
       : [];
     // Alert runs check what the automation already reported before they
