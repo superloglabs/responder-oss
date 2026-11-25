@@ -252,8 +252,9 @@ investigation credits.
   Responder's: the model provider failed, timed out, or could not be
   reached, or refused Responder's own credentials; the model broker could
   not serve Responder-funded requests; or a stopping worker handed an
-  automation turn to the next worker. For automation runs the model broker records
-  such a failure on the turn's grant, outside the sandbox. A rate limit or a
+  automation turn to the next worker. For automation runs the model broker
+  records such a failure on the turn's grant, outside the sandbox, including
+  a server error the provider reports inside a stream. A rate limit or a
   rejected request does not count. Pull request work, which runs no
   workspace code, is not charged when it fails.
 - On plans without machine hours, the billing page splits the period's charges
