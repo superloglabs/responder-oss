@@ -157,4 +157,11 @@ describe("symbolicateStack on a crafted stack", () => {
     expect(symbolicated).not.toBe(error.stacktrace);
     expect(crafted).toBe(`${junk}${symbolicated}`);
   });
+
+  it("leaves frames past the first 512 lines as they are", () => {
+    const error = errorFrom("chromium", "onerror");
+    const filler = "    not a frame\n".repeat(512);
+
+    expect(symbolicateStack(`${filler}${error.stacktrace}`, error.debugIds, maps)).toBeNull();
+  });
 });
