@@ -221,6 +221,35 @@ async function writeRepositoryArchiveWithLimit(
   }
 }
 
+// Git runs on the worker, and a repository's .gitmodules chooses where its
+// submodules come from. Git gets only its path and an empty home, so it sees
+// none of the worker's settings, and every URL except GitHub's goes through a
+// proxy that never resolves, so a submodule cannot make the worker connect to
+// another host.
+export function repositoryGitEnvironment(accessToken: string, home: string): NodeJS.ProcessEnv {
+  const config = [
+    ["http.https://github.com/.extraHeader", `Authorization: Basic ${Buffer.from(
+      `x-access-token:${accessToken}`,
+    ).toString("base64")}`],
+    ["url.https://github.com/.insteadOf", "git@github.com:"],
+    ["url.https://github.com/.insteadOf", "ssh://git@github.com/"],
+    ["http.proxy", "http://egress-refused.invalid:9"],
+    ["http.https://github.com/.proxy", ""],
+  ];
+  return {
+    GIT_ALLOW_PROTOCOL: "https",
+    GIT_CONFIG_COUNT: String(config.length),
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_TERMINAL_PROMPT: "0",
+    HOME: home,
+    ...(process.env.PATH ? { PATH: process.env.PATH } : {}),
+    ...Object.fromEntries(config.flatMap(([key, value], index) => [
+      [`GIT_CONFIG_KEY_${index}`, key],
+      [`GIT_CONFIG_VALUE_${index}`, value],
+    ])),
+  };
+}
+
 async function downloadRepositorySnapshotWithGit(
   repository: RuntimeRepository,
   accessToken: string,
@@ -231,25 +260,13 @@ async function downloadRepositorySnapshotWithGit(
   const temporaryRoot = dirname(archivePath);
   const gitDirectory = join(temporaryRoot, "repository.git");
   const checkoutDirectory = join(temporaryRoot, "repository");
-  const gitEnvironment = {
-    ...process.env,
-    GIT_ALLOW_PROTOCOL: "https",
-    GIT_CONFIG_COUNT: "3",
-    GIT_CONFIG_KEY_0: "http.https://github.com/.extraHeader",
-    GIT_CONFIG_VALUE_0: `Authorization: Basic ${Buffer.from(
-      `x-access-token:${accessToken}`,
-    ).toString("base64")}`,
-    GIT_CONFIG_KEY_1: "url.https://github.com/.insteadOf",
-    GIT_CONFIG_VALUE_1: "git@github.com:",
-    GIT_CONFIG_KEY_2: "url.https://github.com/.insteadOf",
-    GIT_CONFIG_VALUE_2: "ssh://git@github.com/",
-    GIT_TERMINAL_PROMPT: "0",
-  };
+  const gitEnvironment = repositoryGitEnvironment(accessToken, temporaryRoot);
   const repositoryUrl = `https://github.com/${repository.fullName}.git`;
 
   try {
     await mkdir(gitDirectory);
     await execFileAsync("git", ["-C", gitDirectory, "init", "--bare", "--quiet"], {
+      env: gitEnvironment,
       timeout: 30_000,
     });
     await execFileAsync(
@@ -262,7 +279,7 @@ async function downloadRepositorySnapshotWithGit(
         "origin",
         repositoryUrl,
       ],
-      { timeout: 30_000 },
+      { env: gitEnvironment, timeout: 30_000 },
     );
     await execFileAsync(
       "git",
@@ -280,7 +297,7 @@ async function downloadRepositorySnapshotWithGit(
     const { stdout } = await execFileAsync(
       "git",
       ["-C", gitDirectory, "rev-parse", "FETCH_HEAD"],
-      { timeout: 30_000 },
+      { env: gitEnvironment, timeout: 30_000 },
     );
     const sha = stdout.trim();
     if (!/^[a-f0-9]{40}$/i.test(sha)) {

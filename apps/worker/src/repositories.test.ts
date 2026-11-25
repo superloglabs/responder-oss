@@ -2,10 +2,11 @@ import type { DaytonaSandboxSession } from "@openai/agents-extensions/sandbox/da
 import type { SandboxSession } from "./sandbox-session.js";
 import { execFile } from "node:child_process";
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   checkoutRuntimeRepository,
   checkoutRuntimeRepositoryAtRef,
@@ -13,6 +14,7 @@ import {
   checkoutRuntimeRepositoriesAtRefs,
   importRuntimeRepositoryCommit,
   refreshRuntimeRepositories,
+  repositoryGitEnvironment,
   repositoryWorkspacePath,
 } from "./repositories.js";
 
@@ -331,16 +333,20 @@ describe("Daytona repository checkout", () => {
     const gitPath = join(binDirectory, "git");
     const callsPath = join(temporaryDirectory, "git-calls");
     const authPath = join(temporaryDirectory, "git-auth");
+    const homesPath = join(temporaryDirectory, "git-homes");
     let uploadedEntries = "";
     await mkdir(binDirectory);
     await writeFile(
       gitPath,
       [
+        // Git runs without the worker's environment, so the paths are
+        // written into the script.
         "#!/bin/sh",
-        "printf '%s\\n' \"$*\" >> \"$RESPONDER_TEST_GIT_CALLS\"",
+        `printf '%s\\n' "$*" >> '${callsPath}'`,
+        `printf '%s\\n' "\${HOME:-}" >> '${homesPath}'`,
         "case \" $* \" in",
-        "  *\" fetch \"*) printf '%s\\n' \"$GIT_CONFIG_VALUE_0\" > \"$RESPONDER_TEST_GIT_AUTH\" ;;",
-        "  *\" rev-parse \"*) printf '%s\\n' \"$RESPONDER_TEST_GIT_SHA\" ;;",
+        `  *" fetch "*) printf '%s\\n' "$GIT_CONFIG_VALUE_0" > '${authPath}' ;;`,
+        `  *" rev-parse "*) printf '%s\\n' '${sha}' ;;`,
         "  *\" ls-tree \"*) printf '.gitmodules\\n' ;;",
         "  *\" worktree add \"*)",
         "    for argument do destination=\"${previous:-}\"; previous=\"$argument\"; done",
@@ -352,9 +358,6 @@ describe("Daytona repository checkout", () => {
       { mode: 0o755 },
     );
     vi.stubEnv("PATH", `${binDirectory}:${process.env.PATH ?? ""}`);
-    vi.stubEnv("RESPONDER_TEST_GIT_AUTH", authPath);
-    vi.stubEnv("RESPONDER_TEST_GIT_CALLS", callsPath);
-    vi.stubEnv("RESPONDER_TEST_GIT_SHA", sha);
 
     try {
       await checkoutRuntimeRepositories(session, "version-id", {
@@ -381,6 +384,11 @@ describe("Daytona repository checkout", () => {
       expect(gitCalls).toContain(
         "submodule update --init --recursive --depth=1",
       );
+      // Every Git call runs with the isolated environment, whose home is the
+      // scratch directory rather than the worker's.
+      const homes = (await readFile(homesPath, "utf8")).trim().split("\n");
+      expect(homes).toHaveLength(gitCalls.trim().split("\n").length);
+      for (const home of homes) expect(home.startsWith(temporaryDirectory)).toBe(true);
       expect(await readFile(authPath, "utf8")).toBe(
         `Authorization: Basic ${Buffer.from(
           "x-access-token:github-secret",
@@ -652,7 +660,7 @@ describe("Daytona repository checkout", () => {
       [
         "#!/bin/sh",
         "case \" $* \" in",
-        "  *\" rev-parse \"*) printf '%s\\n' \"$RESPONDER_TEST_GIT_SHA\" ;;",
+        `  *" rev-parse "*) printf '%s\\n' '${sha}' ;;`,
         "  *\" worktree add \"*)",
         "    for argument do destination=\"${previous:-}\"; previous=\"$argument\"; done",
         "    mkdir -p \"$destination\"",
@@ -673,7 +681,6 @@ describe("Daytona repository checkout", () => {
       { mode: 0o755 },
     );
     vi.stubEnv("PATH", `${binDirectory}:${process.env.PATH ?? ""}`);
-    vi.stubEnv("RESPONDER_TEST_GIT_SHA", sha);
     vi.stubEnv("RESPONDER_TEST_GIT_COMPLETED", completionMarker);
 
     try {
@@ -745,4 +752,57 @@ describe("Daytona repository checkout", () => {
       path: "/home/daytona/workspace/.responder/repositories.json",
     });
   });
+});
+
+describe("repositoryGitEnvironment", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("gives git only what it needs, not the worker's settings", () => {
+    vi.stubEnv("DATABASE_URL", "postgres://worker");
+    vi.stubEnv("NO_PROXY", "*");
+    const environment = repositoryGitEnvironment("installation-token", "/tmp/home");
+    expect(environment.DATABASE_URL).toBeUndefined();
+    expect(environment.NO_PROXY).toBeUndefined();
+    expect(environment.HOME).toBe("/tmp/home");
+    expect(environment.PATH).toBe(process.env.PATH);
+  });
+
+  it("does not let a submodule URL reach a host other than GitHub", async () => {
+    const connections: string[] = [];
+    const server = createServer((socket) => {
+      connections.push(String(socket.remoteAddress));
+      socket.destroy();
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const { port } = server.address() as { port: number };
+    const root = await mkdtemp(join(tmpdir(), "responder-submodule-"));
+    const git = (cwd: string, ...args: string[]) =>
+      execFileAsync("git", ["-C", cwd, "-c", "user.email=test@example.com", "-c", "user.name=Test", ...args]);
+    try {
+      const superproject = join(root, "superproject");
+      await mkdir(superproject);
+      await git(superproject, "init", "--quiet");
+      await writeFile(
+        join(superproject, ".gitmodules"),
+        `[submodule "internal"]\n\tpath = internal\n\turl = https://127.0.0.1:${port}/internal.git\n`,
+      );
+      await git(superproject, "add", ".gitmodules");
+      await git(superproject, "update-index", "--add", "--cacheinfo", `160000,${"b".repeat(40)},internal`);
+      await git(superproject, "commit", "--quiet", "-m", "Add a submodule");
+      const checkout = join(root, "checkout");
+      await execFileAsync("git", ["clone", "--quiet", superproject, checkout]);
+
+      await expect(execFileAsync(
+        "git",
+        ["-C", checkout, "submodule", "update", "--init", "--recursive", "--depth=1"],
+        { env: repositoryGitEnvironment("installation-token", root), timeout: 30_000 },
+      )).rejects.toThrow();
+      expect(connections).toEqual([]);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+      await rm(root, { force: true, recursive: true });
+    }
+  }, 60_000);
 });

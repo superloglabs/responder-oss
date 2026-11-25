@@ -123,7 +123,9 @@ types. `drizzle/` contains the ordered schema history.
 - Repository work runs in a separate sandbox. GitHub credentials stay outside
   the sandbox; the service streams selected repository snapshots through
   bounded worker scratch storage and into the isolated workspace without
-  buffering the complete archive in worker memory.
+  buffering the complete archive in worker memory. A repository with
+  submodules is fetched with Git on the worker. Git runs without the worker's
+  environment and reaches only github.com, whatever URLs `.gitmodules` names.
 - Workspace skills are text folders (a `SKILL.md` and reference files such as
   an OpenAPI spec) that an automation run writes to
   `.responder/skills/<name>` in its sandbox and lists in the agent's prompt.
