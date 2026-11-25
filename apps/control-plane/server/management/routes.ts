@@ -67,7 +67,7 @@ for (const operation of managementOperations) {
       );
     }
     const result = await executeOperation(operation, caller, input.input);
-    return context.json(result.body, result.status as 200);
+    return context.json(result.body, result.status as 200, result.headers);
   });
 }
 

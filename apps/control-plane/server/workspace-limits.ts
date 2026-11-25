@@ -71,6 +71,17 @@ export function createConcurrencyLimiter({ limit, maxWaiting, waitMs }: { limit:
   }
 
   return {
+    // Waits for a slot like `run`, and returns its release function, which
+    // may be called more than once.
+    async acquire(key: string): Promise<() => void> {
+      await acquire(key);
+      let released = false;
+      return () => {
+        if (released) return;
+        released = true;
+        release(key);
+      };
+    },
     async run<T>(key: string, task: () => Promise<T>): Promise<T> {
       await acquire(key);
       try {
@@ -95,8 +106,9 @@ export function createConcurrencyLimiter({ limit, maxWaiting, waitMs }: { limit:
   };
 }
 
+// Read the way the ClickHouse client reads its connection count.
 function positiveInteger(value: string | undefined): number | null {
-  const parsed = Number.parseInt(value ?? "", 10);
+  const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
@@ -113,8 +125,12 @@ export function workspaceQueryConcurrency(environment: NodeJS.ProcessEnv = proce
 // The store's request timeout: a query that cannot start within it fails.
 const telemetryQueries = createConcurrencyLimiter({ limit: workspaceQueryConcurrency(), maxWaiting: 50, waitMs: 20_000 });
 
-// The workspace's view of the telemetry store, whose queries take one of the
-// workspace's slots while they run.
+// How long a query's slot stays taken if its result is never read.
+const unreadResultMs = 30_000;
+
+// The workspace's view of the telemetry store. A query takes one of the
+// workspace's slots until its result has been read, since its connection
+// stays in use until then.
 export function limitedTelemetryClient(
   client: TelemetryClient,
   organizationId: string,
@@ -123,11 +139,60 @@ export function limitedTelemetryClient(
   return new Proxy(client, {
     get(target, property) {
       if (property === "query") {
-        return (params: Parameters<TelemetryClient["query"]>[0]) =>
-          limiter.run(organizationId, () => target.query(params));
+        return async (params: Parameters<TelemetryClient["query"]>[0]) => {
+          const release = await limiter.acquire(organizationId);
+          let result: Awaited<ReturnType<TelemetryClient["query"]>>;
+          try {
+            result = await target.query(params);
+          } catch (error) {
+            release();
+            throw error;
+          }
+          return heldUntilRead(result, release);
+        };
       }
       const value: unknown = Reflect.get(target, property, target);
       return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
+function heldUntilRead<Result extends object>(result: Result, release: () => void): Result {
+  const timer = setTimeout(release, unreadResultMs);
+  timer.unref?.();
+  const done = () => {
+    clearTimeout(timer);
+    release();
+  };
+  return new Proxy(result, {
+    get(target, property) {
+      const value: unknown = Reflect.get(target, property, target);
+      if (typeof value !== "function") return value;
+      if (property === "json" || property === "text") {
+        return async (...args: unknown[]) => {
+          try {
+            return await (value as (...input: unknown[]) => Promise<unknown>).apply(target, args);
+          } finally {
+            done();
+          }
+        };
+      }
+      if (property === "stream") {
+        return (...args: unknown[]) => {
+          const stream = (value as (...input: unknown[]) => NodeJS.EventEmitter).apply(target, args);
+          stream.once("close", done);
+          stream.once("end", done);
+          stream.once("error", done);
+          return stream;
+        };
+      }
+      if (property === "close") {
+        return (...args: unknown[]) => {
+          done();
+          return (value as (...input: unknown[]) => unknown).apply(target, args);
+        };
+      }
+      return (value as (...input: unknown[]) => unknown).bind(target);
     },
   });
 }

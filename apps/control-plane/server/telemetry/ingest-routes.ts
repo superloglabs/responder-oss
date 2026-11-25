@@ -98,6 +98,7 @@ function bearerToken(headers: Headers): string | null {
 
 export function createIngestRoutes(dependencies: IngestRouteDependencies = defaultDependencies) {
   const keys = new Map<string, { expires: number; keyId: string | null; organizationId: string | null }>();
+  const lookups = new Map<string, Promise<{ keyId: string; organizationId: string } | null>>();
   const subscriptionWorkspaces = new Map<string, { expires: number; organizationId: string | null }>();
   const logSubscriptionWorkspace = dependencies.logSubscriptionWorkspace ?? findAwsLogSubscriptionWorkspace;
   const cloudWatchLogsToken = dependencies.cloudWatchLogsToken ?? cloudWatchLogsIngestToken;
@@ -122,14 +123,22 @@ export function createIngestRoutes(dependencies: IngestRouteDependencies = defau
     if (cached && cached.expires > dependencies.now()) {
       return cached.organizationId && cached.keyId ? { keyId: cached.keyId, organizationId: cached.organizationId } : null;
     }
-    const found = await dependencies.findKey(token);
-    if (keys.size >= keyCacheLimit) keys.clear();
-    keys.set(hash, {
-      expires: dependencies.now() + keyCacheMs,
-      keyId: found?.keyId ?? null,
-      organizationId: found?.organizationId ?? null,
-    });
-    return found ? { keyId: found.keyId, organizationId: found.organizationId } : null;
+    // Requests that miss the cache together share one lookup, so a burst
+    // with one key is one database query.
+    const pending = lookups.get(hash);
+    if (pending) return pending;
+    const lookup = (async () => {
+      const found = await dependencies.findKey(token);
+      if (keys.size >= keyCacheLimit) keys.clear();
+      keys.set(hash, {
+        expires: dependencies.now() + keyCacheMs,
+        keyId: found?.keyId ?? null,
+        organizationId: found?.organizationId ?? null,
+      });
+      return found ? { keyId: found.keyId, organizationId: found.organizationId } : null;
+    })().finally(() => lookups.delete(hash));
+    lookups.set(hash, lookup);
+    return lookup;
   }
 
   async function forward(input: {
@@ -333,7 +342,19 @@ export function createIngestRoutes(dependencies: IngestRouteDependencies = defau
         }
         const logs = cloudWatchLogsMessagesToOtlp(group.messages, { accountId: group.awsAccountId, region: group.region }, dependencies.now());
         if (logs.records === 0) continue;
-        const response = await forward({ body: JSON.stringify(logs.payload), collector, contentType: "application/json", organizationId, signal: "logs" });
+        // A workspace at its in-flight limit is retried with the whole batch;
+        // the other workspaces' logs are still sent now.
+        const release = inFlight.tryAcquire(organizationId);
+        if (!release) {
+          busy = busyBody.error;
+          continue;
+        }
+        let response: Response | null;
+        try {
+          response = await forward({ body: JSON.stringify(logs.payload), collector, contentType: "application/json", organizationId, signal: "logs" });
+        } finally {
+          release();
+        }
         if (!response || response.status >= 500 || response.status === 429) {
           busy = response ? `Telemetry ingest answered HTTP ${response.status}` : "Telemetry ingest is unavailable";
           continue;

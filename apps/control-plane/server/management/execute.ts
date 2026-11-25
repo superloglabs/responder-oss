@@ -12,6 +12,7 @@ import {
 
 export type ManagementResult = {
   body: Record<string, unknown>;
+  headers?: Record<string, string>;
   status: number;
 };
 
@@ -81,16 +82,6 @@ export async function executeOperation(
   const started = Date.now();
   let result: ManagementResult;
   try {
-    if (
-      operation.requiresAutomations &&
-      !(await organizationHasCapability(context.organizationId, "automations"))
-    ) {
-      throw new ManagementError(
-        404,
-        "Automations are not available in this workspace.",
-        "automations_unavailable",
-      );
-    }
     const input = operation.input.safeParse(rawInput);
     if (!input.success) {
       throw new ManagementError(400, "Invalid request", "invalid_request", input.error.issues);
@@ -98,7 +89,19 @@ export async function executeOperation(
     // One workspace runs a bounded number of operations at once, so a burst
     // of calls cannot take the process's shared capacity from the others.
     const value: unknown = JSON.parse(
-      JSON.stringify(await limiter.run(context.organizationId, () => operation.run(context, input.data))),
+      JSON.stringify(await limiter.run(context.organizationId, async () => {
+        if (
+          operation.requiresAutomations &&
+          !(await organizationHasCapability(context.organizationId, "automations"))
+        ) {
+          throw new ManagementError(
+            404,
+            "Automations are not available in this workspace.",
+            "automations_unavailable",
+          );
+        }
+        return operation.run(context, input.data);
+      })),
     );
     const output = operation.output.safeParse(value);
     if (!output.success) {
@@ -122,6 +125,7 @@ export async function executeOperation(
     } else if (error instanceof WorkspaceBusyError) {
       result = {
         body: { code: "workspace_busy", error: error.message, retryAfterSeconds: error.retryAfterSeconds },
+        headers: { "retry-after": String(error.retryAfterSeconds) },
         status: 429,
       };
     } else {

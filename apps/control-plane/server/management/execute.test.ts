@@ -28,15 +28,19 @@ describe("executeOperation per-workspace limit", () => {
     const refused = await executeOperation(slow, caller("org-a"), {}, limiter);
     const other = executeOperation(operation(async () => ({ ok: true })), caller("org-b"), {}, limiter);
 
-    expect(refused).toMatchObject({ body: { code: "workspace_busy" }, status: 429 });
+    expect(refused).toMatchObject({ body: { code: "workspace_busy" }, headers: { "retry-after": "1" }, status: 429 });
     expect((await other).status).toBe(200);
     finish();
     expect((await first).status).toBe(200);
   });
 
-  it("answers 429 when the workspace's telemetry queries are all in use", async () => {
+  it("turns a busy error from inside the operation into 429 with a retry hint", async () => {
     const busy = operation(async () => { throw new WorkspaceBusyError(20); });
 
-    expect(await executeOperation(busy, caller("org-a"), {})).toMatchObject({ body: { code: "workspace_busy" }, status: 429 });
+    expect(await executeOperation(busy, caller("org-a"), {})).toMatchObject({
+      body: { code: "workspace_busy", retryAfterSeconds: 20 },
+      headers: { "retry-after": "20" },
+      status: 429,
+    });
   });
 });

@@ -69,17 +69,20 @@ describe("createConcurrencyLimiter", () => {
 
 describe("limitedTelemetryClient", () => {
   it("queues a workspace's queries and passes other calls through", async () => {
-    const gate = deferred();
-    const client = { close: vi.fn(async () => undefined), query: vi.fn(() => gate.promise.then(() => ({ rows: 1 }))) };
+    const client = {
+      close: vi.fn(async () => undefined),
+      query: vi.fn(async () => ({ json: async () => [{ rows: 1 }] })),
+    };
     const limiter = createConcurrencyLimiter({ limit: 1, maxWaiting: 10, waitMs: 1_000 });
     const limited = limitedTelemetryClient(client as unknown as TelemetryClient, "org", limiter);
 
-    const first = limited.query({ query: "select 1" });
+    const first = await limited.query({ query: "select 1" });
     const second = limited.query({ query: "select 2" });
-    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    // The first result has not been read, so its connection is still in use.
     expect(client.query).toHaveBeenCalledTimes(1);
-    gate.resolve();
-    await Promise.all([first, second]);
+    expect(await first.json()).toEqual([{ rows: 1 }]);
+    await second;
     expect(client.query).toHaveBeenCalledTimes(2);
     await limited.close();
     expect(client.close).toHaveBeenCalled();
@@ -92,5 +95,6 @@ describe("workspaceQueryConcurrency", () => {
     expect(workspaceQueryConcurrency({ TELEMETRY_CLICKHOUSE_MAX_CONNECTIONS: "2" })).toBe(1);
     expect(workspaceQueryConcurrency({ TELEMETRY_CLICKHOUSE_MAX_CONNECTIONS: "8" })).toBe(4);
     expect(workspaceQueryConcurrency({ TELEMETRY_WORKSPACE_QUERY_CONCURRENCY: "3" })).toBe(3);
+    expect(workspaceQueryConcurrency({ TELEMETRY_CLICKHOUSE_MAX_CONNECTIONS: "1e2" })).toBe(50);
   });
 });

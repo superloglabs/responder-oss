@@ -51,8 +51,13 @@ const app = new Hono()
   .route("/api/v1", managementApiRoutes)
   .route("/api/mcp", managementMcpRoutes);
 const clickhouse = { query: vi.fn() };
-// Operations query through the workspace's limited view of the store.
-const workspaceClient = expect.objectContaining({ query: expect.any(Function) });
+// Operations query through the workspace's limited view of the store, not
+// the shared client itself.
+const workspaceClient = {
+  asymmetricMatch: (value: unknown) =>
+    value !== clickhouse && typeof (value as { query?: unknown } | null)?.query === "function",
+  toAsymmetricMatcher: () => "the workspace's limited telemetry client",
+};
 
 function api(path: string, body?: unknown) {
   return app.request(`/api/v1${path}`, {
@@ -340,6 +345,16 @@ describe("telemetry operations", () => {
 });
 
 describe("MCP batches", () => {
+  beforeEach(() => {
+    mocks.authenticate.mockResolvedValue({
+      apiKeyId,
+      organizationId,
+      role: "member",
+      user: { email: "ash@example.com", id: userId, name: "Ash" },
+    });
+    mocks.capability.mockResolvedValue(false);
+  });
+
   it("refuses a JSON-RPC batch larger than 20 messages", async () => {
     const message = (id: number) => ({ id, jsonrpc: "2.0", method: "tools/list", params: {} });
     const send = (count: number) => app.request("/api/mcp", {
@@ -351,6 +366,7 @@ describe("MCP batches", () => {
     const refused = await send(21);
     expect(refused.status).toBe(400);
     expect(await refused.json()).toMatchObject({ error: { code: -32600 }, jsonrpc: "2.0" });
+    expect((await send(20)).status).toBe(200);
     expect((await send(2)).status).toBe(200);
   });
 });
