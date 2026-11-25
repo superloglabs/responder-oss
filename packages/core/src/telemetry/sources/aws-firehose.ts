@@ -190,12 +190,15 @@ export async function decodeCloudWatchLogsRecords(
     try {
       const limit = Math.min(limits.maxRecordBytes, remaining);
       if (limit <= 0) throw new Error("The request's records are too large");
+      // The record's limit is taken from the budget before it is read, and
+      // only the unused part comes back, so records that fail still use it.
+      remaining -= limit;
       const bytes = Buffer.from(record.data, "base64");
       const text = bytes[0] === 0x1f && bytes[1] === 0x8b
         ? await gunzipAsync(bytes, { maxOutputLength: limit })
         : bytes;
       if (text.length > limit) throw new Error("The record is too large");
-      remaining -= text.length;
+      remaining += limit - text.length;
       parsed = cloudWatchLogsSchema.parse(JSON.parse(text.toString("utf8")));
     } catch {
       skipped += 1;

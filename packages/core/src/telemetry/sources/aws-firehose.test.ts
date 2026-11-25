@@ -173,6 +173,15 @@ describe("decodeCloudWatchLogsRecords", () => {
     expect(await decodeCloudWatchLogsRecords({ records: [record], requestId: "r" })).toEqual({ messages: [], skipped: 1 });
   });
 
+  it("counts a record refused for its size against the request's total", async () => {
+    const large = cloudWatchRecord(message("x".repeat(4096)));
+    const small = cloudWatchRecord(message("small"));
+
+    const result = await decodeCloudWatchLogsRecords({ records: [large, large, small], requestId: "r" }, { maxRecordBytes: 1024, maxTotalBytes: 2048 });
+
+    expect(result).toEqual({ messages: [], skipped: 3 });
+  });
+
   it("limits each record to 8 MiB decompressed by default", async () => {
     const large = cloudWatchRecord(message("z".repeat(9 * 1024 * 1024)));
 

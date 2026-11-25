@@ -23,6 +23,7 @@ describe("parseVercelLogs", () => {
 
     expect(() => parseVercelLogs(body, "application/x-ndjson")).toThrow("Too many");
     expect(() => parseVercelLogs(`[${Array(50_001).fill("{}").join(",")}]`, "application/json")).toThrow("Too many");
+    expect(parseVercelLogs(`${"{}\n\n".repeat(50_000)}`, "application/x-ndjson")).toHaveLength(50_000);
   });
 
   it("reads an array, one record, or NDJSON", () => {
