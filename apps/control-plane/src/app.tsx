@@ -19,6 +19,8 @@ import {
   PrivacyPage,
   PricingPage,
   ProductUpdateArticlePage,
+  ResourcePage,
+  ResourcesIndexPage,
   SecurityPage,
   SmsConsentPage,
   SubprocessorsPage,
@@ -166,6 +168,8 @@ export function App() {
       <Route element={<ComparisonPage />} path="/compare/:slug" />
       <Route element={<OpenSourcePage />} path="/open-source" />
       <Route element={<ObservabilityPage />} path="/observability" />
+      <Route element={<ResourcesIndexPage />} path="/resources" />
+      <Route element={<ResourcePage />} path="/resources/:slug" />
       <Route element={<TeamPage />} path="/team" />
       <Route element={<PrivacyPage />} path="/privacy" />
       <Route element={<TermsPage />} path="/tos" />
