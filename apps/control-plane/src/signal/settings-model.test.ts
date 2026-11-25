@@ -29,10 +29,11 @@ describe("Signal settings", () => {
     expect(settings).toMatchObject({
       minimumSeverity: "SEV-3", dailyInvestigationCap: null, dismissalCooldownHours: 24, skippedServices: [], notes: "",
       slackScan: { enabled: false, channels: [] }, retentionDays: null, replicas: { connected: false }, discord: { connected: false }, jira: null,
+      codingAgents: { agents: ["claude", "codex"], claudeSurface: "terminal" },
       limits: { dailyInvestigationCap: 50 },
     });
     expect(Object.keys(settingsBody(settings)).sort()).toEqual([
-      "dailyInvestigationCap", "dismissalCooldownHours", "enabled", "jira", "minimumSeverity", "notes", "repositoryIds", "retentionDays", "skippedServices", "slack", "slackScan",
+      "codingAgents", "dailyInvestigationCap", "dismissalCooldownHours", "enabled", "jira", "minimumSeverity", "notes", "repositoryIds", "retentionDays", "skippedServices", "slack", "slackScan",
     ]);
   });
 

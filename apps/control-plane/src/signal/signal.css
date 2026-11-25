@@ -427,6 +427,20 @@
 .signalSettingsRow__label span { color: #666; }
 .signalSettingsRow__label a { color: #3039bd; font-weight: 600; text-decoration: none; }
 .signal .signalSettingsSelect { width: 240px; flex-shrink: 0; border-radius: 6px; }
+.signal .signalSettingsGroup__description { margin: -6px 0 0; color: #666; }
+.signalAgents { margin: 0; padding: 0 20px 0 8px; list-style: none; }
+.signalAgent { display: flex; align-items: center; gap: 12px; padding: 16px 0; }
+.signalAgent + .signalAgent { border-top: .5px solid #00000014; }
+.signalAgent--dragging { opacity: .5; }
+.signalAgent[draggable="true"] { cursor: grab; }
+.signalAgent__handle { display: flex; width: 20px; flex-shrink: 0; justify-content: center; }
+.signalAgent__handle button { display: flex; padding: 2px; border: 0; border-radius: 4px; background: none; color: #a0a0a0; cursor: grab; }
+.signalAgent__handle button:hover, .signalAgent__handle button:focus-visible { color: #444; }
+.signalAgent__logo { width: 24px; height: 24px; flex-shrink: 0; border-radius: 5px; object-fit: contain; }
+.signal .signalAgent__surface { width: 140px; }
+.signalTestResult { display: flex; align-items: center; gap: 6px; margin: -4px 0 0; color: #444; }
+.signalTestResult svg { flex-shrink: 0; color: #168255; }
+.signalTestResult--error { color: #b33d43; }
 .signalSettingsActions { display: flex; justify-content: flex-end; gap: 8px; }
 .signalSourceRow + .signalSourceRow, .signalSourceRow + .signalSettingsCard--rows { border-top: .5px solid #00000014; }
 .signalSourceRow__main { display: flex; align-items: center; gap: 16px; padding: 20px; }

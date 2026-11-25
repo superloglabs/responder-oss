@@ -38,9 +38,12 @@ function fakeSignal(count = 30, options: { setUp?: boolean } = {}) {
       notes: "",
       slackScan: { enabled: false, channels: [] as Array<{ integrationAccountId: string; channelId: string }> },
       retentionDays: null as 30 | 60 | 90 | 365 | null,
+      codingAgents: { agents: ["claude", "codex"], claudeSurface: "terminal" } as { agents: string[]; claudeSurface: string },
       replicas: { connected: false },
       limits: { dailyInvestigationCap: 50 },
     },
+    // The next test message fails with this error, like Slack refusing it.
+    failTestMessage: null as string | null,
     // The next settings save fails with this error, like a server rejecting it.
     failNextSave: null as string | null,
     // Plan lookups fail while this is set, like a billing outage.
@@ -123,6 +126,10 @@ async function workspace(page: Page, options: { enabled?: boolean; signal?: Retu
         if (signal.settings.enabled) signal.settings.setupComplete = true;
       }
       return route.fulfill({ json: signal.settings });
+    }
+    if (path === "/settings/test-message" && request.method() === "POST") {
+      if (signal.failTestMessage) return route.fulfill({ status: 400, json: { error: signal.failTestMessage } });
+      return route.fulfill({ json: { channelId: signal.settings.slack!.channelId } });
     }
     if (path === "/settings/replicas" && request.method() === "PUT") {
       if (signal.saveDelayMs) await new Promise((resolve) => setTimeout(resolve, signal.saveDelayMs));
@@ -698,6 +705,38 @@ test("changes where findings are posted", async ({ page }) => {
   // Managing Slack opens the workspace's integrations, like setup does.
   await page.getByRole("button", { name: "Manage Slack" }).click();
   await expect(page).toHaveURL(/\/settings$/u);
+});
+
+test("chooses the coding agents findings open in and sends a test message", async ({ page }) => {
+  const signal = fakeSignal();
+  signal.settings.slack = { integrationAccountId: "slack-account", channelId: "C02" };
+  await workspace(page, { signal });
+  await page.goto("/signal/setup/notifications");
+
+  const agents = page.getByRole("list", { name: "Coding agents" });
+  await expect(agents.getByRole("listitem")).toHaveText([
+    /Claude Code/u, /Codex/u, /Conductor/u, /Capy/u, /cmux/u, /Replicas/u,
+  ]);
+  await page.getByRole("switch", { name: "Open in Capy" }).click();
+  await expect.poll(() => signal.settings.codingAgents).toEqual({ agents: ["claude", "codex", "capy"], claudeSurface: "terminal" });
+  await page.getByRole("switch", { name: "Open in Codex" }).click();
+  await expect.poll(() => signal.settings.codingAgents.agents).toEqual(["claude", "capy"]);
+
+  // The arrow keys move an agent among the ones turned on.
+  await page.getByRole("button", { name: /^Move Capy/u }).press("ArrowUp");
+  await expect.poll(() => signal.settings.codingAgents.agents).toEqual(["capy", "claude"]);
+
+  await page.getByLabel("Claude Code app").selectOption("web");
+  await expect.poll(() => signal.settings.codingAgents.claudeSurface).toBe("web");
+  await expect(page.getByText("Opens a new session in Claude Code on the web.")).toBeVisible();
+
+  signal.failTestMessage = "Superlog is not in the findings channel. Add the Superlog app to the channel, then try again.";
+  await page.getByRole("button", { name: "Send test message" }).click();
+  await expect(page.getByRole("alert")).toHaveText(signal.failTestMessage);
+  signal.failTestMessage = null;
+  await page.getByRole("button", { name: "Send test message" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Test message sent" })).toBeVisible();
+  expect(signal.writes.at(-1)).toEqual({ method: "POST", path: "/settings/test-message", body: null });
 });
 
 test("connects Replicas with a webhook URL and removes it", async ({ page }) => {

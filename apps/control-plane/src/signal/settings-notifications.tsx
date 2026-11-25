@@ -14,6 +14,8 @@ import {
 } from "./model";
 import type { SaveSettings, SettingsPageProps } from "./settings";
 import { sourceActions, type SourceActions } from "./setup-data";
+import { CodingAgentRows, TestMessageButton, TestMessageResult } from "./coding-agents";
+import { useTestMessage } from "./coding-agents-model";
 import { DiscordWebhook } from "./discord";
 import { ChannelSelect } from "./setup-shared";
 import { SettingsGroup, SettingsPage, SettingsRow, SourceRow } from "./shared";
@@ -24,6 +26,7 @@ export function SettingsNotifications({ data, save, saved, setSettings, status }
   const actions = sourceActions({ integrations, otelServices: null, listPath: "/signal/setup/notifications", navigate });
   const connected = actions.connected("slack");
   const workspace = actions.accounts("slack").map((account) => account.displayName).join(", ");
+  const { test, send } = useTestMessage();
   return <SettingsPage title="Notifications" description="Where findings are posted and filed." status={status}>
     <SettingsGroup title="Slack">
       <div className="signalSettingsCard">
@@ -49,7 +52,16 @@ export function SettingsNotifications({ data, save, saved, setSettings, status }
       </div>
     </SettingsGroup>
     {actions.summary("jira") && <JiraSettings actions={actions} value={settings.jira} save={save} />}
-    <SettingsGroup title="Coding agents">
+    <SettingsGroup title="Coding agents"
+      action={<TestMessageButton disabled={!settings.slack} test={test} send={() => void send()} />}>
+      <p className="signalSettingsGroup__description">
+        Buttons under each finding in Slack open the agent with the fix prompt filled in. Agents get a button while
+        they fit on one line with the other buttons; the rest go in the ⋯ menu. Drag to reorder.
+      </p>
+      <div className="signalSettingsCard">
+        <CodingAgentRows value={settings.codingAgents} onChange={(codingAgents) => save({ codingAgents })} />
+      </div>
+      <TestMessageResult test={test} />
       <div className="signalSettingsCard signalSettingsCard--rows">
         <ReplicasWebhook connected={settings.replicas.connected} onSaved={(next) => setSettings(next, true)} />
       </div>
@@ -61,7 +73,7 @@ const jiraPath = "/signal/setup/context/jira";
 
 const modeDescriptions: Record<SignalJiraMode | "off", string> = {
   off: "Findings are not filed in Jira.",
-  button: "Members file a finding from its page or its Slack message with Create Jira issue.",
+  button: "Members file a finding with Create Jira issue on its page or To Jira on its Slack message.",
   automatic: "Signal files every finding it posts, starting now. Findings kept below the minimum severity are not filed.",
 };
 
