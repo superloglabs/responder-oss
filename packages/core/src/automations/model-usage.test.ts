@@ -107,3 +107,33 @@ describe("automation model usage observer", () => {
     });
   });
 });
+
+describe("provider failures in a stream", () => {
+  function failed(format: "chat_completions" | "messages" | "responses", event: unknown) {
+    const observer = createAutomationModelUsageObserver(format, "text/event-stream");
+    observer.observe(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+    return observer.providerFailed;
+  }
+
+  it("sees an overloaded or failing Anthropic stream", () => {
+    expect(failed("messages", { error: { type: "overloaded_error" }, type: "error" })).toBe(true);
+    expect(failed("messages", { error: { type: "api_error" }, type: "error" })).toBe(true);
+  });
+
+  it("sees an OpenAI response that failed on the server", () => {
+    expect(failed("responses", { response: { error: { code: "server_error" } }, type: "response.failed" })).toBe(true);
+  });
+
+  it("ignores failures a request can cause", () => {
+    expect(failed("messages", { error: { type: "invalid_request_error" }, type: "error" })).toBe(false);
+    expect(failed("messages", { error: { type: "rate_limit_error" }, type: "error" })).toBe(false);
+    expect(failed("responses", { response: { error: { code: "invalid_prompt" } }, type: "response.failed" })).toBe(false);
+    expect(failed("responses", { response: { error: { code: "server_error" } }, type: "response.completed" })).toBe(false);
+  });
+
+  it("ignores events outside a stream", () => {
+    const observer = createAutomationModelUsageObserver("messages", "application/json");
+    observer.observe(encoder.encode(JSON.stringify({ error: { type: "overloaded_error" }, type: "error" })));
+    expect(observer.providerFailed).toBe(false);
+  });
+});

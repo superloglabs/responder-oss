@@ -219,6 +219,9 @@ export const automationModelBrokerGrants = pgTable(
     // Set when the broker refused a request because the organization's usage
     // allowance could not cover it, so the worker can say why the run failed.
     allowanceExhaustedAt: timestamp("allowance_exhausted_at", { withTimezone: true }),
+    // Set when a model request failed on Responder's side, such as a provider
+    // outage or the broker itself, so the worker can waive the failed turn.
+    providerFailedAt: timestamp("provider_failed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [

@@ -65,6 +65,7 @@ import {
   type SlackInvestigationTraceItem,
 } from "@responder/core/integrations/slack-live-progress";
 import { isSlackAssistantRequest } from "@responder/core/integrations/slack-assistant";
+import { modelProviderFailedOnResponderSide } from "./agent-usage.js";
 import { linearAgentDelivery } from "./linear-agent-delivery.js";
 import {
   deliverSlackIssueFollowupResponse,
@@ -413,13 +414,16 @@ async function deleteExpiredSandboxes(): Promise<void> {
   }
 }
 
-// An investigation recorded as failed is not charged. A waiver that fails is
-// reported and leaves it charged.
+// An investigation recorded as failed is charged for what it used, unless its
+// model provider failed on Responder's side. A waiver that fails is reported
+// and leaves it charged.
 async function waiveFailedInvestigationUsage(
   payload: { config: { organizationId: string }; investigationId: string },
   jobId: string,
   since: Date,
+  failure: unknown,
 ): Promise<void> {
+  if (!modelProviderFailedOnResponderSide(failure)) return;
   await waiveJobUsage({
     since,
     workload: "investigation",
@@ -1051,7 +1055,7 @@ await boss.work(
         message,
       );
       if (investigationFailed) {
-        await waiveFailedInvestigationUsage(payload, job.id, usageSince);
+        await waiveFailedInvestigationUsage(payload, job.id, usageSince, error);
       }
       if (investigationFailed && linear) {
         await linear.fail().catch(() => undefined);
@@ -1335,7 +1339,7 @@ await boss.work(investigationQueue, { localConcurrency: investigationLocalConcur
       message,
     );
     if (investigationFailed) {
-      await waiveFailedInvestigationUsage(payload, job.id, usageSince);
+      await waiveFailedInvestigationUsage(payload, job.id, usageSince, error);
     }
     await failInvestigationReplayRequest(payload.investigationId, message);
     await failPendingInvestigationPullRequests(

@@ -1,6 +1,8 @@
 import { Usage } from "@openai/agents";
+import { APIConnectionError, APIConnectionTimeoutError, APIError } from "openai";
 import { describe, expect, it, vi } from "vitest";
 import {
+  modelProviderFailedOnResponderSide,
   recordAgentRunUsage,
   requireUsageAllowance,
   UsageAllowanceExhaustedError,
@@ -82,5 +84,53 @@ describe("agent run usage", () => {
         nextResetAt: null,
       }),
     )).resolves.toBeUndefined();
+  });
+});
+
+describe("failed agent run waivers", () => {
+  const headers = new Headers();
+
+  it("waives a run whose model provider failed or could not be reached", () => {
+    expect(modelProviderFailedOnResponderSide(
+      APIError.generate(500, { message: "server error" }, "server error", headers),
+    )).toBe(true);
+    expect(modelProviderFailedOnResponderSide(new APIConnectionError({ message: "Connection error." }))).toBe(true);
+    expect(modelProviderFailedOnResponderSide(new APIConnectionTimeoutError())).toBe(true);
+  });
+
+  it.each([401, 402, 403])("waives a run whose provider refused Responder's own credentials with %s", (status) => {
+    expect(modelProviderFailedOnResponderSide(
+      APIError.generate(status, { message: "refused" }, "refused", headers),
+    )).toBe(true);
+  });
+
+  it("waives a run whose provider timed out", () => {
+    expect(modelProviderFailedOnResponderSide(
+      APIError.generate(408, { message: "timeout" }, "timeout", headers),
+    )).toBe(true);
+  });
+
+  it("finds the provider failure behind a wrapping error", () => {
+    const providerFailure = APIError.generate(503, { message: "overloaded" }, "overloaded", headers);
+    expect(modelProviderFailedOnResponderSide(
+      new Error("Investigation failed", { cause: providerFailure }),
+    )).toBe(true);
+    expect(modelProviderFailedOnResponderSide(
+      new AggregateError([new Error("cleanup failed"), providerFailure]),
+    )).toBe(true);
+  });
+
+  it("charges a run that failed for any other reason", () => {
+    expect(modelProviderFailedOnResponderSide(new Error("Sandbox command failed"))).toBe(false);
+    expect(modelProviderFailedOnResponderSide(
+      APIError.generate(400, { message: "context too long" }, "context too long", headers),
+    )).toBe(false);
+    expect(modelProviderFailedOnResponderSide(
+      APIError.generate(429, { message: "rate limited" }, "rate limited", headers),
+    )).toBe(false);
+    expect(modelProviderFailedOnResponderSide(
+      Object.assign(new Error("looks like a provider failure"), { status: 500 }),
+    )).toBe(false);
+    expect(modelProviderFailedOnResponderSide("failed")).toBe(false);
   });
 });
