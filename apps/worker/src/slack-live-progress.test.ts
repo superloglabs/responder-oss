@@ -38,7 +38,7 @@ describe("Slack investigation progress", () => {
       { type: "instructions.configured" },
       { type: "reasoning.completed" },
       { type: "message.completed", data: { message: "Opened the pull request." } },
-      ...["read_repository_file", "open_pull_request", "update_automation", "get_workspace", "sentry_search", "shell"]
+      ...["read_repository_file", "open_pull_request", "get_workspace", "sentry_search", "shell"]
         .map((toolName) => ({
           type: "actions.requested",
           data: { actions: [{ callId: `call-${toolName}`, toolName }] },
@@ -53,7 +53,6 @@ describe("Slack investigation progress", () => {
       "Writing the reply.",
       "Reading the code.",
       "Opening a pull request.",
-      "Updating the workspace.",
       "Reading the workspace settings.",
       "Checking connected tools.",
       "Working on the request.",

@@ -142,9 +142,6 @@ function eventId(event: SlackProgressTraceEvent, prefix: string): string {
 // as an investigation.
 function assistantPhaseForTool(tool: string): string {
   if (tool === "open_pull_request") return "Opening a pull request.";
-  if (/^(create|update)_automation$|^update_tag_mode$/.test(tool)) {
-    return "Updating the workspace.";
-  }
   if (/^get_(workspace|automation)/.test(tool)) return "Reading the workspace settings.";
   if (
     tool === "list_repository_files" ||

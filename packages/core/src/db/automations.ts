@@ -22,12 +22,10 @@ import { isAutomationContextProvider } from "../automations/context-providers.js
 import { dueScheduleSlot } from "../automations/schedule.js";
 import { matchesSlackPhrase } from "../automations/slack-phrase-match.js";
 import type { AutomationUserMessageEventData } from "../automations/transcript.js";
-import { member } from "./auth-schema.js";
 import { notifyAutomationRunFinished } from "../agent-events.js";
 import { getDatabase } from "./client.js";
 import type { RuntimeRepository } from "./investigations.js";
 import { slackAccountOfApp } from "./integrations.js";
-import { getOldestOrganizationOwner } from "./organizations.js";
 import {
   agents,
   automationModelBrokerGrants,
@@ -2239,28 +2237,6 @@ export async function heartbeatAutomationRun(
     )
     .returning({ id: automationRuns.id });
   return rows.length > 0;
-}
-
-// The workspace member an automation run acts for when it changes the
-// workspace: whoever saved the run's automation version, or else the oldest
-// owner.
-export async function getAutomationRunActor(input: {
-  automationVersionId: string;
-  organizationId: string;
-}): Promise<string | null> {
-  const rows = await getDatabase()
-    .select({ createdBy: automationVersions.createdBy })
-    .from(automationVersions)
-    .innerJoin(
-      member,
-      and(
-        eq(member.userId, automationVersions.createdBy),
-        eq(member.organizationId, input.organizationId),
-      ),
-    )
-    .where(eq(automationVersions.id, input.automationVersionId))
-    .limit(1);
-  return rows[0]?.createdBy ?? getOldestOrganizationOwner(input.organizationId);
 }
 
 export async function getAutomationRuntimeRepositories(versionId: string) {

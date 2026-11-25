@@ -47,7 +47,6 @@ import { investigationPrompt, toInvestigationInput } from "@responder/core/inves
 import { supabaseMcpUrl } from "@responder/core/integrations/supabase";
 import { isSlackAssistantRequest } from "@responder/core/integrations/slack-assistant";
 import { customTagModeInstructions } from "@responder/core/agents/config";
-import { getSlackThreadModeActor } from "@responder/core/db/agents";
 import { organizationHasCapability } from "@responder/core/db/organization-capabilities";
 import {
   createAwsMcpServer,
@@ -1215,7 +1214,6 @@ export async function runInvestigationAgent(
             : []),
           ...(pullRequestFollowUp?.tools ?? []),
           ...createWorkspaceTools({
-            actorUserId: await getSlackThreadModeActor(job.config.organizationId),
             automationsEnabled: await organizationHasCapability(
               job.config.organizationId,
               "automations",

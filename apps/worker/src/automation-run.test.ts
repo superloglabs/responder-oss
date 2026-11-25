@@ -113,7 +113,6 @@ function dependencies() {
     getConnections: vi.fn().mockResolvedValue([]),
     getConversation: vi.fn().mockResolvedValue([]),
     getNotificationChannelNames: vi.fn().mockResolvedValue(new Map<string, string>()),
-    getRunActor: vi.fn().mockResolvedValue("user-1"),
     getSlackAccount: vi.fn().mockResolvedValue({ encryptedCredentials: "encrypted-slack" }),
     hasCapability: vi.fn<AutomationRunDependencies["hasCapability"]>().mockResolvedValue(false),
     hasFinishedTurn: vi.fn(async () => false),
@@ -809,7 +808,7 @@ describe("automation run processor", () => {
     expect(prompt).toContain("Call search_vercel_api to find an operation, then call_vercel_api to run it.");
   });
 
-  it("gives runs the workspace tools in workspaces with simplified navigation", async () => {
+  it("gives runs the read-only workspace tools in workspaces with simplified navigation", async () => {
     vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
     vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
     vi.stubEnv("RESPONDER_APP_URL", "https://app.responder.example");
@@ -831,16 +830,10 @@ describe("automation run processor", () => {
       runId,
     }, process.env, deps);
 
-    expect(deps.getRunActor).toHaveBeenCalledWith({
-      automationVersionId: claimedRun().automationVersionId,
-      organizationId,
-    });
     expect(deps.workspaceTools).toHaveBeenCalledWith({
-      actorUserId: "user-1",
       automationsEnabled: true,
       integrationsUrl: "https://app.responder.example/settings",
       organizationId,
-      source: "automation_run",
     });
     expect(deps.createToolHandler.mock.calls[0]![0].workspaceTools).toEqual([workspaceTool]);
     const server = deps.session.materializeEntry.mock.calls
@@ -848,7 +841,8 @@ describe("automation run processor", () => {
       .find((call) => call.path.endsWith("/tools/server.mjs"));
     expect(server?.entry.content).toContain("\"name\":\"get_workspace\"");
     const prompt = deps.runCodex.mock.calls[0]![1].prompt;
-    expect(prompt).toContain("Call get_workspace before changing anything");
+    expect(prompt).toContain("reads this Responder workspace");
+    expect(prompt).toContain("You cannot change them.");
     expect(prompt).toContain("https://app.responder.example/settings");
   });
 
