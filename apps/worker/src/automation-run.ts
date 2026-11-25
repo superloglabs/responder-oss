@@ -1130,8 +1130,8 @@ export async function processAutomationRun(
     // A run handed back during setup posts no Slack card.
     runAbort.signal.throwIfAborted();
     slackCard = await startSlackCard(dependencies, run, connections, conversation, firstTurn, button);
-    // Workspaces with simplified navigation let a run read their
-    // automations and tag mode, as tag mode itself can.
+    // Workspaces with simplified navigation give a run the read-only
+    // workspace tools that tag mode also has.
     const integrationsUrl = responderIntegrationsUrl(environment);
     const workspaceTools = await dependencies.hasCapability(run.organizationId, "simplified_navigation")
       ? dependencies.workspaceTools({

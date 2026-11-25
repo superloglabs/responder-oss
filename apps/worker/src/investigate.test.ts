@@ -383,7 +383,7 @@ describe("sandbox agent configuration", () => {
     expect(instructions).toContain("call open_pull_request");
     expect(instructions).toContain("The workspace tools read this Responder workspace");
     expect(instructions).toContain("You cannot change them.");
-    expect(instructions).toContain("in the Responder app at https://app.example.com/settings");
+    expect(instructions).toContain("New integrations are connected at https://app.example.com/settings");
     expect(instructions).not.toContain("incident investigation agent");
     expect(instructions).not.toContain("Investigate only the alert");
     expect(instructions).not.toContain("ad-hoc Slack thread investigation");

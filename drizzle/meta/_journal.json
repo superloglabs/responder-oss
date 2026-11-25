@@ -862,6 +862,13 @@
       "when": 1795602956849,
       "tag": "0122_render_integration",
       "breakpoints": true
+    },
+    {
+      "idx": 123,
+      "version": "7",
+      "when": 1795622537669,
+      "tag": "0123_agent_read_only_workspace_prompts",
+      "breakpoints": true
     }
   ]
 }
