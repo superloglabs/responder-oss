@@ -1353,7 +1353,8 @@ option needs a cell with a collector
   environment as `deployment.environment.name`. Removing the Railway
   connection removes its sources.
 - **Render**: on its Signal setup manage page, choose services, or whole
-  workspaces, that a connected Render API key reaches (`GET /api/telemetry/sources/render/<connection>`; `POST
+  workspaces, among the first 50 workspaces a connected Render API key
+  reaches (`GET /api/telemetry/sources/render/<connection>`; `POST
   /api/telemetry/sources/render` with `integrationAccountId` and
   `resourceId`, a service or workspace ID). A workspace source reads every
   running service in it, including services added later; a service with a

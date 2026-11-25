@@ -223,25 +223,34 @@ export type RenderReadable = {
   workspaceName: string;
 };
 
+// Setup offers the first workspaces a key reaches, listing their services a
+// few at a time, so one page load stays a bounded number of requests.
+export const MAX_READABLE_WORKSPACES = 50;
+const CONCURRENT_SERVICE_LISTS = 5;
+
 /** The workspaces a key reaches and their services, suspended ones left out. */
 export async function renderReadables(input: { apiKey: string; fetch?: RenderFetch }): Promise<RenderReadable[]> {
-  const readables: RenderReadable[] = [];
-  for (const workspace of await renderWorkspaces(input)) {
-    readables.push({ id: workspace.id, kind: "workspace", ownerId: workspace.id, workspaceName: workspace.name });
-    const services = await renderServices({ ...input, ownerId: workspace.id });
-    for (const service of services.filter((item) => !item.suspended)) {
-      readables.push({
-        id: service.id,
-        kind: "service",
-        ownerId: workspace.id,
-        region: service.region,
-        serviceName: service.name,
-        serviceType: service.type,
-        workspaceName: workspace.name,
-      });
+  const workspaces = (await renderWorkspaces(input)).slice(0, MAX_READABLE_WORKSPACES);
+  const services = new Map<string, RenderService[]>();
+  const queue = [...workspaces];
+  async function next(): Promise<void> {
+    for (let workspace = queue.shift(); workspace; workspace = queue.shift()) {
+      services.set(workspace.id, await renderServices({ ...input, ownerId: workspace.id }));
     }
   }
-  return readables;
+  await Promise.all(Array.from({ length: Math.min(CONCURRENT_SERVICE_LISTS, queue.length) }, next));
+  return workspaces.flatMap((workspace): RenderReadable[] => [
+    { id: workspace.id, kind: "workspace", ownerId: workspace.id, workspaceName: workspace.name },
+    ...(services.get(workspace.id) ?? []).filter((service) => !service.suspended).map((service): RenderReadable => ({
+      id: service.id,
+      kind: "service",
+      ownerId: workspace.id,
+      region: service.region,
+      serviceName: service.name,
+      serviceType: service.type,
+      workspaceName: workspace.name,
+    })),
+  ]);
 }
 
 export type RenderLogLine = {

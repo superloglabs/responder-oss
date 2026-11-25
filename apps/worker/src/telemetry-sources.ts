@@ -19,6 +19,7 @@ import {
 } from "@responder/core/integrations/gcp";
 import { McpOAuthRefreshError } from "@responder/core/integrations/custom-mcp";
 import { renderCredentialsSchema } from "@responder/core/integrations/render";
+import { renderRefusedKey } from "@responder/core/telemetry/sources/render-pull";
 import { telemetryCollectorUrl } from "@responder/core/telemetry/client";
 import { forwardToCollector } from "@responder/core/telemetry/forward";
 import { type GcpRequest, pullGcpSource } from "@responder/core/telemetry/sources/gcp-pull";
@@ -320,7 +321,8 @@ export async function pullRenderTelemetrySources(
         await save(source.id, {
           lastError: read.error,
           state: read.state,
-          status: read.error && !read.received ? "failed" : "active",
+          // A refused key needs a new one, even after logs arrived this pass.
+          status: read.error && (!read.received || read.error === renderRefusedKey) ? "failed" : "active",
           ...(read.received ? { lastReceivedAt: now } : {}),
         });
       }

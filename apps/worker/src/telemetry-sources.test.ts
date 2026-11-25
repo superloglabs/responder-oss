@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { McpOAuthRefreshError } from "@responder/core/integrations/custom-mcp";
+import { renderRefusedKey } from "@responder/core/telemetry/sources/render-pull";
 import {
   type GcpTelemetryPullDependencies,
   type PostHogTelemetryPullDependencies,
@@ -308,6 +309,26 @@ describe("pullRenderTelemetrySources", () => {
     expect(update).toHaveBeenCalledTimes(2);
     expect(update).toHaveBeenLastCalledWith("b", expect.objectContaining({ status: "failed" }));
     error.mockRestore();
+  });
+
+  it("marks sources failed when Render refused the key, keeping the logs that arrived", async () => {
+    const deps = renderDependencies({
+      list: vi.fn(async () => [source("a", "account-1")]),
+      pull: vi.fn<RenderTelemetryPullDependencies["pull"]>(async (input) => ({
+        behind: false,
+        pages: 2,
+        retryLater: false,
+        sources: new Map(input.sources.map((item) => [item.id, { error: renderRefusedKey, logs: 4, received: true, state: item.state, truncated: false }])),
+      })),
+    });
+
+    await pullRenderTelemetrySources(deps);
+
+    expect(deps.update).toHaveBeenCalledWith("a", expect.objectContaining({
+      lastError: renderRefusedKey,
+      lastReceivedAt: new Date("2026-11-25T10:00:00Z"),
+      status: "failed",
+    }));
   });
 
   it("does nothing without a collector", async () => {

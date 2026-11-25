@@ -188,6 +188,28 @@ describe("renderUser and renderExternalAccountId", () => {
 });
 
 describe("renderReadables", () => {
+  it("offers at most the first 50 workspaces, listing their services a few at a time", async () => {
+    let open = 0;
+    let most = 0;
+    const fetchFn = vi.fn<RenderFetch>(async (input) => {
+      const url = new URL(input);
+      if (url.pathname === "/v1/owners") {
+        return Response.json(Array.from({ length: 60 }, (_, index) => ({ cursor: `c${index}`, owner: { id: `tea-${index}`, name: `Team ${index}` } })));
+      }
+      open += 1;
+      most = Math.max(most, open);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      open -= 1;
+      return Response.json([]);
+    });
+
+    const readables = await renderReadables({ apiKey, fetch: fetchFn });
+
+    expect(readables).toHaveLength(50);
+    expect(readables.at(-1)!.id).toBe("tea-49");
+    expect(most).toBe(5);
+  });
+
   it("offers each workspace and its running services", async () => {
     const api = stub([
       Response.json([{ cursor: "a", owner: { id: "tea-1", name: "Example Team" } }]),
