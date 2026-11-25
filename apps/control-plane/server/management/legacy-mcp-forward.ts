@@ -1,19 +1,33 @@
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash, createPublicKey, timingSafeEqual, verify, type KeyObject } from "node:crypto";
 import * as Sentry from "@sentry/hono/node";
 import { z } from "zod";
-import { findLegacyMcpForwardMember } from "../../../../packages/core/src/db/legacy-mcp-forwarding.js";
+import {
+  claimLegacyMcpForwardAssertion,
+  findForwardedWorkspaceMember,
+  findLegacyMcpForwardMember,
+  type LegacyMcpForwardMember,
+} from "../../../../packages/core/src/db/legacy-mcp-forwarding.js";
+import { cellOrigin } from "../integrations/urls.js";
 import type { ManagementContext } from "./operation.js";
 
 // While customers move from the old Superlog product, its MCP server keeps
-// authenticating their existing tokens and forwards a migrated project's
-// requests here, for the workspace whose ID is the project's ID. The shared
-// LEGACY_MCP_FORWARD_TOKEN authenticates the old server; without it,
-// forwarded requests are refused. The caller acts as the workspace member
-// with the token owner's email, and a token that could only read there can
-// only read here. Remove this when the old product shuts down.
+// authenticating their existing tokens and forwards a moved project's
+// requests here. Each request carries a short-lived assertion the old server
+// signs with its Ed25519 key: it names the old project, the token owner's
+// email, the access the token had, this cell, and a hash of the request body.
+// This cell holds only the public keys, in LEGACY_MCP_FORWARD_PUBLIC_KEYS.
+// The request is accepted only for a project listed in legacy_mcp_forwards,
+// and acts as the member of its workspace with that email. Each assertion is
+// accepted once: its jti is recorded until it expires. A token that could
+// only read there can only read here. Remove this when the old product shuts
+// down.
+//
+// LEGACY_MCP_FORWARD_TOKEN is the earlier shared credential. It is accepted
+// only while it is configured and the request carries no assertion.
 
 export const legacyMcpForwardHeaders = {
   access: "x-legacy-mcp-access",
+  assertion: "x-legacy-mcp-assertion",
   email: "x-legacy-mcp-user-email",
   projectId: "x-legacy-mcp-project-id",
   token: "x-legacy-mcp-forward-token",
@@ -26,8 +40,14 @@ export const legacyMcpForwardRefusedBody = {
   error: "This forwarded MCP request is not accepted.",
 };
 
+export const legacyMcpAssertionIssuer = "superlog-legacy-mcp";
+// The longest an assertion may live, and the clock difference tolerated
+// between the two servers.
+const maxLifetimeSeconds = 120;
+const clockSkewSeconds = 30;
+
 export function isLegacyMcpForward(headers: Headers): boolean {
-  return headers.has(legacyMcpForwardHeaders.token);
+  return headers.has(legacyMcpForwardHeaders.assertion) || headers.has(legacyMcpForwardHeaders.token);
 }
 
 function sameSecret(supplied: string, expected: string): boolean {
@@ -35,20 +55,81 @@ function sameSecret(supplied: string, expected: string): boolean {
   return timingSafeEqual(digest(supplied), digest(expected));
 }
 
-// Null refuses the request: a wrong or unconfigured credential, a workspace
-// that is not in this cell, or a person who is not its member.
-export async function authenticateLegacyMcpForward(
-  headers: Headers,
-  environment: NodeJS.ProcessEnv = process.env,
-): Promise<LegacyMcpForward | null> {
-  const expected = environment.LEGACY_MCP_FORWARD_TOKEN?.trim();
-  const supplied = headers.get(legacyMcpForwardHeaders.token) ?? "";
-  if (!expected || !sameSecret(supplied, expected)) return null;
-  const organizationId = z.uuid().safeParse(headers.get(legacyMcpForwardHeaders.projectId));
-  const email = z.email().max(320).safeParse(headers.get(legacyMcpForwardHeaders.email)?.trim());
-  if (!organizationId.success || !email.success) return null;
-  const principal = await findLegacyMcpForwardMember(organizationId.data, email.data);
-  if (!principal) return null;
+const base64url = /^[A-Za-z0-9_-]+$/;
+
+// Each key is the base64url "x" of an Ed25519 public key. Several keys, comma
+// separated, let the old server's key be replaced without a gap.
+export function legacyMcpForwardPublicKeys(value: string | undefined): KeyObject[] {
+  const keys: KeyObject[] = [];
+  for (const entry of value?.split(",") ?? []) {
+    const x = entry.trim();
+    if (!x || !base64url.test(x) || Buffer.from(x, "base64url").length !== 32) continue;
+    try {
+      keys.push(createPublicKey({ format: "jwk", key: { crv: "Ed25519", kty: "OKP", x } }));
+    } catch {
+      // An unusable key is skipped; with none left, every assertion is refused.
+    }
+  }
+  return keys;
+}
+
+const assertionHeaderSchema = z.object({ alg: z.literal("EdDSA"), typ: z.literal("JWT").optional() });
+const assertionClaimsSchema = z.object({
+  access: z.enum(["read", "read-write"]),
+  aud: z.string(),
+  body: z.string().regex(base64url).length(43),
+  email: z.email().max(320),
+  exp: z.number().int(),
+  iat: z.number().int(),
+  iss: z.literal(legacyMcpAssertionIssuer),
+  jti: z.string().min(16).max(64),
+  project: z.uuid(),
+});
+type AssertionClaims = z.infer<typeof assertionClaimsSchema>;
+
+function decodeJson(segment: string): unknown {
+  if (!base64url.test(segment)) return null;
+  try {
+    return JSON.parse(Buffer.from(segment, "base64url").toString("utf8"));
+  } catch {
+    return null;
+  }
+}
+
+// The claims of an assertion signed by one of the keys, addressed to this
+// cell, and current. Null otherwise. The body hash is checked separately, so
+// a request's body is read only once its assertion is known to be genuine.
+export function verifyLegacyMcpAssertion(
+  assertion: string,
+  { audience, keys, now = Date.now() }: { audience: string; keys: KeyObject[]; now?: number },
+): AssertionClaims | null {
+  if (keys.length === 0 || assertion.length > 4096) return null;
+  const parts = assertion.split(".");
+  if (parts.length !== 3) return null;
+  const [header, payload, signature] = parts as [string, string, string];
+  if (!assertionHeaderSchema.safeParse(decodeJson(header)).success) return null;
+  if (!base64url.test(signature)) return null;
+  const signingInput = Buffer.from(`${header}.${payload}`);
+  const signatureBytes = Buffer.from(signature, "base64url");
+  if (!keys.some((key) => verify(null, signingInput, key, signatureBytes))) return null;
+  const claims = assertionClaimsSchema.safeParse(decodeJson(payload));
+  if (!claims.success) return null;
+  const { aud, exp, iat } = claims.data;
+  const seconds = Math.floor(now / 1000);
+  if (aud !== audience) return null;
+  if (iat > seconds + clockSkewSeconds || exp <= seconds - clockSkewSeconds) return null;
+  if (exp <= iat || exp - iat > maxLifetimeSeconds) return null;
+  return claims.data;
+}
+
+// Whether the body is the one the assertion was made for.
+export function assertionCoversBody(claims: AssertionClaims, body: Uint8Array): boolean {
+  const digest = createHash("sha256").update(body).digest();
+  const expected = Buffer.from(claims.body, "base64url");
+  return expected.length === digest.length && timingSafeEqual(expected, digest);
+}
+
+function forwardFor(principal: LegacyMcpForwardMember, readOnly: boolean): LegacyMcpForward {
   Sentry.setUser({ id: principal.user.id, username: principal.user.name });
   Sentry.setTag("organization_id", principal.organizationId);
   return {
@@ -59,6 +140,57 @@ export async function authenticateLegacyMcpForward(
       oauthClientId: "legacy-mcp-forward",
       source: "mcp",
     },
-    readOnly: headers.get(legacyMcpForwardHeaders.access) !== "read-write",
+    readOnly,
   };
+}
+
+// The forward and the request to hand on, whose body has been read once to
+// check it. Null refuses the request: a missing, invalid, or expired
+// assertion, a different body, an assertion already used, a project that did
+// not move to this cell, or a person who is not a member of its workspace.
+export async function authenticateLegacyMcpForward(
+  request: Request,
+  environment: NodeJS.ProcessEnv = process.env,
+): Promise<{ forward: LegacyMcpForward; request: Request } | null> {
+  const assertion = request.headers.get(legacyMcpForwardHeaders.assertion);
+  if (assertion === null) {
+    const forward = await authenticateSharedCredential(request.headers, environment);
+    return forward ? { forward, request } : null;
+  }
+  const claims = verifyLegacyMcpAssertion(assertion, {
+    audience: cellOrigin(),
+    keys: legacyMcpForwardPublicKeys(environment.LEGACY_MCP_FORWARD_PUBLIC_KEYS),
+  });
+  if (!claims) return null;
+  const body = new Uint8Array(await request.arrayBuffer());
+  if (!assertionCoversBody(claims, body)) return null;
+  // Kept for as long as the assertion could still be accepted.
+  const acceptedUntil = new Date((claims.exp + clockSkewSeconds) * 1000);
+  if (!(await claimLegacyMcpForwardAssertion(claims.jti, acceptedUntil))) return null;
+  const principal = await findForwardedWorkspaceMember(claims.project, claims.email);
+  if (!principal) return null;
+  return {
+    forward: forwardFor(principal, claims.access !== "read-write"),
+    request: new Request(request.url, {
+      body,
+      headers: request.headers,
+      method: request.method,
+      signal: request.signal,
+    }),
+  };
+}
+
+async function authenticateSharedCredential(
+  headers: Headers,
+  environment: NodeJS.ProcessEnv,
+): Promise<LegacyMcpForward | null> {
+  const expected = environment.LEGACY_MCP_FORWARD_TOKEN?.trim();
+  const supplied = headers.get(legacyMcpForwardHeaders.token) ?? "";
+  if (!expected || !sameSecret(supplied, expected)) return null;
+  const organizationId = z.uuid().safeParse(headers.get(legacyMcpForwardHeaders.projectId));
+  const email = z.email().max(320).safeParse(headers.get(legacyMcpForwardHeaders.email)?.trim());
+  if (!organizationId.success || !email.success) return null;
+  const principal = await findLegacyMcpForwardMember(organizationId.data, email.data);
+  if (!principal) return null;
+  return forwardFor(principal, headers.get(legacyMcpForwardHeaders.access) !== "read-write");
 }

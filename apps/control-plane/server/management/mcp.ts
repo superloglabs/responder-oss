@@ -247,10 +247,10 @@ async function handleMcpRequest(
 export const managementMcpRoutes = new Hono()
   .post("/", async (context) => {
     if (isLegacyMcpForward(context.req.raw.headers)) {
-      const forwarded = await authenticateLegacyMcpForward(context.req.raw.headers);
+      const forwarded = await authenticateLegacyMcpForward(context.req.raw);
       if (!forwarded) return context.json(legacyMcpForwardRefusedBody, 403);
-      return handleMcpRequest(context.req.raw, forwarded.context, {
-        readOnly: forwarded.readOnly,
+      return handleMcpRequest(forwarded.request, forwarded.forward.context, {
+        readOnly: forwarded.forward.readOnly,
       });
     }
     const caller = await authenticateManagementRequest(context.req.raw.headers, "mcp");

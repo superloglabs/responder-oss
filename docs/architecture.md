@@ -187,14 +187,25 @@ types. `drizzle/` contains the ordered schema history.
   are dropped. Operations that take a secret value, such as storing a
   workspace secret or a model API key, are not offered as MCP tools.
 - While customers move from the old Superlog product, its MCP server forwards
-  a migrated project's requests to `/api/mcp` with the shared
-  `LEGACY_MCP_FORWARD_TOKEN` in `x-legacy-mcp-forward-token`. The request acts
-  as the member whose verified email is in `x-legacy-mcp-user-email`, in the
-  workspace whose ID is in `x-legacy-mcp-project-id`; it is refused when the
-  workspace is not in this cell or the person is not its member. A token that
-  could only read in the old product sends `x-legacy-mcp-access: read` and
-  gets only read-only tools. Without the token configured, forwarded requests
-  are refused. This is removed when the old product shuts down.
+  a moved project's requests to `/api/mcp` with an assertion in
+  `x-legacy-mcp-assertion`: a compact JWS signed with the old server's Ed25519
+  key (`alg: EdDSA`). Its claims are `iss: superlog-legacy-mcp`, `aud` (this
+  cell's origin), `iat` and `exp` (at most 120 seconds apart), `jti`, `project`
+  (the old project ID), `email` (the token owner's), `access` (`read` or
+  `read-write`), and `body` (the base64url SHA-256 of the request body). The
+  cell verifies it with `LEGACY_MCP_FORWARD_PUBLIC_KEYS` and accepts it only
+  for a project listed in `legacy_mcp_forwards`, acting as the member of that
+  row's workspace with a verified email equal to `email`. Each `jti` is
+  accepted once and kept in `legacy_mcp_forward_assertions` until the
+  assertion can no longer be accepted: `exp` plus the 30-second clock skew.
+  A token that could only read in the old product gets only read-only tools.
+  Requests without an assertion fall back to the earlier shared
+  `LEGACY_MCP_FORWARD_TOKEN` only while it is configured: the token in
+  `x-legacy-mcp-forward-token`, the workspace ID in `x-legacy-mcp-project-id`,
+  the member's verified email in `x-legacy-mcp-user-email`, and
+  `x-legacy-mcp-access: read-write` for all tools (anything else gets
+  read-only tools). That path does not check `legacy_mcp_forwards`. This is
+  removed when the old product shuts down.
 
 ## Management API and MCP server
 

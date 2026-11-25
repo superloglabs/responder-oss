@@ -3,13 +3,19 @@ import { inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { member, organization, user } from "./auth-schema.js";
 import { closeDatabase, getDatabase } from "./client.js";
-import { findLegacyMcpForwardMember } from "./legacy-mcp-forwarding.js";
+import {
+  claimLegacyMcpForwardAssertion,
+  findForwardedWorkspaceMember,
+  findLegacyMcpForwardMember,
+} from "./legacy-mcp-forwarding.js";
+import { legacyMcpForwards } from "./schema.js";
 
 // Run against a disposable, migrated PostgreSQL database only.
 const testUrl = process.env.TEST_LEGACY_MCP_FORWARD_DATABASE_URL;
 describe.skipIf(!testUrl)("legacy MCP forward members (PostgreSQL)", () => {
   const organizationId = randomUUID();
   const otherOrganizationId = randomUUID();
+  const legacyProjectId = randomUUID();
   const tag = randomUUID();
   const people = {
     banned: { email: `banned-${tag}@example.com`, id: randomUUID() },
@@ -39,6 +45,7 @@ describe.skipIf(!testUrl)("legacy MCP forward members (PostgreSQL)", () => {
       { createdAt, organizationId, role: "member", userId: people.unverified.id },
       { createdAt, organizationId, role: "member", userId: people.banned.id },
     ]);
+    await db.insert(legacyMcpForwards).values({ legacyProjectId, organizationId });
   });
   afterAll(async () => {
     const db = getDatabase();
@@ -62,5 +69,38 @@ describe.skipIf(!testUrl)("legacy MCP forward members (PostgreSQL)", () => {
       await expect(findLegacyMcpForwardMember(organizationId, email)).resolves.toBeNull();
     }
     await expect(findLegacyMcpForwardMember(randomUUID(), people.member.email)).resolves.toBeNull();
+  });
+
+  it("finds the member of the workspace a listed project moved to", async () => {
+    await expect(findForwardedWorkspaceMember(legacyProjectId, people.member.email.toUpperCase()))
+      .resolves.toEqual({
+        organizationId,
+        role: "admin",
+        user: { email: people.member.email, id: people.member.id, name: "Ash" },
+      });
+  });
+
+  it("refuses unlisted projects, other workspaces' members, and unverified or banned people", async () => {
+    await expect(findForwardedWorkspaceMember(organizationId, people.member.email)).resolves.toBeNull();
+    await expect(findForwardedWorkspaceMember(otherOrganizationId, people.outsider.email)).resolves.toBeNull();
+    for (const email of [people.outsider.email, people.unverified.email, people.banned.email]) {
+      await expect(findForwardedWorkspaceMember(legacyProjectId, email)).resolves.toBeNull();
+    }
+  });
+
+  it("claims an assertion ID once until it expires", async () => {
+    const jti = `assertion-${tag}`;
+    const expiresAt = new Date(Date.now() + 60_000);
+
+    await expect(claimLegacyMcpForwardAssertion(jti, expiresAt)).resolves.toBe(true);
+    await expect(claimLegacyMcpForwardAssertion(jti, expiresAt)).resolves.toBe(false);
+  });
+
+  it("forgets assertion IDs once they have expired", async () => {
+    const jti = `expired-${tag}`;
+    await expect(claimLegacyMcpForwardAssertion(jti, new Date(Date.now() - 1_000))).resolves.toBe(true);
+
+    await expect(claimLegacyMcpForwardAssertion(`other-${tag}`, new Date(Date.now() + 60_000))).resolves.toBe(true);
+    await expect(claimLegacyMcpForwardAssertion(jti, new Date(Date.now() + 60_000))).resolves.toBe(true);
   });
 });
