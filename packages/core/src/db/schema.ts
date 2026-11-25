@@ -2042,6 +2042,8 @@ export const sandboxUsageWorkloadValues = [
   "investigation",
   "pull_request_review",
   "remediation",
+  // A build of the workspace's sandbox image, which runs its setup script.
+  "sandbox_image",
 ] as const;
 
 export type SandboxUsageWorkload = (typeof sandboxUsageWorkloadValues)[number];
@@ -2099,7 +2101,7 @@ export const sandboxUsage = pgTable(
       .where(sql`${table.waivedAt} is not null and ${table.creditedAt} is null`),
     check(
       "sandbox_usage_workload_check",
-      sql`${table.workload} in ('automation', 'investigation', 'pull_request_review', 'remediation')`,
+      sql`${table.workload} in ('automation', 'investigation', 'pull_request_review', 'remediation', 'sandbox_image')`,
     ),
     check(
       "sandbox_usage_billed_balance_check",

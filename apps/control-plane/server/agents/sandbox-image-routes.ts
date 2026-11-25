@@ -6,6 +6,7 @@ import {
   requestSandboxImageRebuild,
   saveSandboxImageSettings,
 } from "../../../../packages/core/src/db/sandbox-image.js";
+import { organizationHasCapability } from "../../../../packages/core/src/db/organization-capabilities.js";
 import { sandboxProvider } from "../../../../packages/core/src/sandbox-config.js";
 import {
   sandboxImageRequired,
@@ -26,6 +27,7 @@ const defaults = {
   getImage: getSandboxImage,
   getRequestedAt: getSandboxImageRequestedAt,
   getSettings: getSandboxImageSettings,
+  hasCapability: organizationHasCapability,
   provider: () => sandboxProvider(),
   queueBuild: queueSandboxImageBuild,
   requestRebuild: requestSandboxImageRebuild,
@@ -58,6 +60,16 @@ function imageState(
 }
 
 export function createSandboxImageRoutes(deps = defaults) {
+  // A Signal-only workspace runs no automations or investigations in its own
+  // sandboxes, so it has no image to build.
+  async function runsAgentSandboxes(organizationId: string): Promise<boolean> {
+    const [signal, automations] = await Promise.all([
+      deps.hasCapability(organizationId, "signal"),
+      deps.hasCapability(organizationId, "automations"),
+    ]);
+    return !signal || automations;
+  }
+
   async function presented(organizationId: string, role: string) {
     const [settings, image, requestedAt] = await Promise.all([
       deps.getSettings(organizationId),
@@ -101,6 +113,9 @@ export function createSandboxImageRoutes(deps = defaults) {
       if (deps.provider() !== "vercel") {
         return context.json({ error: "Sandbox settings need the Vercel sandbox provider" }, 409);
       }
+      if (!(await runsAgentSandboxes(tenant.organizationId))) {
+        return context.json({ error: "Sandbox settings are not available in this workspace" }, 403);
+      }
       const parsed = sandboxImageSettingsSchema.safeParse(
         await context.req.json().catch(() => null),
       );
@@ -127,6 +142,9 @@ export function createSandboxImageRoutes(deps = defaults) {
       }
       if (deps.provider() !== "vercel") {
         return context.json({ error: "Sandbox settings need the Vercel sandbox provider" }, 409);
+      }
+      if (!(await runsAgentSandboxes(tenant.organizationId))) {
+        return context.json({ error: "Sandbox settings are not available in this workspace" }, 403);
       }
       const settings = await deps.getSettings(tenant.organizationId);
       if (!sandboxImageRequired(settings)) {

@@ -18,6 +18,7 @@ const playwright: SandboxImageSettings = {
 };
 
 function setup(input: {
+  capabilities?: string[];
   image?: SandboxImageRecord | null;
   provider?: "daytona" | "vercel";
   requestedAt?: Date | null;
@@ -28,6 +29,8 @@ function setup(input: {
     getImage: vi.fn(async () => input.image ?? null),
     getRequestedAt: vi.fn(async () => input.requestedAt ?? null),
     getSettings: vi.fn(async () => input.settings ?? defaultSandboxImageSettings),
+    hasCapability: vi.fn(async (_organizationId: string, capability: string) =>
+      (input.capabilities ?? ["automations"]).includes(capability)),
     provider: () => input.provider ?? "vercel",
     queueBuild: vi.fn(async () => {}),
     requestRebuild: vi.fn(async () => {}),
@@ -51,6 +54,25 @@ function put(app: ReturnType<typeof createSandboxImageRoutes>, body: unknown) {
 }
 
 describe("sandbox settings", () => {
+  it("refuses image changes in a workspace that runs no agent sandboxes", async () => {
+    const { app, deps } = setup({ capabilities: ["signal"], settings: playwright });
+    const saved = await put(app, { ...playwright, setupScript: "echo changed" });
+    const rebuilt = await app.request("/rebuild", { method: "POST" });
+    for (const response of [saved, rebuilt]) {
+      expect(response.status).toBe(403);
+      expect(await response.json()).toEqual({ error: "Sandbox settings are not available in this workspace" });
+    }
+    expect(deps.save).not.toHaveBeenCalled();
+    expect(deps.requestRebuild).not.toHaveBeenCalled();
+    expect(deps.queueBuild).not.toHaveBeenCalled();
+  });
+
+  it("allows image changes in a workspace with Signal and automations", async () => {
+    const { app, deps } = setup({ capabilities: ["signal", "automations"] });
+    expect((await put(app, playwright)).status).toBe(200);
+    expect(deps.queueBuild).toHaveBeenCalledWith(organizationId);
+  });
+
   it("shows members the settings without editing", async () => {
     const { app } = setup({ role: "member" });
     const body = await (await app.request("/")).json() as { canEdit: boolean; image: { state: string } };
