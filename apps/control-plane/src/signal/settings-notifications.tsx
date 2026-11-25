@@ -5,7 +5,6 @@ import { Button } from "../design-system";
 import {
   fetchJiraIssueTypes,
   fetchJiraProjects,
-  saveDiscordWebhook,
   saveReplicasWebhook,
   type SignalJiraIssueType,
   type SignalJiraMode,
@@ -15,6 +14,7 @@ import {
 } from "./model";
 import type { SaveSettings, SettingsPageProps } from "./settings";
 import { sourceActions, type SourceActions } from "./setup-data";
+import { DiscordWebhook } from "./discord";
 import { ChannelSelect } from "./setup-shared";
 import { SettingsGroup, SettingsPage, SettingsRow, SourceRow } from "./shared";
 
@@ -42,7 +42,9 @@ export function SettingsNotifications({ data, save, setSettings, status }: Setti
     </SettingsGroup>
     <SettingsGroup title="Discord">
       <div className="signalSettingsCard signalSettingsCard--rows">
-        <DiscordWebhook connected={settings.discord.connected} onSaved={(saved) => setSettings(saved, true)} />
+        <DiscordWebhook label="Discord channel" connected={settings.discord.connected} delivery={settings.delivery}
+          connectedDescription="Every finding is posted to your Discord channel. Feedback, Jira, and coding agents are on each finding's page."
+          onSaved={(saved) => setSettings(saved, true)} />
       </div>
     </SettingsGroup>
     {actions.summary("jira") && <JiraSettings actions={actions} value={settings.jira} save={save} />}
@@ -203,18 +205,6 @@ function ReplicasWebhook({ connected, onSaved }: { connected: boolean; onSaved: 
     placeholder="https://api.replicas.dev/v1/automations/webhook/whtok_…"
     note="Stored encrypted. Anyone with the URL can start the automation."
     connectLabel="Connect Replicas" />;
-}
-
-// The webhook URL of a Discord channel that findings are posted to.
-export function DiscordWebhook({ connected, onSaved }: { connected: boolean; onSaved: (settings: SignalSettings) => void }) {
-  return <WebhookRow connected={connected} onSaved={onSaved} save={saveDiscordWebhook}
-    label="Discord channel"
-    connectedDescription="Every finding is posted to your Discord channel. Feedback, Jira, and coding agents are on each finding's page."
-    description="Post findings to a Discord channel. In Discord, open the channel's settings, then Integrations, then Webhooks, and copy a webhook URL."
-    inputLabel="Discord webhook URL"
-    placeholder="https://discord.com/api/webhooks/…"
-    note="Stored encrypted. Signal posts a short message to check it. Anyone with the URL can post to the channel."
-    connectLabel="Connect Discord" />;
 }
 
 // A webhook URL. It is a secret, so once saved it can only be removed or

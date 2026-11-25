@@ -491,3 +491,34 @@
   .signalSourceRow__main { flex-wrap: wrap; gap: 12px; padding: 16px 12px; }
   .signalSourceRow__more { padding: 0 12px 16px; }
 }
+
+/* Where findings go: Slack or Discord, one option open at a time. */
+.signalDestinations { border: .5px solid #00000014; border-radius: 6px; overflow: hidden; background: #fafafa; }
+.signalDestination + .signalDestination { border-top: .5px solid #00000014; }
+.signalDestination--selected { background: #fff; }
+.signalDestination__option { display: flex; align-items: center; gap: 16px; width: 100%; padding: 20px; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.signalDestination--selected .signalDestination__option { cursor: default; }
+.signalDestination__option:focus-visible { outline: none; box-shadow: inset 0 0 0 2px #a5a9ed; }
+.signalRadio { width: 16px; height: 16px; flex: 0 0 16px; border-radius: 999px; background: #fff; box-shadow: 0 1px 1.5px #0000001a, 0 0 0 .5px #00000033; }
+.signalDestination--selected .signalRadio { box-shadow: inset 0 0 0 5px #4e58f9; }
+.signalDestination__label { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 2px; }
+.signalDestination__label strong { color: #202020; font-size: 13px; font-weight: 600; line-height: 20px; }
+.signalDestination__label span { color: #666; font-size: 12px; line-height: 20px; }
+.signalDestination__details { padding: 0 20px 8px 100px; }
+.signalDestination__details > .signalSettingsRow { padding: 14px 0; border-top: .5px solid #00000014; }
+.signalDestination__details > .signalSettingsRow--stacked { padding-bottom: 12px; }
+.signalRowActions { display: flex; flex-shrink: 0; align-items: center; gap: 8px; }
+.signalRowActions .signalConnected { margin-right: 4px; font-size: 13px; }
+.signalRowError { display: flex; align-items: flex-start; gap: 6px; }
+.signalRowError svg { flex-shrink: 0; margin-top: 3px; }
+.signalSettingsRow__label .signalRowError, .signalRowError { color: #b33d43; }
+.signalWebhookForm { display: flex; flex-direction: column; gap: 6px; }
+.signalWebhookForm__field { display: flex; align-items: center; gap: 8px; }
+.signalWebhookForm__field .signalSecret { flex: 1; min-width: 0; }
+.signalSecret--error { box-shadow: 0 0 0 1px #b33d43, 0 0 0 3px #b33d431a; }
+.signal .signalWebhookForm__note { margin: 0; color: #666; font-size: 12px; line-height: 20px; }
+.signalWebhookForm .signalRowError { font-size: 12px; line-height: 20px; }
+.signalSetupHint { align-self: center; color: #666; font-size: 12px; line-height: 20px; }
+@media (max-width: 720px) {
+  .signalDestination__details { padding-left: 20px; }
+}

@@ -1,17 +1,17 @@
 import { useState } from "react";
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { authClient } from "../auth-client";
-import { providerDisplayName } from "../components/provider-glyphs";
 import { Button } from "../design-system";
 import { useDocumentTitle } from "../use-document-title";
 import { findingsDestinationChosen, saveSignalSettings, type SignalSettings } from "./model";
 import { SignalPlanStep } from "./plan";
 import { contextSources, isConnectPage, slackScanReady, sourceActions, sourceName, telemetrySources, useOtelServices, useSetupData, type SetupData } from "./setup-data";
-import { ChannelSelect, RepositoryPicker, SlackChannelChecklist, slackScanLabel, SlackScanSwitch, SourcePage, SourceRows } from "./setup-shared";
+import { RepositoryPicker, SlackChannelChecklist, slackScanLabel, SlackScanSwitch, SourcePage, SourceRows } from "./setup-shared";
 import { useSignalSetupState } from "./setup-state";
 import { SignalSettingsView } from "./settings";
-import { DiscordWebhook } from "./settings-notifications";
-import { ConnectionRow, SettingsRow, SignalLogo } from "./shared";
+import { FindingsDestinationPicker } from "./destination";
+import { destinationBlocker, initialDestination, slackSignInProblem, type FindingsDestination } from "./destination-model";
+import { SettingsRow, SignalLogo } from "./shared";
 
 const steps = ["telemetry", "code", "repositories", "slack", "context", "plan"] as const;
 type Step = (typeof steps)[number];
@@ -19,7 +19,7 @@ const headings: Record<Step, string> = {
   telemetry: "Connect your telemetry",
   code: "Connect your GitHub organization",
   repositories: "Select your repositories",
-  slack: "Connect Slack or Discord",
+  slack: "Where should Signal post findings?",
   context: "Add more context",
   plan: "Choose your plan",
 };
@@ -27,7 +27,7 @@ const descriptions: Record<Step, string> = {
   telemetry: "Signal investigates your telemetry and sends issues with real impact to Slack or Discord.",
   code: "Connect GitHub to choose the repositories Signal can read.",
   repositories: "Signal reads these repositories to find the cause of a problem. It never changes them.",
-  slack: "Choose where Signal sends findings.",
+  slack: "Pick one. You can add the other later in Setup › Notifications.",
   context: "Signal skips problems already tracked in tickets, alerts, or Slack.",
   plan: "Start a monthly subscription to receive investigated findings.",
 };
@@ -45,7 +45,7 @@ export function SignalSetup() {
       ? <section className="signalEmpty"><p className="signalError" role="alert">{setup.error}</p><Button onClick={() => setup.reload()}>Try again</Button></section>
       : <p className="signalLoading" role="status">Loading…</p>;
   }
-  const props = { data: setup.data, organizationId: organizationId ?? undefined, reload: setup.reload, setSettings: setup.setSettings };
+  const props = { data: setup.data, organizationId: organizationId ?? undefined, reload: setup.reload, setSettings: setup.setSettings, setOptions: setup.setOptions };
   return state === "complete" ? <SignalSettingsView {...props} /> : <SignalWizard {...props} />;
 }
 
@@ -54,9 +54,10 @@ export interface SetupViewProps {
   organizationId: string | undefined;
   reload: (clear?: boolean) => void;
   setSettings: (settings: SignalSettings, saved?: boolean) => void;
+  setOptions: (options: SetupData["options"]) => void;
 }
 
-function SignalWizard({ data, organizationId, reload, setSettings }: SetupViewProps) {
+function SignalWizard({ data, organizationId, reload, setSettings, setOptions }: SetupViewProps) {
   const { step: stepParam = "telemetry", page: pageParam, mode } = useParams();
   const step = steps.find((candidate) => candidate === stepParam);
   const page = isConnectPage(pageParam) ? pageParam : undefined;
@@ -71,6 +72,9 @@ function SignalWizard({ data, organizationId, reload, setSettings }: SetupViewPr
   const otel = useOtelServices(step === "telemetry" || page === "otel" ? `${step}/${page}` : null);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  // Where findings go. A failed Slack sign-in comes back to Slack.
+  const [destination, setDestination] = useState<FindingsDestination | null>(() =>
+    searchParams.get("status") === "error" && searchParams.get("integration") === "slack" ? "slack" : initialDestination(settings));
 
   if (!step || (pageParam && (!page || !["telemetry", "context"].includes(step))) || (mode && (!page || mode !== "connect"))) {
     return <Navigate replace to="/signal/setup" />;
@@ -112,7 +116,7 @@ function SignalWizard({ data, organizationId, reload, setSettings }: SetupViewPr
     {header}
     <div className="signalIntro"><h2>{headings[step]}</h2><p>{descriptions[step]}</p></div>
     {error && <p className="signalError" role="alert">{error}</p>}
-    {failedProvider && <p className="signalError" role="alert">
+    {failedProvider && !(step === "slack" && failedProvider === "slack") && <p className="signalError" role="alert">
       Could not connect {sourceName(failedProvider)}. Try again{searchParams.get("reason") ? ` (${searchParams.get("reason")})` : ""}.{" "}
       <button type="button" className="signalLinkButton" onClick={() => setSearchParams({}, { replace: true })}>Dismiss</button>
     </p>}
@@ -123,23 +127,14 @@ function SignalWizard({ data, organizationId, reload, setSettings }: SetupViewPr
       onChange={(repositoryIds) => setDraft({ ...draft, repositoryIds })}
       empty={<><Link to="/signal/setup/code">Connect GitHub</Link> to select repositories.</>} />}
 
-    {step === "slack" && <div className="signalConnections signalSlack">
-      <ConnectionRow provider="slack" name={providerDisplayName("slack")}
-        description={actions.connected("slack") ? actions.summary("slack")?.accounts?.[0]?.displayName ?? "Connected" : "Connect your workspace"}
-        connected={actions.connected("slack")} onConnect={() => actions.connect("slack")} onManage={() => navigate("/settings")} />
-      <div className="signalSlackFields"><div className="signalField">
-        <label htmlFor="signal-findings-channel"><strong>Findings channel</strong><span>Issues that need your attention.</span></label>
-        <ChannelSelect options={options} value={draft.slack} onChange={(slack) => setDraft({ ...draft, slack })} />
-      </div></div>
-    </div>}
-
-    {step === "slack" && <div className="signalSettingsCard signalSettingsCard--rows">
-      {/* Saved at once, since Signal checks the URL with a post. Unsaved choices above are kept. */}
-      <DiscordWebhook connected={draft.discord.connected} onSaved={(saved) => {
+    {step === "slack" && <FindingsDestinationPicker choice={destination} onChoose={setDestination}
+      actions={actions} options={options} onOptions={setOptions} draft={draft} onDraft={setDraft}
+      slackFailure={failedProvider === "slack" ? slackSignInProblem(searchParams.get("reason")) : null}
+      // Saved at once, since Signal checks the URL with a post. Unsaved choices are kept.
+      onDiscordSaved={(saved) => {
         setSettings(saved, true);
-        setEdit({ base: saved, draft: { ...draft, discord: saved.discord } });
-      }} />
-    </div>}
+        setEdit({ base: saved, draft: { ...draft, discord: saved.discord, delivery: saved.delivery } });
+      }} />}
 
     {step === "context" && <>
       <SourceRows sources={contextSources} actions={actions} otelServices={otel.count} />
@@ -171,7 +166,9 @@ function SignalWizard({ data, organizationId, reload, setSettings }: SetupViewPr
         : step === "repositories" ? <Button variant={draft.repositoryIds.length ? "primary" : "secondary"} disabled={saving} onClick={() => void save(draft, "slack")}>
           {draft.repositoryIds.length ? "Continue" : "Skip for now"}
         </Button>
-        : step === "slack" ? <Button variant="primary" disabled={saving || !findingsDestinationChosen(draft)} onClick={() => void save(draft, "context")}>Continue</Button>
+        : step === "slack" ? <DestinationContinue blocker={destinationBlocker(destination, draft, actions.connected("slack"))} saving={saving}
+          // Only the chosen destination is kept, so findings go where the person picked.
+          onContinue={() => void save({ ...draft, slack: destination === "slack" ? draft.slack : null }, "context")} />
         : step === "context" ? <ContextContinue draft={draft} saving={saving}
           anyConnected={contextSources.some((source) => actions.connected(source.provider))}
           onContinue={() => void save(draft, "plan")} />
@@ -179,6 +176,14 @@ function SignalWizard({ data, organizationId, reload, setSettings }: SetupViewPr
     </footer>}
 
   </section>;
+}
+
+// Continue, with the reason it is disabled beside it.
+function DestinationContinue({ blocker, saving, onContinue }: { blocker: string | null; saving: boolean; onContinue: () => void }) {
+  return <div className="signalSetupChoice">
+    {blocker && <span className="signalSetupHint">{blocker}</span>}
+    <Button variant="primary" disabled={saving || blocker !== null} onClick={onContinue}>Continue</Button>
+  </div>;
 }
 
 function ContextContinue({ draft, saving, anyConnected, onContinue }: {

@@ -71,6 +71,10 @@ export function useSetupData(organizationId: string | null | undefined) {
       if (clear) setData(null);
       setAttempt((value) => value + 1);
     },
+    // Options loaded again, such as Slack channels after a refresh.
+    setOptions(options: AgentOptions) {
+      setData((previous) => previous && { ...previous, options });
+    },
     // Settings changed on the page; `saved` ones also update the sidebar.
     setSettings(settings: SignalSettings, saved = false) {
       setData((previous) => previous && { ...previous, settings });
