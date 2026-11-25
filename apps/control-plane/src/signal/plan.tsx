@@ -134,16 +134,16 @@ function PlanCards({ billing, disabled, choose }: { billing: SignalBilling; disa
 }
 
 // The last setup step: choose a plan, which turns Signal on after checkout.
-export function SignalPlanStep({ settings, slackChosen, saving, onBack, onTurnOn, onTurnOff }: {
+export function SignalPlanStep({ settings, destinationChosen, saving, onBack, onTurnOn, onTurnOff }: {
   settings: SignalSettings;
-  slackChosen: boolean;
+  destinationChosen: boolean;
   saving: boolean;
   onBack: () => void;
   onTurnOn: () => Promise<void>;
   onTurnOff: () => Promise<void>;
 }) {
   // Signal turns on by itself only when a plan finishes setup.
-  const turnOnAfterCheckout = !settings.enabled && !settings.setupComplete && slackChosen;
+  const turnOnAfterCheckout = !settings.enabled && !settings.setupComplete && destinationChosen;
   const onChosen = useCallback(() => { if (turnOnAfterCheckout) void onTurnOn(); }, [turnOnAfterCheckout, onTurnOn]);
   const { billing, busy, choose, manage, status } = useBilling(onChosen);
   const current = billing?.plan ?? null;
@@ -151,9 +151,9 @@ export function SignalPlanStep({ settings, slackChosen, saving, onBack, onTurnOn
 
   return <>
     {status}
-    {billing?.enabled && <PlanCards billing={billing} disabled={busy !== null || saving || (!current && !slackChosen)} choose={(plan) => void choose(plan)} />}
+    {billing?.enabled && <PlanCards billing={billing} disabled={busy !== null || saving || (!current && !destinationChosen)} choose={(plan) => void choose(plan)} />}
 
-    {billing && <PlanStatus billing={billing} settings={settings} slackChosen={slackChosen} />}
+    {billing && <PlanStatus billing={billing} settings={settings} destinationChosen={destinationChosen} />}
 
     <footer className="signalSetupActions">
       <Button onClick={onBack}>Back</Button>
@@ -162,7 +162,7 @@ export function SignalPlanStep({ settings, slackChosen, saving, onBack, onTurnOn
         {/* Turning off never needs a plan, so a workspace whose plan ended can still stop Signal. */}
         {settings.enabled
           ? <Button disabled={saving || busy !== null} onClick={() => void onTurnOff()}>Turn off Signal</Button>
-          : ready && <Button variant="primary" disabled={saving || busy !== null || !slackChosen} onClick={() => void onTurnOn()}>Turn on Signal</Button>}
+          : ready && <Button variant="primary" disabled={saving || busy !== null || !destinationChosen} onClick={() => void onTurnOn()}>Turn on Signal</Button>}
       </div>}
     </footer>
   </>;
@@ -221,10 +221,10 @@ function dollars(amount: number) {
   return `$${Number.isInteger(amount) ? amount : amount.toFixed(2)}`;
 }
 
-function PlanStatus({ billing, settings, slackChosen }: {
+function PlanStatus({ billing, settings, destinationChosen }: {
   billing: SignalBilling;
   settings: SignalSettings;
-  slackChosen: boolean;
+  destinationChosen: boolean;
 }) {
   const resets = billing.resetsAt ? shortDate(new Date(billing.resetsAt)) : null;
   const lines: string[] = [];
@@ -237,11 +237,11 @@ function PlanStatus({ billing, settings, slackChosen }: {
   }
   if (!canTurnOnSignal(billing)) {
     if (settings.enabled) lines.push("Signal has no plan, so it does not investigate. Choose a plan or turn Signal off.");
-    else if (!slackChosen) lines.push("Choose a Slack channel before choosing a plan.");
+    else if (!destinationChosen) lines.push("Choose a Slack channel or add a Discord webhook before choosing a plan.");
   } else if (settings.enabled) {
-    lines.push("Signal is on. It posts findings to Slack as it finds them.");
+    lines.push(`Signal is on. It posts findings to ${settings.slack && settings.discord.connected ? "Slack and Discord" : settings.slack ? "Slack" : "Discord"} as it finds them.`);
   } else {
-    lines.push(slackChosen ? "Signal will post findings to the channel you chose." : "Choose a Slack channel before turning Signal on.");
+    lines.push(destinationChosen ? "Signal will post findings to the channel you chose." : "Choose a Slack channel or add a Discord webhook before turning Signal on.");
   }
   if (lines.length === 0) return null;
   return <p className="signalNote">{lines.join(" ")}</p>;

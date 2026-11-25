@@ -27,6 +27,8 @@ export type SaveSettings = (patch: Partial<SignalSettings>) => void;
 
 export interface SettingsPageProps extends SetupViewProps {
   save: SaveSettings;
+  // Records fields saved through their own endpoint.
+  saved: (patch: Partial<SignalSettings>) => void;
   // Shows a failure that is not a save, such as loading the plan.
   fail: (message: string) => void;
   status: SaveStatus;
@@ -66,6 +68,12 @@ function useSettingsSaver(settings: SignalSettings, setSettings: SetupViewProps[
   }
   return {
     save,
+    // Fields saved some other way, such as the Discord webhook, join the
+    // saved settings, so changes still saving are kept and not undone.
+    saved(patch: Partial<SignalSettings>) {
+      confirmed.current = { ...confirmed.current, ...patch };
+      setSettings(shown(), pending.current.length === 0);
+    },
     status: (path: string) => status?.path === path ? status.status : null,
     fail: (message: string, path: string) => setStatus({ path, status: { state: "error", message } }),
   };
@@ -89,6 +97,7 @@ export function SignalSettingsView(props: SetupViewProps) {
   const pageProps: SettingsPageProps = {
     ...props,
     save: (patch) => saver.save(patch, pathname),
+    saved: (patch) => saver.saved(patch),
     fail: (message) => saver.fail(message, pathname),
     status: saver.status(pathname),
   };

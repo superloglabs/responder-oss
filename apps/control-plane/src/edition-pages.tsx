@@ -85,6 +85,14 @@ export function ObservabilityPage() {
   return <Navigate replace to="/app" />;
 }
 
+export function ResourcesIndexPage() {
+  return <Navigate replace to="/app" />;
+}
+
+export function ResourcePage() {
+  return <Navigate replace to="/app" />;
+}
+
 export function NotFoundPage() {
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-3 px-6">
