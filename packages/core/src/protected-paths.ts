@@ -17,7 +17,7 @@ const categoryLabels: Record<ProtectedPathCategory, string> = {
 };
 
 // Directories whose every file is protected, as lower-case path segments.
-const ciDirectories = [".github", ".gitlab", ".circleci", ".buildkite", ".husky"];
+const ciDirectories = [".github", ".gitlab", ".circleci", ".buildkite", ".husky", ".semaphore", ".woodpecker"];
 const agentInstructionDirectories = [".claude", ".cursor", ".agents"];
 
 const ciFileNames = new Set([
@@ -29,6 +29,17 @@ const ciFileNames = new Set([
   "bitbucket-pipelines.yml",
   ".pre-commit-config.yaml",
   ".pre-commit-config.yml",
+  ".travis.yml",
+  ".drone.yml",
+  ".cirrus.yml",
+  ".woodpecker.yml",
+  "appveyor.yml",
+  "cloudbuild.yaml",
+  "cloudbuild.yml",
+  "buildspec.yml",
+  "buildspec.yaml",
+  // Container builds run their steps in CI.
+  "containerfile",
 ]);
 
 const agentInstructionFileNames = new Set([
@@ -36,6 +47,10 @@ const agentInstructionFileNames = new Set([
   "claude.md",
   ".cursorrules",
   "copilot-instructions.md",
+  "claude.local.md",
+  "gemini.md",
+  ".windsurfrules",
+  ".clinerules",
 ]);
 
 const dependencyFileNames = new Set([
@@ -61,6 +76,8 @@ const dependencyFileNames = new Set([
   "setup.py",
   "setup.cfg",
   "pip.conf",
+  "environment.yml",
+  "environment.yaml",
   // Go, Rust, Ruby, PHP, Elixir
   "go.mod",
   "go.sum",
@@ -73,6 +90,17 @@ const dependencyFileNames = new Set([
   "composer.lock",
   "mix.exs",
   "mix.lock",
+  // Dart, Swift, Scala, Deno, Nix
+  "pubspec.yaml",
+  "pubspec.lock",
+  "package.swift",
+  "package.resolved",
+  "build.sbt",
+  "deno.json",
+  "deno.jsonc",
+  "deno.lock",
+  "flake.nix",
+  "flake.lock",
   // JVM
   "pom.xml",
   "build.gradle",
@@ -80,14 +108,20 @@ const dependencyFileNames = new Set([
   "settings.gradle",
   "settings.gradle.kts",
   "gradle.lockfile",
+  "libs.versions.toml",
   // .NET
   "packages.lock.json",
   "directory.packages.props",
+  "directory.build.props",
   "nuget.config",
   // Runtime versions, which tool managers install
   "mise.toml",
   ".mise.toml",
   ".tool-versions",
+  ".nvmrc",
+  ".node-version",
+  ".python-version",
+  ".ruby-version",
 ]);
 
 function normalizedSegments(path: string): string[] {
@@ -105,6 +139,10 @@ function isRequirementsFile(segments: string[]): boolean {
   return segments.length >= 2 && segments.at(-2) === "requirements" && /\.(txt|in)$/u.test(name);
 }
 
+function isDockerfile(name: string): boolean {
+  return name === "dockerfile" || name.startsWith("dockerfile.") || name.endsWith(".dockerfile");
+}
+
 // What kind of protected file the repository path is, or null when the agent
 // may change it. Matching ignores case.
 export function protectedPathCategory(path: string): ProtectedPathCategory | null {
@@ -115,9 +153,14 @@ export function protectedPathCategory(path: string): ProtectedPathCategory | nul
   if (segments.slice(0, -1).some((segment) => agentInstructionDirectories.includes(segment))) {
     return "agent_instructions";
   }
-  if (ciFileNames.has(name)) return "ci";
+  if (ciFileNames.has(name) || isDockerfile(name)) return "ci";
   if (segments.slice(0, -1).some((segment) => ciDirectories.includes(segment))) return "ci";
-  if (dependencyFileNames.has(name) || name.endsWith(".csproj") || isRequirementsFile(segments)) {
+  if (
+    dependencyFileNames.has(name) ||
+    name.endsWith(".csproj") ||
+    name.endsWith(".gemspec") ||
+    isRequirementsFile(segments)
+  ) {
     return "dependencies";
   }
   return null;

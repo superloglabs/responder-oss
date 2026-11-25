@@ -330,18 +330,11 @@ describe("protected files in agent pull requests", () => {
   });
 
   it("lists renamed files under both names so a rename cannot hide a protected file", async () => {
-    const { execCommand, session } = sessionWith(["src/route.ts"]);
-    await createPullRequestFromSandbox(input, session, {
-      ...dependencies(),
-      fetch: vi
-        .fn<typeof fetch>()
-        .mockResolvedValueOnce(Response.json({ tree: { sha: "base-tree-sha" } }))
-        .mockResolvedValueOnce(Response.json({ sha: "blob-sha" }))
-        .mockResolvedValueOnce(Response.json({ sha: "tree-sha" }))
-        .mockResolvedValueOnce(Response.json({ sha: "commit-sha" }))
-        .mockResolvedValueOnce(Response.json({ ref: "refs/heads/fix" }))
-        .mockResolvedValueOnce(Response.json({ number: 42, html_url: "https://github.com/acme/app/pull/42" })),
-    });
+    // A workflow moved out of .github is listed under its old path too.
+    const { execCommand, session } = sessionWith([".github/workflows/ci.yml", "ci.yml"]);
+    await expect(
+      createPullRequestFromSandbox(input, session, { ...dependencies(), fetch: vi.fn<typeof fetch>() }),
+    ).rejects.toThrow(".github/workflows/ci.yml (CI configuration)");
     expect(String(execCommand.mock.calls[0]?.[0]?.cmd)).toContain("git diff --no-renames --name-only");
   });
 

@@ -54,6 +54,8 @@ export function createThreadPullRequestTool(input: {
   repositories: CheckedOutRepository[];
   session: SandboxSession;
   slackInvestigationSessionId: string;
+  // Set when a pull request review, not a person, started this turn.
+  untrustedTrigger: boolean;
 }, dependencies: ThreadPullRequestDependencies = defaultDependencies) {
   const repositoryNames = [
     ...new Set(input.repositories.map(({ repository }) => repository)),
@@ -124,6 +126,7 @@ export function createThreadPullRequestTool(input: {
         repositoryPath: checkout.path,
         requestId: requestId(input.investigationId, request.repository, request.title),
         title: request.title,
+        untrustedTrigger: input.untrustedTrigger,
         workspaceBaseSha: checkout.workspaceBaseSha,
       }, input.session);
       opened.set(key, pullRequest);

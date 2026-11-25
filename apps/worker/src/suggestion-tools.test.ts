@@ -50,7 +50,10 @@ describe("automatic suggestion pull requests", () => {
   it("queues the pull request when the workspace opens them automatically", async () => {
     await expect(suggestionTool().invoke(undefined as never, JSON.stringify(submission)))
       .resolves.toMatchObject({ automaticPullRequestRequestIds: ["request-1"] });
-    expect(queueSuggestionPullRequests).toHaveBeenCalled();
+    expect(queueSuggestionPullRequests).toHaveBeenCalledWith({
+      organizationId: "15151515-1515-4515-8515-151515151515",
+      suggestionId: "suggestion-1",
+    });
   });
 
   it("leaves it to a person when the workspace asks before pull requests", async () => {

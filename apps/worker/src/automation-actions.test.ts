@@ -83,6 +83,7 @@ function handler(
       checkedOutRepositories: [checkout],
       onAction,
       organizationId: "organization-1",
+      pullRequestPolicy: { allowDependencyChanges: false, awaitingApproval: false, untrustedTrigger: true },
       runId,
       session,
       ...overrides,
@@ -234,7 +235,7 @@ describe("pull request safeguards in automation runs", () => {
     );
   });
 
-  it("treats a run without a policy as an outside event that may not change dependencies", async () => {
+  it("passes a policy that refuses dependency changes from an outside event", async () => {
     const deps = dependencies();
     const { handle } = handler(deps);
 

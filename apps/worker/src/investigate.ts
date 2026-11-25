@@ -1222,6 +1222,7 @@ export async function runInvestigationAgent(
                 repositories,
                 session,
                 slackInvestigationSessionId: job.slackInvestigationSessionId,
+                untrustedTrigger: outsideEvent,
               })]
             : []),
           ...(pullRequestFollowUp?.tools ?? []),

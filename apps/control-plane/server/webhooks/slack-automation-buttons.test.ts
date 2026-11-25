@@ -106,21 +106,28 @@ describe("automation buttons in Slack", () => {
     }]);
   });
 
-  it("records whether a member of the connected Slack team pressed the button", async () => {
+  it("records a press by a member of the connected Slack team", async () => {
     await press({ user: { id: "U123", name: "ada", team_id: "T123" } });
     expect(mocks.queueReply).toHaveBeenLastCalledWith(expect.objectContaining({
       message: expect.objectContaining({
         slackButton: expect.objectContaining({ pressedByTeamMember: true }),
       }),
     }));
+  });
 
-    // A person from another Slack team in a shared channel.
-    await press({ user: { id: "U999", name: "eve", team_id: "T999" } });
-    expect(mocks.queueReply).toHaveBeenLastCalledWith(expect.objectContaining({
-      message: expect.objectContaining({
-        slackButton: expect.objectContaining({ pressedByTeamMember: false }),
-      }),
-    }));
+  it("refuses a press from another Slack team in a shared channel and keeps the buttons", async () => {
+    const response = await press({ user: { id: "U999", name: "eve", team_id: "T999" } });
+
+    expect(response.status).toBe(200);
+    expect(mocks.queueReply).not.toHaveBeenCalled();
+    expect(responses(fetchMock)).toEqual([{
+      body: {
+        replace_original: false,
+        response_type: "ephemeral",
+        text: "Only members of this Slack workspace can use these buttons.",
+      },
+      url: responseUrl,
+    }]);
   });
 
   it("continues the run that posted the message and replaces its buttons", async () => {

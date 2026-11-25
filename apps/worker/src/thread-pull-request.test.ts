@@ -16,6 +16,7 @@ const checkout = {
 
 function pullRequestTool(overrides: {
   repositories?: Array<{ fullName: string; installationId: number }>;
+  untrustedTrigger?: boolean;
 } = {}) {
   const recordOrigin = vi.fn().mockResolvedValue(undefined);
   const createPullRequest = vi.fn().mockResolvedValue({
@@ -31,6 +32,7 @@ function pullRequestTool(overrides: {
     repositories: [checkout],
     session: {} as DaytonaSandboxSession,
     slackInvestigationSessionId: "session-1",
+    untrustedTrigger: overrides.untrustedTrigger ?? false,
   }, {
     captureEvent: vi.fn().mockResolvedValue(undefined),
     createPullRequest,
@@ -63,8 +65,19 @@ describe("Slack thread pull requests", () => {
       repository: "acme/api",
       repositoryPath: checkout.path,
       title: "Add retries",
+      untrustedTrigger: false,
       workspaceBaseSha: checkout.workspaceBaseSha,
     }), expect.anything());
+  });
+
+  it("marks a pull request from a turn a review started as written from outside text", async () => {
+    const { createPullRequest, tool } = pullRequestTool({ untrustedTrigger: true });
+
+    await tool.invoke(undefined as never, request);
+    expect(createPullRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ untrustedTrigger: true }),
+      expect.anything(),
+    );
   });
 
   it("records the thread as the pull request's origin, so a review continues it", async () => {

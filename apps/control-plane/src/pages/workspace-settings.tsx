@@ -757,16 +757,18 @@ function PullRequestApprovalSection() {
         <div className="memberList">
           <div className="memberRow">
             <span className="memberIdentity">
-              <strong>Ask before opening pull requests from alert-triggered runs</strong>
+              <strong>Ask before opening pull requests from outside events</strong>
               <span>
-                The agent posts its fix with a button, or waits for a message
-                on the run page. It opens the pull request once a workspace
-                member answers. Runs you start yourself are not affected.
+                Covers runs started by alerts, error issues, webhooks,
+                schedules, channel messages and GitHub events. The agent posts
+                its fix with a button, or waits for a message on the run page,
+                and opens the pull request once a workspace member answers.
+                Runs a member starts are not affected.
               </span>
             </span>
             <button
               aria-checked={state.requireApproval}
-              aria-label="Ask before opening pull requests from alert-triggered runs"
+              aria-label="Ask before opening pull requests from outside events"
               className="dsSwitch handoffRow__switch"
               disabled={!state.canEdit || saving}
               onClick={() => void toggle()}

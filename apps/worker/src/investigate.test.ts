@@ -887,8 +887,10 @@ describe("sandbox agent configuration", () => {
       true,
     );
 
-    expect(initial.message.match(untrustedFencePattern)).toHaveLength(2);
-    expect(initial.message).not.toContain("Title: Checkout failed");
+    const blocks = initial.message.match(untrustedFencePattern) ?? [];
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]).toContain("Title: Checkout failed");
+    expect(blocks[0]).toContain("push a new workflow");
   });
 
   it("identifies a failed trace write without exposing service keys", () => {

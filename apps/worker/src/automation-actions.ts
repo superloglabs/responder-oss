@@ -222,8 +222,8 @@ export function createAutomationToolHandler(input: {
   onAction(action: AutomationActionResult): Promise<void>;
   organizationId: string;
   // What the run's pull requests may contain and whether they wait for a
-  // member. A run without one is treated as started by an outside event.
-  pullRequestPolicy?: AutomationPullRequestPolicy;
+  // member.
+  pullRequestPolicy: AutomationPullRequestPolicy;
   runId: string;
   session: SandboxSession;
   signal?: AbortSignal;
@@ -233,11 +233,7 @@ export function createAutomationToolHandler(input: {
   triggerPullRequest?: { number: number; repositoryId: string };
   workspaceTools?: WorkspaceTool[];
 }, dependencies: AutomationActionDependencies = defaultDependencies) {
-  const pullRequestPolicy: AutomationPullRequestPolicy = input.pullRequestPolicy ?? {
-    allowDependencyChanges: false,
-    awaitingApproval: false,
-    untrustedTrigger: true,
-  };
+  const { pullRequestPolicy } = input;
   const channelName = (notification: AutomationNotification) =>
     `#${input.notifications?.channelNames.get(`${notification.integrationAccountId}:${notification.channelId}`) ?? notification.channelId}`;
 

@@ -22,6 +22,20 @@ describe("protected repository paths", () => {
     "bitbucket-pipelines.yml",
     ".pre-commit-config.yaml",
     ".husky/pre-commit",
+    ".gitlab-ci.yaml",
+    ".travis.yml",
+    ".drone.yml",
+    ".cirrus.yml",
+    "appveyor.yml",
+    "cloudbuild.yaml",
+    "buildspec.yml",
+    ".semaphore/semaphore.yml",
+    ".woodpecker/build.yml",
+    ".woodpecker.yml",
+    "Dockerfile",
+    "services/api/Dockerfile.prod",
+    "web.dockerfile",
+    "Containerfile",
   ])("treats %s as CI configuration", (path) => {
     expect(protectedPathCategory(path)).toBe("ci");
   });
@@ -70,6 +84,28 @@ describe("protected repository paths", () => {
     "mise.toml",
     ".mise.toml",
     ".tool-versions",
+    ".pnpmfile.cjs",
+    "pip.conf",
+    "nuget.config",
+    "environment.yml",
+    "envs/environment.yaml",
+    ".nvmrc",
+    ".node-version",
+    ".python-version",
+    ".ruby-version",
+    "pubspec.yaml",
+    "pubspec.lock",
+    "Package.swift",
+    "Package.resolved",
+    "build.sbt",
+    "deno.json",
+    "deno.jsonc",
+    "deno.lock",
+    "flake.nix",
+    "flake.lock",
+    "mylib.gemspec",
+    "gradle/libs.versions.toml",
+    "Directory.Build.props",
   ])("treats %s as a dependency file", (path) => {
     expect(protectedPathCategory(path)).toBe("dependencies");
   });
@@ -85,6 +121,10 @@ describe("protected repository paths", () => {
     ".cursor/rules/style.mdc",
     ".cursorrules",
     ".github/copilot-instructions.md",
+    "CLAUDE.local.md",
+    "GEMINI.md",
+    ".windsurfrules",
+    ".clinerules",
   ])("treats %s as agent instructions", (path) => {
     // The Copilot file sits under .github but is named for what it is.
     expect(protectedPathCategory(path)).toBe("agent_instructions");
@@ -97,7 +137,8 @@ describe("protected repository paths", () => {
     "src/package.json.ts",
     "tests/fixtures/requirements.md",
     "src/agents/planner.ts",
-    "Dockerfile",
+    "docs/dockerfile-guide.md",
+    "config/environment.ts",
   ])("allows %s", (path) => {
     expect(protectedPathCategory(path)).toBeNull();
   });
