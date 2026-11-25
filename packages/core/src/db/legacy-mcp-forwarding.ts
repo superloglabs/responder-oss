@@ -64,35 +64,3 @@ export async function findForwardedWorkspaceMember(
     user: { email: row.email, id: row.userId, name: row.name },
   };
 }
-
-// For the earlier shared credential: the member of any workspace in this
-// cell with a verified email, matched without regard to case, who is not
-// banned. Null when the workspace is not here or the person is not its
-// member.
-export async function findLegacyMcpForwardMember(
-  organizationId: string,
-  email: string,
-  now = new Date(),
-): Promise<LegacyMcpForwardMember | null> {
-  const rows = await getDatabase()
-    .select({
-      email: user.email,
-      name: user.name,
-      organizationId: member.organizationId,
-      role: member.role,
-      userId: user.id,
-    })
-    .from(member)
-    .innerJoin(user, eq(user.id, member.userId))
-    .where(
-      and(eq(member.organizationId, organizationId), memberConditions(email, now)),
-    )
-    .limit(1);
-  const row = rows[0];
-  if (!row) return null;
-  return {
-    organizationId: row.organizationId,
-    role: row.role,
-    user: { email: row.email, id: row.userId, name: row.name },
-  };
-}

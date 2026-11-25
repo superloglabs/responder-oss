@@ -208,13 +208,7 @@ types. `drizzle/` contains the ordered schema history.
   accepted once and kept in `legacy_mcp_forward_assertions` until the
   assertion can no longer be accepted: `exp` plus the 30-second clock skew.
   A token that could only read in the old product gets only read-only tools.
-  Requests without an assertion fall back to the earlier shared
-  `LEGACY_MCP_FORWARD_TOKEN` only while it is configured: the token in
-  `x-legacy-mcp-forward-token`, the workspace ID in `x-legacy-mcp-project-id`,
-  the member's verified email in `x-legacy-mcp-user-email`, and
-  `x-legacy-mcp-access: read-write` for all tools (anything else gets
-  read-only tools). That path does not check `legacy_mcp_forwards`. This is
-  removed when the old product shuts down.
+  This is removed when the old product shuts down.
 
 ## Management API and MCP server
 
