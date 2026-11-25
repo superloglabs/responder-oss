@@ -333,6 +333,45 @@ describe.skipIf(!testUrl)("account credentials (PostgreSQL)", () => {
       ]);
       expect(await authenticateApiKey(apiKey)).not.toBeNull();
     });
+
+    it("ends the session of a person banned outside Better Auth", async () => {
+      const email = `ban-sql-session-${randomUUID()}@example.com`;
+      const { cookie, userId } = await signUp(email);
+
+      await query(`update "user" set banned = true where id = $1`, [userId]);
+      const response = await request("/api/auth/get-session", { cookie });
+
+      expect(await response.json()).toBeNull();
+      expect(await auth.api.getSession({ headers: new Headers({ cookie }) })).toBeNull();
+      expect(await sessionCount(userId)).toBe(0);
+    });
+
+    it("refuses other auth endpoints to a person banned outside Better Auth", async () => {
+      const email = `ban-sql-org-${randomUUID()}@example.com`;
+      const { cookie, userId } = await signUp(email);
+
+      await query(`update "user" set banned = true where id = $1`, [userId]);
+      const response = await request("/api/auth/organization/create", {
+        body: { name: "Acme", slug: `acme-${randomUUID()}` },
+        cookie,
+      });
+
+      expect(response.status).toBe(401);
+      expect(await sessionCount(userId)).toBe(0);
+    });
+
+    it("keeps the session once the ban has expired", async () => {
+      const email = `ban-expired-${randomUUID()}@example.com`;
+      const { cookie, userId } = await signUp(email);
+
+      await query(
+        `update "user" set banned = true, ban_expires = now() - interval '1 second' where id = $1`,
+        [userId],
+      );
+      const response = await request("/api/auth/get-session", { cookie });
+
+      expect(await response.json()).toMatchObject({ user: { id: userId } });
+    });
   });
 
   describe("email confirmation", () => {
