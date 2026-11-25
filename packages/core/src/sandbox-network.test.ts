@@ -75,8 +75,37 @@ describe("sandboxNetworkFor", () => {
   });
 
   it("always allows Superlog's host", () => {
-    expect(sandboxNetworkFor({ allowedDomains: [], restricted: true }, "https://superlog.sh/app"))
-      .toEqual({ allowedDomains: ["superlog.sh"] });
+    expect(sandboxNetworkFor({ allowedDomains: [], restricted: true }, "https://superlog.sh/app")?.allowedDomains)
+      .toEqual(["superlog.sh"]);
+  });
+
+  it("limits Superlog's host to the broker paths under the application URL", () => {
+    const network = sandboxNetworkFor({ allowedDomains: [], restricted: true }, "https://superlog.sh/app/")!;
+    expect(network.application.host).toBe("superlog.sh");
+    const brokerPath = new RegExp(network.application.brokerPathPattern, "u");
+    for (const path of [
+      "/app/api/automation-model-broker/v1/messages",
+      "/app/api/automation-model-broker/v1/messages?beta=true",
+      "/app/api/automation-model-broker/v1/responses",
+      "/app/api/automation-context-broker/v1/2f0c6a52-6c1d-4a0e-9a59-0c7b1f3c9d10",
+      "/app/api/automation-context-broker/v1/2f0c6a52-6c1d-4a0e-9a59-0c7b1f3c9d10/logging",
+    ]) {
+      expect(brokerPath.test(path), path).toBe(true);
+    }
+    for (const path of [
+      "/api/automation-model-broker/v1/messages",
+      "/app/api/mcp",
+      "/app/api/automation-model-broker",
+      "/app/api/automation-model-brokerx/v1",
+      "/app/api/automation-model-broker/../mcp",
+      "/app/api/automation-model-broker/v1/../../ingest",
+      "/app/api/automation-model-broker/%2e%2e/mcp",
+      "/app/api/automation-model-broker/v1//..//mcp",
+      "/app/api/automation-model-broker/v1/.%2e/x",
+      "/app/api/automation-model-broker/v1\\..\\mcp",
+    ]) {
+      expect(brokerPath.test(path), path).toBe(false);
+    }
   });
 
   it("adds each secret's hosts once", () => {

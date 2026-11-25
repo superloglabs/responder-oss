@@ -352,6 +352,8 @@ export async function runInFreshAutomationSandbox<T>(
       workload: "automation",
       workloadId: input.runId,
     });
+    // Superlog's host takes only this turn's broker token from the sandbox.
+    const network = input.network ? { ...input.network, brokerToken: input.brokerToken } : null;
     if (!resumed) {
       await abortable(
         dependencies.configure(
@@ -359,7 +361,7 @@ export async function runInFreshAutomationSandbox<T>(
           input.config,
           input.secrets ?? [],
           input.keepPaused ? pausedAutomationSandboxLifetimeMinutes : 0,
-          input.network ?? null,
+          network,
         ),
         input.signal,
       );
@@ -377,13 +379,13 @@ export async function runInFreshAutomationSandbox<T>(
             session,
             input.config,
             input.secrets ?? [],
-            input.network ?? null,
+            network,
           )
           : dependencies.applyNetwork(
             session,
             input.config,
             input.secrets ?? [],
-            input.network ?? null,
+            network,
           ),
         input.signal,
       );

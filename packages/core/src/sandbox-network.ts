@@ -87,10 +87,27 @@ export function publicApplicationUrl(
   ].map((value) => value?.trim()).find(Boolean);
 }
 
+// The paths under the public application URL that serve the model broker and
+// the context servers.
+export const automationModelBrokerPath = "/api/automation-model-broker";
+export const automationContextBrokerPath = "/api/automation-context-broker";
+
 // The domains a restricted sandbox reaches, or null for open access.
-// `*.example.com` covers example.com and every subdomain.
+// `*.example.com` covers example.com and every subdomain. On Superlog's own
+// host a sandbox reaches only the brokers, and only with its run's token.
 export interface SandboxNetwork {
   allowedDomains: string[];
+  application: {
+    // An RE2 pattern for the broker paths. Dot segments and percent-encoding
+    // are left out, so a path cannot resolve to another route.
+    brokerPathPattern: string;
+    host: string;
+  };
+  brokerToken?: string;
+}
+
+function escapeRegularExpression(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
 }
 
 export function sandboxNetworkFor(
@@ -98,15 +115,22 @@ export function sandboxNetworkFor(
   applicationUrl: string,
 ): SandboxNetwork | null {
   if (!settings.restricted) return null;
+  const url = new URL(applicationUrl);
+  const brokers = [automationModelBrokerPath, automationContextBrokerPath]
+    .map((path) => escapeRegularExpression(`${url.pathname.replace(/\/$/u, "")}${path}`));
   return {
-    allowedDomains: [...new Set([new URL(applicationUrl).hostname, ...settings.allowedDomains])],
+    allowedDomains: [...new Set([url.hostname, ...settings.allowedDomains])],
+    application: {
+      brokerPathPattern: `^(?:${brokers.join("|")})/(?:[A-Za-z0-9_~-][A-Za-z0-9._~-]*/?)*(?:\\?.*)?$`,
+      host: url.hostname,
+    },
   };
 }
 
 // Adds the hosts of the secrets mounted in the sandbox, which a secret needs
 // to be of any use.
 export function sandboxAllowedDomains(
-  network: SandboxNetwork,
+  network: Pick<SandboxNetwork, "allowedDomains">,
   secrets: ReadonlyArray<{ allowedHosts?: string[] }>,
 ): string[] {
   return [...new Set([

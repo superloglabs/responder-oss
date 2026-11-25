@@ -6,10 +6,17 @@ import {
   VercelSandboxSession,
   type VercelSandboxSessionState,
 } from "@openai/agents-extensions/sandbox/vercel";
-import { daytonaSecretPlaceholderPrefix } from "@responder/core/automations/chatgpt-subscription";
 import { decryptCredentials } from "@responder/core/credentials/encryption";
 import { sandboxWorkspaceRoot, type VercelSandboxConfig } from "@responder/core/sandbox-config";
-import { sandboxAllowedDomains, type SandboxNetwork } from "@responder/core/sandbox-network";
+import {
+  daytonaSecretPlaceholderPrefix,
+  subscriptionSecretHosts,
+} from "@responder/core/automations/chatgpt-subscription";
+import {
+  defaultSandboxAllowedDomains,
+  sandboxAllowedDomains,
+  type SandboxNetwork,
+} from "@responder/core/sandbox-network";
 import { Sandbox, type Command, type CommandFinished } from "@vercel/sandbox";
 import { reportWorkerException, type WorkerErrorContext } from "./monitoring.js";
 import { miseVersionsHost, sandboxSnapshotResources, vercelSandboxPath } from "./sandbox-snapshot.js";
@@ -239,10 +246,34 @@ function secretValue(secret: SandboxSecretMount): string {
   return decryptCredentials<{ value: string }>(secret.encryptedValue).value;
 }
 
-function secretRules(placeholder: string, value: string): NetworkPolicyRule[] {
+// On the domains Superlog allows by default, a request that carries a
+// credential the sandbox did not get from a mounted secret has every
+// credential header emptied, so code in the sandbox cannot act as an account
+// of its own there. Requests without credentials are left alone, which keeps
+// public downloads working. Domains a workspace adds are left as they are.
+const clearedCredentialHeaders = ["authorization", "cookie", "proxy-authorization", ...credentialHeaders];
+const clearedCredentials = Object.fromEntries(clearedCredentialHeaders.map((header) => [header, ""]));
+const credentialClearingDomains = new Set([
+  ...defaultSandboxAllowedDomains.flatMap((domain) =>
+    domain.startsWith("*.") ? [domain, domain.slice(2)] : [domain]
+  ),
+  miseVersionsHost,
+  ...subscriptionSecretHosts,
+]);
+
+function credentialClearingRules(): NetworkPolicyRule[] {
+  return clearedCredentialHeaders.map((header) => ({
+    match: { headers: [{ key: { exact: header } }] },
+    transform: [{ headers: clearedCredentials }],
+  }) as NetworkPolicyRule);
+}
+
+// On a domain where credentials are cleared, the swap also clears every other
+// credential header on the request.
+function secretRules(placeholder: string, value: string, clearOthers: boolean): NetworkPolicyRule[] {
   const rule = (header: string, sent: string, replacement: string) => ({
     match: { headers: [{ key: { exact: header }, value: { exact: sent } }] },
-    transform: [{ headers: { [header]: replacement } }],
+    transform: [{ headers: { ...(clearOthers ? clearedCredentials : {}), [header]: replacement } }],
   }) as NetworkPolicyRule;
   return [
     ...authorizationSchemes.map((scheme) =>
@@ -252,12 +283,31 @@ function secretRules(placeholder: string, value: string): NetworkPolicyRule[] {
   ];
 }
 
+// A request forwarded here goes nowhere: the name never resolves, so the
+// firewall answers 502.
+const refusedRequestUrl = "https://egress-refused.invalid";
+
+// On Superlog's host a sandbox reaches only the model and context brokers,
+// and only with its own run's token, which then replaces every other
+// credential on the request. Anything else is refused.
+function applicationRules(network: SandboxNetwork): NetworkPolicyRule[] {
+  const token = network.brokerToken;
+  if (!token) return [];
+  const brokerPath = { regex: network.application.brokerPathPattern };
+  const credentials = { ...clearedCredentials, authorization: `Bearer ${token}`, "x-api-key": token };
+  return [["authorization", `Bearer ${token}`], ["x-api-key", token]].map(([header, value]) => ({
+    match: { headers: [{ key: { exact: header }, value: { exact: value } }], path: brokerPath },
+    transform: [{ headers: credentials }],
+  }) as NetworkPolicyRule);
+}
+
 // Each sandbox sees only placeholders, and the firewall swaps a placeholder
 // for its value on requests to the secret's allowed hosts. Outbound access is
 // limited to the workspace's list of domains and mise's version list, or open
 // when the workspace has turned the restriction off. Real values
 // stay out of the session state, which is saved to the database, so this is
-// applied after every start.
+// applied after every start. The firewall applies the first rule a request
+// matches, so a secret's swap comes before the rules that clear or refuse.
 export function secretNetworkPolicy(
   secrets: ReadonlyArray<{ allowedHosts: string[]; placeholder: string; value: string }>,
   network: SandboxNetwork | null = null,
@@ -275,9 +325,23 @@ export function secretNetworkPolicy(
   }
   for (const secret of secrets) {
     for (const host of secret.allowedHosts) {
-      const rules = secretRules(secret.placeholder, secret.value);
-      (allow[host] ??= []).push(...rules);
-      if (host.startsWith("*.")) (allow[host.slice(2)] ??= []).push(...rules);
+      for (const domain of host.startsWith("*.") ? [host, host.slice(2)] : [host]) {
+        // A secret never opens Superlog's host, where only the brokers are
+        // reachable.
+        if (domain === network?.application.host) continue;
+        (allow[domain] ??= []).push(
+          ...secretRules(secret.placeholder, secret.value, Boolean(network) && credentialClearingDomains.has(domain)),
+        );
+      }
+    }
+  }
+  if (network) {
+    for (const [domain, rules] of Object.entries(allow)) {
+      if (domain === network.application.host) {
+        allow[domain] = [...applicationRules(network), { forwardURL: refusedRequestUrl } as NetworkPolicyRule];
+      } else if (credentialClearingDomains.has(domain)) {
+        rules.push(...credentialClearingRules());
+      }
     }
   }
   return { allow } as NetworkPolicy;

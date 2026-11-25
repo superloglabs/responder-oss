@@ -56,7 +56,11 @@ import { getOrganizationModelCredential, selectOrganizationModelCredential } fro
 import type { RunBillingAccount } from "@responder/core/db/run-billing-accounts";
 import { listProviderModels, matchProviderModel, ModelCatalogError } from "@responder/core/automations/model-catalog";
 import { modelProvider, type ModelProviderId } from "@responder/core/automations/model-providers";
-import { publicApplicationUrl } from "@responder/core/sandbox-network";
+import {
+  automationContextBrokerPath,
+  automationModelBrokerPath,
+  publicApplicationUrl,
+} from "@responder/core/sandbox-network";
 import { workspaceSandboxNetwork } from "./sandbox-network.js";
 import { workspaceSandbox } from "./sandbox-image.js";
 import { sandboxHasMise, sandboxRuntimeInstructions } from "./sandbox-snapshot.js";
@@ -307,7 +311,7 @@ function automationBrokerBaseUrl(environment: NodeJS.ProcessEnv): string {
   if (url.protocol !== "https:" || url.username || url.password) {
     throw new Error("The automation model broker requires a public HTTPS URL");
   }
-  url.pathname = `${url.pathname.replace(/\/$/u, "")}/api/automation-model-broker/v1`;
+  url.pathname = `${url.pathname.replace(/\/$/u, "")}${automationModelBrokerPath}/v1`;
   url.search = "";
   url.hash = "";
   return url.toString().replace(/\/$/u, "");
@@ -326,8 +330,8 @@ function automationContextServers(
 ) {
   const broker = new URL(automationBrokerBaseUrl(environment));
   broker.pathname = broker.pathname.replace(
-    /\/api\/automation-model-broker\/v1$/u,
-    "/api/automation-context-broker/v1/",
+    new RegExp(`${automationModelBrokerPath}/v1$`, "u"),
+    `${automationContextBrokerPath}/v1/`,
   );
   const slackTriggered = triggerInput.provider === "slack";
   const served = connections.filter((connection) =>

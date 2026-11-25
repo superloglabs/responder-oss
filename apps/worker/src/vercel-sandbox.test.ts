@@ -13,6 +13,7 @@ import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { encryptCredentials } from "@responder/core/credentials/encryption";
 import type { VercelSandboxConfig } from "@responder/core/sandbox-config";
+import { sandboxNetworkFor } from "@responder/core/sandbox-network";
 import { resumeSandbox, serializeSandboxSession } from "./sandbox-runtime.js";
 import { miseVersionsHost, vercelSandboxPath } from "./sandbox-snapshot.js";
 import { containsDaytonaSecretPlaceholder } from "./secret-safety.js";
@@ -65,35 +66,198 @@ describe("secretNetworkPolicy", () => {
   });
 });
 
+const { application } = sandboxNetworkFor({ allowedDomains: [], restricted: true }, "https://superlog.sh")!;
+
+interface FirewallRule {
+  forwardURL?: string;
+  match?: {
+    headers?: Array<{ key?: { exact?: string }; value?: { exact?: string } }>;
+    path?: { regex?: string; startsWith?: string };
+  };
+  transform?: Array<{ headers?: Record<string, string> }>;
+}
+
+// Vercel's firewall: the first rule that matches a request applies, and a
+// request no rule matches goes out unchanged.
+function throughFirewall(
+  policy: unknown,
+  domain: string,
+  request: { headers?: Record<string, string>; path?: string },
+): { headers: Record<string, string>; refused: boolean } {
+  const rules = (policy as { allow: Record<string, FirewallRule[]> }).allow[domain];
+  if (!rules) throw new Error(`${domain} is not allowed`);
+  const headers = { ...request.headers };
+  const path = request.path ?? "/";
+  const rule = rules.find(({ match }) =>
+    (!match?.path?.startsWith || path.startsWith(match.path.startsWith)) &&
+    (!match?.path?.regex || new RegExp(match.path.regex, "u").test(path)) &&
+    (match?.headers ?? []).every(({ key, value }) =>
+      key?.exact !== undefined && key.exact in headers &&
+      (value?.exact === undefined || headers[key.exact] === value.exact))
+  );
+  if (rule?.forwardURL) return { headers, refused: new URL(rule.forwardURL).hostname.endsWith(".invalid") };
+  for (const transform of rule?.transform ?? []) Object.assign(headers, transform.headers);
+  return { headers, refused: false };
+}
+
 describe("secretNetworkPolicy for a restricted workspace", () => {
   const policy = secretNetworkPolicy(
     [{ allowedHosts: ["api.example.com"], placeholder: "ph-1", value: "real-1" }],
-    { allowedDomains: ["superlog.sh", "*.npmjs.org"] },
+    { allowedDomains: ["superlog.sh", "*.npmjs.org", "registry.npmjs.org", "github.com", "api.github.com"], application },
   ) as { allow: Record<string, unknown[]> };
 
   it("allows only the listed domains, the secrets' hosts, and mise's version list", () => {
     expect(Object.keys(policy.allow).sort()).toEqual([
       "*.npmjs.org",
       "api.example.com",
+      "api.github.com",
+      "github.com",
       "mise-versions.jdx.dev",
       "npmjs.org",
+      "registry.npmjs.org",
       "superlog.sh",
     ]);
     expect(miseVersionsHost).toBe("mise-versions.jdx.dev");
-    expect(policy.allow["superlog.sh"]).toEqual([]);
   });
 
   it("still swaps a secret's placeholder on its hosts", () => {
-    expect(JSON.stringify(policy.allow["api.example.com"])).toContain("real-1");
+    expect(throughFirewall(policy, "api.example.com", { headers: { authorization: "Bearer ph-1" } }).headers)
+      .toEqual({ authorization: "Bearer real-1" });
   });
 
   it("swaps a wildcard secret's placeholder on the apex host too", () => {
     const wildcard = secretNetworkPolicy(
       [{ allowedHosts: ["*.example.com"], placeholder: "ph-1", value: "real-1" }],
-      { allowedDomains: ["superlog.sh"] },
+      { allowedDomains: ["superlog.sh"], application },
     ) as { allow: Record<string, unknown[]> };
     expect(JSON.stringify(wildcard.allow["*.example.com"])).toContain("real-1");
     expect(JSON.stringify(wildcard.allow["example.com"])).toContain("real-1");
+  });
+
+  it("clears credentials the sandbox brings itself to Superlog's default domains", () => {
+    for (const [domain, headers] of [
+      ["github.com", { authorization: "Basic eC1hY2Nlc3MtdG9rZW46Z2hwX290aGVy" }],
+      ["api.github.com", { authorization: "token ghp_other" }],
+      ["api.github.com", { cookie: "user_session=other" }],
+      ["registry.npmjs.org", { authorization: "Bearer npm_other", "x-request": "kept" }],
+      ["mise-versions.jdx.dev", { "x-api-key": "other" }],
+    ] as const) {
+      const { headers: sent, refused } = throughFirewall(policy, domain, { headers });
+      expect(refused).toBe(false);
+      for (const [name, value] of Object.entries(headers)) {
+        expect(sent[name], `${domain} ${name}`).toBe(name === "x-request" ? value : "");
+      }
+    }
+  });
+
+  it("leaves requests without credentials untouched, so public downloads keep working", () => {
+    expect(throughFirewall(policy, "github.com", { headers: { accept: "*/*" } }).headers).toEqual({ accept: "*/*" });
+    expect(throughFirewall(policy, "registry.npmjs.org", {}).headers).toEqual({});
+  });
+
+  it("leaves domains the workspace added as they are", () => {
+    expect(throughFirewall(policy, "*.npmjs.org", { headers: { authorization: "Bearer kept" } }).headers)
+      .toEqual({ authorization: "Bearer kept" });
+  });
+
+  it("clears other credentials on a secret's host only when it is a default domain", () => {
+    expect(throughFirewall(policy, "api.example.com", { headers: { authorization: "Bearer kept" } }).headers)
+      .toEqual({ authorization: "Bearer kept" });
+    const github = secretNetworkPolicy(
+      [{ allowedHosts: ["api.github.com"], placeholder: "ph-1", value: "real-1" }],
+      { allowedDomains: ["superlog.sh", "api.github.com"], application },
+    );
+    expect(throughFirewall(github, "api.github.com", { headers: { authorization: "token ph-1" } }).headers.authorization)
+      .toBe("token real-1");
+    expect(throughFirewall(github, "api.github.com", { headers: { authorization: "token other" } }).headers.authorization)
+      .toBe("");
+  });
+
+  it("clears other credentials sent along with a secret's placeholder on a default domain", () => {
+    const github = secretNetworkPolicy(
+      [{ allowedHosts: ["api.github.com", "api.example.com"], placeholder: "ph-1", value: "real-1" }],
+      { allowedDomains: ["superlog.sh", "api.github.com"], application },
+    );
+    expect(throughFirewall(github, "api.github.com", {
+      headers: { authorization: "token ph-1", cookie: "user_session=other", "x-api-key": "other" },
+    }).headers).toMatchObject({ authorization: "token real-1", cookie: "", "x-api-key": "" });
+    // A domain the workspace added keeps the request's other headers.
+    expect(throughFirewall(github, "api.example.com", {
+      headers: { authorization: "token ph-1", cookie: "session=kept" },
+    }).headers).toEqual({ authorization: "token real-1", cookie: "session=kept" });
+  });
+
+  it("does not let a secret open Superlog's host", () => {
+    const mounted = secretNetworkPolicy(
+      [{ allowedHosts: ["superlog.sh"], placeholder: "ph-1", value: "real-1" }],
+      { allowedDomains: ["superlog.sh"], application, brokerToken: "run-token" },
+    );
+    expect(throughFirewall(mounted, "superlog.sh", { headers: { authorization: "Bearer ph-1" }, path: "/api/mcp" }).refused)
+      .toBe(true);
+    expect(JSON.stringify(mounted)).not.toContain("real-1");
+  });
+
+  it("refuses every request to Superlog's host from a sandbox without a run token", () => {
+    expect(throughFirewall(policy, "superlog.sh", { path: "/api/health" }).refused).toBe(true);
+    expect(throughFirewall(policy, "superlog.sh", {
+      headers: { authorization: "Bearer other" },
+      path: "/api/automation-model-broker/v1/messages",
+    }).refused).toBe(true);
+  });
+
+  describe("with a run token", () => {
+    const run = secretNetworkPolicy([], {
+      allowedDomains: ["superlog.sh"],
+      application,
+      brokerToken: "run-token",
+    });
+
+    it("lets the run's token reach the brokers", () => {
+      for (const [path, headers] of [
+        ["/api/automation-model-broker/v1/messages?beta=true", { authorization: "Bearer run-token" }],
+        ["/api/automation-model-broker/v1/messages", { "x-api-key": "run-token" }],
+        ["/api/automation-context-broker/v1/connection-1/logging", { authorization: "Bearer run-token" }],
+      ] as const) {
+        const result = throughFirewall(run, "superlog.sh", { headers, path });
+        expect(result.refused, path).toBe(false);
+        expect(result.headers.authorization).toBe("Bearer run-token");
+        expect(result.headers["x-api-key"]).toBe("run-token");
+      }
+    });
+
+    it("replaces any other credential sent along with the run's token", () => {
+      const { headers } = throughFirewall(run, "superlog.sh", {
+        headers: { authorization: "Bearer other-run", cookie: "session=other", "x-api-key": "run-token" },
+        path: "/api/automation-model-broker/v1/messages",
+      });
+      expect(headers).toMatchObject({ authorization: "Bearer run-token", cookie: "", "x-api-key": "run-token" });
+    });
+
+    it("follows a path prefix on the application URL", () => {
+      const prefixed = secretNetworkPolicy([], {
+        ...sandboxNetworkFor({ allowedDomains: [], restricted: true }, "https://superlog.sh/app")!,
+        brokerToken: "run-token",
+      });
+      const headers = { authorization: "Bearer run-token" };
+      expect(throughFirewall(prefixed, "superlog.sh", { headers, path: "/app/api/automation-model-broker/v1/messages" }).refused)
+        .toBe(false);
+      expect(throughFirewall(prefixed, "superlog.sh", { headers, path: "/api/automation-model-broker/v1/messages" }).refused)
+        .toBe(true);
+    });
+
+    it("refuses other paths, other tokens, and paths that resolve elsewhere", () => {
+      for (const [path, authorization] of [
+        ["/api/mcp", "Bearer run-token"],
+        ["/api/ingest/v1/logs", "Bearer run-token"],
+        ["/api/automation-model-broker/%2e%2e/mcp", "Bearer run-token"],
+        ["/api/automation-model-broker/v1/../../automations", "Bearer run-token"],
+        ["/api/automation-model-broker/v1/messages", "Bearer other-run"],
+        ["/api/automation-model-broker/v1/messages", undefined],
+      ] as const) {
+        const headers = authorization ? { authorization } : undefined;
+        expect(throughFirewall(run, "superlog.sh", { headers, path }).refused, `${path} ${authorization}`).toBe(true);
+      }
+    });
   });
 });
 
@@ -153,10 +317,10 @@ describe("applyVercelSandboxSecrets", () => {
   });
 
   it("restricts a sandbox that has no secrets", async () => {
-    await applyVercelSandboxSecrets(sessionWith({}), config, [], { allowedDomains: ["superlog.sh"] });
-    expect(updateNetworkPolicy).toHaveBeenCalledWith({
-      allow: { "mise-versions.jdx.dev": [], "superlog.sh": [] },
-    });
+    await applyVercelSandboxSecrets(sessionWith({}), config, [], { allowedDomains: ["superlog.sh"], application });
+    const policy = updateNetworkPolicy.mock.calls[0]?.[0] as { allow: Record<string, unknown[]> };
+    expect(Object.keys(policy.allow).sort()).toEqual(["mise-versions.jdx.dev", "superlog.sh"]);
+    expect(throughFirewall(policy, "superlog.sh", { path: "/" }).refused).toBe(true);
   });
 
   it("makes no request when there are no secrets to apply or remove", async () => {
