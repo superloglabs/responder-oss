@@ -170,8 +170,15 @@ export function decodeCloudWatchLogsRecords(
   for (const record of request.records) {
     let parsed: CloudWatchLogsMessage;
     try {
+      const head = Buffer.from(record.data.slice(0, 4), "base64");
+      const gzipped = head[0] === 0x1f && head[1] === 0x8b;
+      // Base64 holds 3 bytes in 4 characters, so a plain record's size is
+      // known before it is decoded.
+      if (!gzipped && Math.floor((record.data.length * 3) / 4) > remaining + 2) {
+        throw new RangeError("CloudWatch Logs records exceed the size limit");
+      }
       const bytes = Buffer.from(record.data, "base64");
-      const decoded = bytes[0] === 0x1f && bytes[1] === 0x8b
+      const decoded = gzipped
         ? gunzipSync(bytes, { maxOutputLength: Math.max(remaining, 1) })
         : bytes;
       if (decoded.byteLength > remaining) throw new RangeError("CloudWatch Logs records exceed the size limit");

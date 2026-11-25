@@ -1,5 +1,5 @@
-import { gzipSync } from "node:zlib";
-import { describe, expect, it } from "vitest";
+import { gunzipSync, gzipSync } from "node:zlib";
+import { describe, expect, it, vi } from "vitest";
 import {
   cloudWatchLogsToOtlp,
   decodeCloudWatchLogsRecords,
@@ -9,6 +9,11 @@ import {
   logSeverity,
   metricStreamRequest,
 } from "./aws-firehose.js";
+
+vi.mock("node:zlib", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:zlib")>();
+  return { ...actual, gunzipSync: vi.fn(actual.gunzipSync) };
+});
 
 function framed(...messages: number[][]): string {
   return Buffer.concat(messages.map((message) => Buffer.from([message.length, ...message]))).toString("base64");
@@ -56,10 +61,25 @@ describe("decodeCloudWatchLogsRecords", () => {
   it("skips a record that decompresses past the limit on its own", () => {
     const bomb = { data: gzipSync(Buffer.alloc(16 * 1024 * 1024)).toString("base64") };
 
+    vi.mocked(gunzipSync).mockClear();
+
     const result = decodeCloudWatchLogsRecords({ records: [bomb, cloudWatchRecord(message)], requestId: "r" }, 4_096);
 
     expect(result.messages).toHaveLength(1);
     expect(result.skipped).toBe(1);
+    // The bomb is never inflated past the budget.
+    expect(vi.mocked(gunzipSync).mock.calls[0]?.[1]).toEqual({ maxOutputLength: 4_096 });
+  });
+
+  it("skips an uncompressed record larger than the remaining budget without decoding it", () => {
+    const plain = { data: Buffer.from(JSON.stringify(message)).toString("base64") };
+    const from = vi.spyOn(Buffer, "from");
+
+    const result = decodeCloudWatchLogsRecords({ records: [plain], requestId: "r" }, 100);
+
+    expect(result.skipped).toBe(1);
+    expect(from).not.toHaveBeenCalledWith(plain.data, "base64");
+    from.mockRestore();
   });
 });
 
