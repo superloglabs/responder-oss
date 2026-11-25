@@ -1,5 +1,6 @@
 import { createHash, timingSafeEqual } from "node:crypto";
-import { gunzipSync } from "node:zlib";
+import { promisify } from "node:util";
+import { gunzip } from "node:zlib";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import {
@@ -71,14 +72,17 @@ const signals = new Set(["logs", "metrics", "traces"]);
 // How long a key lookup is reused. A revoked key stops working within it.
 const keyCacheMs = 60_000;
 const keyCacheLimit = 10_000;
-// Decompressed request bodies larger than this are refused.
-const maxDecompressedBytes = 64 * 1024 * 1024;
+// Decompressed request bodies larger than this are refused. Firehose streams
+// buffer 1 MiB, and Vercel drains send smaller batches.
+const maxDecompressedBytes = 16 * 1024 * 1024;
+const gunzipAsync = promisify(gunzip);
 
-// The request body, decompressed when it was sent with gzip.
+// The request body, decompressed off the event loop when it was sent with
+// gzip.
 async function requestBody(request: Request): Promise<Buffer> {
   const body = Buffer.from(await request.arrayBuffer());
   return request.headers.get("content-encoding")?.toLowerCase() === "gzip"
-    ? gunzipSync(body, { maxOutputLength: maxDecompressedBytes })
+    ? await gunzipAsync(body, { maxOutputLength: maxDecompressedBytes })
     : body;
 }
 
@@ -229,7 +233,7 @@ export function createIngestRoutes(dependencies: IngestRouteDependencies = defau
             if (!response) return reply(503, "Telemetry ingest is unavailable", requestId);
           }
         } else {
-          const logs = cloudWatchLogsToOtlp(request, firehoseSource(context.req.header("x-amz-firehose-source-arn")), dependencies.now());
+          const logs = await cloudWatchLogsToOtlp(request, firehoseSource(context.req.header("x-amz-firehose-source-arn")), dependencies.now());
           if (logs.records > 0) {
             response = await forward({ body: JSON.stringify(logs.payload), collector, contentType: "application/json", organizationId: key.organizationId, signal });
             if (!response) return reply(503, "Telemetry ingest is unavailable", requestId);
@@ -268,7 +272,7 @@ export function createIngestRoutes(dependencies: IngestRouteDependencies = defau
         return reply(400, "Invalid Firehose request body");
       }
       const requestId = headerRequestId || request.requestId;
-      const { messages } = decodeCloudWatchLogsRecords(request);
+      const { messages } = await decodeCloudWatchLogsRecords(request);
       const groups = new Map<string, { awsAccountId: string; messages: typeof messages; region: string }>();
       for (const message of messages) {
         const region = message.subscriptionFilters

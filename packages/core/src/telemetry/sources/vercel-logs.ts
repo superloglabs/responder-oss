@@ -25,12 +25,33 @@ const severities: Record<string, { number: number; text: string }> = {
   warning: { number: 13, text: "WARN" },
 };
 
+// More records than a drain sends in one delivery.
+const maxRecords = 50_000;
+
+// The non-blank lines, stopping once there are more than a delivery holds.
+function ndjsonLines(text: string): string[] {
+  const lines: string[] = [];
+  let start = 0;
+  while (start <= text.length) {
+    const newline = text.indexOf("\n", start);
+    const end = newline === -1 ? text.length : newline;
+    const line = text.slice(start, end).replace(/\r$/u, "");
+    if (line.trim()) {
+      lines.push(line);
+      if (lines.length > maxRecords) throw new Error("Too many Vercel log records");
+    }
+    start = end + 1;
+  }
+  return lines;
+}
+
 export function parseVercelLogs(body: string, contentType: string): VercelLogRecord[] {
   const text = body.trim();
   if (!text) return [];
   const records = contentType.toLowerCase().includes("ndjson")
-    ? text.split(/\r?\n/u).filter((line) => line.trim()).map((line) => JSON.parse(line) as unknown)
+    ? ndjsonLines(text).map((line) => JSON.parse(line) as unknown)
     : ([JSON.parse(text)] as unknown[]).flat();
+  if (records.length > maxRecords) throw new Error("Too many Vercel log records");
   return records.map((record) => {
     if (!record || typeof record !== "object" || Array.isArray(record)) throw new Error("Invalid Vercel log record");
     return record as VercelLogRecord;

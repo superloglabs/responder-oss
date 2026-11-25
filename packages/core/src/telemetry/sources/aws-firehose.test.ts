@@ -2,6 +2,7 @@ import { gzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 import {
   cloudWatchLogsToOtlp,
+  decodeCloudWatchLogsRecords,
   firehoseAnswer,
   firehoseSource,
   logGroupService,
@@ -32,10 +33,16 @@ describe("metricStreamRequest", () => {
     const truncated = Buffer.from([5, 1, 2]).toString("base64");
     expect(() => metricStreamRequest({ records: [{ data: truncated }], requestId: "r" })).toThrow("Truncated");
   });
+
+  it("refuses a request with more messages than a metric stream sends", () => {
+    const data = Buffer.alloc(100_001).toString("base64");
+
+    expect(() => metricStreamRequest({ records: [{ data }], requestId: "r" })).toThrow("Too many messages");
+  });
 });
 
 describe("cloudWatchLogsToOtlp", () => {
-  it("turns a subscription record into logs for its log group", () => {
+  it("turns a subscription record into logs for its log group", async () => {
     const request = {
       records: [
         cloudWatchRecord({
@@ -55,7 +62,7 @@ describe("cloudWatchLogsToOtlp", () => {
       requestId: "r",
     };
 
-    const result = cloudWatchLogsToOtlp(request, { accountId: "123456789012", region: "eu-west-1" }, 1_760_000_001_000);
+    const result = await cloudWatchLogsToOtlp(request, { accountId: "123456789012", region: "eu-west-1" }, 1_760_000_001_000);
 
     expect(result.records).toBe(2);
     expect(result.skipped).toBe(1);
@@ -73,7 +80,7 @@ describe("cloudWatchLogsToOtlp", () => {
     expect(second).toMatchObject({ body: { stringValue: "INFO started" }, severityText: "INFO" });
   });
 
-  it("names an ECS container's logs after the container and lifts JSON fields", () => {
+  it("names an ECS container's logs after the container and lifts JSON fields", async () => {
     const request = {
       records: [
         cloudWatchRecord({
@@ -87,7 +94,7 @@ describe("cloudWatchLogsToOtlp", () => {
       requestId: "r",
     };
 
-    const resource = cloudWatchLogsToOtlp(request, null).payload.resourceLogs[0]!;
+    const resource = (await cloudWatchLogsToOtlp(request, null)).payload.resourceLogs[0]!;
 
     expect(resource.resource.attributes).toEqual(expect.arrayContaining([{ key: "service.name", value: { stringValue: "api" } }]));
     const [record] = resource.scopeLogs[0]!.logRecords;
@@ -126,5 +133,60 @@ describe("Firehose helpers", () => {
     expect(logGroupService("/aws/ecs/containerinsights/ResponderParis-ClusterEB0386A7-EatE0wgcbXoE/performance")).toBe("ResponderParis-Cluster");
     expect(logGroupService("ResponderParis-ApiLogs3D05D88B-d72MaarPZDKM")).toBe("ResponderParis-ApiLogs");
     expect(logGroupService("")).toBe("aws");
+  });
+});
+
+describe("decodeCloudWatchLogsRecords", () => {
+  function message(text: string) {
+    return {
+      logEvents: [{ id: "1", message: text, timestamp: 1_760_000_000_000 }],
+      logGroup: "/aws/lambda/checkout",
+      logStream: "stream",
+      messageType: "DATA_MESSAGE",
+      owner: "123456789012",
+    };
+  }
+
+  it("skips a record that decompresses past the record limit", async () => {
+    const request = { records: [cloudWatchRecord(message("x".repeat(4096))), cloudWatchRecord(message("small"))], requestId: "r" };
+
+    const result = await decodeCloudWatchLogsRecords(request, { maxRecordBytes: 1024, maxTotalBytes: 1024 * 1024 });
+
+    expect(result.skipped).toBe(1);
+    expect(result.messages.map((decoded) => decoded.logEvents[0]!.message)).toEqual(["small"]);
+  });
+
+  it("skips records once the request's decompressed total is used up", async () => {
+    const record = cloudWatchRecord(message("y".repeat(600)));
+    const request = { records: [record, record, record], requestId: "r" };
+
+    const result = await decodeCloudWatchLogsRecords(request, { maxRecordBytes: 1024, maxTotalBytes: 1600 });
+
+    expect(result.messages).toHaveLength(2);
+    expect(result.skipped).toBe(1);
+  });
+
+  it("skips a record with more events than one CloudWatch Logs batch holds", async () => {
+    const events = Array.from({ length: 10_001 }, (_, index) => ({ id: String(index), message: "m", timestamp: 1 }));
+    const record = cloudWatchRecord({ ...message("unused"), logEvents: events });
+
+    expect(await decodeCloudWatchLogsRecords({ records: [record], requestId: "r" })).toEqual({ messages: [], skipped: 1 });
+  });
+
+  it("counts a record refused for its size against the request's total", async () => {
+    const large = cloudWatchRecord(message("x".repeat(4096)));
+    const small = cloudWatchRecord(message("small"));
+
+    const result = await decodeCloudWatchLogsRecords({ records: [large, large, small], requestId: "r" }, { maxRecordBytes: 1024, maxTotalBytes: 2048 });
+
+    expect(result).toEqual({ messages: [], skipped: 3 });
+  });
+
+  it("limits each record to 8 MiB decompressed by default", async () => {
+    const large = cloudWatchRecord(message("z".repeat(9 * 1024 * 1024)));
+
+    const result = await decodeCloudWatchLogsRecords({ records: [large], requestId: "r" });
+
+    expect(result).toEqual({ messages: [], skipped: 1 });
   });
 });
