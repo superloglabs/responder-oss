@@ -272,12 +272,20 @@ function builtinGroup(type: string, message: string | null | undefined): string 
 // occurrence. Anthropic-style envelopes are unwrapped first so the per-request
 // `request_id` doesn't leak into the bucket.
 const MESSAGE_BUCKET_MAX = 160;
+// An address's local part is at most 64 characters and its domain at most
+// 255. The bounds keep the search linear in the text's length, and it only
+// runs on runs of address characters that contain `@`.
+const EMAIL = /\b[\w.+-]{1,64}@[\w.-]{1,255}\.\w+\b/g;
+
+export function redactEmails(s: string): string {
+  return s.replace(/[\w.+@-]+/g, (run) => (run.includes("@") ? run.replace(EMAIL, "<email>") : run));
+}
 export function messageBucketFor(message: string | null | undefined): string {
   if (!message) return "";
   let s = unwrapAnthropicErrorMessage(message);
   s = s.replace(/https?:\/\/\S+/gi, "<url>");
   s = collapseRequestPaths(s);
-  s = s.replace(/\b[\w.+-]+@[\w.-]+\.\w+\b/g, "<email>");
+  s = redactEmails(s);
   s = s.replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, "<uuid>");
   s = s.replace(/\b\d{4}-\d{2}-\d{2}[T ][\d:.]+Z?(?:[+-]\d{2}:?\d{2})?\b/g, "<ts>");
   s = s.replace(/\b(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?\b/g, "<ip>");
@@ -362,7 +370,7 @@ export function normalizeMessage(body: string): string {
   let s = body;
   s = s.replace(/https?:\/\/\S+/gi, "<url>");
   s = collapseRequestPaths(s);
-  s = s.replace(/\b[\w.+-]+@[\w.-]+\.\w+\b/g, "<email>");
+  s = redactEmails(s);
   s = s.replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, "<uuid>");
   s = s.replace(/\b\d{4}-\d{2}-\d{2}[T ][\d:.]+Z?(?:[+-]\d{2}:?\d{2})?\b/g, "<ts>");
   s = s.replace(/\b(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?\b/g, "<ip>");
@@ -385,7 +393,7 @@ function normalizePsycopgError(body: string): string | null {
   let s = `postgres.errors.${headline.type}: ${headline.message}`;
   s = redactPostgresHeadlineValues(s);
   s = s.replace(/https?:\/\/\S+/gi, "<url>");
-  s = s.replace(/\b[\w.+-]+@[\w.-]+\.\w+\b/g, "<email>");
+  s = redactEmails(s);
   s = s.replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, "<uuid>");
   s = s.replace(/\b\d{4}-\d{2}-\d{2}[T ][\d:.]+Z?(?:[+-]\d{2}:?\d{2})?\b/g, "<ts>");
   s = s.replace(/\b(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?\b/g, "<ip>");
@@ -661,27 +669,38 @@ function isThreeDigits(value: string): boolean {
 // innermost frame first, without frames that carry no location. A frame
 // repeated by recursion counts once.
 function parseFrames(stacktrace: string): Frame[] {
-  const frames = /^\s*File "/m.test(stacktrace) ? parsePythonFrames(stacktrace) : parseJavaScriptFrames(stacktrace);
+  const lines = stacktrace.split("\n");
+  const frames = lines.some((line) => line.trimStart().startsWith('File "')) ? parsePythonFrames(lines) : parseJavaScriptFrames(lines);
   return frames.filter((frame, index) => {
     const previous = frames[index - 1];
     return !previous || previous.fn !== frame.fn || previous.path !== frame.path;
   });
 }
 
+// Stacks are read up to this many lines from the innermost frame, and longer
+// lines are not frames. This bounds the work for a stack of any size.
+export const MAXIMUM_STACK_LINES = 512;
+export const MAXIMUM_FRAME_LINE_LENGTH = 4_096;
+
+export function frameLines(lines: string[], innermost: "first" | "last"): string[] {
+  const kept = innermost === "first" ? lines.slice(0, MAXIMUM_STACK_LINES) : lines.slice(-MAXIMUM_STACK_LINES);
+  return kept.filter((line) => line.length <= MAXIMUM_FRAME_LINE_LENGTH);
+}
+
 // Python prints the innermost frame last.
-export function parsePythonFrames(stacktrace: string): Frame[] {
+export function parsePythonFrames(stacktrace: string | string[]): Frame[] {
   const out: Frame[] = [];
-  for (const raw of stacktrace.split("\n")) {
+  for (const raw of frameLines(typeof stacktrace === "string" ? stacktrace.split("\n") : stacktrace, "last")) {
     const match = raw.trim().match(/^File "(.+?)", line \d+(?:, in (.+))?$/);
     if (match) out.push({ fn: match[2]?.trim() || null, path: match[1] ?? "" });
   }
   return out.reverse();
 }
 
-function parseJavaScriptFrames(stacktrace: string): Frame[] {
+function parseJavaScriptFrames(lines: string[]): Frame[] {
   const out: Frame[] = [];
-  const v8 = /^\s*at /m.test(stacktrace);
-  for (const raw of stacktrace.split("\n")) {
+  const v8 = lines.some((line) => line.trimStart().startsWith("at "));
+  for (const raw of frameLines(lines, "first")) {
     const line = raw.trim();
     // Firefox follows a callback's frames with where it was registered, as
     // `EventListener.handleEvent*fn@...` or `setTimeout handler*fn@...`.
@@ -703,8 +722,8 @@ function parseJavaScriptFrame(line: string): Frame | null {
     const body = line.slice(3);
     // Code run by eval has no file of its own.
     if (body.includes("(eval at ")) return null;
-    const withFn = body.match(/^(.+?)\s+\((?:address at )?(.+?)(?::\d+){1,2}\)$/);
-    if (withFn) return { fn: javaScriptFunction(withFn[1]), path: withFn[2] ?? "" };
+    const withFn = v8FrameWithFunction(body, { columns: "one or two" });
+    if (withFn) return { fn: javaScriptFunction(withFn.fn), path: withFn.path };
     const bare = body.match(/^(?:address at )?(.+?):\d+:\d+$/);
     return bare ? { fn: null, path: bare[1] ?? "" } : null;
   }
@@ -769,10 +788,7 @@ function normalizePath(p: string): string {
   // Next.js/Turbopack puts content hashes in generated chunk filenames. The
   // same source stack can therefore acquire a different path identity across
   // chunks (or builds), which must not create a fresh issue fingerprint.
-  out = out.replace(
-    /(\/(?:\.next|_next)\/(?:server|static)\/(?:[^/]+\/)*[^/]*?)[0-9a-f]{8,}((?:\._)?\.js)$/gi,
-    "$1<hash>$2",
-  );
+  out = replaceNextChunkHash(out);
   out = removeBundleHash(out);
   out = out.replace(/^.*?\/((?:apps|packages|src|app|lib|pages)\/.*)$/, "$1");
   return out;
@@ -797,4 +813,76 @@ function removeBundleHash(path: string): string {
   // An eight-letter word such as `polyfill` or `Settings` is a name, not a hash.
   const looksGenerated = /\d/.test(token!) || (/[a-z]/.test(token!) && /[A-Z]/.test(token!) && !/^[A-Z][a-z]+$/.test(token!));
   return looksGenerated ? `${directory}${name}-<hash>${suffix}` : path;
+}
+
+// `at fn (path:line:col)` without a regular expression, which would take time
+// quadratic in the line's length. The function is the text before the first
+// whitespace followed by `(`; the path is the shortest text after it that is
+// followed by the line and column at the end.
+export function v8FrameWithFunction(
+  body: string,
+  options: { addressAt?: boolean; columns: "one or two" | "two" },
+): { fn: string; path: string } | null {
+  if (!body.endsWith(")")) return null;
+  let open = -1;
+  let fnEnd = -1;
+  for (let index = 1; index < body.length && open < 0; index += 1) {
+    if (!isWhitespace(body[index])) continue;
+    let end = index;
+    while (end < body.length && isWhitespace(body[end])) end += 1;
+    if (body[end] === "(") {
+      fnEnd = index;
+      open = end;
+    }
+    index = end - 1;
+  }
+  if (open < 0) return null;
+  const location = (start: number): number => {
+    const pattern = options.columns === "two" ? /:\d+:\d+\)$/g : /(?::\d+){1,2}\)$/g;
+    pattern.lastIndex = start + 1;
+    return pattern.exec(body)?.index ?? -1;
+  };
+  const addressAt = "address at ";
+  const candidates = options.addressAt !== false && body.startsWith(addressAt, open + 1)
+    ? [open + 1 + addressAt.length, open + 1]
+    : [open + 1];
+  for (const start of candidates) {
+    const end = location(start);
+    if (end > start) return { fn: body.slice(0, fnEnd), path: body.slice(start, end) };
+  }
+  return null;
+}
+
+const NEXT_CHUNK_DIRECTORY = /\/(?:\.next|_next)\/(?:server|static)\//gi;
+
+function isHexDigit(char: string | undefined): boolean {
+  if (!char) return false;
+  const code = char.charCodeAt(0);
+  return (code >= 48 && code <= 57) || (code >= 65 && code <= 70) || (code >= 97 && code <= 102);
+}
+
+// Replaces the content hash at the end of a Next.js chunk's file name, so
+// `/_next/static/chunks/page-0123abcd.js` becomes `page-<hash>.js`. The hash
+// is the run of eight or more hex digits right before `._.js` or `.js`.
+export function replaceNextChunkHash(path: string): string {
+  const slash = path.lastIndexOf("/");
+  // The chunk sits in `/_next/static/` or `/.next/server/`, or in a folder
+  // below it, and no folder name on the way is empty.
+  let directoryEnd = -1;
+  for (const directory of path.matchAll(NEXT_CHUNK_DIRECTORY)) {
+    const end = directory.index + directory[0].length;
+    if (end <= slash + 1) directoryEnd = end;
+  }
+  if (directoryEnd < 0 || path.slice(directoryEnd - 1, slash + 1).includes("//")) return path;
+  const file = path.slice(slash + 1);
+  for (const suffix of ["._.js", ".js"]) {
+    if (file.length < suffix.length || file.slice(-suffix.length).toLowerCase() !== suffix) continue;
+    const stem = file.slice(0, -suffix.length);
+    let start = stem.length;
+    while (start > 0 && isHexDigit(stem[start - 1])) start -= 1;
+    if (start < stem.length && stem.length - start >= 8) {
+      return `${path.slice(0, slash + 1)}${stem.slice(0, start)}<hash>${file.slice(-suffix.length)}`;
+    }
+  }
+  return path;
 }

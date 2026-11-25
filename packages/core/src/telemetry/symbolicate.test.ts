@@ -144,3 +144,24 @@ describe("symbolicateCandidates", () => {
     expect(await symbolicateCandidates([plain, unknown, broken], load)).toEqual([plain, unknown, broken]);
   });
 });
+
+describe("symbolicateStack on a crafted stack", () => {
+  it("reads long and many lines quickly and still maps the frames it can", () => {
+    const error = errorFrom("chromium", "onerror");
+    const junk = `    at${" ".repeat(4_000)}\n`.repeat(300);
+    const started = performance.now();
+    const symbolicated = symbolicateStack(error.stacktrace, error.debugIds, maps);
+    const crafted = symbolicateStack(`${junk}${error.stacktrace}`, error.debugIds, maps);
+    expect(performance.now() - started).toBeLessThan(1_000);
+    expect(symbolicated).toEqual(expect.any(String));
+    expect(symbolicated).not.toBe(error.stacktrace);
+    expect(crafted).toBe(`${junk}${symbolicated}`);
+  });
+
+  it("leaves frames past the first 512 lines as they are", () => {
+    const error = errorFrom("chromium", "onerror");
+    const filler = "    not a frame\n".repeat(512);
+
+    expect(symbolicateStack(`${filler}${error.stacktrace}`, error.debugIds, maps)).toBeNull();
+  });
+});

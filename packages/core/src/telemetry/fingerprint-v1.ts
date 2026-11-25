@@ -1,5 +1,14 @@
 import { createHash } from "node:crypto";
-import { extractPsycopgHeadline, normalizeMessage, parsePythonFrames, pythonTracebackException } from "./fingerprint.js";
+import {
+  extractPsycopgHeadline,
+  MAXIMUM_FRAME_LINE_LENGTH,
+  normalizeMessage,
+  parsePythonFrames,
+  pythonTracebackException,
+  redactEmails,
+  replaceNextChunkHash,
+  v8FrameWithFunction,
+} from "./fingerprint.js";
 
 // The v1 fingerprint, frozen. An occurrence whose current fingerprint has no
 // issue yet takes over the issue its v1 fingerprint named, so the change to
@@ -31,8 +40,8 @@ export function fingerprintV1(input: {
   message?: string | null;
 }): string {
   const type = input.type || "Error";
-  const stacktrace = input.stacktrace ?? "";
-  const frames = /^\s*File "/m.test(stacktrace) ? parsePythonFrames(stacktrace) : parseJavaScriptFrames(stacktrace);
+  const lines = (input.stacktrace ?? "").split("\n");
+  const frames = lines.some((line) => line.trimStart().startsWith('File "')) ? parsePythonFrames(lines) : parseJavaScriptFrames(lines);
   const userFrames = frames.filter((frame) => !IGNORE_PATH.some((re) => re.test(frame.path))).slice(0, TOP_N_FRAMES);
   const picked = userFrames.length > 0 ? userFrames : frames.slice(0, TOP_N_FRAMES);
   const normalized = picked.map((frame) => {
@@ -71,7 +80,7 @@ function messageBucketFor(message: string | null | undefined): string {
   let s = envelope?.[1] ? envelope[1].replace(/\\"/g, '"').replace(/\\\\/g, "\\") : message;
   s = s.replace(/https?:\/\/\S+/gi, "<url>");
   s = s.replace(/(^|\s)\/\S*/g, "$1<path>");
-  s = s.replace(/\b[\w.+-]+@[\w.-]+\.\w+\b/g, "<email>");
+  s = redactEmails(s);
   s = s.replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi, "<uuid>");
   s = s.replace(/\b\d{4}-\d{2}-\d{2}[T ][\d:.]+Z?(?:[+-]\d{2}:?\d{2})?\b/g, "<ts>");
   s = s.replace(/\b(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?\b/g, "<ip>");
@@ -82,15 +91,17 @@ function messageBucketFor(message: string | null | undefined): string {
   return s.length > 160 ? s.slice(0, 160) : s;
 }
 
-function parseJavaScriptFrames(stacktrace: string): Frame[] {
+function parseJavaScriptFrames(lines: string[]): Frame[] {
   const out: Frame[] = [];
-  for (const raw of stacktrace.split("\n")) {
+  // The frozen fingerprint reads every line. Only lines too long to be frames
+  // are skipped, which bounds the work on each line.
+  for (const raw of lines.filter((line) => line.length <= MAXIMUM_FRAME_LINE_LENGTH)) {
     const line = raw.trim();
     if (!line.startsWith("at ")) continue;
     const body = line.slice(3);
-    const withFn = body.match(/^(.+?)\s+\((.+?):\d+:\d+\)$/);
+    const withFn = v8FrameWithFunction(body, { addressAt: false, columns: "two" });
     if (withFn) {
-      out.push({ fn: withFn[1] ?? null, path: withFn[2] ?? "" });
+      out.push(withFn);
       continue;
     }
     const bare = body.match(/^(.+?):\d+:\d+$/);
@@ -111,6 +122,6 @@ function normalizePath(p: string): string {
     )
     .replace(/(\/\.expo-internal\/)[^/]+\.(?:js)?bundle$/i, "$1<bundle>");
   out = out.replace(/(\/(?:\.next|_next)\/(?:server|static)\/(?:[^/]+\/)*[^/?#]+(?:\._)?\.js)(?:[?#].*)$/gi, "$1");
-  out = out.replace(/(\/(?:\.next|_next)\/(?:server|static)\/(?:[^/]+\/)*[^/]*?)[0-9a-f]{8,}((?:\._)?\.js)$/gi, "$1<hash>$2");
+  out = replaceNextChunkHash(out);
   return out.replace(/^.*?\/((?:apps|packages|src|app|lib|pages)\/.*)$/, "$1");
 }
