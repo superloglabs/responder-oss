@@ -247,6 +247,14 @@ investigation credits.
   even if it goes past a balance. Operator replays are not charged.
 - Every member can see billing. Only workspace owners and admins can start a
   checkout, change or cancel the plan, or open the payment portal.
+- Failed work is charged for what it used, because what runs in its sandbox
+  can end it on purpose. Usage is waived only when the failure was
+  Responder's: the model provider failed or could not be reached, or refused
+  Responder's own credentials, or a stopping worker handed an automation
+  turn to the next worker. For automation runs the model broker records
+  such a failure on the turn's grant, outside the sandbox. A rate limit or a
+  rejected request does not count. Pull request work, which runs no
+  workspace code, is not charged when it fails.
 - On plans without machine hours, the billing page splits the period's charges
   into model usage and sandbox time from these rows. Autumn's balance remains
   the total.

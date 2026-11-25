@@ -41,6 +41,7 @@ import type {
 } from "@responder/core/automations/transcript";
 import {
   automationModelBrokerGrantAllowanceExhausted,
+  automationModelBrokerGrantProviderFailed,
   createAutomationModelBrokerGrant,
   revokeAutomationModelBrokerGrant,
   moveAutomationModelBrokerGrantToResponderInference,
@@ -189,6 +190,7 @@ export interface AutomationRunDependencies {
   getSkills: typeof getAutomationRuntimeSkills;
   getMemories: typeof getRuntimeWorkspaceMemories;
   grantAllowanceExhausted: typeof automationModelBrokerGrantAllowanceExhausted;
+  grantProviderFailed: typeof automationModelBrokerGrantProviderFailed;
   hasCapability: typeof organizationHasCapability;
   hasFinishedTurn: typeof automationRunHasFinishedTurn;
   hasNewMessages: typeof automationRunHasNewMessages;
@@ -256,6 +258,7 @@ export const defaultAutomationRunDependencies: AutomationRunDependencies = {
   getSkills: getAutomationRuntimeSkills,
   getMemories: getRuntimeWorkspaceMemories,
   grantAllowanceExhausted: automationModelBrokerGrantAllowanceExhausted,
+  grantProviderFailed: automationModelBrokerGrantProviderFailed,
   hasCapability: organizationHasCapability,
   hasFinishedTurn: automationRunHasFinishedTurn,
   hasNewMessages: automationRunHasNewMessages,
@@ -1526,11 +1529,17 @@ export async function processAutomationRun(
       : allowanceExhausted
         ? allowanceExhausted.message
       : safeInvestigationError(organizationRefusal ?? error, environment);
-    // A turn that failed or was handed back through Responder's fault is not
-    // charged. A run that reached its own runtime limit or allowance is. The
-    // waiver comes first so a failed status write cannot leave the turn
-    // charged.
-    if (!cancelled && !leaseLost && !timedOut && !allowanceExhausted) {
+    // A failed turn is charged for what it used, since what runs in the
+    // sandbox can end the turn on purpose. Only a turn handed back on a
+    // worker stop, or one whose model provider failed on Responder's side as
+    // the broker recorded, is not. The waiver comes first so a failed status
+    // write cannot leave such a turn charged.
+    const responderFault = handedBack || (grantId !== undefined && await dependencies.grantProviderFailed({
+      grantId,
+      organizationId: run.organizationId,
+      runId: run.runId,
+    }).catch(() => false));
+    if (responderFault && !cancelled && !leaseLost && !timedOut && !allowanceExhausted) {
       await dependencies.waiveUsage({
         leaseId: run.leaseId,
         runId: run.runId,

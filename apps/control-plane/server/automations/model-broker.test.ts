@@ -32,6 +32,7 @@ function brokerRoutes(overrides: Partial<NonNullable<BrokerDependencies>>) {
     gatewayApiKey: () => "gateway-secret",
     getPricing: vi.fn().mockResolvedValue({ input: "0.000001", output: "0.000002" }),
     markAllowanceExhausted: vi.fn().mockResolvedValue(undefined),
+    markProviderFailed: vi.fn().mockResolvedValue(undefined),
     providerFetch: vi.fn(),
     recordUsage: vi.fn().mockResolvedValue(undefined),
     releaseInference: vi.fn().mockResolvedValue(undefined),
@@ -450,6 +451,106 @@ describe("Responder-funded automation inference", () => {
     expect(response.status).toBe(402);
     expect(providerFetch).not.toHaveBeenCalled();
     expect(markAllowanceExhausted).toHaveBeenCalledWith(claim.grantId);
+  });
+
+  describe("provider failures", () => {
+    async function send(overrides: Partial<NonNullable<BrokerDependencies>>) {
+      const markProviderFailed = vi.fn().mockResolvedValue(undefined);
+      const routes = brokerRoutes({ markProviderFailed, ...overrides });
+      const response = await routes.request("/v1/responses", {
+        body: JSON.stringify({ input: "hello", model: "gpt-5.1-codex" }),
+        headers: {
+          authorization: `Bearer ${bearerToken()}`,
+          "content-type": "application/json",
+        },
+        method: "POST",
+      });
+      return { markProviderFailed, response };
+    }
+
+    const responderClaim = { ...claim, apiKey: null, inferenceSource: "responder" as const };
+
+    it("marks the grant when the provider fails on its side", async () => {
+      const { markProviderFailed, response } = await send({
+        claimGrant: vi.fn().mockResolvedValue(claim),
+        providerFetch: vi.fn().mockResolvedValue(new Response("overloaded", { status: 503 })),
+      });
+
+      expect(response.status).toBe(503);
+      expect(markProviderFailed).toHaveBeenCalledWith(claim.grantId);
+    });
+
+    it("marks the grant when the provider cannot be reached", async () => {
+      const { markProviderFailed, response } = await send({
+        claimGrant: vi.fn().mockResolvedValue(claim),
+        providerFetch: vi.fn().mockRejectedValue(new TypeError("fetch failed")),
+      });
+
+      expect(response.status).toBe(502);
+      expect(markProviderFailed).toHaveBeenCalledWith(claim.grantId);
+    });
+
+    it("marks the grant when Responder's gateway refuses its own credentials", async () => {
+      const { markProviderFailed, response } = await send({
+        claimGrant: vi.fn().mockResolvedValue(responderClaim),
+        providerFetch: vi.fn().mockResolvedValue(new Response("payment required", { status: 402 })),
+      });
+
+      expect(response.status).toBe(402);
+      expect(markProviderFailed).toHaveBeenCalledWith(claim.grantId);
+    });
+
+    it("marks the grant when the broker cannot serve Responder-funded requests", async () => {
+      const { markProviderFailed, response } = await send({
+        claimGrant: vi.fn().mockResolvedValue(responderClaim),
+        gatewayApiKey: () => undefined,
+        providerFetch: vi.fn(),
+      });
+
+      expect(response.status).toBe(503);
+      expect(markProviderFailed).toHaveBeenCalledWith(claim.grantId);
+    });
+
+    it("does not mark the grant for a rejected request", async () => {
+      const { markProviderFailed, response } = await send({
+        claimGrant: vi.fn().mockResolvedValue(responderClaim),
+        providerFetch: vi.fn().mockResolvedValue(new Response("bad request", { status: 400 })),
+      });
+
+      expect(response.status).toBe(400);
+      expect(markProviderFailed).not.toHaveBeenCalled();
+    });
+
+    it("does not mark the grant when the provider rate limits it", async () => {
+      const { markProviderFailed, response } = await send({
+        claimGrant: vi.fn().mockResolvedValue(responderClaim),
+        providerFetch: vi.fn().mockResolvedValue(new Response("slow down", { status: 429 })),
+      });
+
+      expect(response.status).toBe(429);
+      expect(markProviderFailed).not.toHaveBeenCalled();
+    });
+
+    it("does not mark the grant when the organization's own key is refused", async () => {
+      const { markProviderFailed, response } = await send({
+        claimGrant: vi.fn().mockResolvedValue(claim),
+        providerFetch: vi.fn().mockResolvedValue(new Response("invalid key", { status: 401 })),
+      });
+
+      expect(response.status).toBe(401);
+      expect(markProviderFailed).not.toHaveBeenCalled();
+    });
+
+    it("does not mark the grant when the allowance is used up", async () => {
+      const { markProviderFailed, response } = await send({
+        claimGrant: vi.fn().mockResolvedValue(responderClaim),
+        providerFetch: vi.fn(),
+        reserveInference: vi.fn().mockResolvedValue(null),
+      });
+
+      expect(response.status).toBe(402);
+      expect(markProviderFailed).not.toHaveBeenCalled();
+    });
   });
 
   it("fails Responder-funded requests when AI Gateway is not configured", async () => {

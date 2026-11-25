@@ -369,6 +369,37 @@ export async function automationModelBrokerGrantAllowanceExhausted(input: {
   return rows.length > 0;
 }
 
+export async function markAutomationModelBrokerGrantProviderFailed(
+  grantId: string,
+  now = new Date(),
+): Promise<void> {
+  await getDatabase()
+    .update(automationModelBrokerGrants)
+    .set({ providerFailedAt: now })
+    .where(and(
+      eq(automationModelBrokerGrants.id, grantId),
+      isNull(automationModelBrokerGrants.providerFailedAt),
+    ));
+}
+
+export async function automationModelBrokerGrantProviderFailed(input: {
+  grantId: string;
+  organizationId: string;
+  runId: string;
+}): Promise<boolean> {
+  const rows = await getDatabase()
+    .select({ id: automationModelBrokerGrants.id })
+    .from(automationModelBrokerGrants)
+    .where(and(
+      eq(automationModelBrokerGrants.id, input.grantId),
+      eq(automationModelBrokerGrants.organizationId, input.organizationId),
+      eq(automationModelBrokerGrants.runId, input.runId),
+      isNotNull(automationModelBrokerGrants.providerFailedAt),
+    ))
+    .limit(1);
+  return rows.length > 0;
+}
+
 export async function purgeAutomationModelBrokerGrants(
   now = new Date(),
 ): Promise<number> {

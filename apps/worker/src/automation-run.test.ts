@@ -126,6 +126,7 @@ function dependencies() {
     getSkills: vi.fn<AutomationRunDependencies["getSkills"]>().mockResolvedValue([]),
     getMemories: vi.fn<AutomationRunDependencies["getMemories"]>().mockResolvedValue([]),
     grantAllowanceExhausted: vi.fn().mockResolvedValue(false),
+    grantProviderFailed: vi.fn<AutomationRunDependencies["grantProviderFailed"]>().mockResolvedValue(false),
     hasNewMessages: vi.fn().mockResolvedValue(false),
     installDependencies: vi.fn<AutomationRunDependencies["installDependencies"]>().mockResolvedValue([]),
     heartbeatRun: vi.fn().mockResolvedValue(true),
@@ -2622,11 +2623,67 @@ describe("automation run processor", () => {
       expect.any(AutomationHarnessError),
       expect.objectContaining({ requestId: runId }),
     );
+    // What runs in the sandbox can end the harness, so the turn is charged.
+    expect(deps.grantProviderFailed).toHaveBeenCalledWith({
+      grantId: "71717171-7171-4171-8171-717171717171",
+      organizationId,
+      runId,
+    });
+    expect(deps.waiveUsage).not.toHaveBeenCalled();
+  });
+
+  it("waives a failed turn's usage when the model provider failed on Responder's side", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    deps.selectCredential.mockResolvedValue(null);
+    deps.runCodex.mockRejectedValue(new AutomationHarnessError("Codex automation harness failed", ""));
+    deps.grantProviderFailed.mockResolvedValue(true);
+
+    await processAutomationRun("job-1", {
+      kind: "automation_run",
+      queuedAt: "2026-09-22T19:00:00.000Z",
+      runId,
+    }, process.env, deps);
+
     expect(deps.waiveUsage).toHaveBeenCalledWith({
       leaseId: claimedRun().leaseId,
       runId,
       since: new Date("2026-09-22T18:59:59.000Z"),
     });
+  });
+
+  it("charges a failed turn whose provider failure cannot be read", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    deps.runCodex.mockRejectedValue(new AutomationHarnessError("Codex automation harness failed", ""));
+    deps.grantProviderFailed.mockRejectedValue(new Error("database unavailable"));
+
+    await processAutomationRun("job-1", {
+      kind: "automation_run",
+      queuedAt: "2026-09-22T19:00:00.000Z",
+      runId,
+    }, process.env, deps);
+
+    expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({ status: "failed" }));
+    expect(deps.waiveUsage).not.toHaveBeenCalled();
+  });
+
+  it("charges a turn the organization's own subscription refused", async () => {
+    vi.stubEnv("DAYTONA_API_KEY", "sandbox-key");
+    vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
+    const deps = dependencies();
+    deps.runCodex.mockRejectedValue(new AutomationSubscriptionRefusalError("usage limit", "", { workStarted: true }));
+
+    await processAutomationRun("job-1", {
+      kind: "automation_run",
+      queuedAt: "2026-09-22T19:00:00.000Z",
+      runId,
+    }, process.env, deps);
+
+    expect(deps.setStatus).toHaveBeenCalledWith(expect.objectContaining({ failureCategory: "subscription_refused" }));
+    expect(deps.waiveUsage).not.toHaveBeenCalled();
   });
 
   it("records a refusal the organization can fix apart from Responder failures", async () => {
@@ -2705,6 +2762,7 @@ describe("automation run processor", () => {
     vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
     const deps = dependencies();
     deps.runCodex.mockRejectedValue(new AutomationHarnessError("Codex automation harness failed", ""));
+    deps.grantProviderFailed.mockResolvedValue(true);
     deps.setStatus.mockRejectedValue(new Error("database unavailable"));
 
     await processAutomationRun("job-1", {
@@ -2721,6 +2779,7 @@ describe("automation run processor", () => {
     vi.stubEnv("RESPONDER_PUBLIC_URL", "https://responder.example");
     const deps = dependencies();
     deps.runCodex.mockRejectedValue(new AutomationHarnessError("Codex automation harness failed", ""));
+    deps.grantProviderFailed.mockResolvedValue(true);
     const waiveError = new Error("database unavailable");
     deps.waiveUsage.mockRejectedValue(waiveError);
 

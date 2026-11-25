@@ -27,6 +27,7 @@ import { inferenceCharge } from "../../../../packages/core/src/billing/usage-cha
 import {
   claimAutomationModelBrokerGrant,
   markAutomationModelBrokerGrantAllowanceExhausted,
+  markAutomationModelBrokerGrantProviderFailed,
   type AutomationModelBrokerClaim,
 } from "../../../../packages/core/src/db/automation-model-broker.js";
 
@@ -58,6 +59,7 @@ interface AutomationModelBrokerDependencies {
   gatewayApiKey(): string | undefined;
   getPricing: typeof getAIGatewayModelPricing;
   markAllowanceExhausted: typeof markAutomationModelBrokerGrantAllowanceExhausted;
+  markProviderFailed: typeof markAutomationModelBrokerGrantProviderFailed;
   providerFetch: ProviderFetch;
   recordUsage: typeof recordBrokeredModelUsage;
   releaseInference: typeof releaseResponderInference;
@@ -70,6 +72,7 @@ const defaultDependencies: AutomationModelBrokerDependencies = {
   gatewayApiKey: () => process.env.AI_GATEWAY_API_KEY?.trim() || undefined,
   getPricing: getAIGatewayModelPricing,
   markAllowanceExhausted: markAutomationModelBrokerGrantAllowanceExhausted,
+  markProviderFailed: markAutomationModelBrokerGrantProviderFailed,
   providerFetch: fetch,
   recordUsage: recordBrokeredModelUsage,
   releaseInference: releaseResponderInference,
@@ -565,6 +568,27 @@ async function claimGrant(
   );
 }
 
+// A failed turn is charged unless the failure was Responder's, so the broker
+// records the failures that are: the provider or the broker itself failing,
+// and the gateway refusing Responder's own credentials. A refused request
+// and a rate limit are not, since a request the run sends can cause either.
+function providerFailureIsResponders(
+  status: number,
+  inferenceSource: AutomationModelBrokerClaim["inferenceSource"],
+): boolean {
+  if (status >= 500) return true;
+  return inferenceSource === "responder" && [401, 402, 403].includes(status);
+}
+
+function markProviderFailed(
+  grant: AutomationModelBrokerClaim,
+  dependencies: AutomationModelBrokerDependencies,
+): void {
+  void dependencies.markProviderFailed(grant.grantId).catch((error: unknown) => {
+    logBrokerError("automation_model_provider_failure_mark_failed", error, grant);
+  });
+}
+
 function releaseReservation(
   reservationId: string,
   grant: AutomationModelBrokerClaim,
@@ -624,10 +648,15 @@ async function forward(
   } catch (error) {
     if (reservationId) releaseReservation(reservationId, grant, dependencies);
     if (error instanceof BrokerRequestError) {
+      if (error.status === 503) markProviderFailed(grant, dependencies);
       return context.json({ error: error.message }, error.status);
     }
     logBrokerError("automation_model_provider_request_failed", error, grant);
+    markProviderFailed(grant, dependencies);
     return context.json({ error: "Model provider request failed" }, 502);
+  }
+  if (!providerResponse.ok && providerFailureIsResponders(providerResponse.status, grant.inferenceSource)) {
+    markProviderFailed(grant, dependencies);
   }
   // A failed provider response is not metered, so it releases its reservation.
   if (reservationId && !providerResponse.ok) {

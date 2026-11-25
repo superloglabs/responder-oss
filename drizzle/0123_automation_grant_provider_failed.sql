@@ -1,0 +1,1 @@
+ALTER TABLE "automation_model_broker_grants" ADD COLUMN "provider_failed_at" timestamp with time zone;

@@ -1,4 +1,5 @@
 import type { Usage } from "@openai/agents";
+import { APIConnectionError, APIError } from "openai";
 import { checkWorkAllowance } from "@responder/core/billing/autumn";
 import {
   organizationUsesUsageBilling,
@@ -34,6 +35,27 @@ export class UsageAllowanceExhaustedError extends Error {
     );
     this.name = "UsageAllowanceExhaustedError";
   }
+}
+
+// Whether an agent run failed because its model provider failed on
+// Responder's side: an outage, a connection that could not be made, or a
+// refusal of Responder's own credentials. A failed run is otherwise charged
+// for what it used, since what runs in its sandbox can end it on purpose.
+export function modelProviderFailedOnResponderSide(error: unknown): boolean {
+  const pending = [error];
+  const seen = new Set<unknown>();
+  for (let cause = pending.pop(); cause !== undefined; cause = pending.pop()) {
+    if (seen.has(cause) || seen.size >= 32) continue;
+    seen.add(cause);
+    if (cause instanceof APIConnectionError) return true;
+    if (cause instanceof APIError && typeof cause.status === "number" &&
+      (cause.status >= 500 || [401, 402, 403].includes(cause.status))) {
+      return true;
+    }
+    if (cause instanceof AggregateError) pending.push(...cause.errors);
+    if (cause instanceof Error && cause.cause !== undefined) pending.push(cause.cause);
+  }
+  return false;
 }
 
 // Stops billable pull request work before its sandbox starts when machine
