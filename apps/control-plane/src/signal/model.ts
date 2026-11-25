@@ -70,6 +70,19 @@ export interface SignalSlackChannel {
   channelId: string;
 }
 
+// Coding agents a finding's Slack message opens with its prompt filled in,
+// and the Claude Code apps Open in Claude can start.
+export const signalCodingAgents = ["claude", "codex", "conductor", "capy", "cmux", "replicas"] as const;
+export type SignalCodingAgent = (typeof signalCodingAgents)[number];
+export type SignalClaudeSurface = "terminal" | "desktop" | "web";
+
+export interface SignalCodingAgents {
+  // In button order. Agents get a button while they fit on one line with
+  // the other buttons; the rest go in a menu at the end of it.
+  agents: SignalCodingAgent[];
+  claudeSurface: SignalClaudeSurface;
+}
+
 export interface SignalSettings {
   enabled: boolean;
   // True once Signal has been turned on, even if it is off now.
@@ -92,6 +105,7 @@ export interface SignalSettings {
   retentionDays: SignalRetentionDays | null;
   // The Jira project findings are filed in, or null when Jira is off.
   jira: SignalJiraSettings | null;
+  codingAgents: SignalCodingAgents;
   // Whether a Replicas automation webhook is saved, which adds Send to
   // Replicas to findings in Slack. The URL itself is never sent back.
   replicas: { connected: boolean };
@@ -215,6 +229,7 @@ export function withSettingsDefaults(settings: Partial<SignalSettings> & Pick<Si
     slackScan: settings.slackScan ?? { enabled: false, channels: [] },
     retentionDays: settings.retentionDays ?? null,
     jira: settings.jira ?? null,
+    codingAgents: settings.codingAgents ?? { agents: ["claude", "codex"], claudeSurface: "terminal" },
     replicas: settings.replicas ?? { connected: false },
     discord: settings.discord ?? { connected: false },
     delivery: settings.delivery ?? null,
@@ -236,6 +251,7 @@ export function settingsBody(settings: SignalSettings) {
     slackScan: settings.slackScan,
     retentionDays: settings.retentionDays,
     jira: settings.jira,
+    codingAgents: settings.codingAgents,
   };
 }
 
@@ -245,6 +261,11 @@ export async function fetchSignalSettings() {
 
 export async function saveSignalSettings(settings: SignalSettings) {
   return withSettingsDefaults(await signalJson<SignalSettings>("/settings", jsonBody("PUT", settingsBody(settings))));
+}
+
+// Posts a message with the buttons findings get to the findings channel.
+export async function sendSignalTestMessage() {
+  return signalJson<{ channelId: string }>("/settings/test-message", { method: "POST" });
 }
 
 // Saves the webhook URL of a Replicas automation, or removes it with null.

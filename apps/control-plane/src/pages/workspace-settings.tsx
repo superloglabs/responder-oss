@@ -11,6 +11,7 @@ import { useDocumentTitle } from "../use-document-title";
 import { useOrganizationCapabilities } from "../organization-capabilities";
 import { startSignalCheckout } from "../signal/model";
 import { handoffLabel, handoffTargets, type HandoffTarget } from "@responder/core/ide-handoff";
+import { codingAgentMarks } from "../coding-agent-marks";
 import {
   extensionTeamPlanDescription,
   teamPlanDescription,
@@ -586,11 +587,11 @@ export function WorkspaceSettingsPage() {
 }
 
 const handoffTargetDetails: Record<HandoffTarget, { description: string; logo: string | null; name: string }> = {
-  conductor: { description: "Opens a new workspace. Needs the Conductor app.", logo: "/coding-agents/conductor.png", name: "Conductor" },
-  claude: { description: "Opens a new terminal session. Needs Claude Code.", logo: "/coding-agents/claude.svg", name: "Claude Code" },
-  codex: { description: "Opens a new thread. Needs the Codex app.", logo: "/coding-agents/codex.svg", name: "Codex" },
-  t3: { description: "Opens a new thread. Needs the T3 Code app.", logo: "/coding-agents/t3.png", name: "T3 Code" },
-  capy: { description: "Opens a new thread in Capy.", logo: "/coding-agents/capy.svg", name: "Capy" },
+  conductor: codingAgentMarks.conductor,
+  claude: codingAgentMarks.claude,
+  codex: codingAgentMarks.codex,
+  t3: codingAgentMarks.t3,
+  capy: codingAgentMarks.capy,
   prompt: { description: "Shows the prompt in a code block only you can see.", logo: null, name: "Copy prompt" },
 };
 
