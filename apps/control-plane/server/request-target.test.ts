@@ -70,6 +70,9 @@ describe("request targets with dot segments", () => {
         "/api/webhooks/%2e%2e/health",
         "/api/webhooks/../health",
         "/api/ingest/%2E%2E/health",
+        "/api/%0A/./health",
+        "/api/webhooks/%0A/%2e%2e/%2e%2e/health",
+        "/api/%0D/./health",
       ]) {
         const response = await get(port, target);
         expect(response.status, target).toBe(400);
