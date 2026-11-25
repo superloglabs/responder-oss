@@ -73,6 +73,19 @@ async function socksConnect(
 }
 
 describe("egress proxy", () => {
+  it("keeps the process up when the listening server reports an error", async () => {
+    const proxy = await startEgressProxy({ allowLocal: true, name: "test" });
+    cleanups.push(() => proxy.close());
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    cleanups.push(() => warn.mockRestore());
+
+    // An accept failure such as EMFILE is emitted on the server after listen.
+    expect(() =>
+      proxy.server.emit("error", Object.assign(new Error("accept failed"), { code: "EMFILE" })),
+    ).not.toThrow();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("egress_proxy_server_error"));
+  });
+
   it("tunnels to an allowed destination", async () => {
     const echo = createServer((socket) => socket.pipe(socket));
     const echoPort = await listen(echo);

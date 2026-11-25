@@ -8,6 +8,9 @@ import { rpcMessages } from "./mcp-messages.js";
 const TOOL_CACHE_TTL_MS = 10 * 60 * 1_000;
 const MAX_CACHED_LISTINGS = 500;
 export const MAX_TOOL_PAGES = 10;
+// Listings stay cached for ten minutes, so the pages of one listing share one
+// size budget. Each response is also capped by the provider fetch.
+export const MAX_TOOL_LISTING_BYTES = 8 * 1024 * 1024;
 const PROTOCOL_VERSION = "2025-03-26";
 
 // Methods forwarded to the provider. tools/list is answered by the broker
@@ -54,12 +57,16 @@ async function readRpcResponse(
   response: Response,
   id: string,
   label: string,
+  onText?: (text: string) => void,
 ): Promise<z.infer<typeof rpcResponseSchema>> {
   if (!response.ok) {
+    await response.body?.cancel();
     throw new Error(`${label} returned HTTP ${response.status}`);
   }
+  const text = await response.text();
+  onText?.(text);
   const messages = rpcMessages(
-    await response.text(),
+    text,
     response.headers.get("content-type") ?? "",
   );
   for (const message of messages) {
@@ -152,6 +159,13 @@ async function listAllowedTools(server: ManagedMcpServer): Promise<McpTool[]> {
   await (await send({ method: "notifications/initialized" })).body?.cancel();
 
   const tools: McpTool[] = [];
+  let listingBytes = 0;
+  const countListingBytes = (text: string) => {
+    listingBytes += Buffer.byteLength(text);
+    if (listingBytes > MAX_TOOL_LISTING_BYTES) {
+      throw new Error(`${server.label} tool listing exceeds the size limit`);
+    }
+  };
   let cursor: string | undefined;
   for (let page = 0; ; page += 1) {
     // A cut-off listing would hide tools, so it fails instead.
@@ -166,6 +180,7 @@ async function listAllowedTools(server: ManagedMcpServer): Promise<McpTool[]> {
       await send({ id, method: "tools/list", params: cursor ? { cursor } : {} }),
       id,
       server.label,
+      countListingBytes,
     )).result);
     tools.push(...(listed.tools as McpTool[]));
     cursor = listed.nextCursor || undefined;

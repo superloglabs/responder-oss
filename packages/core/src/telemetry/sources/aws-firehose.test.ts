@@ -2,6 +2,7 @@ import { gzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 import {
   cloudWatchLogsToOtlp,
+  decodeCloudWatchLogsRecords,
   firehoseAnswer,
   firehoseSource,
   logGroupService,
@@ -31,6 +32,34 @@ describe("metricStreamRequest", () => {
 
     const truncated = Buffer.from([5, 1, 2]).toString("base64");
     expect(() => metricStreamRequest({ records: [{ data: truncated }], requestId: "r" })).toThrow("Truncated");
+  });
+});
+
+describe("decodeCloudWatchLogsRecords", () => {
+  const message = {
+    logEvents: [{ id: "1", message: "x".repeat(1_000), timestamp: 1_760_000_000_000 }],
+    logGroup: "/aws/lambda/checkout",
+    logStream: "s",
+    messageType: "DATA_MESSAGE",
+    owner: "123456789012",
+  };
+
+  it("skips records once the request's decompressed size passes the limit", () => {
+    const request = { records: [cloudWatchRecord(message), cloudWatchRecord(message)], requestId: "r" };
+
+    const result = decodeCloudWatchLogsRecords(request, 1_500);
+
+    expect(result.messages).toHaveLength(1);
+    expect(result.skipped).toBe(1);
+  });
+
+  it("skips a record that decompresses past the limit on its own", () => {
+    const bomb = { data: gzipSync(Buffer.alloc(16 * 1024 * 1024)).toString("base64") };
+
+    const result = decodeCloudWatchLogsRecords({ records: [bomb, cloudWatchRecord(message)], requestId: "r" }, 4_096);
+
+    expect(result.messages).toHaveLength(1);
+    expect(result.skipped).toBe(1);
   });
 });
 

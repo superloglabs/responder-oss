@@ -75,6 +75,21 @@ describe("managed MCP tool listing", () => {
       (JSON.parse(String((init as RequestInit).body)) as { method: string }).method);
     expect(methods.filter((method) => method === "initialize")).toHaveLength(2);
   });
+
+  it("fails instead of caching a listing whose pages together pass the size limit", async () => {
+    // Each page is within one response's limit; together they are not.
+    const description = "x".repeat(3 * 1024 * 1024);
+    const target = server((body) =>
+      result(body.id, body.method === "initialize"
+        ? {}
+        : { nextCursor: "more", tools: [{ ...readOnly, description }] }));
+
+    await expect(allowedManagedMcpTools(target)).rejects.toThrow(/size limit/u);
+
+    const pages = target.fetch.mock.calls.filter(([, init]) =>
+      (JSON.parse(String((init as RequestInit).body)) as { method: string }).method === "tools/list");
+    expect(pages).toHaveLength(3);
+  });
 });
 
 describe("managed MCP decisions", () => {

@@ -277,6 +277,17 @@ export async function startEgressProxy(
       resolve();
     });
   });
+  // After listen, the server still emits accept failures such as EMFILE. With
+  // no listener, Node throws them and the whole process exits.
+  server.on("error", (error: NodeJS.ErrnoException) => {
+    console.warn(
+      JSON.stringify({
+        code: error.code ?? error.constructor.name,
+        event: "egress_proxy_server_error",
+        proxy: options.name,
+      }),
+    );
+  });
   const address = server.address();
   if (!address || typeof address === "string") {
     server.close();
