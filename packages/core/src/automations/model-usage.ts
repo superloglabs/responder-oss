@@ -17,6 +17,24 @@ export type AutomationModelWireFormat =
 export interface AutomationModelUsageObserver {
   finish(): AutomationModelUsage | null;
   observe(chunk: Uint8Array): void;
+  // Whether a streamed event so far reported a failure on the provider's
+  // side, such as an overloaded model, rather than one a request can cause.
+  readonly providerFailed: boolean;
+}
+
+function providerFailureEvent(
+  format: AutomationModelWireFormat,
+  event: Record<string, unknown>,
+): boolean {
+  if (format === "messages") {
+    const type = record(event.error)?.type;
+    return event.type === "error" && (type === "overloaded_error" || type === "api_error");
+  }
+  if (format === "responses") {
+    return event.type === "response.failed" &&
+      record(record(event.response)?.error)?.code === "server_error";
+  }
+  return false;
 }
 
 const maximumBufferedBytes = 32 * 1024 * 1024;
@@ -141,6 +159,7 @@ export function createAutomationModelUsageObserver(
   let bufferedBytes = 0;
   let overflowed = false;
   let usage: AutomationModelUsage | null = null;
+  let providerFailed = false;
 
   function processLine(line: string): void {
     if (!line.startsWith("data:")) return;
@@ -148,6 +167,7 @@ export function createAutomationModelUsageObserver(
     if (!data || data === "[DONE]") return;
     try {
       const event = record(JSON.parse(data));
+      if (event && providerFailureEvent(format, event)) providerFailed = true;
       if (event) usage = usageFromEvent(format, event, usage);
     } catch {
       // Ignore malformed provider events; usage is read from valid ones.
@@ -155,6 +175,9 @@ export function createAutomationModelUsageObserver(
   }
 
   return {
+    get providerFailed() {
+      return providerFailed;
+    },
     observe(chunk) {
       if (overflowed) return;
       pending += decoder.decode(chunk, { stream: true });

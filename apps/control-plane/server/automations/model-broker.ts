@@ -251,11 +251,13 @@ function meteredBody(
   observer: ReturnType<typeof createAutomationModelUsageObserver>,
   onFinish: (usage: AutomationModelUsage | null) => void,
   drainOnCancel: boolean,
-  // Runs before the client sees a failed read of the provider's response.
-  onReadError: () => Promise<void>,
+  // Runs before the client sees a failed read of the provider's response or
+  // the provider's own report of a failure on its side.
+  onProviderFailure: () => Promise<void>,
 ): ReadableStream<Uint8Array> {
   const reader = body.getReader();
   let finished = false;
+  let providerFailureSeen = false;
   const finish = () => {
     if (finished) return;
     finished = true;
@@ -283,10 +285,14 @@ function meteredBody(
           return;
         }
         observer.observe(value);
+        if (observer.providerFailed && !providerFailureSeen) {
+          providerFailureSeen = true;
+          await onProviderFailure();
+        }
         controller.enqueue(value);
       } catch (error) {
         finish();
-        await onReadError();
+        await onProviderFailure();
         controller.error(error);
       }
     },

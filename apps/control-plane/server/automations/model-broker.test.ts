@@ -559,6 +559,30 @@ describe("Responder-funded automation inference", () => {
       expect(markProviderFailed).toHaveBeenCalledWith(claim.grantId);
     });
 
+    it("marks the grant when the provider reports a server error in its stream", async () => {
+      const failure = `data: ${JSON.stringify({ response: { error: { code: "server_error" } }, type: "response.failed" })}\n\n`;
+      const { markProviderFailed, response } = await send({
+        claimGrant: vi.fn().mockResolvedValue(claim),
+        providerFetch: vi.fn().mockResolvedValue(
+          new Response(failure, { headers: { "content-type": "text/event-stream" } }),
+        ),
+      });
+
+      await response.text();
+      expect(markProviderFailed).toHaveBeenCalledOnce();
+      expect(markProviderFailed).toHaveBeenCalledWith(claim.grantId);
+    });
+
+    it("marks the grant when the provider request times out", async () => {
+      const { markProviderFailed, response } = await send({
+        claimGrant: vi.fn().mockResolvedValue(claim),
+        providerFetch: vi.fn().mockRejectedValue(new DOMException("timed out", "TimeoutError")),
+      });
+
+      expect(response.status).toBe(502);
+      expect(markProviderFailed).toHaveBeenCalledWith(claim.grantId);
+    });
+
     it("does not mark the grant when the run disconnected", async () => {
       const disconnected = new AbortController();
       disconnected.abort();
