@@ -246,19 +246,6 @@ function secretValue(secret: SandboxSecretMount): string {
   return decryptCredentials<{ value: string }>(secret.encryptedValue).value;
 }
 
-function secretRules(placeholder: string, value: string): NetworkPolicyRule[] {
-  const rule = (header: string, sent: string, replacement: string) => ({
-    match: { headers: [{ key: { exact: header }, value: { exact: sent } }] },
-    transform: [{ headers: { [header]: replacement } }],
-  }) as NetworkPolicyRule;
-  return [
-    ...authorizationSchemes.map((scheme) =>
-      rule("authorization", `${scheme}${placeholder}`, `${scheme}${value}`)
-    ),
-    ...credentialHeaders.map((header) => rule(header, placeholder, value)),
-  ];
-}
-
 // On the domains Superlog allows by default, a request that carries a
 // credential the sandbox did not get from a mounted secret has every
 // credential header emptied, so code in the sandbox cannot act as an account
@@ -279,6 +266,21 @@ function credentialClearingRules(): NetworkPolicyRule[] {
     match: { headers: [{ key: { exact: header } }] },
     transform: [{ headers: clearedCredentials }],
   }) as NetworkPolicyRule);
+}
+
+// On a domain where credentials are cleared, the swap also clears every other
+// credential header on the request.
+function secretRules(placeholder: string, value: string, clearOthers: boolean): NetworkPolicyRule[] {
+  const rule = (header: string, sent: string, replacement: string) => ({
+    match: { headers: [{ key: { exact: header }, value: { exact: sent } }] },
+    transform: [{ headers: { ...(clearOthers ? clearedCredentials : {}), [header]: replacement } }],
+  }) as NetworkPolicyRule;
+  return [
+    ...authorizationSchemes.map((scheme) =>
+      rule("authorization", `${scheme}${placeholder}`, `${scheme}${value}`)
+    ),
+    ...credentialHeaders.map((header) => rule(header, placeholder, value)),
+  ];
 }
 
 // A request forwarded here goes nowhere: the name never resolves, so the
@@ -323,19 +325,20 @@ export function secretNetworkPolicy(
   }
   for (const secret of secrets) {
     for (const host of secret.allowedHosts) {
-      const rules = secretRules(secret.placeholder, secret.value);
-      (allow[host] ??= []).push(...rules);
-      if (host.startsWith("*.")) (allow[host.slice(2)] ??= []).push(...rules);
+      for (const domain of host.startsWith("*.") ? [host, host.slice(2)] : [host]) {
+        // A secret never opens Superlog's host, where only the brokers are
+        // reachable.
+        if (domain === network?.application.host) continue;
+        (allow[domain] ??= []).push(
+          ...secretRules(secret.placeholder, secret.value, Boolean(network) && credentialClearingDomains.has(domain)),
+        );
+      }
     }
   }
   if (network) {
     for (const [domain, rules] of Object.entries(allow)) {
       if (domain === network.application.host) {
-        allow[domain] = [
-          ...applicationRules(network),
-          ...rules,
-          { forwardURL: refusedRequestUrl } as NetworkPolicyRule,
-        ];
+        allow[domain] = [...applicationRules(network), { forwardURL: refusedRequestUrl } as NetworkPolicyRule];
       } else if (credentialClearingDomains.has(domain)) {
         rules.push(...credentialClearingRules());
       }

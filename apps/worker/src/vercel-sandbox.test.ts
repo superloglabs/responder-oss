@@ -167,10 +167,34 @@ describe("secretNetworkPolicy for a restricted workspace", () => {
       [{ allowedHosts: ["api.github.com"], placeholder: "ph-1", value: "real-1" }],
       { allowedDomains: ["superlog.sh", "api.github.com"], application },
     );
-    expect(throughFirewall(github, "api.github.com", { headers: { authorization: "token ph-1" } }).headers)
-      .toEqual({ authorization: "token real-1" });
+    expect(throughFirewall(github, "api.github.com", { headers: { authorization: "token ph-1" } }).headers.authorization)
+      .toBe("token real-1");
     expect(throughFirewall(github, "api.github.com", { headers: { authorization: "token other" } }).headers.authorization)
       .toBe("");
+  });
+
+  it("clears other credentials sent along with a secret's placeholder on a default domain", () => {
+    const github = secretNetworkPolicy(
+      [{ allowedHosts: ["api.github.com", "api.example.com"], placeholder: "ph-1", value: "real-1" }],
+      { allowedDomains: ["superlog.sh", "api.github.com"], application },
+    );
+    expect(throughFirewall(github, "api.github.com", {
+      headers: { authorization: "token ph-1", cookie: "user_session=other", "x-api-key": "other" },
+    }).headers).toMatchObject({ authorization: "token real-1", cookie: "", "x-api-key": "" });
+    // A domain the workspace added keeps the request's other headers.
+    expect(throughFirewall(github, "api.example.com", {
+      headers: { authorization: "token ph-1", cookie: "session=kept" },
+    }).headers).toEqual({ authorization: "token real-1", cookie: "session=kept" });
+  });
+
+  it("does not let a secret open Superlog's host", () => {
+    const mounted = secretNetworkPolicy(
+      [{ allowedHosts: ["superlog.sh"], placeholder: "ph-1", value: "real-1" }],
+      { allowedDomains: ["superlog.sh"], application, brokerToken: "run-token" },
+    );
+    expect(throughFirewall(mounted, "superlog.sh", { headers: { authorization: "Bearer ph-1" }, path: "/api/mcp" }).refused)
+      .toBe(true);
+    expect(JSON.stringify(mounted)).not.toContain("real-1");
   });
 
   it("refuses every request to Superlog's host from a sandbox without a run token", () => {
