@@ -136,15 +136,28 @@ export async function pullRenderAccount(input: {
   forward: RenderLogsForward;
   now?: Date;
   pageBudget?: number;
+  // Services with a source of their own under another Render connection of
+  // the same workspace. Workspace sources here leave them to that source.
+  readElsewhere?: ReadonlySet<string>;
   sources: RenderPullSource[];
 }): Promise<RenderAccountResult> {
   const now = input.now ?? new Date();
   const fetchOption = input.fetch ? { fetch: input.fetch } : {};
   const results = new Map<string, RenderSourceResult>();
   const outcome: RenderAccountResult = { behind: false, pages: 0, retryLater: false, sources: results };
+  const members: Member[] = [];
+  // A refused key fails every source, keeping the cursors of reads already
+  // delivered this pass so their lines are not sent again.
   const refuse = () => {
     for (const source of input.sources) {
-      results.set(source.id, { error: renderRefusedKey, logs: 0, received: false, state: source.state, truncated: false });
+      const member = members.find((item) => item.source === source);
+      results.set(source.id, {
+        error: renderRefusedKey,
+        logs: member?.logs ?? 0,
+        received: (member?.logs ?? 0) > 0,
+        state: member ? (member.state as unknown as Record<string, unknown>) : source.state,
+        truncated: member?.skipped ?? false,
+      });
     }
     return outcome;
   };
@@ -152,7 +165,6 @@ export async function pullRenderAccount(input: {
   const end = new Date(now.getTime() - LOG_VISIBILITY_LAG_MS).toISOString();
   const floor = new Date(now.getTime() - LOG_MAX_LAG_MS).toISOString();
   const fresh = new Date(now.getTime() - LOG_START_MS).toISOString();
-  const members: Member[] = [];
   for (const source of input.sources) {
     const parsed = renderSourceStateSchema.safeParse(source.state);
     if (parsed.success) {
@@ -169,7 +181,7 @@ export async function pullRenderAccount(input: {
   }
 
   // Each workspace's services, listed once a pass. A workspace that cannot
-  // be listed keeps the services last listed.
+  // be listed keeps the services last listed; one never listed reports why.
   const listed = new Map<string, RenderService[] | null>();
   for (const ownerId of new Set(members.map((member) => member.state.ownerId))) {
     try {
@@ -177,13 +189,21 @@ export async function pullRenderAccount(input: {
     } catch (error) {
       if (error instanceof RenderApiError && error.kind === "unauthorized") return refuse();
       listed.set(ownerId, null);
+      for (const member of members) {
+        if (member.state.ownerId === ownerId && member.state.kind === "workspace" && Object.keys(member.state.services).length === 0) {
+          member.error = `Logs: Render could not list the workspace's services: ${errorText(error)}`;
+        }
+      }
     }
   }
 
   // A service with a source of its own belongs to it; the others belong to
   // their workspace's source. Services that share a workspace and region are
   // read together.
-  const own = new Set(members.filter((member) => member.state.kind === "service").map((member) => member.source.externalId));
+  const own = new Set([
+    ...members.filter((member) => member.state.kind === "service").map((member) => member.source.externalId),
+    ...(input.readElsewhere ?? []),
+  ]);
   const groups = new Map<string, Covered[]>();
   // A service that moves between a workspace source and a source of its
   // own keeps the newest cursor either kept for it, so no line is sent twice.
@@ -253,10 +273,14 @@ export async function pullRenderAccount(input: {
     member.state.cursors = Object.fromEntries(Object.entries(member.state.cursors).filter(([serviceId]) => ids.has(serviceId)));
   }
 
-  const reads: Covered[][] = [];
+  const grouped: Covered[][] = [];
   for (const group of groups.values()) {
-    for (let start = 0; start < group.length; start += RESOURCES_PER_READ) reads.push(group.slice(start, start + RESOURCES_PER_READ));
+    for (let start = 0; start < group.length; start += RESOURCES_PER_READ) grouped.push(group.slice(start, start + RESOURCES_PER_READ));
   }
+  // With more reads than pages, each pass starts at a different read, so
+  // every read gets its turn.
+  const first = grouped.length > 0 ? Math.floor(now.getTime() / 60_000) % grouped.length : 0;
+  const reads = [...grouped.slice(first), ...grouped.slice(0, first)];
   const total = input.pageBudget ?? RENDER_PAGE_BUDGET;
   const pagesPerRead = Math.max(1, Math.floor(total / Math.max(1, reads.length)));
   let budget = total;
@@ -305,13 +329,13 @@ export async function pullRenderAccount(input: {
         break;
       }
     }
-    const members = [...new Set(read.map((item) => item.member))];
+    const readMembers = [...new Set(read.map((item) => item.member))];
     const retryLater = failure instanceof RenderApiError && failure.kind === "retry_later";
     if (failure instanceof RenderApiError && failure.kind === "unauthorized") return refuse();
     if (retryLater) outcome.retryLater = true;
     else if (!complete && !failure) outcome.behind = true;
     if (failure && !retryLater) {
-      for (const member of members) member.error ??= `Logs: ${errorText(failure)}`;
+      for (const member of readMembers) member.error ??= `Logs: ${errorText(failure)}`;
     }
     // Without a single line, an unfinished read moves nothing.
     if (!complete && lines.length === 0) continue;
@@ -338,7 +362,7 @@ export async function pullRenderAccount(input: {
         if (!(await input.forward(request))) throw new Error("Telemetry ingest did not accept the logs");
       }
     } catch (error) {
-      for (const member of members) member.error ??= `Logs: ${errorText(error)}`;
+      for (const member of readMembers) member.error ??= `Logs: ${errorText(error)}`;
       continue;
     }
     for (const block of blocks) {

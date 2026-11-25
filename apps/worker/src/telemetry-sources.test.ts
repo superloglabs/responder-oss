@@ -287,6 +287,29 @@ describe("pullRenderTelemetrySources", () => {
     log.mockRestore();
   });
 
+  it("tells each connection which services another connection's source reads", async () => {
+    const deps = renderDependencies();
+
+    await pullRenderTelemetrySources(deps);
+
+    // Sources a and b (account-1) are service sources in org-1; c is in org-2.
+    expect(deps.pull).toHaveBeenCalledWith(expect.objectContaining({ readElsewhere: new Set(), sources: [expect.objectContaining({ id: "a" }), expect.objectContaining({ id: "b" })] }));
+    const other = renderDependencies({ list: vi.fn(async () => [source("a", "account-1"), { ...source("w", "account-2"), state: { kind: "workspace", ownerId: "tea-1" } }]) });
+    await pullRenderTelemetrySources(other);
+    expect(other.pull).toHaveBeenCalledWith(expect.objectContaining({ readElsewhere: new Set(["srv-a"]), sources: [expect.objectContaining({ id: "w" })] }));
+  });
+
+  it("saves every source even when one save fails, counting each failure once", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const update = vi.fn(async (id: string) => { if (id === "a") throw new Error("database busy"); });
+    const deps = renderDependencies({ list: vi.fn(async () => [source("a", "account-1"), source("b", "account-1")]), update });
+
+    expect(await pullRenderTelemetrySources(deps)).toEqual({ failed: 1, sources: 2 });
+    expect(update).toHaveBeenCalledTimes(2);
+    expect(update).toHaveBeenLastCalledWith("b", expect.objectContaining({ status: "failed" }));
+    error.mockRestore();
+  });
+
   it("does nothing without a collector", async () => {
     const deps = renderDependencies({ collectorUrl: () => null });
 

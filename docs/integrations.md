@@ -1360,17 +1360,24 @@ option needs a cell with a collector
   source of its own belongs to that source. Every minute the worker lists each
   workspace's services and reads their logs through Render's logs API
   (`GET /v1/logs`, forward, 100 lines a page), one read per workspace and
-  region, as Render requires. Render allows 30 log requests a minute per user,
-  so one pass spends at most 24 pages per connection, split across its reads;
-  a pass that runs out keeps the pages it read and the next continues there,
-  and the worker logs `render_telemetry_pulled` with `behind`. When Render
+  region, as Render requires, in batches of up to 50 services. Render allows
+  30 log requests a minute per user, so one pass spends at most 24 pages per
+  connection, split across its reads, and starts at a different read each
+  minute when there are more reads than pages. A pass that runs out keeps the
+  pages it read and the next continues there, and the worker logs
+  `render_telemetry_pulled` with `behind`. The same key connected in several
+  workspaces has a budget in each; Render's `rate limit exceeded` then slows
+  the reads as below. When Render
   answers `rate limit exceeded` or `log retrieval is currently unavailable`,
   the pass keeps what it read, stops reading with that key, and tries again
   next minute without marking the source failed. Each service keeps its own
-  cursor: a time and the IDs of the lines at that time, so no line is sent
-  twice. A service that gets a source of its own takes its workspace
-  source's cursor, and the workspace source keeps that cursor moving for
-  when the service's source is removed. Reads stop 20 seconds behind the present, start five minutes back for
+  cursor: a time and the IDs of up to 1,000 lines at that time, so a line is
+  not sent twice. Delivery is at least once: when ingest refuses part of a
+  read, the whole read is sent again. A service that gets a source of its own
+  takes its workspace source's cursor, and the workspace source keeps that
+  cursor moving for when the service's source is removed. A service with a
+  source of its own under another Render connection is left to that source,
+  but its cursor is not handed over between connections. Reads stop 20 seconds behind the present, start five minutes back for
   a new service, and skip ahead when more than an hour behind
   (`truncated`). Build logs are left out. Lines of one stack trace from the
   same instance join into one log, as for Railway, and request logs keep their

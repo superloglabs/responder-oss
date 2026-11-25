@@ -76,7 +76,22 @@ export function createRenderConnectionRoutes(dependencies: RenderConnectionDepen
       return context.json({ error: "This API key reaches no Render workspaces." }, 400);
     }
     // The key's user names the connection; without it, its workspaces do.
-    const user = await dependencies.user({ apiKey }).catch(() => null);
+    // Only a key Render names no user for falls back, so a passing failure
+    // cannot give the same person a second connection.
+    let user: Awaited<ReturnType<typeof renderUser>>;
+    try {
+      user = await dependencies.user({ apiKey });
+    } catch (error) {
+      if (!(error instanceof RenderApiError && error.status === 404)) {
+        console.error(JSON.stringify({
+          error: error instanceof Error ? error.message : String(error),
+          event: "render_connect_failed",
+          organizationId: tenant.organizationId,
+        }));
+        return context.json({ error: "Superlog could not reach Render. Try again in a moment." }, 502);
+      }
+      user = null;
+    }
     const names = workspaces.map((workspace) => workspace.name);
     const accountId = await dependencies.save({
       credentialKeyVersion: 1,

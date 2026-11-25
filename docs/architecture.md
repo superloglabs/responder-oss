@@ -91,7 +91,7 @@ types. `drizzle/` contains the ordered schema history.
 - Render connects with an encrypted API key, which reaches every workspace
   its user belongs to. The worker reads only the logs of the services and
   workspaces a workspace chooses, within one shared budget of 24 log requests
-  a minute per key, under Render's limit of 30. Render has no investigation
+  a minute per connection, under Render's limit of 30 per user. Render has no investigation
   tools.
 - Linear context uses its read-only MCP endpoint. Ticket creation goes through
   a separate controlled tool that records a stable request before writing and

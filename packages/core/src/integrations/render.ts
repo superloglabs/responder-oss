@@ -74,6 +74,11 @@ async function boundedText(response: Response): Promise<string> {
   return new TextDecoder().decode(Buffer.concat(chunks));
 }
 
+// Render's text with the key taken out, in case an answer repeats it.
+function withoutKey(text: string, apiKey: string): string {
+  return text.split(apiKey).join("[redacted]");
+}
+
 // One GET against Render's API. The key goes only in the authorization
 // header; errors carry Render's message, never the key.
 async function renderGet(input: {
@@ -94,7 +99,7 @@ async function renderGet(input: {
     });
   } catch (error) {
     throw new RenderApiError(
-      `Render could not be reached: ${error instanceof Error ? error.message : String(error)}`,
+      `Render could not be reached: ${withoutKey(error instanceof Error ? error.message : String(error), input.apiKey)}`,
       "failed",
       null,
     );
@@ -107,9 +112,9 @@ async function renderGet(input: {
     body = null;
   }
   if (!response.ok) {
-    const message = body && typeof body === "object" && typeof (body as { message?: unknown }).message === "string"
+    const message = withoutKey(body && typeof body === "object" && typeof (body as { message?: unknown }).message === "string"
       ? (body as { message: string }).message
-      : text.trim().slice(0, 200) || `HTTP ${response.status}`;
+      : text.trim().slice(0, 200) || `HTTP ${response.status}`, input.apiKey);
     throw new RenderApiError(`Render answered ${response.status}: ${message}`, renderErrorKind(response.status, message), response.status);
   }
   return body;
@@ -218,12 +223,10 @@ export type RenderReadable = {
   workspaceName: string;
 };
 
-const MAX_READABLE_WORKSPACES = 20;
-
 /** The workspaces a key reaches and their services, suspended ones left out. */
 export async function renderReadables(input: { apiKey: string; fetch?: RenderFetch }): Promise<RenderReadable[]> {
   const readables: RenderReadable[] = [];
-  for (const workspace of (await renderWorkspaces(input)).slice(0, MAX_READABLE_WORKSPACES)) {
+  for (const workspace of await renderWorkspaces(input)) {
     readables.push({ id: workspace.id, kind: "workspace", ownerId: workspace.id, workspaceName: workspace.name });
     const services = await renderServices({ ...input, ownerId: workspace.id });
     for (const service of services.filter((item) => !item.suspended)) {

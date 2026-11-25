@@ -78,6 +78,26 @@ describe("Render connection", () => {
     }));
   });
 
+  it("saves nothing when Render cannot say whose key it is right now", async () => {
+    const { app, dependencies } = routes({
+      user: vi.fn(async () => { throw new RenderApiError("Render answered 503: unavailable", "failed", 503); }),
+    });
+
+    const response = await connect(app, { apiKey });
+
+    expect(response.status).toBe(502);
+    expect(dependencies.save).not.toHaveBeenCalled();
+  });
+
+  it("keeps the redirect on this app", async () => {
+    for (const returnTo of ["//evil.example/steal", "https://evil.example/steal"]) {
+      const response = await connect(routes().app, { apiKey, returnTo });
+      const redirect = new URL(((await response.json()) as { redirectUrl: string }).redirectUrl);
+      expect(redirect.origin).toBe("https://app.example.com");
+      expect(redirect.pathname).toBe("/settings");
+    }
+  });
+
   it("says when Render rejects the key, and saves nothing", async () => {
     const { app, dependencies } = routes({
       workspaces: vi.fn(async () => { throw new RenderApiError("Render answered 401: unauthorized", "unauthorized", 401); }),

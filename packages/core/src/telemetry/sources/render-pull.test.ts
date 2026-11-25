@@ -310,6 +310,64 @@ describe("pullRenderAccount", () => {
     expect(ingest.sent.sort()).toEqual(logs.filter((line) => Date.parse(line.timestamp) >= Date.parse("2026-11-25T09:50:00Z") && Date.parse(line.timestamp) <= until).map((line) => line.message).sort());
   });
 
+  it("keeps the workspace's copy of a service's cursor when that service is read in another region's read", async () => {
+    const api = render({ logs: [log("2026-11-25T09:58:00Z", "web line"), log("2026-11-25T09:58:00Z", "eu line", "srv-eu")], services: [web, eu] });
+
+    const result = await pullRenderAccount({ apiKey: "key", fetch: api.fetch, forward: collector().forward, now, sources: [workspaceSource(), serviceSource(web)] });
+
+    expect(result.sources.get("source-workspace")!.state.cursors).toEqual({ "srv-eu": { ids: [], ts: end }, "srv-web": { ids: [], ts: end } });
+  });
+
+  it("gives every read a turn when there are more reads than pages", async () => {
+    const services = ["oregon", "ohio", "frankfurt"].map((region) => ({ id: `srv-${region}`, name: region, ownerId: "tea-1", region }));
+    const api = render({ logs: services.map((service) => log("2026-11-25T09:58:00Z", `${service.name} line`, service.id)), services });
+    const ingest = collector();
+    let state: Record<string, unknown> = {};
+
+    for (let minute = 0; minute < 3; minute += 1) {
+      state = (await pullRenderAccount({
+        apiKey: "key",
+        fetch: api.fetch,
+        forward: ingest.forward,
+        now: new Date(now.getTime() + minute * 60_000),
+        pageBudget: 1,
+        sources: [workspaceSource(state)],
+      })).sources.get("source-workspace")!.state;
+    }
+
+    expect(ingest.sent.sort()).toEqual(["frankfurt line", "ohio line", "oregon line"]);
+  });
+
+  it("keeps the cursors of reads delivered before Render refused the key", async () => {
+    const api = render({ logFailures: { 1: { body: { message: "unauthorized" }, status: 401 } }, logs: [log("2026-11-25T09:58:00Z", "web line"), log("2026-11-25T09:58:00Z", "eu line", "srv-eu")], services: [web, eu] });
+    const ingest = collector();
+
+    const result = await pullRenderAccount({ apiKey: "key", fetch: api.fetch, forward: ingest.forward, now, sources: [workspaceSource()] });
+
+    const source = result.sources.get("source-workspace")!;
+    expect(source.error).toBe(renderRefusedKey);
+    expect(ingest.sent).toHaveLength(1);
+    // The read that was delivered moved its service's cursor to the end.
+    expect(Object.values(source.state.cursors as Record<string, { ts: string }>).map((cursor) => cursor.ts)).toContain(end);
+  });
+
+  it("reports a workspace whose services were never listed and cannot be listed now", async () => {
+    const api = render({ services: [web], servicesStatus: 503 });
+
+    const result = await pullRenderAccount({ apiKey: "key", fetch: api.fetch, forward: collector().forward, now, sources: [workspaceSource()] });
+
+    expect(result.sources.get("source-workspace")!.error).toMatch(/^Logs: Render could not list the workspace's services/u);
+  });
+
+  it("leaves a service with its own source under another connection to that source", async () => {
+    const api = render({ logs: [log("2026-11-25T09:58:00Z", "web line"), log("2026-11-25T09:58:00Z", "worker line", "srv-worker")], services: [web, worker] });
+    const ingest = collector();
+
+    await pullRenderAccount({ apiKey: "key", fetch: api.fetch, forward: ingest.forward, now, readElsewhere: new Set(["srv-web"]), sources: [workspaceSource()] });
+
+    expect(ingest.sent).toEqual(["worker line"]);
+  });
+
   it("skips ahead when a service fell more than an hour behind, and says so", async () => {
     const api = render({ logs: [log("2026-11-25T08:00:00Z", "ancient"), log("2026-11-25T09:30:00Z", "recent")], services: [web] });
     const ingest = collector();

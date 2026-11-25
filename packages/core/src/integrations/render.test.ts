@@ -134,6 +134,18 @@ describe("Render errors", () => {
     expect((failure as RenderApiError).message).not.toContain(apiKey);
   });
 
+  it("takes the key out of an error that repeats it", async () => {
+    const api = stub([Response.json({ message: `invalid key ${apiKey}` }, { status: 400 }), new Response(`bad ${apiKey}`, { status: 500 })]);
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const failure = (await page(api.fetch).catch((error: unknown) => error)) as RenderApiError;
+      expect(failure.message).not.toContain(apiKey);
+      expect(failure.message).toContain("[redacted]");
+    }
+    const unreachable = (await page(async () => { throw new Error(`socket closed for ${apiKey}`); }).catch((error: unknown) => error)) as RenderApiError;
+    expect(unreachable.message).toBe("Render could not be reached: socket closed for [redacted]");
+  });
+
   it("reads a plain-text error body", async () => {
     const api = stub([new Response("rate limit exceeded", { status: 429 })]);
 

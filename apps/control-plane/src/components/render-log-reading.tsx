@@ -7,7 +7,7 @@ import { LogReading, type LogReadingParts } from "./log-reading";
 // start Signal.
 
 const labels = {
-  add: "Add service",
+  add: "Add service or workspace",
   empty: "This key reaches no running services",
   list: "Render services whose logs Superlog reads",
   loadFailed: "Could not load Render services.",

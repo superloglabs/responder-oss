@@ -258,16 +258,32 @@ export async function pullRenderTelemetrySources(
     group.push(source);
     accounts.set(source.integrationAccountId, group);
   }
+  // Services with a source of their own, by workspace and connection, so a
+  // workspace source under one connection leaves them to the other.
+  const serviceSources = listed.filter((source) => source.state.kind === "service");
   const queue = [...accounts.values()];
   let failed = 0;
+  async function save(sourceId: string, update: Parameters<typeof updateTelemetrySource>[1]): Promise<void> {
+    try {
+      await dependencies.update(sourceId, update);
+    } catch (error) {
+      console.error(JSON.stringify({
+        error: error instanceof Error ? error.message : String(error),
+        event: "render_telemetry_save_failed",
+        sourceId,
+      }));
+    }
+  }
   async function next(): Promise<void> {
     for (let sources = queue.shift(); sources; sources = queue.shift()) {
       // A connection belongs to one workspace, and so do its sources.
       const organizationId = sources[0]!.organizationId;
+      const integrationAccountId = sources[0]!.integrationAccountId;
+      const now = dependencies.now();
+      let result: Awaited<ReturnType<typeof pullRenderAccount>>;
       try {
         const credentials = renderCredentialsSchema.parse(dependencies.decrypt(sources[0]!.encryptedCredentials));
-        const now = dependencies.now();
-        const result = await dependencies.pull({
+        result = await dependencies.pull({
           apiKey: credentials.apiKey,
           forward: async (payload) => {
             const response = await dependencies.forward({
@@ -280,45 +296,48 @@ export async function pullRenderTelemetrySources(
             return response.ok;
           },
           now,
+          readElsewhere: new Set(serviceSources
+            .filter((source) => source.organizationId === organizationId && source.integrationAccountId !== integrationAccountId)
+            .map((source) => source.externalId)),
           sources,
         });
-        let logs = 0;
-        const errors: string[] = [];
-        for (const source of sources) {
-          const read = result.sources.get(source.id);
-          if (!read) continue;
-          if (read.error) {
-            failed += 1;
-            errors.push(read.error);
-          }
-          logs += read.logs;
-          await dependencies.update(source.id, {
-            lastError: read.error,
-            state: read.state,
-            status: read.error && !read.received ? "failed" : "active",
-            ...(read.received ? { lastReceivedAt: now } : {}),
-          });
-        }
-        if (logs > 0 || errors.length > 0 || result.behind || result.retryLater) {
-          console.log(JSON.stringify({
-            behind: result.behind,
-            error: errors[0] ?? null,
-            event: "render_telemetry_pulled",
-            integrationAccountId: sources[0]!.integrationAccountId,
-            logs,
-            organizationId,
-            pages: result.pages,
-            retryLater: result.retryLater,
-            sources: sources.length,
-            truncated: [...result.sources.values()].some((read) => read.truncated),
-          }));
-        }
       } catch (error) {
         failed += sources.length;
         const message = error instanceof Error ? error.message : String(error);
-        for (const source of sources) {
-          await dependencies.update(source.id, { lastError: message, status: "failed" }).catch(() => undefined);
+        for (const source of sources) await save(source.id, { lastError: message, status: "failed" });
+        continue;
+      }
+      let logs = 0;
+      const errors: string[] = [];
+      for (const source of sources) {
+        const read = result.sources.get(source.id);
+        if (!read) continue;
+        if (read.error) {
+          failed += 1;
+          errors.push(read.error);
         }
+        logs += read.logs;
+        await save(source.id, {
+          lastError: read.error,
+          state: read.state,
+          status: read.error && !read.received ? "failed" : "active",
+          ...(read.received ? { lastReceivedAt: now } : {}),
+        });
+      }
+      const truncated = [...result.sources.values()].some((read) => read.truncated);
+      if (logs > 0 || errors.length > 0 || result.behind || result.retryLater || truncated) {
+        console.log(JSON.stringify({
+          behind: result.behind,
+          error: errors[0] ?? null,
+          event: "render_telemetry_pulled",
+          integrationAccountId,
+          logs,
+          organizationId,
+          pages: result.pages,
+          retryLater: result.retryLater,
+          sources: sources.length,
+          truncated,
+        }));
       }
     }
   }

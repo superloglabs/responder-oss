@@ -81,20 +81,32 @@ export interface RenderLogBlock {
   severity: { number: number; text: string };
 }
 
+function requestText(line: RenderLogLine): string {
+  return [renderLabel(line, "method"), renderLabel(line, "path"), renderLabel(line, "statusCode")].filter(Boolean).join(" ") || "request";
+}
+
 /**
  * Joins the lines of one multi-line write into one log. Lines of each
  * instance and log type join separately, so a request log never joins an
- * application's stack trace.
+ * application's stack trace, and each request log stays on its own.
  */
 export function renderLogBlocks(lines: RenderLogLine[]): RenderLogBlock[] {
   const origins = new Map<RailwayLogLine, RenderLogLine>();
-  const mapped = lines.filter((line) => !isRenderBuildLog(line)).map((line) => {
+  const mapped = lines.filter((line) => !isRenderBuildLog(line)).map((line, index) => {
     const resource = renderLabel(line, "resource") ?? "";
     const instance = renderLabel(line, "instance") ?? resource;
+    const type = renderLabel(line, "type") ?? "";
+    const request = type === "request";
+    const message = stripAnsi(line.message);
     const shaped: RailwayLogLine = {
-      message: stripAnsi(line.message),
+      // A request line with no text is named by its request, so it is kept.
+      message: request && !message.trim() ? requestText(line) : message,
       severity: renderLabel(line, "level") ?? null,
-      tags: { deploymentInstanceId: `${instance}\u0000${renderLabel(line, "type") ?? ""}`, serviceId: resource },
+      // Each request is its own log: requests never join each other.
+      tags: {
+        deploymentInstanceId: request ? `${instance}\u0000request\u0000${line.id ?? index}` : `${instance}\u0000${type}`,
+        serviceId: resource,
+      },
       timestamp: line.timestamp,
     };
     origins.set(shaped, line);

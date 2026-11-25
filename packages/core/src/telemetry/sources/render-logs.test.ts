@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RenderLogLine } from "../../integrations/render.js";
-import { renderLogBlocks, renderLogsToOtlp, stripAnsi } from "./render-logs.js";
+import { renderLabel, renderLogBlocks, renderLogsToOtlp, stripAnsi } from "./render-logs.js";
 
 function line(
   timestamp: string,
@@ -55,6 +55,16 @@ describe("renderLogBlocks", () => {
     ]);
 
     expect(blocks.map((block) => block.lines)).toEqual([["GET /orders 500"], ["    indented app line"]]);
+  });
+
+  it("keeps each request log on its own, even one without text", () => {
+    const blocks = renderLogBlocks([
+      line("2026-11-25T10:00:00.000001Z", "GET /orders 200", { method: "GET", path: "/orders", statusCode: "200", type: "request" }),
+      line("2026-11-25T10:00:00.000002Z", "  ", { method: "POST", path: "/checkout", statusCode: "502", type: "request" }),
+    ]);
+
+    expect(blocks.map((block) => block.lines)).toEqual([["GET /orders 200"], ["POST /checkout 502"]]);
+    expect(renderLabel(blocks[1]!.first, "statusCode")).toBe("502");
   });
 
   it("strips terminal colors and reads a lower level an error line names", () => {
