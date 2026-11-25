@@ -208,7 +208,10 @@ types. `drizzle/` contains the ordered schema history.
   accepted once and kept in `legacy_mcp_forward_assertions` until the
   assertion can no longer be accepted: `exp` plus the 30-second clock skew.
   A token that could only read in the old product gets only read-only tools.
-  This is removed when the old product shuts down.
+  The earlier shared-credential headers (`x-legacy-mcp-forward-token` and the
+  project, email and access headers) are not read: a request with them and
+  no assertion is an ordinary MCP request and gets 401 without an API key or
+  OAuth token. Forwarding is removed when the old product shuts down.
 
 ## Management API and MCP server
 

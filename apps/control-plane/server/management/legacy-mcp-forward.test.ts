@@ -179,6 +179,22 @@ describe("MCP requests forwarded by the old product with a signed assertion", ()
     expect(names).not.toContain("create_alert");
   });
 
+  it("accepts a valid assertion sent with the retired shared-credential headers", async () => {
+    vi.stubEnv("LEGACY_MCP_FORWARD_TOKEN", "forward-secret");
+
+    const response = await signedForward(listTools, {
+      headers: {
+        "x-legacy-mcp-access": "read-write",
+        "x-legacy-mcp-forward-token": "wrong-secret",
+        "x-legacy-mcp-project-id": "17171717-1717-4717-8717-171717171717",
+        "x-legacy-mcp-user-email": "someone-else@example.com",
+      },
+    });
+
+    expect(response.status).toBe(200);
+    expect(mocks.findForwardedMember).toHaveBeenCalledWith(legacyProjectId, "Ash@Example.com");
+  });
+
   it("refuses an assertion signed by another key, or when no key is configured", async () => {
     const unknownKey = await signedForward(listTools, { key: generateKeyPairSync("ed25519").privateKey });
     expect(unknownKey.status).toBe(403);
