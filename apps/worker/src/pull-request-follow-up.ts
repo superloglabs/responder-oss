@@ -162,6 +162,8 @@ function execSucceeded(output: string): boolean {
 // head, so commits pushed by someone else are never overwritten.
 export async function updatePullRequest(
   input: {
+    // Whether the automation lets the agent change dependency files.
+    allowDependencyChanges?: boolean;
     commitMessage: string;
     repositories: CheckedOutRepository[];
     session: SandboxSession;
@@ -185,7 +187,9 @@ export async function updatePullRequest(
     );
   }
 
-  const files = await changedFiles(input.session, checkout.path, checkout.workspaceBaseSha, true);
+  const files = await changedFiles(input.session, checkout.path, checkout.workspaceBaseSha, true, {
+    allowDependencyChanges: input.allowDependencyChanges ?? false,
+  });
   if (files.length === 0) {
     return { changedFiles: [], headSha: head.sha, url: head.url };
   }

@@ -106,6 +106,23 @@ describe("automation buttons in Slack", () => {
     }]);
   });
 
+  it("records whether a member of the connected Slack team pressed the button", async () => {
+    await press({ user: { id: "U123", name: "ada", team_id: "T123" } });
+    expect(mocks.queueReply).toHaveBeenLastCalledWith(expect.objectContaining({
+      message: expect.objectContaining({
+        slackButton: expect.objectContaining({ pressedByTeamMember: true }),
+      }),
+    }));
+
+    // A person from another Slack team in a shared channel.
+    await press({ user: { id: "U999", name: "eve", team_id: "T999" } });
+    expect(mocks.queueReply).toHaveBeenLastCalledWith(expect.objectContaining({
+      message: expect.objectContaining({
+        slackButton: expect.objectContaining({ pressedByTeamMember: false }),
+      }),
+    }));
+  });
+
   it("continues the run that posted the message and replaces its buttons", async () => {
     const response = await press();
 
@@ -126,6 +143,7 @@ describe("automation buttons in Slack", () => {
           integrationAccountId,
           label: "Create PR",
           messageTimestamp: "1790000001.000100",
+          pressedByTeamMember: false,
           threadTimestamp: "1790000001.000100",
         },
         source: "slack",

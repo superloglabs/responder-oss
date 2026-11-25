@@ -24,8 +24,13 @@ const baseConfiguration = {
 describe("automation configuration", () => {
   it("accepts an unattended full-access Slack automation", () => {
     expect(automationConfigurationSchema.parse(baseConfiguration)).toEqual(
-      { ...baseConfiguration, notifications: [], skillIds: [] },
+      { ...baseConfiguration, allowDependencyChanges: false, notifications: [], skillIds: [] },
     );
+  });
+
+  it("keeps dependency changes off unless the automation allows them", () => {
+    expect(automationConfigurationSchema.parse(baseConfiguration).allowDependencyChanges).toBe(false);
+    expect(automationConfigurationSchema.parse({ ...baseConfiguration, allowDependencyChanges: true }).allowDependencyChanges).toBe(true);
   });
 
   it("allows up to 1,000 model requests per run", () => {

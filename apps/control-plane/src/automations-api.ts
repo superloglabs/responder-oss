@@ -100,6 +100,8 @@ export interface AutomationNotification {
 }
 
 export interface AutomationConfiguration {
+  // Lets pull requests the agent opens change dependency files.
+  allowDependencyChanges: boolean;
   contextAccountIds: string[];
   harness: AutomationHarness;
   maxModelRequests: number;

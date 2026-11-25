@@ -136,6 +136,7 @@ describe("pull request tool", () => {
     expect(createPullRequestFromSandbox).toHaveBeenCalledWith(
       expect.objectContaining({
         body: "Closes WAN-123\n\n## Summary\nHandle the unchecked value.\n\n## How to see it working\nRun the focused test.",
+        untrustedTrigger: true,
       }),
       session,
     );

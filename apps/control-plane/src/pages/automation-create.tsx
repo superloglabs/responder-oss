@@ -53,6 +53,7 @@ import { useDocumentTitle } from "../use-document-title";
 
 const defaultConfiguration: AutomationConfiguration = {
   ...defaultAutomationModelSettings,
+  allowDependencyChanges: false,
   contextAccountIds: [],
   notifications: [],
   prompt: "Investigate the event, make the necessary code changes, run focused tests, and open a pull request with a clear summary.",
@@ -524,6 +525,13 @@ export function AutomationCreatePage({ initialAutomation }: { initialAutomation?
               picker={repositoryPicker}
               repositories={selectedRepositories}
             /> : repositoryPicker}
+            {selectedRepositories.length ? <Switch
+              checked={configuration.allowDependencyChanges}
+              className="automationCreate__dependencySwitch"
+              description="Lets pull requests change package manifests and lockfiles. CI configuration and agent instruction files are never changed."
+              label="Allow dependency changes"
+              onCheckedChange={(allowDependencyChanges) => updateConfiguration((current) => ({ ...current, allowDependencyChanges }))}
+            /> : null}
           </section>
           <section className="automationCreate__section" aria-labelledby="automation-connectors">
             <h2 id="automation-connectors">Connectors</h2>

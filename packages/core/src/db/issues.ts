@@ -23,6 +23,7 @@ import {
 } from "../investigations/report.js";
 import { isSlackAssistantRequest } from "../integrations/slack-assistant.js";
 import { getDatabase } from "./client.js";
+import { pullRequestApprovalRequired } from "./pull-request-approval.js";
 import {
   agentConfigVersions,
   agents,
@@ -205,6 +206,11 @@ export async function submitInvestigationReport(input: {
       throw new Error("Scan reports cannot propose or publish code changes");
     }
     const observationOnly = investigation.input.provider === "scan";
+    // Investigations answer alerts, tickets, and channel messages, so a
+    // workspace that asks before such pull requests leaves them to a person.
+    const publishAutomatically = !observationOnly &&
+      investigation.prMode === "always" &&
+      !(await pullRequestApprovalRequired(input.organizationId, tx));
 
     const hasNewIssues = input.submission.report.issues.some(
       (issue) => issue.resolution === "new",
@@ -335,8 +341,7 @@ export async function submitInvestigationReport(input: {
       }));
     });
     const automaticPullRequestRequests =
-      !observationOnly &&
-      investigation.prMode === "always" &&
+      publishAutomatically &&
       candidateCodeRemediations.length > 0
         ? await queueAutomaticIssuePullRequests(tx, {
             agentConfigVersionId: investigation.agentConfigVersionId,
@@ -426,7 +431,7 @@ export async function submitInvestigationReport(input: {
       linearIssueTemplate: investigation.linearIssueTemplate,
       markdown,
       automaticPullRequestIssueIds:
-        !observationOnly && investigation.prMode === "always"
+        publishAutomatically
           ? automaticPullRequestRequests.map((request) => request.issueId)
           : [],
       automaticPullRequestRequestIds: automaticPullRequestRequests.map(

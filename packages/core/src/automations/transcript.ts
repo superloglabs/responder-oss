@@ -88,6 +88,10 @@ export interface AutomationSlackButtonPress {
   integrationAccountId: string;
   label: string;
   messageTimestamp: string;
+  // Whether a member of the connected Slack team pressed it, rather than
+  // someone from another team in a shared channel. Only such a press can
+  // approve a pull request that waits for a workspace member.
+  pressedByTeamMember?: boolean;
   // The message's thread, where the run answers.
   threadTimestamp: string;
 }

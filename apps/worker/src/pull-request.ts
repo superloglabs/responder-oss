@@ -142,6 +142,8 @@ export function createPullRequestTool(input: {
             repositoryPath: checkout.path,
             requestId: request.requestId,
             title: `Fix: ${request.selectedRemediation?.title ?? request.issueTitle}`.slice(0, 240),
+            // Investigations answer alerts, tickets, and channel messages.
+            untrustedTrigger: true,
             workspaceBaseSha: checkout.workspaceBaseSha,
           },
           input.session,

@@ -187,6 +187,9 @@ const slackBlockActionsSchema = z.object({
   user: z.object({
     id: z.string().min(1),
     name: z.string().min(1).optional(),
+    // The Slack team of the person who pressed, which differs from the
+    // event's team for someone in a channel shared with another team.
+    team_id: z.string().min(1).optional(),
     username: z.string().min(1).optional(),
   }),
   response_url: z.string().url(),
@@ -1006,6 +1009,8 @@ async function pressAutomationRunButton(
         integrationAccountId: run.integrationAccountId,
         label,
         messageTimestamp: message.ts,
+        // A press without a team is not counted as a member's.
+        pressedByTeamMember: payload.user.team_id === payload.team.id,
         threadTimestamp: message.thread_ts ?? message.ts,
       },
       source: "slack",

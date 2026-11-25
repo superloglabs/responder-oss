@@ -15,6 +15,7 @@ const options = {
 } as unknown as AutomationOptions;
 
 const configuration = {
+  allowDependencyChanges: false,
   contextAccountIds: ["datadog", "removed-account"],
   harness: "codex",
   maxModelRequests: 24,

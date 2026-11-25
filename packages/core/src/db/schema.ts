@@ -1616,6 +1616,12 @@ export const automationVersions = pgTable(
       .$type<"full">()
       .notNull()
       .default("full"),
+    // Whether the agent may change dependency manifests and lockfiles in the
+    // pull requests it publishes. CI configuration and agent instructions
+    // are never published.
+    allowDependencyChanges: boolean("allow_dependency_changes")
+      .notNull()
+      .default(false),
     maxRuntimeSeconds: integer("max_runtime_seconds").notNull(),
     maxModelRequests: integer("max_model_requests").notNull(),
     maxOutputTokensPerRequest: integer("max_output_tokens_per_request")
@@ -3044,6 +3050,14 @@ export const smsConsents = pgTable(
 export const handoffSettings = pgTable("handoff_settings", {
   organizationId: uuid("organization_id").primaryKey().references(() => organization.id, { onDelete: "cascade" }),
   targets: text("targets").array().$type<import("../ide-handoff.js").HandoffTarget[]>().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+// Whether a pull request from a run that an outside event started, such as an
+// alert, a webhook request, or a channel message, waits for a workspace member
+// to approve it. A workspace without a row does not wait.
+export const pullRequestApprovalSettings = pgTable("pull_request_approval_settings", {
+  organizationId: uuid("organization_id").primaryKey().references(() => organization.id, { onDelete: "cascade" }),
+  requireApproval: boolean("require_approval").notNull().default(false),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 // Notification preferences are opt-in. Deliveries are inserted with the error

@@ -189,6 +189,11 @@ export function errorTriggerMatches(
 
 export const automationConfigurationSchema = z
   .object({
+    // Lets the agent change dependency manifests and lockfiles in pull
+    // requests it publishes. CI configuration and agent instructions are
+    // never published.
+    allowDependencyChanges: z.boolean().default(false)
+      .describe("Whether pull requests the agent opens may change dependency manifests and lockfiles. Changes to CI configuration and agent instruction files are always refused."),
     contextAccountIds: z.array(z.uuid()).max(50).default([])
       .refine(uniqueIds, "Context account IDs must be unique"),
     harness: automationConfigurationHarnessSchema,

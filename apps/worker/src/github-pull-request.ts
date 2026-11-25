@@ -8,6 +8,7 @@ import {
   createGitHubInstallationToken,
   githubAppHeaders,
 } from "@responder/core/integrations/github";
+import { assertNoProtectedPaths } from "@responder/core/protected-paths";
 import { z } from "zod";
 import { assertNoDaytonaSecretPlaceholders } from "./secret-safety.js";
 
@@ -180,18 +181,24 @@ export async function githubJson(
   return payload;
 }
 
+// The repository's changes since the checkout, read from the sandbox. Changes
+// to CI configuration, agent instructions, and, unless allowed, dependency
+// files are refused before anything is read or published.
 export async function changedFiles(
   session: SandboxSession,
   repositoryPath: string,
   workspaceBaseSha: string,
   allowEmpty = false,
+  options: { allowDependencyChanges?: boolean } = {},
 ): Promise<
   Array<{ content: Uint8Array | null; mode: "100644" | "100755"; path: string }>
 > {
   const listed = await runCommand(
     session,
     [
-      `git diff --name-only -z ${shellQuote(workspaceBaseSha)} --`,
+      // Without renames, a moved file is listed under its old name too, so
+      // its old path is deleted and checked like the new one.
+      `git diff --no-renames --name-only -z ${shellQuote(workspaceBaseSha)} --`,
       "git ls-files --others --exclude-standard -z",
     ].join(" && "),
     repositoryPath,
@@ -204,6 +211,7 @@ export async function changedFiles(
     throw new Error("No repository changes were made");
   }
   if (paths.length > 50) throw new Error("A pull request may change at most 50 files");
+  assertNoProtectedPaths(paths, options);
 
   const files: Array<{
     content: Uint8Array | null;
@@ -259,6 +267,11 @@ export async function changedFiles(
   return files;
 }
 
+// Added to the body of a pull request that an agent wrote while answering an
+// event from outside the workspace, whose text the sender chose.
+export const untrustedTriggerNote =
+  "> [!NOTE]\n> This change was written from an event sent from outside this workspace, such as an alert, a webhook request, or a message. Text in that event may have been chosen by anyone who can send it, so review it as untrusted input before you merge.";
+
 export async function createPullRequestFromSandbox(
   input: {
     baseBranch: string;
@@ -271,7 +284,11 @@ export async function createPullRequestFromSandbox(
     requestId: string;
     scanChangedFileContents?: boolean;
     title: string;
+    // Set when an event from outside the workspace started the run, such as
+    // an alert, a webhook request, or a message from anyone in a channel.
+    untrustedTrigger?: boolean;
     workspaceBaseSha: string;
+    allowDependencyChanges?: boolean;
   },
   session: SandboxSession,
   dependencies: PullRequestDependencies = defaultDependencies,
@@ -280,8 +297,13 @@ export async function createPullRequestFromSandbox(
     session,
     input.repositoryPath,
     input.workspaceBaseSha,
+    false,
+    { allowDependencyChanges: input.allowDependencyChanges ?? false },
   );
-  assertNoDaytonaSecretPlaceholders(input.body, "Pull request body");
+  const body = input.untrustedTrigger
+    ? `${input.body}\n\n${untrustedTriggerNote}`
+    : input.body;
+  assertNoDaytonaSecretPlaceholders(body, "Pull request body");
   assertNoDaytonaSecretPlaceholders(input.title, "Pull request title");
   for (const file of files) {
     assertNoDaytonaSecretPlaceholders(file.path, "Changed file path");
@@ -361,7 +383,7 @@ export async function createPullRequestFromSandbox(
       method: "POST",
       body: JSON.stringify({
         base: input.baseBranch,
-        body: input.body,
+        body,
         head: branch,
         title: input.title,
       }),

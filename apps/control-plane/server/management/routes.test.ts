@@ -79,6 +79,7 @@ const app = new Hono()
 
 const automation = {
   configuration: {
+    allowDependencyChanges: false,
     contextAccountIds: [slackAccountId],
     harness: "codex",
     maxModelRequests: 500,
@@ -243,6 +244,7 @@ describe("management API", () => {
     expect(response.status).toBe(201);
     expect(mocks.createAutomation).toHaveBeenCalledWith(organizationId, userId, {
       configuration: {
+        allowDependencyChanges: false,
         contextAccountIds: [],
         harness: "codex",
         maxModelRequests: 500,
