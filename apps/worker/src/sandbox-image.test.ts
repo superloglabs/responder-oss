@@ -13,6 +13,7 @@ import {
   workspaceSandbox,
 } from "./sandbox-image.js";
 import type { SandboxSession } from "./sandbox-session.js";
+import type { SandboxMeterInput } from "./sandbox-metering.js";
 
 const organizationId = "00000000-0000-4000-8000-000000000001";
 const environment = {
@@ -152,10 +153,15 @@ function buildDependencies(input: {
   sandbox?: ReturnType<typeof fakeSandbox>["sandbox"];
   settings?: SandboxImageSettings;
 }) {
+  const meter = { stop: vi.fn(async () => undefined) };
   return {
+    checkAllowance: vi.fn(async (): Promise<{ allowed: boolean; exhausted: "machine_hours" | "usage_credit" | null }> =>
+      ({ allowed: true, exhausted: null })),
     clear: vi.fn(async () => undefined),
     complete: vi.fn(async () => undefined),
     createSandbox: vi.fn(async () => input.sandbox as never),
+    meter: vi.fn<(input: SandboxMeterInput) => typeof meter>(() => meter),
+    meterHandle: meter,
     fail: vi.fn(async () => undefined),
     getImage: vi.fn(async () => input.image ?? null),
     getRebuildRequestedAt: vi.fn(async () => input.rebuildRequestedAt ?? null),
@@ -188,6 +194,57 @@ describe("sandbox image build", () => {
       { ...base, builtSnapshotId: "snap_new", startCommand: settings.startCommand },
       expect.stringContaining("Built snapshot snap_new."),
     );
+  });
+
+  it("charges the build's sandbox time to the workspace", async () => {
+    const { sandbox } = fakeSandbox();
+    const dependencies = buildDependencies({ sandbox });
+    await buildSandboxImage(organizationId, {}, environment, dependencies);
+    expect(dependencies.checkAllowance).toHaveBeenCalledWith(organizationId, { responderModels: false });
+    expect(dependencies.meter).toHaveBeenCalledWith(expect.objectContaining({
+      billable: true,
+      organizationId,
+      resources: { cpu: 4, disk: 10, memory: 8 },
+      workload: "sandbox_image",
+    }));
+    expect(dependencies.meter.mock.invocationCallOrder[0]!)
+      .toBeGreaterThan(dependencies.createSandbox.mock.invocationCallOrder[0]!);
+    expect(dependencies.meterHandle.stop).toHaveBeenCalledOnce();
+  });
+
+  it("stops charging a build that fails", async () => {
+    const { sandbox } = fakeSandbox("responder-setup.sh");
+    const dependencies = buildDependencies({ sandbox });
+    await buildSandboxImage(organizationId, {}, environment, dependencies);
+    expect(dependencies.meterHandle.stop).toHaveBeenCalledOnce();
+  });
+
+  it("does not start a build once the workspace's allowance is used up", async () => {
+    const { sandbox } = fakeSandbox();
+    const dependencies = buildDependencies({ sandbox });
+    dependencies.checkAllowance.mockResolvedValue({ allowed: false, exhausted: "machine_hours" });
+    await expect(buildSandboxImage(organizationId, {}, environment, dependencies))
+      .resolves.toBe("failed");
+    expect(dependencies.createSandbox).not.toHaveBeenCalled();
+    expect(dependencies.meter).not.toHaveBeenCalled();
+    expect(dependencies.fail).toHaveBeenCalledWith(
+      organizationId,
+      sandboxImageKey(settings, base),
+      "The machine hours for this billing period are used up. Upgrade the plan in billing settings to continue.",
+      "",
+    );
+  });
+
+  it("leaves the image building when the worker stops during the allowance check", async () => {
+    const shutdown = new AbortController();
+    const dependencies = buildDependencies({});
+    dependencies.checkAllowance.mockImplementationOnce(async () => {
+      shutdown.abort();
+      return { allowed: false, exhausted: "machine_hours" };
+    });
+    await expect(buildSandboxImage(organizationId, { signal: shutdown.signal }, environment, dependencies))
+      .resolves.toBe("interrupted");
+    expect(dependencies.fail).not.toHaveBeenCalled();
   });
 
   it("records a failing setup script without throwing", async () => {

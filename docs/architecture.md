@@ -257,6 +257,10 @@ investigation credits.
   a server error the provider reports inside a stream. A rate limit or a
   rejected request does not count. Pull request work, which runs no
   workspace code, is not charged when it fails.
+- A build of the workspace's sandbox image runs its setup script, so it is
+  work too: it checks the balances before its sandbox starts, and its sandbox
+  time is charged as workload `sandbox_image`. A Signal-only workspace runs
+  no agent sandboxes and cannot change its sandbox settings.
 - On plans without machine hours, the billing page splits the period's charges
   into model usage and sandbox time from these rows. Autumn's balance remains
   the total.

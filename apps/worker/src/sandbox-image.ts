@@ -30,7 +30,11 @@ import {
   type SandboxImageBase,
   type SandboxImageRecord,
 } from "@responder/core/sandbox-image";
+import { checkWorkAllowance } from "@responder/core/billing/autumn";
 import { Sandbox, Snapshot } from "@vercel/sandbox";
+import { randomUUID } from "node:crypto";
+import { UsageAllowanceExhaustedError } from "./agent-usage.js";
+import { startSandboxMeter } from "./sandbox-metering.js";
 import type { SandboxSession } from "./sandbox-session.js";
 import { sandboxSnapshotResources } from "./sandbox-snapshot.js";
 import { runVercelCommand } from "./vercel-sandbox.js";
@@ -147,9 +151,14 @@ export type SandboxImageBuildOutcome =
   | "unsupported";
 
 interface BuildDependencies {
+  checkAllowance(
+    organizationId: string,
+    options: { responderModels: boolean },
+  ): Promise<{ allowed: boolean; exhausted: "machine_hours" | "usage_credit" | null }>;
   clear: typeof clearSandboxImage;
   complete: typeof completeSandboxImageBuild;
   createSandbox: typeof Sandbox.create;
+  meter: typeof startSandboxMeter;
   fail: typeof failSandboxImageBuild;
   getImage: typeof getSandboxImage;
   getRebuildRequestedAt: typeof getSandboxImageRebuildRequestedAt;
@@ -160,9 +169,11 @@ interface BuildDependencies {
 }
 
 const defaultBuildDependencies: BuildDependencies = {
+  checkAllowance: checkWorkAllowance,
   clear: clearSandboxImage,
   complete: completeSandboxImageBuild,
   createSandbox: (...args) => Sandbox.create(...args),
+  meter: startSandboxMeter,
   fail: failSandboxImageBuild,
   getImage: getSandboxImage,
   getRebuildRequestedAt: getSandboxImageRebuildRequestedAt,
@@ -232,6 +243,19 @@ export async function buildSandboxImage(
     await dependencies.recordLog(organizationId, key, log);
   };
   if (options.signal?.aborted) return "interrupted";
+  // A build runs the workspace's own script, so it needs machine time left
+  // like any other work, and its sandbox time is charged.
+  const access = await dependencies.checkAllowance(organizationId, { responderModels: false });
+  if (options.signal?.aborted) return "interrupted";
+  if (!access.allowed) {
+    await dependencies.fail(
+      organizationId,
+      key,
+      new UsageAllowanceExhaustedError(access.exhausted).message,
+      log,
+    );
+    return "failed";
+  }
   let sandbox: Sandbox;
   try {
     sandbox = await dependencies.createSandbox({
@@ -248,6 +272,18 @@ export async function buildSandboxImage(
     await dependencies.fail(organizationId, key, "Could not start a sandbox to build in", log);
     throw error;
   }
+  const meter = dependencies.meter({
+    billable: true,
+    organizationId,
+    resources: {
+      ...sandboxSnapshotResources,
+      cpu: settings.vcpus,
+      memory: settings.vcpus * sandboxMemoryGiBPerVcpu,
+    },
+    snapshot: true,
+    workload: "sandbox_image",
+    workloadId: randomUUID(),
+  });
   // Stopping the sandbox ends the command it is running.
   const stop = () => void sandbox.stop().catch(() => undefined);
   options.signal?.addEventListener("abort", stop, { once: true });
@@ -309,6 +345,7 @@ export async function buildSandboxImage(
     throw error;
   } finally {
     options.signal?.removeEventListener("abort", stop);
+    await meter.stop();
   }
 }
 

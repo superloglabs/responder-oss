@@ -49,6 +49,8 @@ export function usageSourceLabel(source: UsageSource): string {
       return "Investigations";
     case "pull_requests":
       return "Pull requests";
+    case "sandbox_image":
+      return "Sandbox image builds";
     case "tag_mode":
       return "Tag mode";
   }

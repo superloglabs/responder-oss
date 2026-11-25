@@ -1,0 +1,2 @@
+ALTER TABLE "sandbox_usage" DROP CONSTRAINT "sandbox_usage_workload_check";--> statement-breakpoint
+ALTER TABLE "sandbox_usage" ADD CONSTRAINT "sandbox_usage_workload_check" CHECK ("sandbox_usage"."workload" in ('automation', 'investigation', 'pull_request_review', 'remediation', 'sandbox_image'));

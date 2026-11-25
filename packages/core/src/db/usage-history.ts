@@ -22,7 +22,7 @@ export function parseUsageHistoryDays(value: string | undefined): UsageHistoryDa
 // automation; runs of an automation that was deleted are grouped together.
 export type UsageSource =
   | { automationId: string; kind: "automation"; name: string }
-  | { kind: "deleted_automation" | "investigations" | "pull_requests" | "tag_mode" };
+  | { kind: "deleted_automation" | "investigations" | "pull_requests" | "sandbox_image" | "tag_mode" };
 
 export interface UsageHistoryPoint {
   // Model usage charged, in dollars.
@@ -83,7 +83,7 @@ export async function getUsageHistory(input: {
     ? eq(automationRuns.automationId, input.automationId)
     : undefined;
 
-  const sandboxSource = sql<string>`case when ${sandboxUsage.workload} = 'automation' then ${automationSource} when ${sandboxUsage.workload} = 'investigation' then ${investigationSource} else 'pull_requests' end`;
+  const sandboxSource = sql<string>`case when ${sandboxUsage.workload} = 'automation' then ${automationSource} when ${sandboxUsage.workload} = 'investigation' then ${investigationSource} when ${sandboxUsage.workload} = 'sandbox_image' then 'sandbox_image' else 'pull_requests' end`;
   // A period still running counts until its last heartbeat.
   const sandboxEnd = sql<Date | string>`coalesce(${sandboxUsage.stoppedAt}, ${sandboxUsage.heartbeatAt})`;
   // Each period is read on its own so that one crossing midnight or the
@@ -230,6 +230,7 @@ const nonAutomationSources = new Set([
   "deleted_automation",
   "investigations",
   "pull_requests",
+  "sandbox_image",
   "tag_mode",
 ]);
 
