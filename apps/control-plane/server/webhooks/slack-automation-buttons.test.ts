@@ -133,6 +133,14 @@ describe("automation buttons in Slack", () => {
   it("refuses a press whose Slack team is unknown", async () => {
     await press({ user: { id: "U999", name: "eve" } });
     expect(mocks.queueReply).not.toHaveBeenCalled();
+    expect(responses(fetchMock)).toEqual([{
+      body: {
+        replace_original: false,
+        response_type: "ephemeral",
+        text: "Only members of this Slack workspace can use these buttons.",
+      },
+      url: responseUrl,
+    }]);
   });
 
   it("continues the run that posted the message and replaces its buttons", async () => {
