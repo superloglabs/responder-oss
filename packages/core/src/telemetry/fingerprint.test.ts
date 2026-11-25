@@ -790,3 +790,30 @@ test("a failed request's fingerprint changes with its service and its status", (
   expect(hash({ status: 502 })).not.toBe(hash({}));
   expect(fingerprintFailedRequest({ ...failedRequest, status: 502 }).exceptionType).toBe("HTTP 502");
 });
+
+// Stacks and messages are read in time linear in their length, so a long or
+// crafted value cannot hold the process.
+test.each([
+  ["a V8 frame of whitespace", { stacktrace: `Error\n    at x${" ".repeat(200_000)}y`, type: "Error" }],
+  ["a V8 frame of nested parentheses", { stacktrace: `Error\n    at ${"a (".repeat(70_000)}`, type: "Error" }],
+  ["a Next.js chunk path", { stacktrace: `Error\n    at f (/_next/static/${"a".repeat(200_000)}g.js:1:1)`, type: "Error" }],
+  ["many blank lines", { stacktrace: "\n".repeat(500_000), type: "Error" }],
+  ["many frames", { stacktrace: `Error\n${`    at f${" ".repeat(900)}y\n`.repeat(1_000)}`, type: "Error" }],
+])("fingerprint reads %s quickly", (_name, input) => {
+  const started = performance.now();
+  fingerprint(input);
+  previousFingerprint(input);
+  expect(performance.now() - started).toBeLessThan(1_000);
+});
+
+test.each([
+  ["dotted words", "a.".repeat(200_000)],
+  ["dashed words", "a-".repeat(200_000)],
+  ["dotted numbers", "1.".repeat(200_000)],
+])("fingerprintLog reads a body of %s quickly", (_name, body) => {
+  const input = { body, service: "api", severity: "ERROR" };
+  const started = performance.now();
+  fingerprintLog(input);
+  previousFingerprintLog(input);
+  expect(performance.now() - started).toBeLessThan(1_000);
+});

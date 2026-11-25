@@ -1,5 +1,6 @@
 import { originalPositionFor, sourceContentFor, TraceMap } from "@jridgewell/trace-mapping";
 import { enclosingFunctionName } from "./enclosing-function.js";
+import { MAXIMUM_FRAME_LINE_LENGTH, MAXIMUM_STACK_LINES } from "./fingerprint.js";
 import type { ErrorCandidate } from "./error-issues.js";
 
 // Maps minified browser frames back to the original source before errors
@@ -29,15 +30,43 @@ type StackLine = {
   url: string;
 };
 
-const V8_WITH_FUNCTION = /^(\s*at\s+)(?:(.+?)\s+\()(?:address at )?(\S+?):(\d+):(\d+)\)$/;
 const V8_BARE = /^(\s*at\s+)(?:address at )?(\S+?):(\d+):(\d+)$/;
 const GECKO = /^(\s*)((?:[^@*\s][^@*]*\*)?)([^@]*)@(\S+?):(\d+):(\d+)$/;
 
-function parseLine(text: string): StackLine | null {
-  const withFunction = text.match(V8_WITH_FUNCTION);
-  if (withFunction) {
-    return { column: Number(withFunction[5]), fn: withFunction[2] ?? null, line: Number(withFunction[4]), marker: withFunction[1]!, style: "v8", url: withFunction[3]! };
+// `at fn (url:line:col)` without a regular expression, which would take time
+// cubic in the line's length. The URL has no whitespace, so the `(` before it
+// follows the line's last whitespace, or the frame reads `(address at url`.
+function v8WithFunction(text: string): StackLine | null {
+  const marker = /^\s*at\s+/.exec(text)?.[0];
+  if (!marker || !text.endsWith(")")) return null;
+  const lastWhitespace = text.search(/\s\S*$/);
+  const openings = [lastWhitespace - 11, lastWhitespace + 1];
+  for (const open of openings) {
+    const address = open === lastWhitespace - 11;
+    if (open <= marker.length || text[open] !== "(" || (address && !text.startsWith("(address at ", open))) continue;
+    let fnEnd = open;
+    while (fnEnd > marker.length && /\s/.test(text[fnEnd - 1]!)) fnEnd -= 1;
+    if (fnEnd === open || fnEnd === marker.length) continue;
+    const location = /:(\d+):(\d+)\)$/.exec(text);
+    const urlStart = open + (address ? 12 : 1);
+    if (!location || location.index <= urlStart) continue;
+    return {
+      column: Number(location[2]),
+      fn: text.slice(marker.length, fnEnd),
+      line: Number(location[1]),
+      marker,
+      style: "v8",
+      url: text.slice(urlStart, location.index),
+    };
   }
+  return null;
+}
+
+function parseLine(text: string): StackLine | null {
+  // Longer lines are not frames, which bounds the work for any stack.
+  if (text.length > MAXIMUM_FRAME_LINE_LENGTH) return null;
+  const withFunction = v8WithFunction(text);
+  if (withFunction) return withFunction;
   const bare = text.match(V8_BARE);
   if (bare) return { column: Number(bare[4]), fn: null, line: Number(bare[3]), marker: bare[1]!, style: "v8", url: bare[2]! };
   const gecko = text.match(GECKO);
@@ -87,7 +116,7 @@ function functionAt(map: TraceMap, source: string, line: number, column: number)
 // frame with neither keeps no function name and groups by its file alone.
 export function symbolicateStack(stacktrace: string, debugIds: Record<string, string>, maps: Map<string, TraceMap>): string | null {
   const lines = stacktrace.split("\n");
-  const parsed = lines.map(parseLine);
+  const parsed = lines.map((line, index) => (index < MAXIMUM_STACK_LINES ? parseLine(line) : null));
   const positions = parsed.map((frame) => {
     if (!frame) return null;
     const debugId = debugIds[frame.url];
