@@ -68,6 +68,16 @@ export function sameSitePath(value: unknown): string | null {
 }
 
 export const accountSecurityBeforeHook = createAuthMiddleware(async (ctx) => {
+  // A banned person's session works for no auth endpoint. /get-session
+  // answers null instead, in accountSecurityAfterHook.
+  if (ctx.path !== "/get-session") {
+    const current = await getSessionFromCtx(ctx).catch(() => null);
+    const bannedUserId = bannedSessionUserId(current);
+    if (bannedUserId) {
+      await revokeCredentialsFor(bannedUserId, "ban");
+      throw new APIError("UNAUTHORIZED", { message: "This account is banned." });
+    }
+  }
   // Confirmation links go only to signed-in people, for their own address.
   if (ctx.path === "/send-verification-email") {
     if (!(await getSessionFromCtx(ctx))) {
@@ -95,8 +105,29 @@ export const accountSecurityBeforeHook = createAuthMiddleware(async (ctx) => {
   }
 });
 
+// The person behind a session Better Auth is about to return, when they are
+// banned. Bans written straight to the user table skip the ban hook, so the
+// session is checked each time it is read.
+export function bannedSessionUserId(returned: unknown, now = new Date()): string | null {
+  if (!returned || typeof returned !== "object" || !("user" in returned)) return null;
+  const user = (returned as { user?: { banExpires?: unknown; banned?: unknown; id?: unknown } })
+    .user;
+  if (!user || typeof user.id !== "string" || user.banned !== true) return null;
+  const expires =
+    user.banExpires instanceof Date || typeof user.banExpires === "string"
+      ? new Date(user.banExpires)
+      : null;
+  return expires && expires.getTime() <= now.getTime() ? null : user.id;
+}
+
 export const accountSecurityAfterHook = createAuthMiddleware(async (ctx) => {
   if (ctx.context.returned === undefined || isAPIError(ctx.context.returned)) return;
+  if (ctx.path === "/get-session") {
+    const bannedUserId = bannedSessionUserId(ctx.context.returned);
+    if (!bannedUserId) return;
+    await revokeCredentialsFor(bannedUserId, "ban");
+    return ctx.json(null);
+  }
   if (ctx.path === "/change-password") {
     const current = ctx.context.newSession ?? (await getSessionFromCtx(ctx));
     if (!current) return;

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { emailConfirmationTokenUserId, sameSitePath } from "./account-security.js";
+import {
+  bannedSessionUserId,
+  emailConfirmationTokenUserId,
+  sameSitePath,
+} from "./account-security.js";
 
 function token(claims: unknown): string {
   const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
@@ -31,5 +35,24 @@ describe("sameSitePath", () => {
     expect(sameSitePath("/\\example.com")).toBeNull();
     expect(sameSitePath("invite")).toBeNull();
     expect(sameSitePath(undefined)).toBeNull();
+  });
+});
+
+describe("bannedSessionUserId", () => {
+  const now = new Date("2026-11-25T12:00:00Z");
+
+  it("names the person behind a session with an active ban", () => {
+    expect(bannedSessionUserId({ user: { banned: true, banExpires: null, id: "user-1" } }, now)).toBe("user-1");
+    expect(
+      bannedSessionUserId({ user: { banned: true, banExpires: "2026-11-26T00:00:00Z", id: "user-1" } }, now),
+    ).toBe("user-1");
+  });
+
+  it("ignores sessions without a ban or whose ban has expired", () => {
+    expect(bannedSessionUserId({ user: { banned: false, id: "user-1" } }, now)).toBeNull();
+    expect(
+      bannedSessionUserId({ user: { banned: true, banExpires: new Date("2026-11-25T11:00:00Z"), id: "user-1" } }, now),
+    ).toBeNull();
+    expect(bannedSessionUserId(null, now)).toBeNull();
   });
 });
