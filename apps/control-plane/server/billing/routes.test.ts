@@ -7,6 +7,7 @@ import {
 } from "./routes.js";
 
 const mocks = vi.hoisted(() => ({
+  cancelAutomationPlan: vi.fn(),
   changeAutomationPlan: vi.fn(),
   createBillingPortal: vi.fn(),
   createPayAsYouGoCheckout: vi.fn(),
@@ -21,7 +22,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("../tenant.js", () => ({ getActiveTenant: mocks.tenant }));
 vi.mock("../../../../packages/core/src/billing/autumn.js", () => ({
-  cancelAutomationPlan: vi.fn(),
+  cancelAutomationPlan: mocks.cancelAutomationPlan,
   changeAutomationPlan: mocks.changeAutomationPlan,
   createBillingPortal: mocks.createBillingPortal,
   createPayAsYouGoCheckout: mocks.createPayAsYouGoCheckout,
@@ -246,6 +247,7 @@ describe("billing routes", () => {
       expect(response.status).toBe(403);
       expect(await response.json()).toEqual({ error: "Only workspace owners and admins can change billing" });
       expect(mocks.createPayAsYouGoCheckout).not.toHaveBeenCalled();
+      expect(mocks.cancelAutomationPlan).not.toHaveBeenCalled();
       expect(mocks.changeAutomationPlan).not.toHaveBeenCalled();
       expect(mocks.createBillingPortal).not.toHaveBeenCalled();
     });
@@ -261,13 +263,15 @@ describe("billing routes", () => {
       expect(mocks.changeAutomationPlan).toHaveBeenCalledOnce();
     });
 
-    it("still shows billing to a member", async () => {
+    it("still shows billing, seats, and usage to a member", async () => {
       signIn("member");
       mocks.getBillingSummary.mockResolvedValue(summary);
+      mocks.organizationHasCapability.mockResolvedValue(true);
+      mocks.getUsageHistory.mockResolvedValue({ days: [] });
 
-      const response = await app.request("/api/billing");
-
-      expect(response.status).toBe(200);
+      for (const path of ["/api/billing", "/api/billing/seats", "/api/billing/usage"]) {
+        expect((await app.request(path)).status, path).toBe(200);
+      }
     });
   });
 
