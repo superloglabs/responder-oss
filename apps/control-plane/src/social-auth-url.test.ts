@@ -27,6 +27,12 @@ describe("social auth error messages", () => {
     );
   });
 
+  it("asks a signed-out visitor to sign in to finish confirming an email", () => {
+    expect(socialAuthErrorMessage("?error=SIGN_IN_REQUIRED")).toBe(
+      "Sign in to finish confirming your email, then open the confirmation link again.",
+    );
+  });
+
   it("uses a safe message for other provider errors", () => {
     expect(socialAuthErrorMessage("?error=invalid_code")).toBe(
       "Social sign in failed. Please try again.",

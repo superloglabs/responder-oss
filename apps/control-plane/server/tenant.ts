@@ -18,7 +18,26 @@ export type ActiveTenantResult =
       status: 401 | 403 | 409;
     };
 
+export type ActiveTenantSessionResult =
+  | Extract<ActiveTenantResult, { ok: false }>
+  | (Extract<ActiveTenantResult, { ok: true }> & { sessionId: string });
+
 export async function getActiveTenant(headers: Headers): Promise<ActiveTenantResult> {
+  const result = await getActiveTenantSession(headers);
+  if (result.ok === false) return result;
+  return {
+    ok: true,
+    organizationId: result.organizationId,
+    role: result.role,
+    user: result.user,
+  };
+}
+
+// The active tenant and the session that reached it, for writes that must
+// not outlive that session.
+export async function getActiveTenantSession(
+  headers: Headers,
+): Promise<ActiveTenantSessionResult> {
   const auth = getAuth();
   const authSession = await auth.api.getSession({ headers });
   if (!authSession) {
@@ -49,6 +68,7 @@ export async function getActiveTenant(headers: Headers): Promise<ActiveTenantRes
     ok: true,
     organizationId,
     role: activeMember.role,
+    sessionId: authSession.session.id,
     user: {
       email: authSession.user.email,
       id: authSession.user.id,

@@ -24,6 +24,18 @@ export async function revokeUserCredentials(
   now = new Date(),
 ): Promise<RevokedUserCredentials> {
   return getDatabase().transaction(async (tx) => {
+    // Sessions go first. Deleting a session waits for any API key its
+    // request is still creating, so the key updates below see that key, and
+    // later requests from the session find it gone.
+    const deletedSessions = await tx
+      .delete(session)
+      .where(
+        and(
+          eq(session.userId, userId),
+          ...(options.keepSessionToken ? [ne(session.token, options.keepSessionToken)] : []),
+        ),
+      )
+      .returning({ id: session.id });
     const revokedApiKeys = await tx
       .update(apiKeys)
       .set({ revokedAt: now })
@@ -45,15 +57,6 @@ export async function revokeUserCredentials(
       .delete(oauthConsent)
       .where(eq(oauthConsent.userId, userId))
       .returning({ id: oauthConsent.id });
-    const deletedSessions = await tx
-      .delete(session)
-      .where(
-        and(
-          eq(session.userId, userId),
-          ...(options.keepSessionToken ? [ne(session.token, options.keepSessionToken)] : []),
-        ),
-      )
-      .returning({ id: session.id });
     return {
       apiKeys: revokedApiKeys.length,
       oauthAccessTokens: revokedAccessTokens.length,

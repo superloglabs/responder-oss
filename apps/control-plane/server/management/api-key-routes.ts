@@ -2,11 +2,12 @@ import { Hono } from "hono";
 import { z } from "zod";
 import {
   createApiKey,
+  EndedSessionError,
   listApiKeys,
   revokeApiKey,
 } from "../../../../packages/core/src/db/api-keys.js";
 import { captureAnalyticsEvent } from "../../../../packages/core/src/analytics.js";
-import { getActiveTenant } from "../tenant.js";
+import { getActiveTenant, getActiveTenantSession } from "../tenant.js";
 
 const apiKeyInputSchema = z.object({
   name: z.string().trim().min(1, "Name the key").max(120),
@@ -36,7 +37,7 @@ export const apiKeyRoutes = new Hono()
     });
   })
   .post("/", async (context) => {
-    const tenant = await getActiveTenant(context.req.raw.headers);
+    const tenant = await getActiveTenantSession(context.req.raw.headers);
     if (tenant.ok === false) return context.json({ error: tenant.error }, tenant.status);
     const parsed = apiKeyInputSchema.safeParse(await context.req.json().catch(() => null));
     if (!parsed.success) {
@@ -45,11 +46,18 @@ export const apiKeyRoutes = new Hono()
         400,
       );
     }
-    const created = await createApiKey({
-      name: parsed.data.name,
-      organizationId: tenant.organizationId,
-      user: tenant.user,
-    });
+    let created: Awaited<ReturnType<typeof createApiKey>>;
+    try {
+      created = await createApiKey({
+        name: parsed.data.name,
+        organizationId: tenant.organizationId,
+        sessionId: tenant.sessionId,
+        user: tenant.user,
+      });
+    } catch (error) {
+      if (error instanceof EndedSessionError) return context.json({ error: "Unauthorized" }, 401);
+      throw error;
+    }
     await captureAnalyticsEvent({
       distinctId: tenant.user.id,
       event: "api key created",

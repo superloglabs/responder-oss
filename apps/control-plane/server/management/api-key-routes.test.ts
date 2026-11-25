@@ -14,8 +14,10 @@ const mocks = vi.hoisted(() => ({
   tenant: vi.fn(),
 }));
 
-vi.mock("../tenant.js", () => ({ getActiveTenant: mocks.tenant }));
-vi.mock("../../../../packages/core/src/db/api-keys.js", () => ({
+vi.mock("../tenant.js", () => ({ getActiveTenant: mocks.tenant, getActiveTenantSession: mocks.tenant }));
+vi.mock("../../../../packages/core/src/db/api-keys.js", async (importOriginal) => ({
+  EndedSessionError: (await importOriginal<typeof import("../../../../packages/core/src/db/api-keys.js")>())
+    .EndedSessionError,
   createApiKey: mocks.create,
   listApiKeys: mocks.list,
   revokeApiKey: mocks.revoke,
@@ -28,7 +30,7 @@ const app = new Hono().route("/api/api-keys", apiKeyRoutes);
 const user = { email: "ash@example.com", id: userId, name: "Ash" };
 
 function signedIn(role: string) {
-  mocks.tenant.mockResolvedValue({ ok: true, organizationId, role, user });
+  mocks.tenant.mockResolvedValue({ ok: true, organizationId, role, sessionId: "session-1", user });
 }
 
 function key(createdBy: string) {
@@ -89,7 +91,7 @@ describe("API key settings routes", () => {
     expect(response.status).toBe(201);
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(await response.json()).toMatchObject({ token: "slk_secret" });
-    expect(mocks.create).toHaveBeenCalledWith({ name: "CI", organizationId, user });
+    expect(mocks.create).toHaveBeenCalledWith({ name: "CI", organizationId, sessionId: "session-1", user });
   });
 
   it("revokes with the member's role", async () => {

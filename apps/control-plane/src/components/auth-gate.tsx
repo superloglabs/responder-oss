@@ -793,7 +793,7 @@ function WorkspaceSetup({ onCreating, onReady }: WorkspaceSetupProps) {
 function confirmationLinkError(code: string | null): string | null {
   if (!code) return null;
   if (code === "SIGN_IN_REQUIRED") {
-    return "Open the confirmation link in this browser, where you're signed in. Send a new one if it expired.";
+    return "Open the confirmation link in a browser signed in to this account.";
   }
   return "That confirmation link is invalid or expired. Send a new one.";
 }

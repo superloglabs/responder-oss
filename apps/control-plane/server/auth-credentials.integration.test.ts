@@ -128,9 +128,14 @@ describe.skipIf(!testUrl)("account credentials (PostgreSQL)", () => {
     await db.insert(organization).values({ createdAt, id: organizationId, name: "Acme", slug: organizationId });
     createdOrganizations.push(organizationId);
     await db.insert(member).values({ createdAt, organizationId, role: "admin", userId });
+    const [current] = await query<{ id: string }>(
+      "select id from session where user_id = $1 order by created_at limit 1",
+      [userId],
+    );
     const { token: apiKey } = await createApiKey({
       name: "CI",
       organizationId,
+      sessionId: current!.id,
       user: { email, id: userId, name: "Test Person" },
     });
     const clientId = `client-${randomUUID()}`;
@@ -272,6 +277,26 @@ describe.skipIf(!testUrl)("account credentials (PostgreSQL)", () => {
 
       expect(response.status).toBe(400);
       expect((await liveCredentials(userId, apiKey)).apiKey).toBe(true);
+    });
+  });
+
+  describe("API key creation", () => {
+    // A request that signed in before a reset must not add a key after the
+    // reset ended its session.
+    it("refuses a key for a session that has ended", async () => {
+      const email = `ended-${randomUUID()}@example.com`;
+      const { userId } = await signUp(email);
+      const [current] = await query<{ id: string }>("select id from session where user_id = $1", [userId]);
+      await query("delete from session where id = $1", [current!.id]);
+
+      await expect(
+        createApiKey({
+          name: "CI",
+          organizationId: randomUUID(),
+          sessionId: current!.id,
+          user: { email, id: userId, name: "Test Person" },
+        }),
+      ).rejects.toThrow("The session has ended");
     });
   });
 

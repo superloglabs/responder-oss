@@ -35,6 +35,11 @@ export function socialAuthErrorMessage(search: string): string | null {
   const error = new URLSearchParams(search).get("error");
   if (!error) return null;
 
+  // An email confirmation link opened without the account's session.
+  if (error === "SIGN_IN_REQUIRED") {
+    return "Sign in to finish confirming your email, then open the confirmation link again.";
+  }
+
   if (error === "email_not_found") {
     return "GitHub did not provide an email address. Try again after email access is enabled, or continue with Google or email.";
   }
