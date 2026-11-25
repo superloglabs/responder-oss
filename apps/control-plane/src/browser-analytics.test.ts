@@ -10,6 +10,8 @@ const posthogMocks = vi.hoisted(() => ({
   startSessionRecording: vi.fn(),
 }));
 
+vi.mock("posthog-js/dist/lazy-recorder", () => ({}));
+
 vi.mock("posthog-js", () => ({
   default: {
     capture: posthogMocks.capture,
@@ -105,6 +107,24 @@ describe("browser analytics", () => {
     expect(posthogMocks.register).toHaveBeenCalledBefore(
       posthogMocks.startSessionRecording,
     );
+  });
+
+  it("bundles the session recorder and never loads PostHog scripts at runtime", async () => {
+    vi.stubEnv("VITE_POSTHOG_PROJECT_TOKEN", "phc_test");
+    const recorderLoaded = vi.fn();
+    vi.doMock("posthog-js/dist/lazy-recorder", () => {
+      recorderLoaded();
+      return {};
+    });
+    const { allowBrowserAnalytics } = await import("./browser-analytics");
+
+    await allowBrowserAnalytics();
+
+    expect(posthogMocks.init).toHaveBeenCalledWith(
+      "phc_test",
+      expect.objectContaining({ disable_external_dependency_loading: true }),
+    );
+    expect(recorderLoaded).toHaveBeenCalledBefore(posthogMocks.init);
   });
 
   it("treats analytics initialization failures as optional and retries", async () => {

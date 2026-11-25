@@ -20,7 +20,10 @@ async function getBrowserAnalyticsClient() {
   const projectToken = import.meta.env.VITE_POSTHOG_PROJECT_TOKEN?.trim();
   if (!projectToken) return null;
 
-  clientPromise = import("posthog-js")
+  // The session recorder ships in our bundle and PostHog may not load any
+  // script at runtime, so no third-party code runs on signed-in pages.
+  clientPromise = import("posthog-js/dist/lazy-recorder")
+    .then(() => import("posthog-js"))
     .then(({ default: client }) => {
       const apiHost =
         import.meta.env.VITE_POSTHOG_HOST?.trim() || DEFAULT_POSTHOG_HOST;
@@ -29,6 +32,7 @@ async function getBrowserAnalyticsClient() {
         api_host: apiHost,
         capture_pageview: false,
         defaults: "2026-05-30",
+        disable_external_dependency_loading: true,
         disable_session_recording: false,
         person_profiles: "identified_only",
         session_recording: {
