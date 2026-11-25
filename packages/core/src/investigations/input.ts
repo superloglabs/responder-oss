@@ -63,7 +63,8 @@ export function toInvestigationInput(request: InvestigationRequest): Investigati
 // data. A request from a person in the workspace is not.
 export function investigationPrompt(
   input: InvestigationInput,
-  options: { outsideEvent?: boolean } = {},
+  // Every caller says whether the event came from outside the workspace.
+  options: { outsideEvent: boolean },
 ): string {
   const awsAlarmContext = awsAlarmPromptContext(input);
   const event = [
@@ -76,7 +77,7 @@ export function investigationPrompt(
   return [
     `# ${input.provider} event`,
     "",
-    options.outsideEvent === true ? fenceUntrusted("the event, as its sender wrote it", event) : event,
+    options.outsideEvent ? fenceUntrusted("the event, as its sender wrote it", event) : event,
   ]
     .filter((line): line is string => line !== null)
     .join("\n");

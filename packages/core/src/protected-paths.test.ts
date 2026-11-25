@@ -81,6 +81,8 @@ describe("protected repository paths", () => {
     "mix.exs",
     "mix.lock",
     "src/App/App.csproj",
+    "src/Lib/Lib.fsproj",
+    "src/Legacy/Legacy.vbproj",
     "packages.lock.json",
     "Directory.Packages.props",
     "mise.toml",

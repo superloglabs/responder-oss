@@ -159,7 +159,7 @@ export function protectedPathCategory(path: string): ProtectedPathCategory | nul
   if (segments.slice(0, -1).some((segment) => ciDirectories.includes(segment))) return "ci";
   if (
     dependencyFileNames.has(name) ||
-    name.endsWith(".csproj") ||
+    [".csproj", ".fsproj", ".vbproj"].some((extension) => name.endsWith(extension)) ||
     name.endsWith(".gemspec") ||
     isRequirementsFile(segments)
   ) {

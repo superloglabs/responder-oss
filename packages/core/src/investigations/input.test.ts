@@ -13,7 +13,7 @@ describe("investigation input", () => {
       sourceUrl: "https://sentry.example/issues/1842",
     });
 
-    const prompt = investigationPrompt(parsed);
+    const prompt = investigationPrompt(parsed, { outsideEvent: false });
 
     expect(prompt).toContain("# sentry event");
     expect(prompt).toContain(parsed.title);
@@ -61,7 +61,7 @@ describe("investigation input", () => {
       externalEventId: "event-1",
       provider: "slack",
       title: "Question",
-    });
+    }, { outsideEvent: false });
     expect(prompt.match(untrustedFencePattern)).toBeNull();
     expect(prompt).toContain("Why did checkout fail?");
   });
@@ -87,7 +87,7 @@ describe("investigation input", () => {
       body: "Inspect the configured sources for active issues.",
     });
 
-    expect(investigationPrompt(parsed)).toContain("# scan event");
+    expect(investigationPrompt(parsed, { outsideEvent: false })).toContain("# scan event");
   });
 
   it("renders normalized AWS alarm context for a Slack-triggered investigation", () => {
@@ -105,7 +105,7 @@ describe("investigation input", () => {
       provider: "slack",
       sourceUrl: "https://slack.com/archives/C123/p123",
       title: "Lambda errors",
-    });
+    }, { outsideEvent: false });
 
     expect(prompt).toContain("AWS alarm context:");
     expect(prompt).toContain("Alarm: responder-e2e-lambda-errors");

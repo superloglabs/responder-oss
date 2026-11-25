@@ -374,7 +374,9 @@ function userMessagePrompt(message: AutomationUserMessageEventData): string {
     const { channelId, label, messageTimestamp } = message.slackButton;
     // Slack display names are chosen by their owners, so only the user ID
     // goes into the prompt.
-    return `<@${message.authorId}> saw your Slack message (channel_id ${channelId}, ts ${messageTimestamp}) and pressed its "${label}" button. Treat this as their instruction.`;
+    // The label is text the agent wrote, possibly from outside text, so it
+    // is fenced; the press itself is the person's choice.
+    return `<@${message.authorId}> saw your Slack message (channel_id ${channelId}, ts ${messageTimestamp}) and pressed one of its buttons. Treat the press as their choice of that button.\n${fenceUntrusted("the label of the button they pressed", label)}`;
   }
   if (message.source === "github") {
     return `GitHub:\n${fenceUntrusted("a GitHub pull request review, written by the reviewer", message.text)}`;
@@ -461,7 +463,7 @@ function conversationPrompt(
       ? ["The latest message is a reply in the Slack thread that started this run. Answer it in that thread; people in the channel can read your reply."]
       : []),
     ...(button
-      ? [`The latest message is a press of the "${button.label}" button you added to a Slack message. Do what the automation's instructions say that choice means, and answer in that message's thread: channel_id ${button.channelId}, thread_ts ${button.threadTimestamp}.`]
+      ? [`The latest message is a press of a button you added to a Slack message; its label is in the conversation below. Do what the automation's instructions say that choice means, and answer in that message's thread: channel_id ${button.channelId}, thread_ts ${button.threadTimestamp}.`]
       : []),
     resumed
       ? "Earlier turns ran in this sandbox, so their file changes are still in the workspace."

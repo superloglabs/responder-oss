@@ -1790,7 +1790,7 @@ describe("automation run processor", () => {
       await processAutomationRun("job-1", job, process.env, deps);
 
       const prompt = deps.runCodex.mock.calls[0]![1].prompt;
-      expect(prompt).toContain("<@U123> saw your Slack message (channel_id C999, ts 1790000002.000100) and pressed its \"Create PR\" button. Treat this as their instruction.");
+      expect(prompt).toMatch(/<@U123> saw your Slack message \(channel_id C999, ts 1790000002\.000100\) and pressed one of its buttons\. Treat the press as their choice of that button\.\nThe block between the (untrusted-[0-9a-f]{16}) markers is the label of the button they pressed\..*\n<\1>\nCreate PR\n<\/\1>/u);
       expect(prompt).toContain("answer in that message's thread: channel_id C999, thread_ts 1790000001.000100");
       expect(prompt).toContain("Reply in the Slack thread of the message whose button was pressed (#ops)");
       expect(prompt).not.toContain("skip_notification");

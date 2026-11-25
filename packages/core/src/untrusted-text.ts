@@ -1,9 +1,9 @@
 import { randomBytes } from "node:crypto";
 
-// Text from alerts, webhook requests, tickets, error reports, telemetry,
-// channel messages, and code reviews is written by whoever can reach the
-// customer's systems. It goes to a model only inside a fence whose marker it
-// cannot predict, labelled as data.
+// Puts text that whoever can reach the customer's systems wrote, such as an
+// alert, a webhook request, a channel message, or a code review, inside a
+// fence whose marker it cannot predict, labelled as data. Tool output is not
+// fenced; the closing rule below covers it.
 export function fenceUntrusted(
   label: string,
   text: string,
