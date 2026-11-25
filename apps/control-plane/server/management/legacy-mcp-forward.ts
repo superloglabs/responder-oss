@@ -4,7 +4,6 @@ import { z } from "zod";
 import {
   claimLegacyMcpForwardAssertion,
   findForwardedWorkspaceMember,
-  findLegacyMcpForwardMember,
   type LegacyMcpForwardMember,
 } from "../../../../packages/core/src/db/legacy-mcp-forwarding.js";
 import { cellOrigin } from "../integrations/urls.js";
@@ -21,16 +20,9 @@ import type { ManagementContext } from "./operation.js";
 // accepted once: its jti is recorded until it expires. A token that could
 // only read there can only read here. Remove this when the old product shuts
 // down.
-//
-// LEGACY_MCP_FORWARD_TOKEN is the earlier shared credential. It is accepted
-// only while it is configured and the request carries no assertion.
 
 export const legacyMcpForwardHeaders = {
-  access: "x-legacy-mcp-access",
   assertion: "x-legacy-mcp-assertion",
-  email: "x-legacy-mcp-user-email",
-  projectId: "x-legacy-mcp-project-id",
-  token: "x-legacy-mcp-forward-token",
 } as const;
 
 export type LegacyMcpForward = { context: ManagementContext; readOnly: boolean };
@@ -47,12 +39,7 @@ const maxLifetimeSeconds = 120;
 const clockSkewSeconds = 30;
 
 export function isLegacyMcpForward(headers: Headers): boolean {
-  return headers.has(legacyMcpForwardHeaders.assertion) || headers.has(legacyMcpForwardHeaders.token);
-}
-
-function sameSecret(supplied: string, expected: string): boolean {
-  const digest = (value: string) => createHash("sha256").update(value).digest();
-  return timingSafeEqual(digest(supplied), digest(expected));
+  return headers.has(legacyMcpForwardHeaders.assertion);
 }
 
 const base64url = /^[A-Za-z0-9_-]+$/;
@@ -153,10 +140,7 @@ export async function authenticateLegacyMcpForward(
   environment: NodeJS.ProcessEnv = process.env,
 ): Promise<{ forward: LegacyMcpForward; request: Request } | null> {
   const assertion = request.headers.get(legacyMcpForwardHeaders.assertion);
-  if (assertion === null) {
-    const forward = await authenticateSharedCredential(request.headers, environment);
-    return forward ? { forward, request } : null;
-  }
+  if (assertion === null) return null;
   const claims = verifyLegacyMcpAssertion(assertion, {
     audience: cellOrigin(),
     keys: legacyMcpForwardPublicKeys(environment.LEGACY_MCP_FORWARD_PUBLIC_KEYS),
@@ -178,19 +162,4 @@ export async function authenticateLegacyMcpForward(
       signal: request.signal,
     }),
   };
-}
-
-async function authenticateSharedCredential(
-  headers: Headers,
-  environment: NodeJS.ProcessEnv,
-): Promise<LegacyMcpForward | null> {
-  const expected = environment.LEGACY_MCP_FORWARD_TOKEN?.trim();
-  const supplied = headers.get(legacyMcpForwardHeaders.token) ?? "";
-  if (!expected || !sameSecret(supplied, expected)) return null;
-  const organizationId = z.uuid().safeParse(headers.get(legacyMcpForwardHeaders.projectId));
-  const email = z.email().max(320).safeParse(headers.get(legacyMcpForwardHeaders.email)?.trim());
-  if (!organizationId.success || !email.success) return null;
-  const principal = await findLegacyMcpForwardMember(organizationId.data, email.data);
-  if (!principal) return null;
-  return forwardFor(principal, headers.get(legacyMcpForwardHeaders.access) !== "read-write");
 }

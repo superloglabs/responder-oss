@@ -3,11 +3,7 @@ import { inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { member, organization, user } from "./auth-schema.js";
 import { closeDatabase, getDatabase } from "./client.js";
-import {
-  claimLegacyMcpForwardAssertion,
-  findForwardedWorkspaceMember,
-  findLegacyMcpForwardMember,
-} from "./legacy-mcp-forwarding.js";
+import { claimLegacyMcpForwardAssertion, findForwardedWorkspaceMember } from "./legacy-mcp-forwarding.js";
 import { legacyMcpForwards } from "./schema.js";
 
 // Run against a disposable, migrated PostgreSQL database only.
@@ -53,22 +49,6 @@ describe.skipIf(!testUrl)("legacy MCP forward members (PostgreSQL)", () => {
     await db.delete(user).where(inArray(user.id, Object.values(people).map((person) => person.id)));
     await closeDatabase();
     vi.unstubAllEnvs();
-  });
-
-  it("finds the member by email without regard to case", async () => {
-    await expect(findLegacyMcpForwardMember(organizationId, ` ${people.member.email.toUpperCase()} `))
-      .resolves.toEqual({
-        organizationId,
-        role: "admin",
-        user: { email: people.member.email, id: people.member.id, name: "Ash" },
-      });
-  });
-
-  it("refuses other workspaces' members, unverified and banned people, and missing workspaces", async () => {
-    for (const email of [people.outsider.email, people.unverified.email, people.banned.email]) {
-      await expect(findLegacyMcpForwardMember(organizationId, email)).resolves.toBeNull();
-    }
-    await expect(findLegacyMcpForwardMember(randomUUID(), people.member.email)).resolves.toBeNull();
   });
 
   it("finds the member of the workspace a listed project moved to", async () => {
