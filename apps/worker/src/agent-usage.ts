@@ -38,8 +38,8 @@ export class UsageAllowanceExhaustedError extends Error {
 }
 
 // Whether an agent run failed because its model provider failed on
-// Responder's side: an outage, a connection that could not be made, or a
-// refusal of Responder's own credentials. A failed run is otherwise charged
+// Responder's side: an outage, a timeout, a connection that could not be
+// made, or a refusal of Responder's own credentials. A failed run is otherwise charged
 // for what it used, since what runs in its sandbox can end it on purpose.
 export function modelProviderFailedOnResponderSide(error: unknown): boolean {
   const pending = [error];
@@ -49,7 +49,7 @@ export function modelProviderFailedOnResponderSide(error: unknown): boolean {
     seen.add(cause);
     if (cause instanceof APIConnectionError) return true;
     if (cause instanceof APIError && typeof cause.status === "number" &&
-      (cause.status >= 500 || [401, 402, 403].includes(cause.status))) {
+      (cause.status >= 500 || [401, 402, 403, 408].includes(cause.status))) {
       return true;
     }
     if (cause instanceof AggregateError) pending.push(...cause.errors);

@@ -251,6 +251,8 @@ function meteredBody(
   observer: ReturnType<typeof createAutomationModelUsageObserver>,
   onFinish: (usage: AutomationModelUsage | null) => void,
   drainOnCancel: boolean,
+  // Runs before the client sees a failed read of the provider's response.
+  onReadError: () => Promise<void>,
 ): ReadableStream<Uint8Array> {
   const reader = body.getReader();
   let finished = false;
@@ -284,6 +286,7 @@ function meteredBody(
         controller.enqueue(value);
       } catch (error) {
         finish();
+        await onReadError();
         controller.error(error);
       }
     },
@@ -305,6 +308,7 @@ function brokerResponse(
   dependencies: AutomationModelBrokerDependencies,
   reservationId: string | undefined,
   span: Span,
+  clientSignal: AbortSignal,
 ): Response {
   const headers = providerResponseHeaders(providerResponse.headers);
   if (!providerResponse.ok) {
@@ -349,6 +353,7 @@ function brokerResponse(
           });
         },
         grant.inferenceSource === "responder",
+        () => markProviderFailed(grant, dependencies, clientSignal),
       )
     : providerResponse.body;
   return new Response(body, {
@@ -569,22 +574,28 @@ async function claimGrant(
 }
 
 // A failed turn is charged unless the failure was Responder's, so the broker
-// records the failures that are: the provider or the broker itself failing,
-// and the gateway refusing Responder's own credentials. A refused request
-// and a rate limit are not, since a request the run sends can cause either.
+// records the failures that are: the provider or the broker itself failing or
+// timing out, and the gateway refusing Responder's own credentials. A refused
+// request and a rate limit are not, since a request the run sends can cause
+// either.
 function providerFailureIsResponders(
   status: number,
   inferenceSource: AutomationModelBrokerClaim["inferenceSource"],
 ): boolean {
-  if (status >= 500) return true;
+  if (status >= 500 || status === 408) return true;
   return inferenceSource === "responder" && [401, 402, 403].includes(status);
 }
 
-function markProviderFailed(
+// Recorded before the run sees the failure, since the worker reads it as soon
+// as the turn ends. A request the run itself disconnected is not recorded:
+// an organization-funded request stops with it.
+async function markProviderFailed(
   grant: AutomationModelBrokerClaim,
   dependencies: AutomationModelBrokerDependencies,
-): void {
-  void dependencies.markProviderFailed(grant.grantId).catch((error: unknown) => {
+  clientSignal: AbortSignal,
+): Promise<void> {
+  if (clientSignal.aborted) return;
+  await dependencies.markProviderFailed(grant.grantId).catch((error: unknown) => {
     logBrokerError("automation_model_provider_failure_mark_failed", error, grant);
   });
 }
@@ -648,22 +659,30 @@ async function forward(
   } catch (error) {
     if (reservationId) releaseReservation(reservationId, grant, dependencies);
     if (error instanceof BrokerRequestError) {
-      if (error.status === 503) markProviderFailed(grant, dependencies);
+      if (error.status === 503) await markProviderFailed(grant, dependencies, context.req.raw.signal);
       return context.json({ error: error.message }, error.status);
     }
     logBrokerError("automation_model_provider_request_failed", error, grant);
-    markProviderFailed(grant, dependencies);
+    await markProviderFailed(grant, dependencies, context.req.raw.signal);
     return context.json({ error: "Model provider request failed" }, 502);
   }
   if (!providerResponse.ok && providerFailureIsResponders(providerResponse.status, grant.inferenceSource)) {
-    markProviderFailed(grant, dependencies);
+    await markProviderFailed(grant, dependencies, context.req.raw.signal);
   }
   // A failed provider response is not metered, so it releases its reservation.
   if (reservationId && !providerResponse.ok) {
     releaseReservation(reservationId, grant, dependencies);
     reservationId = undefined;
   }
-  return brokerResponse(providerResponse, format, grant, dependencies, reservationId, span);
+  return brokerResponse(
+    providerResponse,
+    format,
+    grant,
+    dependencies,
+    reservationId,
+    span,
+    context.req.raw.signal,
+  );
 }
 
 export function createAutomationModelBrokerRoutes(

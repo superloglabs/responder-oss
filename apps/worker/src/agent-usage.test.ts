@@ -98,9 +98,15 @@ describe("failed agent run waivers", () => {
     expect(modelProviderFailedOnResponderSide(new APIConnectionTimeoutError())).toBe(true);
   });
 
-  it("waives a run whose provider refused Responder's own credentials", () => {
+  it.each([401, 402, 403])("waives a run whose provider refused Responder's own credentials with %s", (status) => {
     expect(modelProviderFailedOnResponderSide(
-      APIError.generate(401, { message: "invalid key" }, "invalid key", headers),
+      APIError.generate(status, { message: "refused" }, "refused", headers),
+    )).toBe(true);
+  });
+
+  it("waives a run whose provider timed out", () => {
+    expect(modelProviderFailedOnResponderSide(
+      APIError.generate(408, { message: "timeout" }, "timeout", headers),
     )).toBe(true);
   });
 

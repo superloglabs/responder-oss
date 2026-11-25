@@ -454,8 +454,11 @@ describe("Responder-funded automation inference", () => {
   });
 
   describe("provider failures", () => {
-    async function send(overrides: Partial<NonNullable<BrokerDependencies>>) {
-      const markProviderFailed = vi.fn().mockResolvedValue(undefined);
+    async function send(
+      overrides: Partial<NonNullable<BrokerDependencies>>,
+      signal?: AbortSignal,
+    ) {
+      const markProviderFailed = overrides.markProviderFailed ?? vi.fn().mockResolvedValue(undefined);
       const routes = brokerRoutes({ markProviderFailed, ...overrides });
       const response = await routes.request("/v1/responses", {
         body: JSON.stringify({ input: "hello", model: "gpt-5.1-codex" }),
@@ -464,6 +467,7 @@ describe("Responder-funded automation inference", () => {
           "content-type": "application/json",
         },
         method: "POST",
+        ...(signal ? { signal } : {}),
       });
       return { markProviderFailed, response };
     }
@@ -509,6 +513,61 @@ describe("Responder-funded automation inference", () => {
 
       expect(response.status).toBe(503);
       expect(markProviderFailed).toHaveBeenCalledWith(claim.grantId);
+    });
+
+    it("records the failure before the run sees the response", async () => {
+      let marked = false;
+      const { response } = await send({
+        claimGrant: vi.fn().mockResolvedValue(claim),
+        markProviderFailed: vi.fn(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          marked = true;
+        }),
+        providerFetch: vi.fn().mockResolvedValue(new Response("overloaded", { status: 503 })),
+      });
+
+      expect(response.status).toBe(503);
+      expect(marked).toBe(true);
+    });
+
+    it("marks the grant when the provider times out", async () => {
+      const { markProviderFailed } = await send({
+        claimGrant: vi.fn().mockResolvedValue(claim),
+        providerFetch: vi.fn().mockResolvedValue(new Response("timeout", { status: 408 })),
+      });
+
+      expect(markProviderFailed).toHaveBeenCalledWith(claim.grantId);
+    });
+
+    it("marks the grant when the provider's stream breaks", async () => {
+      const broken = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode("data: {}\n\n"));
+        },
+        pull(controller) {
+          controller.error(new TypeError("terminated"));
+        },
+      });
+      const { markProviderFailed, response } = await send({
+        claimGrant: vi.fn().mockResolvedValue(claim),
+        providerFetch: vi.fn().mockResolvedValue(
+          new Response(broken, { headers: { "content-type": "text/event-stream" } }),
+        ),
+      });
+
+      await expect(response.text()).rejects.toThrow();
+      expect(markProviderFailed).toHaveBeenCalledWith(claim.grantId);
+    });
+
+    it("does not mark the grant when the run disconnected", async () => {
+      const disconnected = new AbortController();
+      disconnected.abort();
+      const { markProviderFailed } = await send({
+        claimGrant: vi.fn().mockResolvedValue(claim),
+        providerFetch: vi.fn().mockRejectedValue(new DOMException("aborted", "AbortError")),
+      }, disconnected.signal);
+
+      expect(markProviderFailed).not.toHaveBeenCalled();
     });
 
     it("does not mark the grant for a rejected request", async () => {
