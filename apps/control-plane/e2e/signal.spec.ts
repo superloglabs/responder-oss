@@ -730,6 +730,13 @@ test("chooses the coding agents findings open in and sends a test message", asyn
   await expect.poll(() => signal.settings.codingAgents.claudeSurface).toBe("web");
   await expect(page.getByText("Opens a new session in Claude Code on the web.")).toBeVisible();
 
+  // The test waits for a save still running, so it sends the buttons shown.
+  signal.saveDelayMs = 800;
+  await page.getByRole("switch", { name: "Open in cmux" }).click();
+  await expect(page.getByRole("button", { name: "Send test message" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Send test message" })).toBeEnabled();
+  signal.saveDelayMs = 0;
+
   signal.failTestMessage = "Superlog is not in the findings channel. Add the Superlog app to the channel, then try again.";
   await page.getByRole("button", { name: "Send test message" }).click();
   await expect(page.getByRole("alert")).toHaveText(signal.failTestMessage);

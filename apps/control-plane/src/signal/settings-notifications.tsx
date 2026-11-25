@@ -53,7 +53,8 @@ export function SettingsNotifications({ data, save, saved, setSettings, status }
     </SettingsGroup>
     {actions.summary("jira") && <JiraSettings actions={actions} value={settings.jira} save={save} />}
     <SettingsGroup title="Coding agents"
-      action={<TestMessageButton disabled={!settings.slack} test={test} send={() => void send()} />}>
+      // A save still running could leave the test with the old buttons.
+      action={<TestMessageButton disabled={!settings.slack} saving={status?.state === "saving"} test={test} send={() => void send()} />}>
       <p className="signalSettingsGroup__description">
         Buttons under each finding in Slack open the agent with the fix prompt filled in. Agents get a button while
         they fit on one line with the other buttons; the rest go in the ⋯ menu. Drag to reorder.

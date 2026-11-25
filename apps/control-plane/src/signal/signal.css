@@ -438,9 +438,9 @@
 .signalAgent__handle button:hover, .signalAgent__handle button:focus-visible { color: #444; }
 .signalAgent__logo { width: 24px; height: 24px; flex-shrink: 0; border-radius: 5px; object-fit: contain; }
 .signal .signalAgent__surface { width: 140px; }
-.signalTestResult { display: flex; align-items: center; gap: 6px; margin: -4px 0 0; color: #444; }
-.signalTestResult svg { flex-shrink: 0; color: #168255; }
-.signalTestResult--error { color: #b33d43; }
+.signal .signalTestResult { display: flex; align-items: center; gap: 6px; margin: -4px 0 0; color: #444; }
+.signal .signalTestResult svg { flex-shrink: 0; color: #168255; }
+.signal .signalTestResult--error { color: #b33d43; }
 .signalSettingsActions { display: flex; justify-content: flex-end; gap: 8px; }
 .signalSourceRow + .signalSourceRow, .signalSourceRow + .signalSettingsCard--rows { border-top: .5px solid #00000014; }
 .signalSourceRow__main { display: flex; align-items: center; gap: 16px; padding: 20px; }
@@ -500,6 +500,9 @@
   .signalSettings { margin-top: 8px; gap: 24px; }
   .signalSettingsRow, .signalCurrentPlan__summary { flex-wrap: wrap; }
   .signal .signalSettingsSelect, .signalSkipped { width: 100%; }
+  .signalAgent { flex-wrap: wrap; }
+  .signalAgent .signalSettingsRow__label { flex: 1 1 160px; }
+  .signal .signalAgent__surface { width: 140px; margin-left: auto; }
   .signalSkipped { align-items: flex-start; }
   .signalSkipped .signalChips { justify-content: flex-start; }
   .signalSourceRow__main { flex-wrap: wrap; gap: 12px; padding: 16px 12px; }

@@ -1,5 +1,6 @@
 import { useState, type DragEvent, type KeyboardEvent } from "react";
 import { IconCheck, IconGripVertical, IconSend } from "@tabler/icons-react";
+import { codingAgentMarks } from "../coding-agent-marks";
 import { Button, Switch } from "../design-system";
 import { agentRows, moveAgent, type TestState } from "./coding-agents-model";
 import {
@@ -8,14 +9,7 @@ import {
   type SignalCodingAgents,
 } from "./model";
 
-const agentDetails: Record<SignalCodingAgent, { name: string; logo: string; description: string }> = {
-  claude: { name: "Claude Code", logo: "/coding-agents/claude.svg", description: "" },
-  codex: { name: "Codex", logo: "/coding-agents/codex.svg", description: "Opens a new thread. Needs the Codex app." },
-  conductor: { name: "Conductor", logo: "/coding-agents/conductor.png", description: "Opens a new workspace. Needs the Conductor app on macOS." },
-  capy: { name: "Capy", logo: "/coding-agents/capy.svg", description: "Opens a new thread in Capy." },
-  cmux: { name: "cmux", logo: "/coding-agents/cmux.png", description: "Pastes the prompt into the focused cmux terminal, after you confirm." },
-  replicas: { name: "Replicas", logo: "/coding-agents/replicas.png", description: "Opens a new Replicas workspace with the prompt." },
-};
+const agentDetails: Record<SignalCodingAgent, { name: string; logo: string; description: string }> = codingAgentMarks;
 
 const claudeDescriptions: Record<SignalClaudeSurface, string> = {
   terminal: "Opens a new terminal session. Needs Claude Code.",
@@ -86,12 +80,14 @@ export function CodingAgentRows({ value, onChange }: {
   </ul>;
 }
 
-export function TestMessageButton({ disabled, test, send }: {
+export function TestMessageButton({ disabled, saving, test, send }: {
   disabled: boolean;
+  // Settings are saving, so the test waits for them.
+  saving: boolean;
   test: TestState;
   send: () => void;
 }) {
-  return <Button disabled={disabled || test.state === "sending"} loading={test.state === "sending"} onClick={send}
+  return <Button disabled={disabled || saving || test.state === "sending"} loading={test.state === "sending"} onClick={send}
     title={disabled ? "Choose a Slack channel for findings first." : undefined}>
     <IconSend size={14} />Send test message
   </Button>;
