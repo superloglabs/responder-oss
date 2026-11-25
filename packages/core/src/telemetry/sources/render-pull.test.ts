@@ -279,8 +279,35 @@ describe("pullRenderAccount", () => {
 
     expect(ingest.sent.sort()).toEqual(["web line", "worker line"]);
     expect(result.sources.get("source-workspace")).toMatchObject({ logs: 1, state: { cursors: { "srv-worker": { ts: end } } } });
-    expect(Object.keys(result.sources.get("source-workspace")!.state.cursors as object)).toEqual(["srv-worker"]);
+    // The workspace keeps web's cursor too, for when web's own source is removed.
+    expect(result.sources.get("source-workspace")!.state.cursors).toEqual({ "srv-web": { ids: [], ts: end }, "srv-worker": { ids: [], ts: end } });
     expect(result.sources.get("source-srv-web")).toMatchObject({ logs: 1, state: { cursors: { "srv-web": { ts: end } }, region: "oregon", serviceName: "web" } });
+  });
+
+  it("hands a service's cursor over when it gets a source of its own and when that source is removed", async () => {
+    const logs = [...lines(600, "2026-11-25T09:54:00Z", "srv-web"), ...lines(600, "2026-11-25T09:54:00Z", "srv-worker")]
+      .map((line, index) => ({ ...line, timestamp: new Date(Date.parse("2026-11-25T09:54:00Z") + index * 300).toISOString() }));
+    const api = render({ logs, services: [web, worker] });
+    const ingest = collector();
+    const pass = async (minute: number, sources: RenderPullSource[]) => (await pullRenderAccount({
+      apiKey: "key",
+      fetch: api.fetch,
+      forward: ingest.forward,
+      now: new Date(Date.parse("2026-11-25T09:55:00Z") + minute * 60_000),
+      sources,
+    })).sources;
+
+    // The workspace alone, then with a source for web, then alone again.
+    let workspace = (await pass(0, [workspaceSource()])).get("source-workspace")!.state;
+    const second = await pass(1, [workspaceSource(workspace), serviceSource(web)]);
+    workspace = second.get("source-workspace")!.state;
+    expect(Object.keys(workspace.cursors as object).sort()).toEqual(["srv-web", "srv-worker"]);
+    workspace = (await pass(2, [workspaceSource(workspace)])).get("source-workspace")!.state;
+    await pass(3, [workspaceSource(workspace)]);
+
+    expect(ingest.sent.length).toBe(new Set(ingest.sent).size);
+    const until = Date.parse("2026-11-25T09:58:00Z") - 20_000;
+    expect(ingest.sent.sort()).toEqual(logs.filter((line) => Date.parse(line.timestamp) >= Date.parse("2026-11-25T09:50:00Z") && Date.parse(line.timestamp) <= until).map((line) => line.message).sort());
   });
 
   it("skips ahead when a service fell more than an hour behind, and says so", async () => {

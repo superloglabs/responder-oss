@@ -185,8 +185,16 @@ export async function pullRenderAccount(input: {
   // read together.
   const own = new Set(members.filter((member) => member.state.kind === "service").map((member) => member.source.externalId));
   const groups = new Map<string, Covered[]>();
+  // A service that moves between a workspace source and a source of its
+  // own keeps the newest cursor either kept for it, so no line is sent twice.
+  function handedOver(serviceId: string): Cursor | undefined {
+    return members
+      .map((member) => member.state.cursors[serviceId])
+      .filter((cursor): cursor is Cursor => Boolean(cursor))
+      .reduce<Cursor | undefined>((newest, cursor) => (!newest || nanos(cursor.ts) > nanos(newest.ts) ? cursor : newest), undefined);
+  }
   function cover(member: Member, serviceId: string, info: RenderServiceInfo) {
-    let cursor = member.state.cursors[serviceId];
+    let cursor = member.state.cursors[serviceId] ?? handedOver(serviceId);
     if (!cursor) {
       // A new service starts a few minutes back, even if this pass cannot
       // read it.
@@ -234,13 +242,14 @@ export async function pullRenderAccount(input: {
     }
   }
   // Cursors of services no longer read are dropped; a service that comes
-  // back starts fresh.
+  // back starts fresh. A workspace source keeps the cursors of its services
+  // that have sources of their own, for when those are removed.
   const covered = new Map<Member, Set<string>>();
   for (const group of groups.values()) {
     for (const item of group) covered.set(item.member, (covered.get(item.member) ?? new Set()).add(item.serviceId));
   }
   for (const member of members) {
-    const ids = covered.get(member) ?? new Set<string>();
+    const ids = new Set([...(covered.get(member) ?? []), ...(member.state.kind === "workspace" ? Object.keys(member.state.services) : [])]);
     member.state.cursors = Object.fromEntries(Object.entries(member.state.cursors).filter(([serviceId]) => ids.has(serviceId)));
   }
 
@@ -338,7 +347,14 @@ export async function pullRenderAccount(input: {
     }
     for (const item of read) {
       const serviceLines = lines.filter((line) => renderLabel(line, "resource") === item.serviceId);
-      item.member.state.cursors[item.serviceId] = advanceCursor(item.cursor, until, serviceLines);
+      const cursor = advanceCursor(item.cursor, until, serviceLines);
+      item.member.state.cursors[item.serviceId] = cursor;
+      for (const member of members) {
+        if (member !== item.member && member.state.kind === "workspace" && member.state.ownerId === item.member.state.ownerId &&
+          member.state.services[item.serviceId]) {
+          member.state.cursors[item.serviceId] = cursor;
+        }
+      }
     }
   }
 

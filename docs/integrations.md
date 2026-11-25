@@ -1365,7 +1365,9 @@ option needs a cell with a collector
   the pass keeps what it read, stops reading with that key, and tries again
   next minute without marking the source failed. Each service keeps its own
   cursor: a time and the IDs of the lines at that time, so no line is sent
-  twice. Reads stop 20 seconds behind the present, start five minutes back for
+  twice. A service that gets a source of its own takes its workspace
+  source's cursor, and the workspace source keeps that cursor moving for
+  when the service's source is removed. Reads stop 20 seconds behind the present, start five minutes back for
   a new service, and skip ahead when more than an hour behind
   (`truncated`). Build logs are left out. Lines of one stack trace from the
   same instance join into one log, as for Railway, and request logs keep their

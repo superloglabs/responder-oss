@@ -619,7 +619,7 @@ function RenderConnect({ integration, listPath, onBack }: PageProps) {
     <div className={`signalInput${error ? " signalInput--error" : ""}`}>
       <label htmlFor="signal-render-key">API key</label>
       <ol className="signalInstructions">
-        <li>In Render, open <strong>Account Settings → API Keys</strong> and create a key (<a href="https://render.com/docs/api" target="_blank" rel="noreferrer">Render's guide</a>).</li>
+        <li>In Render, open Account Settings → API Keys and create a key.</li>
         <li>Paste it below. A Render key reaches every workspace you belong to; Superlog only reads services and logs with it.</li>
       </ol>
       <input id="signal-render-key" type="password" autoComplete="off" spellCheck={false} placeholder="rnd_…" required value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
