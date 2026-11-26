@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chartMax, dayLabel, evidenceAxisLabel, evidenceAxisMax, evidenceBucketLabel, evidenceChartBars, evidenceLegendValue, evidenceLink, foundLabel, groupFindingsByDay, usageTotals } from "./model";
+import { chartMax, dayLabel, evidenceAxisLabel, evidenceAxisMax, evidenceAxisRange, evidenceBucketLabel, evidenceChartBars, evidenceLegendValue, evidenceLink, foundLabel, groupFindingsByDay, usageTotals } from "./model";
 import { setupComplete } from "./setup-state";
 
 const now = new Date("2026-11-07T15:00:00Z");
@@ -72,6 +72,13 @@ describe("evidence charts", () => {
     expect(evidenceAxisMax([29_600])).toBe(30_000);
     expect(evidenceAxisMax([0.4])).toBe(0.6);
     expect(evidenceAxisMax([null, 0])).toBe(3);
+  });
+
+  it("extends the axis below zero for negative values", () => {
+    expect(evidenceAxisRange([5])).toEqual({ min: 0, max: 6 });
+    expect(evidenceAxisRange([-4, 5])).toEqual({ min: -5, max: 10 });
+    expect(evidenceAxisRange([-30, -10])).toEqual({ min: -30, max: 0 });
+    expect(evidenceAxisRange([null])).toEqual({ min: 0, max: 3 });
   });
 
   it("labels the axis briefly", () => {

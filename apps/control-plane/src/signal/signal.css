@@ -554,6 +554,9 @@
 .signalEvidenceDates span { position: absolute; top: 4px; transform: translateX(-50%); white-space: nowrap; }
 .signalEvidenceDates span:first-child { transform: none; }
 .signalEvidenceDates span:last-child { transform: translateX(-100%); }
+.signalEvidenceChart__target { position: absolute; inset: 0 0 auto; height: 88px; cursor: crosshair; }
+.signal .signalEvidenceChart__target:focus-visible { outline: 2px solid var(--signal-chart); outline-offset: 2px; }
+.signalEvidenceChart__live .signalChartTooltip { top: 0; }
 .signalEvidenceTooltipName { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .signalEvidenceLegend { flex-wrap: wrap; }
 .signalEvidenceLegend .signalLegend { flex: 1 1 40%; min-width: 0; }

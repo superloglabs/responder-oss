@@ -487,6 +487,23 @@ export function evidenceAxisMax(values: ReadonlyArray<number | null>): number {
   return Number((step * 3).toPrecision(12));
 }
 
+// The axis of an evidence chart: from zero, or from a round number below the
+// lowest value when some are negative, in three equal round steps.
+export function evidenceAxisRange(values: ReadonlyArray<number | null>): { min: number; max: number } {
+  const present = values.filter((value): value is number => value !== null && Number.isFinite(value));
+  const low = Math.min(0, ...present);
+  const high = Math.max(0, ...present);
+  if (low === 0) return { min: 0, max: evidenceAxisMax(present) };
+  if (high === 0) return { min: -evidenceAxisMax(present.map((value) => -value)), max: 0 };
+  const round = (value: number) => Number(value.toPrecision(12));
+  let step = evidenceAxisMax([high - low]) / 3;
+  for (;;) {
+    const min = Math.floor(low / step) * step;
+    if (min + 3 * step >= high) return { min: round(min), max: round(min + 3 * step) };
+    step = evidenceAxisMax([3 * step * 1.0001]) / 3;
+  }
+}
+
 const compactAxisNumber = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
 
 // A short axis label, such as 20K, 30s, or 250ms.

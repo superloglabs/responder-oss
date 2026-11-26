@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { IconArrowUpRight } from "@tabler/icons-react";
 import { AttributeTable, ExplorerDrawer } from "../components/telemetry-explorer";
@@ -7,7 +7,7 @@ import { formatWidgetValue } from "../dashboards-api";
 import { formatDuration, traceHref } from "../telemetry-api";
 import {
   evidenceAxisLabel,
-  evidenceAxisMax,
+  evidenceAxisRange,
   evidenceBucketLabel,
   evidenceChartBars,
   evidenceLegendValue,
@@ -57,7 +57,8 @@ export function EvidenceItem({ item }: { item: SignalEvidence }) {
     {views.map((view, index) => <EvidenceView
       key={index}
       onOpen={setOpen}
-      showTitle={views.filter((other) => other.type === "chart").length > 1}
+      // The chart's own name, unless it only repeats the card's title.
+      showTitle={views.filter((other) => other.type === "chart").length > 1 || (view.type === "chart" && view.title !== item.title)}
       source={data!.source}
       view={view}
     />)}
@@ -136,14 +137,18 @@ function EvidenceView({ onOpen, showTitle, source, view }: {
 
 // Signal's compact chart: four gridlines, an axis of round numbers, bars for
 // one series of counts and lines otherwise, and a legend with each series'
-// total or latest value.
+// total or latest value. One focusable area reads the bucket under the
+// pointer, or moves through buckets with the arrow keys.
 function EvidenceChart({ showTitle, view }: { showTitle: boolean; view: ChartView }) {
   const [hovered, setHovered] = useState<number | null>(null);
   const bars = evidenceChartBars(view);
   const count = view.buckets.length;
-  const max = evidenceAxisMax(view.series.flatMap((series) => series.values));
-  const y = (value: number) => 80 - value / max * 72;
-  const x = (index: number) => count <= 1 ? 500 : index * 1000 / (count - 1);
+  const { min, max } = evidenceAxisRange(view.series.flatMap((series) => series.values));
+  const y = (value: number) => 80 - (value - min) / (max - min) * 72;
+  // Where a bucket sits across the plot, from 0 to 1: the middle of its slot
+  // for bars, its point for lines.
+  const position = (index: number) => bars ? (index + .5) / count : count <= 1 ? .5 : index / (count - 1);
+  const x = (index: number) => position(index) * 1000;
   const step = 1000 / count;
   const labels = timeLabels(view.buckets);
   const legend = view.series.map((series, index) => ({
@@ -152,18 +157,30 @@ function EvidenceChart({ showTitle, view }: { showTitle: boolean; view: ChartVie
     value: evidenceLegendValue(series.values, bars),
   }));
   const bucketLabel = evidenceBucketLabel(view.stepMs);
+  const ticks = [max, min + (max - min) * 2 / 3, min + (max - min) / 3, min];
+  function pointAt(event: MouseEvent<HTMLDivElement>) {
+    const box = event.currentTarget.getBoundingClientRect();
+    const ratio = Math.min(1, Math.max(0, (event.clientX - box.left) / Math.max(1, box.width)));
+    setHovered(Math.min(count - 1, bars ? Math.floor(ratio * count) : Math.round(ratio * (count - 1))));
+  }
+  function moveWithKeys(event: KeyboardEvent<HTMLDivElement>) {
+    const next = { ArrowLeft: (hovered ?? count) - 1, ArrowRight: (hovered ?? -1) + 1, Home: 0, End: count - 1 }[event.key];
+    if (event.key === "Escape") setHovered(null);
+    if (next === undefined) return;
+    event.preventDefault();
+    setHovered(Math.min(count - 1, Math.max(0, next)));
+  }
   return <figure className="signalEvidenceChart">
     {showTitle && <figcaption>{view.title}</figcaption>}
     <div className="signalChartPlot">
-      <div className="signalChartAxis">{[max, max * 2 / 3, max / 3, 0].map((tick) => <span key={tick}>{evidenceAxisLabel(tick, view.unit)}</span>)}</div>
+      <div className="signalChartAxis">{ticks.map((tick) => <span key={tick}>{evidenceAxisLabel(tick, view.unit)}</span>)}</div>
       <div className="signalChartCanvas">
-        <svg aria-label={view.title} role="img" viewBox="0 0 1000 88" preserveAspectRatio="none">
-          <title>{view.title}</title>
+        <svg aria-hidden="true" viewBox="0 0 1000 88" preserveAspectRatio="none">
           {[8, 32, 56, 80].map((line) => <line key={line} x1={0} x2={1000} y1={line} y2={line} stroke="var(--signal-grid)" vectorEffect="non-scaling-stroke" />)}
           {bars
             ? view.series[0]!.values.map((value, index) => value === null || value === 0 ? null : <rect
               fill="var(--signal-chart)"
-              height={value / max * 72}
+              height={y(0) - y(value)}
               key={index}
               width={step * .5}
               x={index * step + step * .25}
@@ -174,27 +191,30 @@ function EvidenceChart({ showTitle, view }: { showTitle: boolean; view: ChartVie
               fill="none"
               key={series.name}
               stroke={legend[index]!.color}
+              strokeLinecap="round"
               strokeLinejoin="round"
               strokeWidth={1.3}
               vectorEffect="non-scaling-stroke"
             />)}
           {hovered !== null && !bars && <line stroke="#cfcfcf" vectorEffect="non-scaling-stroke" x1={x(hovered)} x2={x(hovered)} y1={4} y2={80} />}
         </svg>
-        <div className="signalChartTargets">{view.buckets.map((bucket, index) => <button
-          aria-label={`${utcDateTime(bucket)} UTC: ${view.series.map((series) => `${series.name} ${formatWidgetValue(series.values[index] ?? null, view.unit)}`).join(", ")}`}
-          key={bucket}
+        <div
+          aria-label={`${view.title}. Use the arrow keys to read each ${bucketLabel ? bucketLabel.replace(/s$/u, "") : "bucket"}.`}
+          className="signalEvidenceChart__target"
           onBlur={() => setHovered(null)}
-          onFocus={() => setHovered(index)}
-          onKeyDown={(event) => { if (event.key === "Escape") setHovered(null); }}
-          onMouseEnter={() => setHovered(index)}
+          onKeyDown={moveWithKeys}
           onMouseLeave={() => setHovered(null)}
-          type="button"
-        />)}</div>
-        <div className="signalEvidenceDates">{labels.map((label) => <span key={label.index} style={{ left: `${count <= 1 ? 50 : label.index / (count - 1) * 100}%` }}>{label.text}</span>)}</div>
-        {hovered !== null && <div className="signalChartTooltip" role="tooltip" style={{ left: `max(0px, min(${count <= 1 ? 0 : hovered / (count - 1) * 100}%, calc(100% - 202px)))` }}>
-          {legend.map((series, index) => <div key={series.name}><i className="signalSwatch" style={{ background: series.color }} /><span className="signalEvidenceTooltipName">{series.name}</span><strong>{formatWidgetValue(view.series[index]!.values[hovered] ?? null, view.unit)}</strong></div>)}
-          <small>{utcDateTime(view.buckets[hovered]!)} UTC</small>
-        </div>}
+          onMouseMove={pointAt}
+          role="group"
+          tabIndex={0}
+        />
+        <div className="signalEvidenceDates">{labels.map((label) => <span key={label.index} style={{ left: `${position(label.index) * 100}%` }}>{label.text}</span>)}</div>
+        <div aria-live="polite" className="signalEvidenceChart__live">
+          {hovered !== null && <div className="signalChartTooltip" style={{ left: `max(0px, min(${position(hovered) * 100}%, calc(100% - 202px)))` }}>
+            {legend.map((series, index) => <div key={series.name}><i className="signalSwatch" style={{ background: series.color }} /><span className="signalEvidenceTooltipName">{series.name}</span><strong>{formatWidgetValue(view.series[index]!.values[hovered] ?? null, view.unit)}</strong></div>)}
+            <small>{utcDateTime(view.buckets[hovered]!)} UTC</small>
+          </div>}
+        </div>
       </div>
     </div>
     <div className="signalChartFooter signalEvidenceLegend">
@@ -208,19 +228,18 @@ function EvidenceChart({ showTitle, view }: { showTitle: boolean; view: ChartVie
   </figure>;
 }
 
-// A line through the points, broken where a bucket has no value.
+// A line through the points, broken where a bucket has no value. A point
+// with no neighbours gets a short dash, since a lone M draws nothing.
 function linePath(values: ReadonlyArray<number | null>, x: (index: number) => number, y: (value: number) => number): string {
-  let path = "";
-  let drawing = false;
+  const parts: string[] = [];
   values.forEach((value, index) => {
-    if (value === null) {
-      drawing = false;
-      return;
-    }
-    path += `${drawing ? "L" : "M"}${x(index)},${y(value)} `;
-    drawing = true;
+    if (value === null) return;
+    const before = values[index - 1] ?? null;
+    const after = values[index + 1] ?? null;
+    if (before === null && after === null) parts.push(`M${x(index) - 3},${y(value)} L${x(index) + 3},${y(value)}`);
+    else parts.push(`${before === null ? "M" : "L"}${x(index)},${y(value)}`);
   });
-  return path.trim();
+  return parts.join(" ");
 }
 
 // About five evenly spaced time labels, always with the last bucket.
