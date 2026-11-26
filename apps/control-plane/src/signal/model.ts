@@ -68,7 +68,8 @@ export interface SignalEvidenceSpan {
 // must be https.
 export function evidenceLink(url: string | null): { internal: boolean; href: string } | null {
   if (!url) return null;
-  if (url.startsWith("/") && !url.startsWith("//")) return { internal: true, href: url };
+  // Browsers read a backslash as a slash, so /\host is another site.
+  if (url.startsWith("/")) return /^\/(?![/\\])[^\\\s]*$/u.test(url) ? { internal: true, href: url } : null;
   try {
     const parsed = new URL(url);
     return parsed.protocol === "https:" ? { internal: false, href: parsed.toString() } : null;

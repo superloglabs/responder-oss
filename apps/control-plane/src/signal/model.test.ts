@@ -57,6 +57,8 @@ describe("evidenceLink", () => {
     expect(evidenceLink("/logs?from=x")).toEqual({ internal: true, href: "/logs?from=x" });
     expect(evidenceLink("https://ui.honeycomb.io/team/result/abc")).toEqual({ internal: false, href: "https://ui.honeycomb.io/team/result/abc" });
     expect(evidenceLink("//evil.example/x")).toBeNull();
+    expect(evidenceLink("/\\evil.example/x")).toBeNull();
+    expect(evidenceLink("/logs\tx")).toBeNull();
     expect(evidenceLink("javascript:alert(1)")).toBeNull();
     expect(evidenceLink("http://ui.honeycomb.io/x")).toBeNull();
     expect(evidenceLink(null)).toBeNull();

@@ -562,7 +562,8 @@
 .signalEvidenceLegend .signalChartNote { display: flex; }
 .signalEvidenceLines { display: flex; flex-direction: column; gap: 2px; padding: 10px 6px; background: #f8f8f8; border-top: .5px solid #e9e9e9; max-height: 340px; overflow: auto; }
 .signal .signalEvidenceLine { display: flex; flex-direction: column; align-items: stretch; width: 100%; padding: 2px 8px; border: 0; border-radius: 4px; background: transparent; text-align: left; font: 400 12px/22px var(--ds-font-mono, ui-monospace, "SFMono-Regular", Consolas, monospace); cursor: pointer; }
-.signal .signalEvidenceLine:hover, .signal .signalEvidenceLine:focus-visible { background: #efefef; outline: 0; }
+.signal .signalEvidenceLine:hover { background: #efefef; }
+.signal .signalEvidenceLine:focus-visible { background: #efefef; outline: 2px solid var(--signal-chart); outline-offset: -2px; }
 .signalEvidenceLine__main { color: #121212; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .signalEvidenceLine__fields { color: #666; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .signalEvidenceLine__fields:empty { display: none; }
@@ -578,7 +579,9 @@
 .signalEvidenceTable td { max-width: 320px; padding: 4px 14px; color: #121212; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .signalEvidenceTable__number { font-variant-numeric: tabular-nums; }
 .signalEvidenceTable tbody tr { cursor: pointer; }
-.signalEvidenceTable tbody tr:hover, .signalEvidenceTable tbody tr:focus-visible { background: #efefef; outline: 0; }
+.signalEvidenceTable tbody tr:hover, .signalEvidenceTable tbody tr:focus-within { background: #efefef; }
+.signal .signalEvidenceTable__open { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.signal .signalEvidenceTable__open:focus-visible { outline: 2px solid var(--signal-chart); outline-offset: 2px; }
 .signalEvidenceNote { padding: 10px 14px; border-top: .5px solid #e9e9e9; color: #666; font-size: 12px; line-height: 20px; overflow-wrap: anywhere; }
 .signalEvidenceDrawer__title { font-size: 13px; font-weight: 500; }
 .signalEvidenceMessage { white-space: pre-wrap; overflow-wrap: anywhere; }

@@ -113,21 +113,20 @@ function EvidenceView({ onOpen, showTitle, source, view }: {
     <table>
       <thead><tr>{view.columns.map((column) => <th key={column} scope="col">{column}</th>)}</tr></thead>
       <tbody>
-        {view.rows.map((row, index) => <tr
-          aria-label={`Open row ${index + 1}`}
-          key={index}
-          onClick={() => onOpen({ type: "table", columns: view.columns, row, source })}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" || event.key === " ") {
-              event.preventDefault();
-              onOpen({ type: "table", columns: view.columns, row, source });
-            }
-          }}
-          tabIndex={0}
-        >
+        {view.rows.map((row, index) => <tr key={index} onClick={() => onOpen({ type: "table", columns: view.columns, row, source })}>
           {row.map((value, column) => {
             const shown = value === null ? "—" : typeof value === "number" ? value.toLocaleString() : value;
-            return <td className={typeof value === "number" ? "signalEvidenceTable__number" : undefined} key={column} title={shown}>{shown}</td>;
+            const className = typeof value === "number" ? "signalEvidenceTable__number" : undefined;
+            // The first cell's button opens the row, so keyboards and screen
+            // readers reach it; a click anywhere on the row does the same.
+            return <td className={className} key={column} title={shown}>
+              {column === 0
+                ? <button className="signalEvidenceTable__open" onClick={(event) => {
+                  event.stopPropagation();
+                  onOpen({ type: "table", columns: view.columns, row, source });
+                }} type="button">{shown}</button>
+                : shown}
+            </td>;
           })}
         </tr>)}
       </tbody>
