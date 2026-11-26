@@ -17,6 +17,7 @@ import {
   type SignalPeriod,
 } from "./model";
 import { SignalComputerIllustration } from "./computer-illustration";
+import { EvidenceItem } from "./evidence";
 import { PeriodSelect, Severity } from "./shared";
 
 function useDebounced<T>(value: T, delayMs: number) {
@@ -224,10 +225,7 @@ export function SignalFindingDetail() {
         <section><h2>Root cause</h2><p>{finding.rootCause}</p></section>
         {finding.suggestedFix && <section><h2>Suggested fix</h2><p>{finding.suggestedFix}</p></section>}
         <section className="signalEvidence"><h2>Evidence</h2>
-          {finding.evidence.map((item, index) => <section className="signalCode" key={`${item.kind}-${index}`}>
-            <header><h3>{item.title}</h3><span>{evidenceLabel(item.kind)}</span></header>
-            <pre className="signalLog"><code>{item.detail}</code></pre>
-          </section>)}
+          {finding.evidence.map((item, index) => <EvidenceItem item={item} key={`${item.kind}-${index}`} />)}
         </section>
         <details className="signalPrompt">
           <summary>Prompt</summary>
@@ -249,6 +247,3 @@ export function SignalFindingDetail() {
   </article>;
 }
 
-function evidenceLabel(kind: SignalFindingDetail["evidence"][number]["kind"]) {
-  return { logs: "Logs", traces: "Traces", metrics: "Metrics", code: "Code", provider: "Provider" }[kind];
-}

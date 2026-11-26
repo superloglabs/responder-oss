@@ -17,6 +17,64 @@ export interface SignalEvidence {
   kind: "logs" | "traces" | "metrics" | "code" | "provider";
   title: string;
   detail: string;
+  // What the cited query returned. Missing from older findings and from
+  // evidence with nothing to chart or list.
+  data?: SignalEvidenceData;
+}
+
+export interface SignalEvidenceData {
+  // Where the data came from, such as Superlog or Honeycomb.
+  source: string;
+  // The same query in the source: a path in this app, or the provider's
+  // https link.
+  url: string | null;
+  views: SignalEvidenceView[];
+}
+
+export type SignalEvidenceView =
+  | {
+    type: "chart";
+    title: string;
+    unit: "none" | "duration_ms" | "duration_s" | "bytes" | "percent";
+    // Bucket start times in milliseconds since the epoch.
+    buckets: number[];
+    stepMs: number;
+    series: Array<{ name: string; values: Array<number | null> }>;
+  }
+  | { type: "logs"; rows: SignalEvidenceLog[] }
+  | { type: "spans"; rows: SignalEvidenceSpan[] }
+  | { type: "table"; columns: string[]; rows: Array<Array<string | number | null>> };
+
+export interface SignalEvidenceLog {
+  timestamp: string | null;
+  severity: string;
+  service: string;
+  message: string;
+  traceId: string | null;
+  fields: Record<string, string>;
+}
+
+export interface SignalEvidenceSpan {
+  timestamp: string | null;
+  name: string;
+  service: string;
+  durationMs: number | null;
+  status: string;
+  traceId: string | null;
+  fields: Record<string, string>;
+}
+
+// A link to open a query in its source. Paths stay in this app; other links
+// must be https.
+export function evidenceLink(url: string | null): { internal: boolean; href: string } | null {
+  if (!url) return null;
+  if (url.startsWith("/") && !url.startsWith("//")) return { internal: true, href: url };
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" ? { internal: false, href: parsed.toString() } : null;
+  } catch {
+    return null;
+  }
 }
 
 export interface SignalFindingDetail extends SignalFindingSummary {
