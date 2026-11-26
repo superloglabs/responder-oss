@@ -159,11 +159,13 @@ function EvidenceChart({ showTitle, view }: { showTitle: boolean; view: ChartVie
   const bucketLabel = evidenceBucketLabel(view.stepMs);
   const ticks = [max, min + (max - min) * 2 / 3, min + (max - min) / 3, min];
   function pointAt(event: MouseEvent<HTMLDivElement>) {
+    if (count === 0) return;
     const box = event.currentTarget.getBoundingClientRect();
     const ratio = Math.min(1, Math.max(0, (event.clientX - box.left) / Math.max(1, box.width)));
     setHovered(Math.min(count - 1, bars ? Math.floor(ratio * count) : Math.round(ratio * (count - 1))));
   }
   function moveWithKeys(event: KeyboardEvent<HTMLDivElement>) {
+    if (count === 0) return;
     const next = { ArrowLeft: (hovered ?? count) - 1, ArrowRight: (hovered ?? -1) + 1, Home: 0, End: count - 1 }[event.key];
     if (event.key === "Escape") setHovered(null);
     if (next === undefined) return;
@@ -210,7 +212,7 @@ function EvidenceChart({ showTitle, view }: { showTitle: boolean; view: ChartVie
         />
         <div className="signalEvidenceDates">{labels.map((label) => <span key={label.index} style={{ left: `${position(label.index) * 100}%` }}>{label.text}</span>)}</div>
         <div aria-live="polite" className="signalEvidenceChart__live">
-          {hovered !== null && <div className="signalChartTooltip" style={{ left: `max(0px, min(${position(hovered) * 100}%, calc(100% - 202px)))` }}>
+          {hovered !== null && hovered >= 0 && hovered < count && <div className="signalChartTooltip" style={{ left: `max(0px, min(${position(hovered) * 100}%, calc(100% - 202px)))` }}>
             {legend.map((series, index) => <div key={series.name}><i className="signalSwatch" style={{ background: series.color }} /><span className="signalEvidenceTooltipName">{series.name}</span><strong>{formatWidgetValue(view.series[index]!.values[hovered] ?? null, view.unit)}</strong></div>)}
             <small>{utcDateTime(view.buckets[hovered]!)} UTC</small>
           </div>}

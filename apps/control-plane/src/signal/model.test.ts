@@ -87,6 +87,9 @@ describe("evidence charts", () => {
     expect(evidenceAxisLabel(250, "duration_ms")).toBe("250ms");
     expect(evidenceAxisLabel(0, "duration_ms")).toBe("0s");
     expect(evidenceAxisLabel(2048, "bytes")).toBe("2KB");
+    expect(evidenceAxisLabel(-5_632, "bytes")).toBe("-5.5KB");
+    expect(evidenceAxisLabel(-90_000, "duration_ms")).toBe("-1.5m");
+    expect(evidenceAxisLabel(-5, "none")).toBe("-5");
   });
 
   it("names the bucket size", () => {

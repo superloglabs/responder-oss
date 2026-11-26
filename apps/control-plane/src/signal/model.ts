@@ -509,6 +509,7 @@ const compactAxisNumber = new Intl.NumberFormat("en", { notation: "compact", max
 // A short axis label, such as 20K, 30s, or 250ms.
 export function evidenceAxisLabel(value: number, unit: SignalEvidenceUnit): string {
   if (value === 0) return unit === "duration_ms" || unit === "duration_s" ? "0s" : "0";
+  if (value < 0) return `-${evidenceAxisLabel(-value, unit)}`;
   if (unit === "duration_ms" || unit === "duration_s") {
     const milliseconds = unit === "duration_s" ? value * 1000 : value;
     if (milliseconds >= 60_000) return `${compactAxisNumber.format(milliseconds / 60_000)}m`;
