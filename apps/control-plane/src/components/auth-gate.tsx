@@ -405,7 +405,9 @@ export function SignIn({
           </span>
           <span aria-hidden="true" className="authSubmitPending">
             {isSubmitting && <span className="dsSpinner" />}
-            {isCreatingAccount ? "Creating account…" : "Signing in…"}
+            {/* Own element, so a browser translator replacing this text
+                cannot break React inserting the spinner before it. */}
+            <span>{isCreatingAccount ? "Creating account…" : "Signing in…"}</span>
           </span>
         </button>
       </form>
@@ -727,7 +729,9 @@ function WorkspaceSetup({ onCreating, onReady }: WorkspaceSetupProps) {
             <span aria-hidden="true" className="authSubmitIdle">Create workspace</span>
             <span aria-hidden="true" className="authSubmitPending">
               {isSubmitting && <span className="dsSpinner" />}
-              Creating workspace…
+              {/* Own element, so a browser translator replacing this text
+                  cannot break React inserting the spinner before it. */}
+              <span>Creating workspace…</span>
             </span>
           </button>
         </form>
