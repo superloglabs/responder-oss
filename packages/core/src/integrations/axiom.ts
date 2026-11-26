@@ -32,6 +32,15 @@ export function isAxiomReadOnlyTool(name: string): boolean {
   return (AXIOM_READ_ONLY_MCP_TOOLS as readonly string[]).includes(name);
 }
 
+// Axiom marks its query tools as able to write, because they can save a
+// result snapshot in Axiom when saveResults is true. Read-only runs call
+// them with saveResults false, which only runs the query.
+export const AXIOM_SAVING_QUERY_MCP_TOOLS = ["queryDataset", "queryMetrics"] as const;
+
+export function isAxiomSavingQueryTool(name: string): boolean {
+  return (AXIOM_SAVING_QUERY_MCP_TOOLS as readonly string[]).includes(name);
+}
+
 const axiomCredentialsSchema = z.object({
   authType: z.literal("oauth"),
   mcpUrl: z.literal(AXIOM_MCP_URL),
