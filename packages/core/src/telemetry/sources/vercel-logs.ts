@@ -10,42 +10,18 @@ import {
   type OtlpLogsRequest,
   stringOrEmpty,
 } from "./otlp-json.js";
-import { jsonLogFields } from "../structured-log.js";
+import { fieldsSeverity, jsonLogFields, levelSeverity, type LogSeverity } from "../structured-log.js";
 
 // Vercel log drains deliver JSON: an array of records, one record, or NDJSON.
 // https://vercel.com/docs/drains/reference/logs
 
 export type VercelLogRecord = Record<string, unknown>;
 
-type Severity = { number: number; text: string };
-
-const severities: Record<string, Severity> = {
-  critical: { number: 21, text: "FATAL" },
-  debug: { number: 5, text: "DEBUG" },
-  error: { number: 17, text: "ERROR" },
-  fatal: { number: 21, text: "FATAL" },
-  info: { number: 9, text: "INFO" },
-  trace: { number: 1, text: "TRACE" },
-  warn: { number: 13, text: "WARN" },
-  warning: { number: 13, text: "WARN" },
-};
-
-// pino's and bunyan's numeric levels.
-const numericLevels: Record<number, string> = { 10: "trace", 20: "debug", 30: "info", 40: "warn", 50: "error", 60: "fatal" };
-
-// The level a message names when it is one JSON object:
-// `{"level":"error","message":"..."}`.
-function messageSeverity(message: unknown): Severity | undefined {
-  const fields = jsonLogFields(message);
-  const level = fields?.level ?? fields?.severity;
-  if (typeof level === "number") return severities[numericLevels[level] ?? ""];
-  return typeof level === "string" ? severities[level.trim().toLowerCase()] : undefined;
-}
-
 // Vercel sets a line's level from its stream: stdout is info and stderr is
-// error, whatever the line says. A structured line's own level wins.
-function recordSeverity(log: VercelLogRecord): Severity | undefined {
-  return messageSeverity(log.message) ?? (typeof log.level === "string" ? severities[log.level.toLowerCase()] : undefined);
+// error, whatever the line says. A JSON line's own level wins.
+function recordSeverity(log: VercelLogRecord): LogSeverity | undefined {
+  const fields = jsonLogFields(log.message);
+  return (fields ? fieldsSeverity(fields) : undefined) ?? levelSeverity(log.level);
 }
 
 // More records than a drain sends in one delivery.

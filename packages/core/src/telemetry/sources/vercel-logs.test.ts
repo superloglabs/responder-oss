@@ -90,6 +90,8 @@ describe("vercelLogsToOtlp", () => {
       expect(severityOf({ level: "info", message: "level: error in plain text" })).toEqual([9, "INFO"]);
       expect(severityOf({ level: "error", message: '{"msg":"no level"}' })).toEqual([17, "ERROR"]);
       expect(severityOf({ level: "info", message: '{"level":"loud"}' })).toEqual([9, "INFO"]);
+      expect(severityOf({ level: "info", message: '{"level":"__proto__"}' })).toEqual([9, "INFO"]);
+      expect(severityOf({ level: "info", message: '{"level":"notice","severity":"ERROR"}' })).toEqual([17, "ERROR"]);
       expect(severityOf({ level: "info", message: '{"level":"error"' })).toEqual([9, "INFO"]);
       expect(severityOf({ level: "info", message: '["level","error"]' })).toEqual([9, "INFO"]);
       expect(severityOf({ level: "info", message: `{"level":"error","pad":"${"x".repeat(70_000)}"}` })).toEqual([9, "INFO"]);

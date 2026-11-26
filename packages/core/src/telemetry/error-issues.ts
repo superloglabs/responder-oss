@@ -364,19 +364,20 @@ export function groupErrorCandidates(
 ): ErrorOccurrences[] {
   const groups = new Map<string, ErrorOccurrences>();
   for (const received of candidates) {
-    const candidate = withStructuredLog(withReactMessage(received));
+    const decoded = withReactMessage(received);
     // A log below error level is here as a failed request, or as a warning
     // of a workspace that makes warnings issues. A failed request's issue is
     // the request's status, route, and error text; the line around them is
     // not an error message. A warning's issue is its own message. Any other
     // line is not an error.
-    const belowError = candidate.kind === "log" && candidate.severity_number !== undefined &&
-      Number(candidate.severity_number) < errorSeverityNumber &&
-      !errorSeverityTexts.has(candidate.severity.trim().toUpperCase());
-    const failedRequest = belowError ? failedRequestOf(candidate.attrs) : null;
-    const warning = belowError && !failedRequest && isWarning(candidate) &&
-      (options.warningOrganizationIds?.has(candidate.project_id) ?? false);
+    const belowError = decoded.kind === "log" && decoded.severity_number !== undefined &&
+      Number(decoded.severity_number) < errorSeverityNumber &&
+      !errorSeverityTexts.has(decoded.severity.trim().toUpperCase());
+    const failedRequest = belowError ? failedRequestOf(decoded.attrs) : null;
+    const warning = belowError && !failedRequest && isWarning(decoded) &&
+      (options.warningOrganizationIds?.has(decoded.project_id) ?? false);
     if (belowError && !failedRequest && !warning) continue;
+    const candidate = withStructuredLog(decoded);
     // A log whose body is a Python traceback has its stack there.
     const bodyTraceback = candidate.kind === "log" && !candidate.exception_stacktrace
       ? pythonTracebackException(candidate.body)

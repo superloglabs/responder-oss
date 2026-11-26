@@ -362,7 +362,12 @@ describe("groupErrorCandidates with a JSON log line as the body", () => {
       jsonLog({ error: "No phone found for ID 1380056205193146", level: "error", message: "Failed to process message (log_id: 1)", stack: stackText }),
     ]);
 
-    expect(issue).toMatchObject({ exceptionType: "ContextError", title: "ContextError: No phone found for ID 1380056205193146" });
+    expect(issue).toMatchObject({
+      exceptionType: "ContextError",
+      title: "ContextError: No phone found for ID 1380056205193146",
+      topFrame: expect.stringContaining("resolve"),
+    });
+    expect(issue?.sample.stacktrace).toBe(stackText);
   });
 
   it("leaves a body that is not a JSON object as it is", () => {
