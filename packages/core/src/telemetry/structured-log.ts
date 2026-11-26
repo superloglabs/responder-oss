@@ -41,15 +41,16 @@ const levelFields = ["level", "severity", "levelname", "log_level"] as const;
 // known level.
 export function fieldsSeverity(fields: Record<string, unknown>): LogSeverity | undefined {
   for (const key of levelFields) {
-    const severity = levelSeverity(fields[key]);
+    const severity = Object.hasOwn(fields, key) ? levelSeverity(fields[key]) : undefined;
     if (severity) return severity;
   }
   return undefined;
 }
 
 // The fields of a line that is one JSON object, or null for any other text.
-export function jsonLogFields(text: unknown): Record<string, unknown> | null {
-  if (typeof text !== "string" || text.length > maxLineLength) return null;
+// A source that reads every line's fields anyway can pass no limit.
+export function jsonLogFields(text: unknown, maxLength: number | null = maxLineLength): Record<string, unknown> | null {
+  if (typeof text !== "string" || (maxLength !== null && text.length > maxLength)) return null;
   const trimmed = text.trim();
   if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return null;
   let value: unknown;

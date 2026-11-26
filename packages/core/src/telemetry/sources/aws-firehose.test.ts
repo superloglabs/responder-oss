@@ -126,6 +126,7 @@ describe("Firehose helpers", () => {
     expect(logSeverity('{"severity":"critical"}')?.text).toBe("FATAL");
     expect(logSeverity('{"level":50,"msg":"boom"}')?.text).toBe("ERROR");
     expect(logSeverity('{"msg":"ERROR in message"}')).toBeUndefined();
+    expect(logSeverity(`{"level":"error","pad":"${"x".repeat(70_000)}"}`)?.text).toBe("ERROR");
     expect(logSeverity("START RequestId: 1")).toBeUndefined();
     expect(logGroupService("/ecs/payments-api")).toBe("payments-api");
     expect(logGroupService("/ecs/payments-api", "ecs/web/0123456789abcdef0123456789abcdef")).toBe("web");

@@ -9,6 +9,7 @@ describe("jsonLogFields", () => {
     expect(jsonLogFields("plain text")).toBeNull();
     expect(jsonLogFields({ level: "error" })).toBeNull();
     expect(jsonLogFields(`{"pad":"${"x".repeat(70_000)}"}`)).toBeNull();
+    expect(jsonLogFields(`{"pad":"${"x".repeat(70_000)}"}`, null)).toMatchObject({ pad: expect.any(String) });
   });
 });
 
@@ -55,6 +56,7 @@ describe("levelSeverity and fieldsSeverity", () => {
     expect(fieldsSeverity({ level: "notice", severity: "ERROR" })).toEqual({ number: 17, text: "ERROR" });
     expect(fieldsSeverity({ levelname: "WARNING" })).toEqual({ number: 13, text: "WARN" });
     expect(fieldsSeverity({ level: "loud" })).toBeUndefined();
+    expect(fieldsSeverity(Object.create({ level: "error" }) as Record<string, unknown>)).toBeUndefined();
   });
 });
 

@@ -91,7 +91,7 @@ const cloudWatchLogsSchema = z.object({
 
 // The level of a structured log line, or a level word at its start.
 export function logSeverity(message: string): { number: number; text: string } | undefined {
-  return severityOf(message, jsonLogFields(message));
+  return severityOf(message, jsonLogFields(message, null));
 }
 
 function severityOf(message: string, fields: Record<string, unknown> | null) {
@@ -104,7 +104,7 @@ function severityOf(message: string, fields: Record<string, unknown> | null) {
 // attributes, as the console logs sent over OTLP do. Other lines stay as
 // written.
 export function logLine(message: string): { attributes: OtlpKeyValue[]; body: string; severity?: { number: number; text: string } } {
-  const fields = jsonLogFields(message);
+  const fields = jsonLogFields(message, null);
   if (!fields) return { attributes: [], body: message, severity: severityOf(message, fields) };
   return {
     attributes: attributes(...Object.entries(fields).map(([key, value]) => attribute(key, value))),
