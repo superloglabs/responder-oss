@@ -20,7 +20,10 @@ function redactText(
   value: string,
   environment: NodeJS.ProcessEnv,
 ): string {
-  let safe = redactDaytonaSecretPlaceholders(value);
+  // Postgres jsonb rejects the null character, and one failed trace write
+  // fails the whole investigation, so tool output that carries it (for
+  // example a Sentry issue quoting binary query parameters) is cleaned here.
+  let safe = redactDaytonaSecretPlaceholders(value.replaceAll("\u0000", ""));
   for (const name of [
     "OPENAI_API_KEY",
     "DAYTONA_API_KEY",
