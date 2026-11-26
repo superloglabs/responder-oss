@@ -10,20 +10,19 @@ import {
   type OtlpLogsRequest,
   stringOrEmpty,
 } from "./otlp-json.js";
+import { fieldsSeverity, jsonLogFields, levelSeverity, type LogSeverity } from "../structured-log.js";
 
 // Vercel log drains deliver JSON: an array of records, one record, or NDJSON.
 // https://vercel.com/docs/drains/reference/logs
 
 export type VercelLogRecord = Record<string, unknown>;
 
-const severities: Record<string, { number: number; text: string }> = {
-  debug: { number: 5, text: "DEBUG" },
-  error: { number: 17, text: "ERROR" },
-  fatal: { number: 21, text: "FATAL" },
-  info: { number: 9, text: "INFO" },
-  warn: { number: 13, text: "WARN" },
-  warning: { number: 13, text: "WARN" },
-};
+// Vercel sets a line's level from its stream: stdout is info and stderr is
+// error, whatever the line says. A JSON line's own level wins.
+function recordSeverity(log: VercelLogRecord): LogSeverity | undefined {
+  const fields = jsonLogFields(log.message);
+  return (fields ? fieldsSeverity(fields) : undefined) ?? levelSeverity(log.level);
+}
 
 // More records than a drain sends in one delivery.
 const maxRecords = 50_000;
@@ -71,7 +70,7 @@ function resourceAttributes(log: VercelLogRecord): OtlpKeyValue[] {
 }
 
 function logRecord(log: VercelLogRecord): OtlpLogRecord {
-  const severity = typeof log.level === "string" ? severities[log.level.toLowerCase()] : undefined;
+  const severity = recordSeverity(log);
   const proxy = objectOrEmpty(log.proxy);
   const traceId = hexId(log.traceId ?? log["trace.id"], 32);
   const spanId = hexId(log.spanId ?? log["span.id"], 16);

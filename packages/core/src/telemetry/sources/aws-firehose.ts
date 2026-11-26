@@ -10,6 +10,7 @@ import {
   type OtlpLogRecord,
   type OtlpLogsRequest,
 } from "./otlp-json.js";
+import { fieldsSeverity, jsonLogFields, levelSeverity } from "../structured-log.js";
 
 // Amazon Data Firehose delivers to an HTTP endpoint as a JSON envelope of
 // base64 records, with the ingest key in X-Amz-Firehose-Access-Key, and
@@ -88,52 +89,22 @@ const cloudWatchLogsSchema = z.object({
   subscriptionFilters: z.array(z.string()).default([]),
 });
 
-const severities: Record<string, { number: number; text: string }> = {
-  CRITICAL: { number: 21, text: "FATAL" },
-  DEBUG: { number: 5, text: "DEBUG" },
-  ERROR: { number: 17, text: "ERROR" },
-  FATAL: { number: 21, text: "FATAL" },
-  INFO: { number: 9, text: "INFO" },
-  TRACE: { number: 1, text: "TRACE" },
-  WARN: { number: 13, text: "WARN" },
-  WARNING: { number: 13, text: "WARN" },
-};
-
-// Pino and Bunyan write the level as a number.
-const numericLevels: Record<number, string> = { 10: "TRACE", 20: "DEBUG", 30: "INFO", 40: "WARN", 50: "ERROR", 60: "FATAL" };
-
-// The fields of a log line that is one JSON object.
-function jsonFields(message: string): Record<string, unknown> | undefined {
-  const trimmed = message.trim();
-  if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) return undefined;
-  try {
-    const parsed: unknown = JSON.parse(trimmed);
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 // The level of a structured log line, or a level word at its start.
 export function logSeverity(message: string): { number: number; text: string } | undefined {
-  return severityOf(message, jsonFields(message));
+  return severityOf(message, jsonLogFields(message, null));
 }
 
-function severityOf(message: string, fields: Record<string, unknown> | undefined) {
-  if (fields) {
-    const level = fields.level ?? fields.severity ?? fields.levelname ?? fields.log_level;
-    if (typeof level === "number") return severities[numericLevels[level] ?? ""];
-    return typeof level === "string" ? severities[level.toUpperCase()] : undefined;
-  }
+function severityOf(message: string, fields: Record<string, unknown> | null) {
+  if (fields) return fieldsSeverity(fields);
   const word = /^(?:\S+\s+){0,3}?\[?(TRACE|DEBUG|INFO|WARN|WARNING|ERROR|FATAL|CRITICAL)\]?\b/u.exec(message.trimStart())?.[1];
-  return word ? severities[word] : undefined;
+  return levelSeverity(word);
 }
 
 // A JSON log line keeps its message as the body and its fields as
 // attributes, as the console logs sent over OTLP do. Other lines stay as
 // written.
 export function logLine(message: string): { attributes: OtlpKeyValue[]; body: string; severity?: { number: number; text: string } } {
-  const fields = jsonFields(message);
+  const fields = jsonLogFields(message, null);
   if (!fields) return { attributes: [], body: message, severity: severityOf(message, fields) };
   return {
     attributes: attributes(...Object.entries(fields).map(([key, value]) => attribute(key, value))),

@@ -71,4 +71,31 @@ describe("vercelLogsToOtlp", () => {
     expect(payload.resourceLogs).toHaveLength(2);
     expect(payload.resourceLogs[0]!.scopeLogs[0]!.logRecords).toHaveLength(2);
   });
+
+  describe("severity", () => {
+    function severityOf(fields: Record<string, unknown>) {
+      const log = vercelLogsToOtlp([{ ...record, ...fields }]).resourceLogs[0]!.scopeLogs[0]!.logRecords[0]!;
+      return [log.severityNumber, log.severityText];
+    }
+
+    it("takes the level a JSON line names over the stream's", () => {
+      expect(severityOf({ level: "info", message: '{"level":"error","msg":"Could not post the alert"}' })).toEqual([17, "ERROR"]);
+      expect(severityOf({ level: "info", message: ' {"severity":"WARNING","message":"slow"}\n' })).toEqual([13, "WARN"]);
+      expect(severityOf({ level: "error", message: '{"level":"info","message":"started"}' })).toEqual([9, "INFO"]);
+      expect(severityOf({ level: "info", message: '{"level":60,"msg":"crashed"}' })).toEqual([21, "FATAL"]);
+      expect(severityOf({ level: "error", message: '{"level":30,"msg":"ok"}' })).toEqual([9, "INFO"]);
+    });
+
+    it("keeps the stream's level when the line names none it knows", () => {
+      expect(severityOf({ level: "info", message: "level: error in plain text" })).toEqual([9, "INFO"]);
+      expect(severityOf({ level: "error", message: '{"msg":"no level"}' })).toEqual([17, "ERROR"]);
+      expect(severityOf({ level: "info", message: '{"level":"loud"}' })).toEqual([9, "INFO"]);
+      expect(severityOf({ level: "info", message: '{"level":"__proto__"}' })).toEqual([9, "INFO"]);
+      expect(severityOf({ level: "info", message: '{"level":"notice","severity":"ERROR"}' })).toEqual([17, "ERROR"]);
+      expect(severityOf({ level: "info", message: '{"level":"error"' })).toEqual([9, "INFO"]);
+      expect(severityOf({ level: "info", message: '["level","error"]' })).toEqual([9, "INFO"]);
+      expect(severityOf({ level: "info", message: `{"level":"error","pad":"${"x".repeat(70_000)}"}` })).toEqual([9, "INFO"]);
+      expect(severityOf({ level: undefined, message: { level: "error" } })).toEqual([0, ""]);
+    });
+  });
 });
