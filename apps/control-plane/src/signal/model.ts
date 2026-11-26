@@ -17,6 +17,65 @@ export interface SignalEvidence {
   kind: "logs" | "traces" | "metrics" | "code" | "provider";
   title: string;
   detail: string;
+  // What the cited query returned. Missing from older findings and from
+  // evidence with nothing to chart or list.
+  data?: SignalEvidenceData;
+}
+
+export interface SignalEvidenceData {
+  // Where the data came from, such as Superlog or Honeycomb.
+  source: string;
+  // The same query in the source: a path in this app, or the provider's
+  // https link.
+  url: string | null;
+  views: SignalEvidenceView[];
+}
+
+export type SignalEvidenceView =
+  | {
+    type: "chart";
+    title: string;
+    unit: "none" | "duration_ms" | "duration_s" | "bytes" | "percent";
+    // Bucket start times in milliseconds since the epoch.
+    buckets: number[];
+    stepMs: number;
+    series: Array<{ name: string; values: Array<number | null> }>;
+  }
+  | { type: "logs"; rows: SignalEvidenceLog[] }
+  | { type: "spans"; rows: SignalEvidenceSpan[] }
+  | { type: "table"; columns: string[]; rows: Array<Array<string | number | null>> };
+
+export interface SignalEvidenceLog {
+  timestamp: string | null;
+  severity: string;
+  service: string;
+  message: string;
+  traceId: string | null;
+  fields: Record<string, string>;
+}
+
+export interface SignalEvidenceSpan {
+  timestamp: string | null;
+  name: string;
+  service: string;
+  durationMs: number | null;
+  status: string;
+  traceId: string | null;
+  fields: Record<string, string>;
+}
+
+// A link to open a query in its source. Paths stay in this app; other links
+// must be https.
+export function evidenceLink(url: string | null): { internal: boolean; href: string } | null {
+  if (!url) return null;
+  // Browsers read a backslash as a slash, so /\host is another site.
+  if (url.startsWith("/")) return /^\/(?![/\\])[^\\\s]*$/u.test(url) ? { internal: true, href: url } : null;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" ? { internal: false, href: parsed.toString() } : null;
+  } catch {
+    return null;
+  }
 }
 
 export interface SignalFindingDetail extends SignalFindingSummary {
@@ -415,4 +474,81 @@ export function connectionStartUrl(connectUrl: string, returnTo: string) {
   const url = new URL(connectUrl, window.location.origin);
   url.searchParams.set("returnTo", returnTo);
   return `${url.pathname}${url.search}`;
+}
+
+// The top of an evidence chart's axis: three equal steps of 1, 2, 2.5, or 5
+// times a power of ten, so each gridline reads as a round number.
+export function evidenceAxisMax(values: ReadonlyArray<number | null>): number {
+  const highest = Math.max(0, ...values.filter((value): value is number => value !== null && Number.isFinite(value)));
+  if (highest === 0) return 3;
+  const rough = highest / 3;
+  const power = 10 ** Math.floor(Math.log10(rough));
+  const step = [1, 2, 2.5, 5, 10].map((factor) => factor * power).find((candidate) => candidate >= rough) ?? 10 * power;
+  return Number((step * 3).toPrecision(12));
+}
+
+// The axis of an evidence chart: from zero, or from a round number below the
+// lowest value when some are negative, in three equal round steps.
+export function evidenceAxisRange(values: ReadonlyArray<number | null>): { min: number; max: number } {
+  const present = values.filter((value): value is number => value !== null && Number.isFinite(value));
+  const low = Math.min(0, ...present);
+  const high = Math.max(0, ...present);
+  if (low === 0) return { min: 0, max: evidenceAxisMax(present) };
+  if (high === 0) return { min: -evidenceAxisMax(present.map((value) => -value)), max: 0 };
+  const round = (value: number) => Number(value.toPrecision(12));
+  let step = evidenceAxisMax([high - low]) / 3;
+  for (;;) {
+    const min = Math.floor(low / step) * step;
+    if (min + 3 * step >= high) return { min: round(min), max: round(min + 3 * step) };
+    step = evidenceAxisMax([3 * step * 1.0001]) / 3;
+  }
+}
+
+const compactAxisNumber = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
+
+// A short axis label, such as 20K, 30s, or 250ms.
+export function evidenceAxisLabel(value: number, unit: SignalEvidenceUnit): string {
+  if (value === 0) return unit === "duration_ms" || unit === "duration_s" ? "0s" : "0";
+  if (value < 0) return `-${evidenceAxisLabel(-value, unit)}`;
+  if (unit === "duration_ms" || unit === "duration_s") {
+    const milliseconds = unit === "duration_s" ? value * 1000 : value;
+    if (milliseconds >= 60_000) return `${compactAxisNumber.format(milliseconds / 60_000)}m`;
+    if (milliseconds >= 1000) return `${compactAxisNumber.format(milliseconds / 1000)}s`;
+    return `${compactAxisNumber.format(milliseconds)}ms`;
+  }
+  if (unit === "bytes") {
+    const units = ["B", "KB", "MB", "GB", "TB"];
+    let size = value;
+    let index = 0;
+    while (size >= 1024 && index < units.length - 1) {
+      size /= 1024;
+      index += 1;
+    }
+    return `${compactAxisNumber.format(size)}${units[index]}`;
+  }
+  return `${compactAxisNumber.format(value)}${unit === "percent" ? "%" : ""}`;
+}
+
+export type SignalEvidenceUnit = Extract<SignalEvidenceView, { type: "chart" }>["unit"];
+
+// "1-minute buckets", "10-minute buckets", "1-hour buckets".
+export function evidenceBucketLabel(stepMs: number): string {
+  const units: Array<[number, string]> = [[86_400_000, "day"], [3_600_000, "hour"], [60_000, "minute"], [1000, "second"]];
+  for (const [size, name] of units) {
+    if (stepMs >= size && stepMs % size === 0) return `${stepMs / size}-${name} buckets`;
+  }
+  return "";
+}
+
+// One unitless series of whole numbers draws as bars, like a count;
+// anything else as lines.
+export function evidenceChartBars(view: Extract<SignalEvidenceView, { type: "chart" }>): boolean {
+  return view.unit === "none" && view.series.length === 1 && view.series[0]!.values.every((value) => value === null || (Number.isInteger(value) && value >= 0));
+}
+
+// A legend's value: the total of a count, or a line's latest value.
+export function evidenceLegendValue(values: ReadonlyArray<number | null>, bars: boolean): number | null {
+  const present = values.filter((value): value is number => value !== null);
+  if (present.length === 0) return null;
+  return bars ? present.reduce((sum, value) => sum + value, 0) : present.at(-1)!;
 }

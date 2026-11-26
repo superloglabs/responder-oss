@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chartMax, dayLabel, foundLabel, groupFindingsByDay, usageTotals } from "./model";
+import { chartMax, dayLabel, evidenceAxisLabel, evidenceAxisMax, evidenceAxisRange, evidenceBucketLabel, evidenceChartBars, evidenceLegendValue, evidenceLink, foundLabel, groupFindingsByDay, usageTotals } from "./model";
 import { setupComplete } from "./setup-state";
 
 const now = new Date("2026-11-07T15:00:00Z");
@@ -49,5 +49,61 @@ describe("Signal setup", () => {
     expect(setupComplete({ enabled: false, setupComplete: true })).toBe(true);
     expect(setupComplete({ enabled: true })).toBe(true);
     expect(setupComplete({ enabled: false })).toBe(false);
+  });
+});
+
+describe("evidenceLink", () => {
+  it("keeps app paths and https links only", () => {
+    expect(evidenceLink("/logs?from=x")).toEqual({ internal: true, href: "/logs?from=x" });
+    expect(evidenceLink("https://ui.honeycomb.io/team/result/abc")).toEqual({ internal: false, href: "https://ui.honeycomb.io/team/result/abc" });
+    expect(evidenceLink("//evil.example/x")).toBeNull();
+    expect(evidenceLink("/\\evil.example/x")).toBeNull();
+    expect(evidenceLink("/logs\tx")).toBeNull();
+    expect(evidenceLink("javascript:alert(1)")).toBeNull();
+    expect(evidenceLink("http://ui.honeycomb.io/x")).toBeNull();
+    expect(evidenceLink(null)).toBeNull();
+  });
+});
+
+describe("evidence charts", () => {
+  it("rounds the axis to three even steps", () => {
+    expect(evidenceAxisMax([5])).toBe(6);
+    expect(evidenceAxisMax([17_280])).toBe(30_000);
+    expect(evidenceAxisMax([29_600])).toBe(30_000);
+    expect(evidenceAxisMax([0.4])).toBe(0.6);
+    expect(evidenceAxisMax([null, 0])).toBe(3);
+  });
+
+  it("extends the axis below zero for negative values", () => {
+    expect(evidenceAxisRange([5])).toEqual({ min: 0, max: 6 });
+    expect(evidenceAxisRange([-4, 5])).toEqual({ min: -5, max: 10 });
+    expect(evidenceAxisRange([-30, -10])).toEqual({ min: -30, max: 0 });
+    expect(evidenceAxisRange([null])).toEqual({ min: 0, max: 3 });
+  });
+
+  it("labels the axis briefly", () => {
+    expect(evidenceAxisLabel(20_000, "none")).toBe("20K");
+    expect(evidenceAxisLabel(20_000, "duration_ms")).toBe("20s");
+    expect(evidenceAxisLabel(250, "duration_ms")).toBe("250ms");
+    expect(evidenceAxisLabel(0, "duration_ms")).toBe("0s");
+    expect(evidenceAxisLabel(2048, "bytes")).toBe("2KB");
+    expect(evidenceAxisLabel(-5_632, "bytes")).toBe("-5.5KB");
+    expect(evidenceAxisLabel(-90_000, "duration_ms")).toBe("-1.5m");
+    expect(evidenceAxisLabel(-5, "none")).toBe("-5");
+  });
+
+  it("names the bucket size", () => {
+    expect(evidenceBucketLabel(600_000)).toBe("10-minute buckets");
+    expect(evidenceBucketLabel(3_600_000)).toBe("1-hour buckets");
+    expect(evidenceBucketLabel(90_000)).toBe("90-second buckets");
+  });
+
+  it("draws one series of counts as bars, totalled", () => {
+    const view = { type: "chart" as const, title: "c", unit: "none" as const, buckets: [1, 2], stepMs: 1, series: [{ name: "a", values: [1, null, 4] }] };
+    expect(evidenceChartBars(view)).toBe(true);
+    expect(evidenceChartBars({ ...view, series: [{ name: "a", values: [1.5] }] })).toBe(false);
+    expect(evidenceChartBars({ ...view, unit: "duration_ms" })).toBe(false);
+    expect(evidenceLegendValue([1, null, 4], true)).toBe(5);
+    expect(evidenceLegendValue([1, null, 4], false)).toBe(4);
   });
 });
