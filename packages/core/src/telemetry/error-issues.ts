@@ -17,6 +17,7 @@ import {
 } from "./failed-requests.js";
 import { fingerprintLogV1, fingerprintV1 } from "./fingerprint-v1.js";
 import { decodeReactError, minifiedMessageAttribute } from "./react-errors.js";
+import { structuredLogLine } from "./structured-log.js";
 
 // Error issues group a workspace's exceptions by fingerprint. Exceptions are
 // span events named "exception", logs at ERROR severity or above, and request
@@ -337,6 +338,23 @@ function isWarning(candidate: ErrorCandidate): boolean {
   return number === 0 && warningSeverityTexts.has(candidate.severity.trim().toUpperCase());
 }
 
+// A JSON log line is grouped and titled by what it says and the error it
+// carries. Its other fields, such as its time, process, and trace, change
+// with each line, and the names of all its fields are shared by every line a
+// logger writes, so neither tells one error from another.
+function withStructuredLog(candidate: ErrorCandidate): ErrorCandidate {
+  if (candidate.kind !== "log") return candidate;
+  const line = structuredLogLine(candidate.body);
+  if (!line) return candidate;
+  return {
+    ...candidate,
+    body: line.message,
+    exception_message: candidate.exception_message || line.errorMessage || "",
+    exception_stacktrace: candidate.exception_stacktrace || line.stacktrace || "",
+    exception_type: candidate.exception_type || line.errorType || "",
+  };
+}
+
 // Fingerprints each candidate and collapses those with the same workspace and
 // fingerprint, so an exception storm is one write per issue. The newest
 // occurrence becomes the sample.
@@ -346,7 +364,7 @@ export function groupErrorCandidates(
 ): ErrorOccurrences[] {
   const groups = new Map<string, ErrorOccurrences>();
   for (const received of candidates) {
-    const candidate = withReactMessage(received);
+    const candidate = withStructuredLog(withReactMessage(received));
     // A log below error level is here as a failed request, or as a warning
     // of a workspace that makes warnings issues. A failed request's issue is
     // the request's status, route, and error text; the line around them is

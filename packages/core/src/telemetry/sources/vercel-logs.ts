@@ -10,20 +10,43 @@ import {
   type OtlpLogsRequest,
   stringOrEmpty,
 } from "./otlp-json.js";
+import { jsonLogFields } from "../structured-log.js";
 
 // Vercel log drains deliver JSON: an array of records, one record, or NDJSON.
 // https://vercel.com/docs/drains/reference/logs
 
 export type VercelLogRecord = Record<string, unknown>;
 
-const severities: Record<string, { number: number; text: string }> = {
+type Severity = { number: number; text: string };
+
+const severities: Record<string, Severity> = {
+  critical: { number: 21, text: "FATAL" },
   debug: { number: 5, text: "DEBUG" },
   error: { number: 17, text: "ERROR" },
   fatal: { number: 21, text: "FATAL" },
   info: { number: 9, text: "INFO" },
+  trace: { number: 1, text: "TRACE" },
   warn: { number: 13, text: "WARN" },
   warning: { number: 13, text: "WARN" },
 };
+
+// pino's and bunyan's numeric levels.
+const numericLevels: Record<number, string> = { 10: "trace", 20: "debug", 30: "info", 40: "warn", 50: "error", 60: "fatal" };
+
+// The level a message names when it is one JSON object:
+// `{"level":"error","message":"..."}`.
+function messageSeverity(message: unknown): Severity | undefined {
+  const fields = jsonLogFields(message);
+  const level = fields?.level ?? fields?.severity;
+  if (typeof level === "number") return severities[numericLevels[level] ?? ""];
+  return typeof level === "string" ? severities[level.trim().toLowerCase()] : undefined;
+}
+
+// Vercel sets a line's level from its stream: stdout is info and stderr is
+// error, whatever the line says. A structured line's own level wins.
+function recordSeverity(log: VercelLogRecord): Severity | undefined {
+  return messageSeverity(log.message) ?? (typeof log.level === "string" ? severities[log.level.toLowerCase()] : undefined);
+}
 
 // More records than a drain sends in one delivery.
 const maxRecords = 50_000;
@@ -71,7 +94,7 @@ function resourceAttributes(log: VercelLogRecord): OtlpKeyValue[] {
 }
 
 function logRecord(log: VercelLogRecord): OtlpLogRecord {
-  const severity = typeof log.level === "string" ? severities[log.level.toLowerCase()] : undefined;
+  const severity = recordSeverity(log);
   const proxy = objectOrEmpty(log.proxy);
   const traceId = hexId(log.traceId ?? log["trace.id"], 32);
   const spanId = hexId(log.spanId ?? log["span.id"], 16);

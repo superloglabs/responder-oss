@@ -302,6 +302,78 @@ describe("groupErrorCandidates with a Python traceback as the log body", () => {
   });
 });
 
+describe("groupErrorCandidates with a JSON log line as the body", () => {
+  function jsonLog(fields: Record<string, unknown>, overrides: Partial<ErrorCandidate> = {}): ErrorCandidate {
+    return candidate({
+      attrs: {},
+      body: JSON.stringify(fields),
+      exception_message: "",
+      exception_stacktrace: "",
+      exception_type: "",
+      kind: "log",
+      severity: "ERROR",
+      severity_number: 17,
+      ...overrides,
+    });
+  }
+  const jsStack = [
+    "Error: Slack refused the alert: channel_not_found",
+    "    at postAlert (/var/task/.next/server/app/api/cron/waitlist/route.js:20:831)",
+    "    at async sweep (/var/task/.next/server/app/api/cron/waitlist/route.js:20:1504)",
+  ].join("\n");
+
+  it("groups lines by their message, not by the fields every line shares", () => {
+    const line = (message: string, pid: number, time: string) =>
+      jsonLog({ hostname: `169.254.0.${pid}`, level: "error", message, pid, time });
+    const issues = groupErrorCandidates([
+      line("[Billing] Could not renew the subscription", 15, "2026-11-26T08:35:47.043Z"),
+      line("[Billing] Could not renew the subscription", 17, "2026-11-26T08:40:47.043Z"),
+      line("[Mailer] Template is missing", 15, "2026-11-26T08:35:47.043Z"),
+    ]);
+
+    expect(issues).toHaveLength(2);
+    expect(issues.map((issue) => [issue.title, issue.eventCount])).toEqual(expect.arrayContaining([
+      ["ERROR: [Billing] Could not renew the subscription", 2],
+      ["ERROR: [Mailer] Template is missing", 1],
+    ]));
+  });
+
+  it("groups and titles a line with an error object by its error and stack", () => {
+    const [issue] = groupErrorCandidates([
+      jsonLog({
+        error: { message: "Slack refused the alert: channel_not_found", stack: jsStack, type: "Error" },
+        level: "error",
+        message: "[Waitlist] Could not post the alert",
+        time: "2026-11-26T08:35:47.043Z",
+      }),
+    ]);
+
+    expect(issue).toMatchObject({
+      exceptionType: "Error",
+      title: "Error: Slack refused the alert: channel_not_found",
+      topFrame: expect.stringContaining("postAlert"),
+    });
+    expect(issue?.sample.stacktrace).toBe(jsStack);
+  });
+
+  it("reads an error given as text with the stack beside it", () => {
+    const stackText = "ContextError: No phone found for ID 1380056205193146\n    at resolve (/var/task/.next/server/app/api/whatsapp/route.js:1:24189)";
+    const [issue] = groupErrorCandidates([
+      jsonLog({ error: "No phone found for ID 1380056205193146", level: "error", message: "Failed to process message (log_id: 1)", stack: stackText }),
+    ]);
+
+    expect(issue).toMatchObject({ exceptionType: "ContextError", title: "ContextError: No phone found for ID 1380056205193146" });
+  });
+
+  it("leaves a body that is not a JSON object as it is", () => {
+    const [plain] = groupErrorCandidates([jsonLog({}, { body: "{not json" })]);
+    const [empty] = groupErrorCandidates([jsonLog({ level: "error", pid: 15 })]);
+
+    expect(plain?.title).toBe("ERROR: {not json");
+    expect(empty?.title).toBe('ERROR: {"level":"error","pid":15}');
+  });
+});
+
 describe("groupErrorCandidates with a failed request log", () => {
   // A request log line below error level whose fields say the request
   // failed with a server error.
