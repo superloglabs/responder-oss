@@ -27,6 +27,7 @@ vi.mock("@responder/core/db/investigations", () => {
 
 const { datadogObservationUrl, isObservationTool, ObservationMcpServer, openWorkspaceContext } = await import("./context-servers.js");
 const { awsReadOnlyToolFilter } = await import("./aws.js");
+const { axiomReadOnlyToolFilter, isAxiomObservationTool } = await import("./axiom.js");
 const { isAwsSessionLimitedMcpTool } = await import("@responder/core/integrations/aws-mcp");
 
 const tool = (name: string, annotations?: Record<string, unknown>) =>
@@ -98,6 +99,40 @@ describe("observation tools", () => {
     const other = new ObservationMcpServer(server("other"), String);
     await other.connect();
     expect((await other.listTools()).map((candidate) => candidate.name)).not.toContain("aws___run_script");
+  });
+
+  it("keeps Axiom's query tools, which a read-only server calls without saving", async () => {
+    const callTool = vi.fn().mockResolvedValue([{ type: "text", text: "ok" }]);
+    // Axiom marks its query tools as able to write, because they can save a result.
+    const listed = [
+      tool("queryDataset", { readOnlyHint: false, destructiveHint: false }),
+      tool("queryMetrics", { readOnlyHint: false, destructiveHint: false }),
+      tool("listDatasets", { readOnlyHint: true, destructiveHint: false }),
+      tool("createMonitor", { readOnlyHint: false, destructiveHint: false }),
+      tool("listTokens", { readOnlyHint: true, destructiveHint: false }),
+    ];
+    const server = {
+      name: "axiom",
+      connect: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn().mockResolvedValue(undefined),
+      listTools: vi.fn().mockResolvedValue(listed),
+      callTool,
+      toolFilter: axiomReadOnlyToolFilter,
+    } as unknown as MCPServer;
+
+    const axiom = new ObservationMcpServer(server, String, isAxiomObservationTool);
+    await axiom.connect();
+    expect((await axiom.listTools()).map((candidate) => candidate.name)).toEqual([
+      "queryDataset", "queryMetrics", "listDatasets",
+    ]);
+    await axiom.callTool("queryDataset", { apl: "['logs'] | take 1" });
+    expect(callTool).toHaveBeenCalledWith("queryDataset", { apl: "['logs'] | take 1" });
+    await expect(axiom.callTool("createMonitor", {})).rejects.toThrow("not available");
+
+    // Without Axiom's rule, its query tools are left out.
+    const plain = new ObservationMcpServer(server, String);
+    await plain.connect();
+    expect((await plain.listTools()).map((candidate) => candidate.name)).toEqual(["listDatasets"]);
   });
 
   it("reports a server it could not reach instead of failing", async () => {

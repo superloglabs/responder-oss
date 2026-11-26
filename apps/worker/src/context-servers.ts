@@ -23,7 +23,7 @@ import { isAwsSessionLimitedMcpTool } from "@responder/core/integrations/aws-mcp
 import { supabaseMcpUrl } from "@responder/core/integrations/supabase";
 import { createAwsMcpServer } from "./aws.js";
 import { createAwsInspectionTools } from "./aws-inspection-tools.js";
-import { createAxiomMcpServer } from "./axiom.js";
+import { createAxiomMcpServer, isAxiomObservationTool } from "./axiom.js";
 import { createClickStackMcpServer } from "./clickstack.js";
 import { createCloudflareMcpServer } from "./cloudflare.js";
 import { createLinearMcpServer } from "./custom-mcp.js";
@@ -222,7 +222,6 @@ export async function openWorkspaceContext(input: {
   const awsServers = await Promise.all(aws.map((connection) => createAwsMcpServer(connection, environment)));
   const servers: MCPServer[] = [
     ...gcp.flatMap((connection) => createGcpMcpServers(connection, environment)),
-    ...(axiom ? [createAxiomMcpServer(axiom, { readOnly: true })] : []),
     ...(datadog ? [createDatadogMcpServer({ ...datadog, mcpUrl: datadogObservationUrl(datadog.mcpUrl) })] : []),
     ...dash0.map(createDash0McpServer),
     ...postHog.map(createPostHogMcpServer),
@@ -245,6 +244,9 @@ export async function openWorkspaceContext(input: {
     // AWS marks its script runner as able to write. It stays, because the
     // role session it runs in allows only read-only actions.
     ...awsServers.map((server) => new ObservationMcpServer(server, describeError, isAwsSessionLimitedMcpTool)),
+    // Axiom marks its query tools as able to write, because they can save a
+    // result. They stay, because the read-only server never saves.
+    ...(axiom ? [new ObservationMcpServer(createAxiomMcpServer(axiom, { readOnly: true }), describeError, isAxiomObservationTool)] : []),
     ...servers.map((server) => new ObservationMcpServer(server, describeError)),
   ];
   await Promise.all(observed.map((server) => server.connect()));
