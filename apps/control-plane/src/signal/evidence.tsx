@@ -28,8 +28,8 @@ const kindLabels: Record<SignalEvidence["kind"], string> = {
   provider: "Provider",
 };
 
-// Line colors after the accent: the design's neutral gray, then distinct hues.
-const seriesColors = ["var(--signal-accent)", "#a4a4a4", "#d97706", "#0f9f6e", "#d03b7f", "#7c5cd6", "#0e91b1", "#6b8e23"];
+// The design's indigo, then its neutral gray, then distinct hues.
+const seriesColors = ["var(--signal-chart)", "#a4a4a4", "#d97706", "#0f9f6e", "#d03b7f", "#7c5cd6", "#0e91b1", "#6b8e23"];
 
 // A row opened in the drawer, with where it came from.
 type OpenRow =
@@ -163,7 +163,7 @@ function EvidenceChart({ showTitle, view }: { showTitle: boolean; view: ChartVie
           {[8, 32, 56, 80].map((line) => <line key={line} x1={0} x2={1000} y1={line} y2={line} stroke="var(--signal-grid)" vectorEffect="non-scaling-stroke" />)}
           {bars
             ? view.series[0]!.values.map((value, index) => value === null || value === 0 ? null : <rect
-              fill="var(--signal-accent)"
+              fill="var(--signal-chart)"
               height={value / max * 72}
               key={index}
               width={step * .5}

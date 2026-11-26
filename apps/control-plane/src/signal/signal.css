@@ -1,5 +1,7 @@
 .signal {
   --signal-accent: var(--ds-info);
+  /* Evidence charts, as in the Signal designs. */
+  --signal-chart: #4e58f9;
   --signal-neutral: #cecece;
   --signal-grid: #f0f0f0;
   color: #121212;
