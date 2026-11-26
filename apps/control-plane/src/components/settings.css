@@ -4,8 +4,8 @@
 .settingsPageHeading__navigation { display: flex; flex-direction: column; gap: 20px; }
 .settingsPageHeading__navigation > p { margin: 0; color: #666; font-size: 13px; line-height: 20px; }
 .appShell--workspace.appShell--settings .settingsTabs { display: flex; gap: 28px; min-height: 36px; margin: 0; padding: 0; border-bottom: 1px solid #e6e8ec; overflow-x: auto; }
-.appShell--workspace.appShell--settings .settingsTabs a { display: flex; align-items: flex-start; flex-shrink: 0; height: 36px; padding: 0 0 12px; border-bottom: 2px solid transparent; color: #666; font-size: 13px; font-weight: 400; line-height: 20px; }
-.appShell--workspace.appShell--settings .settingsTabs a.isActive { border-bottom-color: #4e58f9; color: #1a1a1a; font-weight: 500; }
+.appShell--workspace.appShell--settings .settingsTabs a { display: flex; align-items: flex-start; flex-shrink: 0; height: 36px; padding: 0 0 12px; border-bottom: 2px solid transparent; color: var(--ds-text-muted); font-size: 13px; font-weight: 400; line-height: 20px; }
+.appShell--workspace.appShell--settings .settingsTabs a.isActive { border-bottom-color: #4e58f9; color: var(--ds-text-primary); font-weight: 500; }
 .appShell--workspace.appShell--settings .integrationBento { width: 100%; }
 .appShell--workspace.appShell--settings .integrationRows { gap: 28px; }
 .settingsIntegrationSection { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
@@ -55,12 +55,12 @@
 .appShell--workspace.appShell--settings .workspaceSettings__mark { display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; border: 1px solid #e6e8ec; border-radius: 10px; background: #fff; color: #1a1a1a; font-size: 18px; font-weight: 400; }
 .appShell--workspace.appShell--settings .workspaceSettings__intro h2 { font-size: 16px; font-weight: 500; line-height: 20px; }
 .appShell--workspace.appShell--settings .workspaceSettings__intro p { margin-top: 2px; color: #666; font-size: 12px; line-height: 20px; }
-.appShell--workspace.appShell--settings .inviteForm { padding: 16px; gap: 16px; border: .5px solid #e6e8ec; border-radius: 12px; background: #fff; }
+.appShell--workspace.appShell--settings .inviteForm { padding: 16px; gap: 16px; border: .5px solid var(--issues-line); border-radius: 12px; background: var(--ds-surface-base); }
 .appShell--workspace.appShell--settings .inviteForm h3 { font-size: 13px; font-weight: 500; line-height: 20px; }
-.appShell--workspace.appShell--settings .inviteForm p { margin-top: 4px; color: #666; font-size: 13px; line-height: 20px; }
-.appShell--workspace.appShell--settings .inviteForm input { height: 32px; padding: 0 10px; border: 1px solid #e6e8ec; border-radius: 6px; background: #fff; color: #1a1a1a; font-size: 13px; }
+.appShell--workspace.appShell--settings .inviteForm p { margin-top: 4px; color: var(--ds-text-muted); font-size: 13px; line-height: 20px; }
+.appShell--workspace.appShell--settings .inviteForm input { height: 32px; padding: 0 10px; border: 1px solid var(--issues-line); border-radius: 6px; background: var(--ds-surface-base); color: var(--ds-text-primary); font-size: 13px; }
 .appShell--workspace.appShell--settings .inviteForm .button { min-height: 32px; }
-.appShell--workspace.appShell--settings .settingsRoleSelect .dsSelect__trigger { height: 28px; min-height: 28px; padding: 3px 10px; border: 1px solid #e6e8ec; border-radius: 6px; background: #fff; color: #1a1a1a; font-size: 13px; }
+.appShell--workspace.appShell--settings .settingsRoleSelect .dsSelect__trigger { height: 28px; min-height: 28px; padding: 3px 10px; border: 1px solid var(--issues-line); border-radius: 6px; background: var(--ds-surface-base); color: var(--ds-text-primary); font-size: 13px; }
 .appShell--workspace.appShell--settings .settingsRoleSelect--invite { width: 120px; }
 .appShell--workspace.appShell--settings .settingsRoleSelect--invite .dsSelect__trigger { height: 32px; }
 .appShell--workspace.appShell--settings .settingsRoleSelect--member { width: 110px; flex-shrink: 0; }
